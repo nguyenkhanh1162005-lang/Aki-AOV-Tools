@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 from telegram import FSInputFile
 
-from app.large_merger import merge_zip_files, MergeError
+from app.large_merger import merge_zip_files, MergeError\nfrom app.aov_inspector import inspect_archives, InspectError
 
 MIB = 1024 * 1024
 LOCAL_API = bool(
@@ -182,7 +182,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("clear", clear))
-    app.add_handler(CommandHandler("merge", merge))
+    app.add_handler(CommandHandler("merge", merge))\n    app.add_handler(CommandHandler("inspect", inspect))
     app.add_handler(MessageHandler(filters.Document.ALL, receive))
     app.run_polling()
 
