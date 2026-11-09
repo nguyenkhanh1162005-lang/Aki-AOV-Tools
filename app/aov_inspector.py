@@ -114,4 +114,4 @@ def inspect_archives(paths: list[str]) -> str:
         "- BattleBank.bytes, LobbyBank.bytes và assetbundle độc quyền chưa được giải mã/hợp nhất bởi công cụ này.",
         "- Không dùng ZIP ghép thông thường làm bản mod hoàn chỉnh khi chưa thử trên đúng phiên bản iOS.",
     ])
-    return "\\n".join(lines)
+    return "\n".join(lines)
