@@ -14,7 +14,8 @@ from telegram.ext import (
 )
 from telegram import FSInputFile
 
-from app.large_merger import merge_zip_files, MergeError\nfrom app.aov_inspector import inspect_archives, InspectError
+from app.large_merger import merge_zip_files, MergeError
+from app.aov_inspector import inspect_archives, InspectError
 
 MIB = 1024 * 1024
 LOCAL_API = bool(
@@ -122,6 +123,29 @@ async def receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
         destination.unlink(missing_ok=True)
         await status_message.edit_text(
             f"Tải file thất bại: {type(exc).__name__}. Thử gửi lại nhé."
+        )
+
+
+
+async def inspect(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    files = context.user_data.get("zips", [])
+    if not files:
+        await update.effective_message.reply_text("Chưa có ZIP nào. Gửi file trước nhé.")
+        return
+    status_message = await update.effective_message.reply_text(
+        "Đang đọc danh mục ZIP, không sửa hoặc giải mã tài nguyên..."
+    )
+    try:
+        report = await asyncio.to_thread(inspect_archives, [path for _, path in files])
+        chunks = [report[i:i + 3800] for i in range(0, len(report), 3800)]
+        await status_message.edit_text(chunks[0])
+        for chunk in chunks[1:]:
+            await update.effective_message.reply_text(chunk)
+    except InspectError as exc:
+        await status_message.edit_text(f"Không kiểm tra được: {exc}")
+    except Exception as exc:
+        await status_message.edit_text(
+            f"Kiểm tra thất bại: {type(exc).__name__}. ZIP gốc vẫn được giữ."
         )
 
 
