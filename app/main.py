@@ -11,6 +11,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from .large_merger import merge_zip_files, MergeError, MAX_FILES, MAX_INPUT_BYTES
+from .aov_inspector import inspect_archives, InspectError
 
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
