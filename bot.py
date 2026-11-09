@@ -52,6 +52,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Chế độ nhận file: {mode}.\n\n"
         "Gửi lần lượt các file ZIP, sau đó dùng /merge để ghép.\n"
         "/status xem giới hạn hiện tại\n"
+        "/inspect kiểm tra cấu trúc ZIP đã gửi\n"
         "/clear xóa danh sách file"
     )
 
@@ -206,7 +207,8 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("clear", clear))
-    app.add_handler(CommandHandler("merge", merge))\n    app.add_handler(CommandHandler("inspect", inspect))
+    app.add_handler(CommandHandler("merge", merge))
+    app.add_handler(CommandHandler("inspect", inspect))
     app.add_handler(MessageHandler(filters.Document.ALL, receive))
     app.run_polling()
 
