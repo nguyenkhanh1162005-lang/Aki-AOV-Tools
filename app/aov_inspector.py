@@ -49,7 +49,7 @@ def inspect_archives(paths: list[str]) -> str:
 
     total_entries = 0
     total_uncompressed = 0
-    inventories: list[tuple[str, dict[str, tuple[int, int]]]] = []
+    inventories: list[tuple[str, dict[str, tuple[int, int]], Counter[str], list[str]]] = []
     collisions: dict[str, list[str]] = {}
 
     for path in paths:
