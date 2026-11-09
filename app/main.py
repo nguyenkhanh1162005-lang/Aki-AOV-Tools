@@ -67,5 +67,40 @@ async def merge(files: list[UploadFile] = File(...)):
         raise
 
 
+
+@app.post("/api/inspect")
+async def inspect(files: list[UploadFile] = File(...)):
+    if not files or len(files) > MAX_FILES:
+        raise HTTPException(400, f"Chọn từ 1 đến {MAX_FILES} file ZIP.")
+    workdir = Path(tempfile.mkdtemp(prefix="aki-aov-inspect-"))
+    input_paths: list[str] = []
+    total_bytes = 0
+    try:
+        for index, upload in enumerate(files, start=1):
+            filename = upload.filename or ""
+            if not filename.lower().endswith(".zip"):
+                raise HTTPException(400, "Chỉ chấp nhận file .zip.")
+            destination = workdir / f"{index}_{Path(filename).name}"
+            with destination.open("wb") as target:
+                while True:
+                    chunk = await upload.read(CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_INPUT_BYTES:
+                        raise HTTPException(413, "Tổng dung lượng ZIP vượt quá 500 MB.")
+                    target.write(chunk)
+            await upload.close()
+            input_paths.append(str(destination))
+        try:
+            report = await run_in_threadpool(inspect_archives, input_paths)
+        except InspectError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(report)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
 if WEB.exists():
     app.mount("/", StaticFiles(directory=WEB, html=True), name="web")
