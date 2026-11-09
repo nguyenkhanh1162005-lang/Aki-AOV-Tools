@@ -1,10 +1,12 @@
 # Aki AOV Tools
 
-Công cụ web và Telegram bot để ghép các tệp ZIP thông thường.
+Công cụ web và Telegram bot dùng chung bộ xử lý ZIP trên ổ đĩa, kèm chức năng kiểm kê cấu trúc gói tài nguyên AOV (chỉ đọc).
 
 ## Tính năng
 - Web UI tiếng Việt, dùng được trên điện thoại.
-- Web: chọn tối đa 10 ZIP để ghép và tải kết quả.
+- Web: chọn tối đa 10 ZIP để kiểm tra cấu trúc hoặc ghép ZIP thông thường.
+- Web API `/api/inspect`: liệt kê phần mở rộng, tên có dấu hiệu là tài nguyên game và đường dẫn trùng giữa các ZIP.
+- Telegram bot: dùng `/inspect` để tạo cùng loại báo cáo kiểm kê trước khi cân nhắc ghép.
 - Telegram bot: gửi ZIP, dùng `/merge` để ghép, `/clear` để xóa danh sách, `/status` để xem giới hạn.
 - Bot xử lý ZIP theo luồng trên ổ đĩa tạm, tránh giữ toàn bộ file lớn trong RAM.
 
