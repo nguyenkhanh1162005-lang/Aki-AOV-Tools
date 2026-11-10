@@ -8,7 +8,11 @@ from pathlib import Path, PurePosixPath
 
 from .aov_format_detector import detect_resource_format, summarize_formats
 from .wwise_bnk import WwiseBNKError, inspect_wwise_bnk
-from .assetbundle_inspector import AssetBundleInspectError, inspect_assetbundle
+from .assetbundle_inspector import (
+    AssetBundleInspectError,
+    compare_assetbundle_overlays,
+    inspect_assetbundle,
+)
 
 
 MAX_FILES = 10
@@ -73,6 +77,7 @@ def inspect_archives(paths: list[str]) -> str:
     detected_formats: list[tuple[str, str]] = []
     wwise_reports: list[tuple[str, dict | str]] = []
     assetbundle_reports: list[tuple[str, dict | str]] = []
+    assetbundle_comparisons: list[tuple[str, dict | str]] = []
 
     for path in paths:
         try:
@@ -138,6 +143,38 @@ def inspect_archives(paths: list[str]) -> str:
                 )
 
         inventories.append((Path(path).name, files, extensions, important))
+
+    # Compare only a small number of same-path AssetBundles across input ZIPs.
+    # This is a structural report, not an authorization to merge their objects.
+    compared_assetbundles = 0
+    for name, sources in collisions.items():
+        if compared_assetbundles >= 5 or Path(name).suffix.lower() != ".assetbundle":
+            continue
+        unique_sources = []
+        seen_archives = set()
+        for filename, source_path, size, crc, info in sources:
+            if source_path not in seen_archives:
+                unique_sources.append((filename, source_path, size, info))
+                seen_archives.add(source_path)
+        if len(unique_sources) < 2:
+            continue
+        left, right = unique_sources[:2]
+        label = f"{name} [{left[0]} vs {right[0]}]"
+        if left[2] > MAX_ASSETBUNDLE_INSPECT_BYTES or right[2] > MAX_ASSETBUNDLE_INSPECT_BYTES:
+            assetbundle_comparisons.append((label, "Bỏ qua so sánh sâu: ít nhất một AssetBundle vượt quá 64 MiB."))
+            compared_assetbundles += 1
+            continue
+        try:
+            with zipfile.ZipFile(left[1], "r") as left_zip, zipfile.ZipFile(right[1], "r") as right_zip:
+                left_data = left_zip.read(left[3])
+                right_data = right_zip.read(right[3])
+            assetbundle_comparisons.append((
+                label,
+                compare_assetbundle_overlays(left_data, right_data),
+            ))
+        except (AssetBundleInspectError, RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
+            assetbundle_comparisons.append((label, f"Không thể so sánh an toàn: {exc}"))
+        compared_assetbundles += 1
 
     format_counts, format_examples = summarize_formats(detected_formats)
     lines = [
@@ -214,6 +251,36 @@ def inspect_archives(paths: list[str]) -> str:
     else:
         lines.append("- Không tìm thấy AssetBundle UnityFS/UnityRaw/UnityWeb phù hợp để phân tích sâu.")
     lines.append("- Chỉ lập danh mục object và external path; chưa sửa hoặc hợp nhất AssetBundle.")
+
+    lines.extend(["", "ĐỐI CHIẾU ASSETBUNDLE TRÙNG ĐƯỜNG DẪN"])
+    if assetbundle_comparisons:
+        for name, result in assetbundle_comparisons:
+            lines.append(f"- {name}")
+            if isinstance(result, str):
+                lines.append(f"  • {result}")
+            else:
+                lines.append(
+                    f"  • Unity version khớp: {result['unity_versions_match']} | "
+                    f"Platform khớp: {result['platforms_match']} | "
+                    f"Container đầy đủ: {result['container_inventory_complete']}"
+                )
+                lines.append(
+                    f"  • Đường dẫn chung: {result['shared_container_paths']} | "
+                    f"ứng viên thay thế: {len(result['replacement_candidates'])} | "
+                    f"đường dẫn mới: {len(result['new_container_paths'])}"
+                )
+                if result["container_type_conflicts"]:
+                    lines.append(
+                        "  • Xung đột loại object: "
+                        + ", ".join(result["container_type_conflicts"][:8])
+                    )
+                lines.append(
+                    f"  • Kiểm tra cấu trúc đạt: {result['structural_checks_pass']} | "
+                    "Cho phép ghép tự động: False"
+                )
+    else:
+        lines.append("- Không có đường dẫn AssetBundle trùng giữa các ZIP để đối chiếu.")
+    lines.append("- Đối chiếu chỉ mang tính cấu trúc; chưa remap object ID, preload table hoặc CAB reference.")
 
     lines.extend(["", "KIỂM TRA BATTLEBANK / LOBBYBANK"])
     if bank_files:
