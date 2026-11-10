@@ -137,6 +137,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
     return {
         "name": Path(path).name,
         "entries": len(names),
+        "uncompressed_bytes": total_uncompressed,
         "looks_like_aov": looks_like_aov,
         "source_role": source_role,
         "has_mod_skin_container": has_mod_skin_container,
@@ -192,6 +193,9 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
     total_profile_entries = sum(item["entries"] for item in profiles)
     if total_profile_entries > MAX_PROFILE_ENTRIES:
         raise ModPipelineError("Tổng số mục trong các ZIP vượt quá 20.000.")
+    total_uncompressed = sum(item["uncompressed_bytes"] for item in profiles)
+    if total_uncompressed > MAX_PROFILE_UNCOMPRESSED:
+        raise ModPipelineError("Tổng dung lượng giải nén của các ZIP vượt quá 1 GiB.")
     adapter = _select_adapter(profiles)
 
     destination = Path(output_path)
@@ -219,6 +223,7 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
             "adapter": adapter,
             "input_count": len(archive_paths),
             "input_bytes": total_input_bytes,
+            "input_uncompressed_bytes": total_uncompressed,
             "input_profiles": profiles,
             "output_bytes": destination.stat().st_size,
             "structurally_validated": True,
