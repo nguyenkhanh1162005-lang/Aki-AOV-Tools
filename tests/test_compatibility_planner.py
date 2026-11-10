@@ -60,6 +60,20 @@ class CompatibilityPlannerTests(unittest.TestCase):
         with self.assertRaises(CompatibilityPlanError):
             plan_resource_compatibility([{"path": "x", "sha256": "bad", "format": "generic_zip"}])
 
+    def test_unity_dependency_inventory_is_preserved_in_report(self):
+        result = plan_resource_compatibility([
+            resource("hero.assetbundle", "a", format="unity_assetbundle",
+                     is_aov_resource=True,
+                     unity_dependencies=["shared/materials"],
+                     unity_external_paths=["CAB-hero"],
+                     dependency_inventory_complete=True)
+        ])
+        item = result["resources"][0]
+        self.assertEqual(item["unity_dependencies"], ["shared/materials"])
+        self.assertEqual(item["unity_external_paths"], ["CAB-hero"])
+        self.assertTrue(item["dependency_inventory_complete"])
+        self.assertEqual(item["status"], "UNSUPPORTED")
+
     def test_empty_plan_rejected(self):
         with self.assertRaises(CompatibilityPlanError):
             plan_resource_compatibility([])
