@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import tempfile
 import zipfile
 from collections import Counter
 from pathlib import Path, PurePosixPath
@@ -72,6 +74,7 @@ def inspect_archives(paths: list[str]) -> str:
     encrypted_files: list[str] = []
     method_counts: Counter[str] = Counter()
     mses_tables: list[tuple[str, str, int, int, int]] = []
+    package_entries: list[tuple[str, str]] = []
 
     for path in paths:
         try:
@@ -126,6 +129,128 @@ def inspect_archives(paths: list[str]) -> str:
 
         inventories.append((Path(path).name, files, extensions, important, local_duplicates))
 
+
+    # Inspect known ZIP containers inside mod wrappers (Resources.zip and PKG .bytes).
+    # Use a spooled temporary file so large nested archives do not accumulate in RAM.
+    def scan_nested(
+        nested: zipfile.ZipFile,
+        source_label: str,
+        *,
+        depth: int,
+        resource_root: bool,
+        package_prefix: str = "",
+    ) -> None:
+        nonlocal total_entries, total_uncompressed
+        for child_info in nested.infolist():
+            if child_info.is_dir():
+                continue
+            total_entries += 1
+            total_uncompressed += child_info.file_size
+            if total_entries > MAX_ENTRIES:
+                raise InspectError("Các ZIP và gói PKG lồng có quá nhiều mục.")
+            if total_uncompressed > MAX_TOTAL_UNCOMPRESSED:
+                raise InspectError("Tổng dung lượng khai báo vượt quá 1 GB.")
+            child_name = _safe_name(child_info.filename)
+            child_lower = child_name.lower()
+            child_ext = Path(child_name).suffix.lower() or "[không đuôi]"
+            normalized = child_name
+            if resource_root:
+                parts = normalized.split("/")
+                if len(parts) >= 3 and parts[0].lower() == "resources":
+                    normalized = "/".join(parts[2:])
+            key = f"{package_prefix}!{normalized}" if package_prefix else normalized
+            path_sources.setdefault(key, []).append(
+                (source_label, child_info.file_size, child_info.CRC)
+            )
+            if package_prefix:
+                package_entries.append((source_label, child_name))
+            if Path(child_name).name.lower() in {"battlebank.bytes", "lobbybank.bytes"}:
+                bank_files.append((
+                    f"{source_label} :: {child_name}",
+                    child_info.file_size,
+                    child_info.CRC,
+                ))
+            if child_ext == ".bytes" and child_info.file_size >= 16:
+                try:
+                    with nested.open(child_info, "r") as stream:
+                        prefix = stream.read(24)
+                    header = peek_mses_header(child_name, prefix)
+                    if header:
+                        mses_tables.append((
+                            source_label, child_name, header.version,
+                            header.field_count, header.row_count,
+                        ))
+                except (OSError, RuntimeError, AoVResourceError, zipfile.BadZipFile):
+                    pass
+
+            if depth >= 2 or not child_name.lower().endswith(".pkg.bytes"):
+                continue
+            try:
+                with nested.open(child_info, "r") as source:
+                    signature = source.read(4)
+                    if not signature.startswith(b"PK\x03\x04"):
+                        continue
+                    with tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024) as spool:
+                        spool.write(signature)
+                        shutil.copyfileobj(source, spool, length=1024 * 1024)
+                        spool.seek(0)
+                        with zipfile.ZipFile(spool, "r") as pkg:
+                            nested_archives.append(
+                                f"{source_label} :: {child_name} ({child_info.file_size:,} byte)"
+                            )
+                            scan_nested(
+                                pkg,
+                                f"{source_label} :: {child_name}",
+                                depth=depth + 1,
+                                resource_root=False,
+                                package_prefix=key,
+                            )
+            except (OSError, RuntimeError, zipfile.BadZipFile):
+                suspicious_files.append(
+                    f"{source_label} :: {child_name} [PKG lồng không đọc được]"
+                )
+
+    for path in paths:
+        try:
+            with zipfile.ZipFile(path, "r") as outer:
+                for outer_info in outer.infolist():
+                    if outer_info.is_dir():
+                        continue
+                    outer_name = _safe_name(outer_info.filename)
+                    lower_name = outer_name.lower()
+                    is_resources = Path(outer_name).name.lower() == "resources.zip"
+                    is_pkg = lower_name.endswith(".pkg.bytes")
+                    if not (is_resources or is_pkg):
+                        continue
+                    try:
+                        with outer.open(outer_info, "r") as source:
+                            signature = source.read(4)
+                            if not signature.startswith(b"PK\x03\x04"):
+                                continue
+                            with tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024) as spool:
+                                spool.write(signature)
+                                shutil.copyfileobj(source, spool, length=1024 * 1024)
+                                spool.seek(0)
+                                with zipfile.ZipFile(spool, "r") as nested:
+                                    nested_archives.append(
+                                        f"{Path(path).name} :: {outer_name} ({outer_info.file_size:,} byte)"
+                                    )
+                                    scan_nested(
+                                        nested,
+                                        f"{Path(path).name} :: {outer_name}",
+                                        depth=1,
+                                        resource_root=is_resources,
+                                        package_prefix="" if is_resources else outer_name,
+                                    )
+                    except (OSError, RuntimeError, zipfile.BadZipFile):
+                        suspicious_files.append(
+                            f"{Path(path).name} :: {outer_name} [gói lồng không đọc được]"
+                        )
+        except (OSError, zipfile.BadZipFile) as exc:
+            raise InspectError(f"Không mở lại được ZIP: {Path(path).name}") from exc
+
+    nested_archives = list(dict.fromkeys(nested_archives))
+
     lines = [
         "BÁO CÁO KIỂM TRA CẤU TRÚC ZIP AOV",
         "Chế độ chỉ đọc: không sửa hoặc xóa tài nguyên; có đọc header AES/MSES khi nhận diện được.",
@@ -163,6 +288,13 @@ def inspect_archives(paths: list[str]) -> str:
     else:
         lines.append("- Không nhận diện được header MSES trong các .bytes đã quét.")
 
+    lines.extend(["", "TỆP BÊN TRONG CÁC PKG"])
+    if package_entries:
+        lines.append(f"- Đã đọc {len(package_entries)} mục trong các PKG dạng ZIP:")
+        lines.extend(f"  • {source} :: {name}" for source, name in package_entries[:100])
+    else:
+        lines.append("- Không phát hiện tệp con trong PKG dạng ZIP.")
+
     lines.extend(["", "ĐƯỜNG DẪN TRÙNG GIỮA CÁC FILE"])
     same_metadata = []
     different_metadata = []
@@ -186,7 +318,7 @@ def inspect_archives(paths: list[str]) -> str:
     lines.extend(["", "DẤU HIỆU CẦN KIỂM TRA THÊM"])
     lines.append(f"- Mục có tên gợi ý thông báo/khởi động/popup: {len(suspicious_files)}")
     lines.extend(f"  • {item}" for item in suspicious_files[:80])
-    lines.append(f"- ZIP/lưu trữ lồng bên trong: {len(nested_archives)}")
+    lines.append(f"- ZIP/lưu trữ lồng đã mở: {len(nested_archives)}")
     lines.extend(f"  • {item}" for item in nested_archives[:40])
     lines.append(f"- Mục được đánh dấu mã hóa ZIP: {len(encrypted_files)}")
     lines.extend(f"  • {item}" for item in encrypted_files[:40])
@@ -203,3 +335,16 @@ def inspect_archives(paths: list[str]) -> str:
         "- Chỉ nên tạo bản mod sau khi xác định đúng cấu trúc, phiên bản game và quan hệ phụ thuộc của tài nguyên.",
     ])
     return "\n".join(lines)
+
+
+def requires_format_aware_merge(report: str) -> bool:
+    """Return True when generic ZIP merging could flatten or overwrite AOV resources."""
+    if "MSES v7" in report:
+        return True
+    for line in report.splitlines():
+        if line.startswith("- ZIP/lưu trữ lồng đã mở:"):
+            try:
+                return int(line.rsplit(":", 1)[1].strip()) > 0
+            except (IndexError, ValueError):
+                return True
+    return False

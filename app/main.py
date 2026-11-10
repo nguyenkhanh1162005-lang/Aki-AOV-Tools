@@ -13,7 +13,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from .large_merger import merge_zip_files, MergeError, MAX_FILES, MAX_INPUT_BYTES
-from .aov_inspector import inspect_archives, InspectError
+from .aov_inspector import inspect_archives, InspectError, requires_format_aware_merge
 
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -135,6 +135,18 @@ async def merge(files: list[UploadFile] = File(...)):
                     target.write(chunk)
             await upload.close()
             input_paths.append(str(destination))
+
+        try:
+            safety_report = await run_in_threadpool(inspect_archives, input_paths)
+        except InspectError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if requires_format_aware_merge(safety_report):
+            raise HTTPException(
+                409,
+                "Đã phát hiện Resources.zip/PKG lồng hoặc bảng MSES. "
+                "Ghép ZIP thường không an toàn cho gói AOV; hãy dùng /api/inspect "
+                "để xem báo cáo. Chưa tạo file kết quả.",
+            )
 
         output_path = workdir / "aki-merged.zip"
         try:
