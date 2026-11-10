@@ -136,7 +136,10 @@ async def merge(files: list[UploadFile] = File(...)):
             await upload.close()
             input_paths.append(str(destination))
 
-        safety_report = await run_in_threadpool(inspect_archives, input_paths)
+        try:
+            safety_report = await run_in_threadpool(inspect_archives, input_paths)
+        except InspectError as exc:
+            raise HTTPException(400, str(exc)) from exc
         if requires_format_aware_merge(safety_report):
             raise HTTPException(
                 409,
