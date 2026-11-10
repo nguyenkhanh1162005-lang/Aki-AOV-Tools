@@ -44,6 +44,26 @@ class UploadSessionTests(unittest.IsolatedAsyncioTestCase):
                 main._ensure_upload_capacity()
         self.assertEqual(raised.exception.status_code, 429)
 
+    async def test_upload_status_reports_offsets_and_refreshes_session(self):
+        directory = tempfile.mkdtemp(prefix="aki-test-status-")
+        path = Path(directory) / "1_sample.zip"
+        path.write_bytes(b"abc")
+        main.UPLOAD_SESSIONS["resume-me"] = {
+            "created": time.time() - 30,
+            "workdir": directory,
+            "files": [{"name": "sample.zip", "size": 8, "received": 3}],
+            "paths": [str(path)],
+        }
+
+        result = await main.chunked_upload_status("resume-me")
+
+        self.assertEqual(result["upload_id"], "resume-me")
+        self.assertEqual(result["files"], [
+            {"name": "sample.zip", "size": 8, "received": 3}
+        ])
+        self.assertEqual(result["chunk_size"], main.UPLOAD_CHUNK_BYTES)
+        self.assertLess(time.time() - main.UPLOAD_SESSIONS["resume-me"]["created"], 2)
+
     async def test_chunk_upload_start_rejects_non_object_file_metadata(self):
         with self.assertRaises(HTTPException) as raised:
             await main.start_chunked_upload({"files": ["not-an-object"]})
