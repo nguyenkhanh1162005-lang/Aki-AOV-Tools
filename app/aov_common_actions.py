@@ -37,6 +37,10 @@ def _track_signature(track: ET.Element) -> str:
     clone.attrib.pop("useRefParam", None)
     clone.attrib.pop("refParamName", None)
     for node in clone.iter():
+        if node.text is not None and not node.text.strip():
+            node.text = None
+        if node.tail is not None and not node.tail.strip():
+            node.tail = None
         for attr in list(node.attrib):
             if attr.lower() in {"guid", "m_guid"}:
                 node.attrib.pop(attr, None)
