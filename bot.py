@@ -4,7 +4,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from telegram import Update
+from telegram import Update, FSInputFile
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -12,7 +12,6 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from telegram import FSInputFile
 
 from app.large_merger import merge_zip_files, MergeError
 from app.aov_inspector import inspect_archives, InspectError
@@ -65,9 +64,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Aki-AOV Bot đã sẵn sàng.\n"
         f"Chế độ nhận file: {mode}.\n\n"
-        "Gửi ZIP nhỏ trực tiếp hoặc gửi liên kết HTTPS tải ZIP trực tiếp (tối đa 500 MB), sau đó dùng /merge để ghép.\n"
+        "Gửi tối đa 10 ZIP hoặc gửi link HTTPS tải ZIP trực tiếp, sau đó dùng /inspect để phân tích hoặc /merge để ghép.\n"
         "/status xem giới hạn hiện tại\n"
-        "/inspect kiểm tra cấu trúc ZIP đã gửi\n"
+        "/files xem danh sách ZIP đã nhận\n"
+        "/inspect xuất báo cáo cấu trúc ZIP dạng TXT\n"
+        "/merge kiểm tra, ghép và xác minh lại dữ liệu đầu ra\n"
         "/clear xóa danh sách file"
     )
 
@@ -87,13 +88,27 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def files_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _authorized(update):
+        return
+    files = context.user_data.get("zips", [])
+    if not files:
+        await update.effective_message.reply_text("Chưa có ZIP nào. Gửi file trước nhé.")
+        return
+    lines = ["DANH SÁCH ZIP ĐÃ NHẬN"]
+    for index, (name, path) in enumerate(files, 1):
+        size = Path(path).stat().st_size if Path(path).exists() else 0
+        lines.append(f"{index}. {name} — {size / MIB:.1f} MB")
+    await update.effective_message.reply_text("\n".join(lines))
+
+
 async def receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _authorized(update):
         return
     message = update.effective_message
     doc = message.document if message else None
     if not doc or not (doc.file_name or "").lower().endswith(".zip"):
-        await message.reply_text("Hãy gửi file .zip dưới dạng Tệp nhé.")
+        await message.reply_text("Hiện tại bot nhận ZIP để phân tích và ghép. Hãy gửi file .zip dưới dạng Tệp nhé.")
         return
 
     if doc.file_size and doc.file_size > MAX_FILE_BYTES:
@@ -202,7 +217,6 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-
 async def inspect(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _authorized(update):
         return
@@ -210,15 +224,23 @@ async def inspect(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not files:
         await update.effective_message.reply_text("Chưa có ZIP nào. Gửi file trước nhé.")
         return
+    folder = _workdir(context)
+    report_path = folder / "aki-inspection-report.txt"
     status_message = await update.effective_message.reply_text(
-        "Đang đọc danh mục ZIP, không sửa hoặc giải mã tài nguyên..."
+        "Đang phân tích danh mục, đường dẫn trùng, CRC và dấu hiệu tài nguyên. Chế độ chỉ đọc, không sửa ZIP gốc..."
     )
     try:
         report = await asyncio.to_thread(inspect_archives, [path for _, path in files])
-        chunks = [report[i:i + 3800] for i in range(0, len(report), 3800)]
-        await status_message.edit_text(chunks[0])
-        for chunk in chunks[1:]:
-            await update.effective_message.reply_text(chunk)
+        report_path.write_text(report, encoding="utf-8")
+        preview = report[:3500]
+        await status_message.edit_text(
+            preview + ("\n\nBáo cáo đầy đủ được gửi kèm dưới dạng TXT." if len(report) > 3500 else "")
+        )
+        await update.effective_message.reply_document(
+            document=FSInputFile(str(report_path), filename="aki-inspection-report.txt"),
+            read_timeout=120,
+            write_timeout=120,
+        )
     except InspectError as exc:
         await status_message.edit_text(f"Không kiểm tra được: {exc}")
     except Exception as exc:
@@ -245,27 +267,26 @@ async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     folder = _workdir(context)
     output_path = folder / "aki-merged.zip"
     status_message = await update.effective_message.reply_text(
-        "Đang kiểm tra và ghép ZIP. Đừng gửi /clear trong lúc xử lý nhé."
+        "Đang kiểm tra xung đột, ghép ZIP và đọc lại từng tệp để xác minh SHA-256 + CRC. ZIP gốc được giữ nguyên..."
     )
     try:
-        await asyncio.to_thread(
+        output_size = await asyncio.to_thread(
             merge_zip_files,
             [path for _, path in files],
             str(output_path),
         )
-        output_size = output_path.stat().st_size
         if not LOCAL_API and output_size > 48 * MIB:
             await status_message.edit_text(
-                f"Đã ghép xong ({output_size / MIB:.1f} MB), nhưng Bot API mặc định "
-                "chỉ cho bot gửi file tối đa 50 MB. File nguồn vẫn được giữ lại; "
+                f"Đã ghép và xác minh xong ({output_size / MIB:.1f} MB), nhưng Bot API mặc định "
+                "chỉ cho bot gửi file tối đa 50 MB. File nguồn và kết quả vẫn được giữ trên phiên làm việc; "
                 "cần Local Bot API hoặc cách lưu trữ kết quả bên ngoài để gửi file này."
             )
             return
         await status_message.edit_text(
-            f"Đã ghép xong ({output_size / MIB:.1f} MB). Đang gửi file..."
+            f"Đã ghép và xác minh xong ({output_size / MIB:.1f} MB). Đang gửi file..."
         )
         await update.effective_message.reply_document(
-            document=FSInputFile(str(output_path), filename="aki-merged.zip"),
+            document=FSInputFile(str(output_path), filename="aki-merged-verified.zip"),
             read_timeout=1800,
             write_timeout=1800,
             connect_timeout=60,
@@ -273,7 +294,7 @@ async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         _cleanup(context)
     except MergeError as exc:
-        await status_message.edit_text(f"Không ghép được: {exc}")
+        await status_message.edit_text(f"Không ghép được: {exc}\nZIP nguồn vẫn được giữ nguyên.")
     except Exception as exc:
         await status_message.edit_text(
             f"Gửi hoặc xử lý thất bại: {type(exc).__name__}. "
@@ -295,6 +316,7 @@ def main():
     app = builder.build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("files", files_list))
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("merge", merge))
     app.add_handler(CommandHandler("inspect", inspect))
