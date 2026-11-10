@@ -52,22 +52,29 @@ class MSESTests(unittest.TestCase):
         self.assertEqual(parse_mses(output).rows[0][4:], b"overlay")
         self.assertEqual(report["replaced_keys"], ["0x00000001"])
 
-    def test_rejects_override_key_missing_from_one_table(self):
+    def test_rejects_override_key_missing_from_overlay(self):
         base = make_table(4, [struct.pack("<I", 1) + b"base"])
         overlay = make_table(4, [struct.pack("<I", 1) + b"overlay"])
-        with self.assertRaisesRegex(MSESError, "không tồn tại ở cả base và overlay"):
+        with self.assertRaisesRegex(MSESError, "không tồn tại trong overlay"):
             merge_mses_rows(base, overlay, override_keys={2})
 
-    def test_rejects_override_when_schemas_differ(self):
+    def test_rejects_unapproved_conflict_when_schemas_differ(self):
         base = make_table(4, [struct.pack("<I", 1) + b"base"])
-        overlay = make_table(3, [struct.pack("<I", 1) + b"base"])
-        with self.assertRaisesRegex(MSESError, "schema giữa base và overlay khác nhau"):
-            merge_mses_rows(
-                base,
-                overlay,
-                override_keys={1},
-                allow_schema_mismatch=True,
-            )
+        overlay = make_table(3, [struct.pack("<I", 1) + b"overlay"])
+        with self.assertRaisesRegex(MSESError, "bản ghi chung không được cho phép ghi đè"):
+            merge_mses_rows(base, overlay, allow_schema_mismatch=True)
+
+    def test_allows_explicit_override_for_selected_row_across_schema_drift(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(3, [struct.pack("<I", 1) + b"overlay"])
+        output, report = merge_mses_rows(
+            base,
+            overlay,
+            override_keys={1},
+            allow_schema_mismatch=True,
+        )
+        self.assertEqual(parse_mses(output).rows[0][4:], b"overlay")
+        self.assertEqual(report["replaced_keys"], ["0x00000001"])
 
     def test_rejects_bad_checksum(self):
         original = bytearray(make_table(4, [struct.pack("<I", 1) + b"one"]))
