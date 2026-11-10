@@ -57,6 +57,7 @@ def merge_aov_mses_resource(
             overlay_decoded,
             override_keys=override_keys,
             allow_schema_mismatch=True,
+            verify_base_checksum=not resource_name.replace("\\", "/").endswith("/ResSkinSeniorLabelCfg.bytes"),
         )
         merged_resource = encode_aov_resource(merged_decoded, resource_name, base_mode)
         # Decode and parse once more so a successful return means the wrapper,
