@@ -259,7 +259,10 @@ def build_cross_cab_reference_merge_plan(
                 return {"ready": False, "reason": f"{label} CAB descriptor is malformed: {key}", "cabs": {}}
 
     path_plans = {}
-    final_path_ids = {}
+    final_path_ids = {
+        key: set(descriptor["path_ids"])
+        for key, descriptor in base.items()
+    }
     for key, descriptor in overlay.items():
         base_descriptor = base.get(key, {})
         plan = build_path_id_remap_plan(
@@ -299,7 +302,7 @@ def build_cross_cab_reference_merge_plan(
                 continue
             if target_key not in final_path_ids:
                 continue
-            target_plan = path_plans[target_key]
+            target_plan = path_plans.get(target_key, {"remap": {}})
             external_path_id_remaps[str(old_file_id)] = target_plan["remap"]
             external_target_path_ids[str(final_file_id)] = final_path_ids[target_key]
 
