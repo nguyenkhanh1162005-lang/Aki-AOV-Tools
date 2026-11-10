@@ -5,7 +5,7 @@ Công cụ web và Telegram bot dùng chung bộ xử lý ZIP, kiểm kê cấu 
 ## Tính năng
 - Web UI tiếng Việt, dùng được trên điện thoại.
 - Web: tải tối đa 10 ZIP theo khối 4 MB, kiểm tra cấu trúc, ghép ZIP thông thường hoặc ghép mod AOV chuyên sâu.
-- Web API `/api/inspect`: liệt kê phần mở rộng, tên có dấu hiệu là tài nguyên game và đường dẫn trùng giữa các ZIP.
+- Web API `/api/inspect`: liệt kê phần mở rộng, tên có dấu hiệu là tài nguyên game và so sánh SHA-256 các đường dẫn trùng để phân biệt nội dung giống hệt với xung đột thật (tối đa 80 đường dẫn trùng được hiển thị chi tiết).
 - Bộ kiểm tra `/inspect` và `/api/inspect` đọc chữ ký 32 byte đầu mỗi mục để phân loại sơ bộ AoV AES/Zstandard, Unity AssetBundle, ZIP lồng, Wwise, ảnh, XML/JSON và dữ liệu chưa nhận diện; chỉ đọc, không sửa tài nguyên.
 - Web API `/api/drive/import`: tải ZIP từ link Google Drive công khai trực tiếp về máy chủ, tối đa 10 link và tổng 500 MB.
 - Web API `/api/upload/{upload_id}/aov-merge`: chạy bộ ghép Vấn Tâm Kiếm chuyên sâu trên phiên upload.
