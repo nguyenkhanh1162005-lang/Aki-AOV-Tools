@@ -57,21 +57,35 @@ def _archive_profile(path: str) -> dict[str, Any]:
         leaves.intersection(AOV_MARKERS)
         or (has_resource_tree and extensions.intersection(AOV_EXTENSIONS))
     )
-    has_base = any(
-        PurePosixPath(name).name.lower() == "resources.zip" for name in names
-    ) and any(PurePosixPath(name).name.lower() == "danhsachskin.txt" for name in names)
-    has_vtk_ifix = any(PurePosixPath(name).name.lower() == "heroskin_2.bytes" for name in names)
+
+    # This is a user-supplied 10-skin MOD container (Resources.zip + skin list),
+    # not a request to use or inject the official game package.
+    has_mod_skin_container = (
+        "resources.zip" in leaves and "danhsachskin.txt" in leaves
+    )
+    has_vtk_ifix = "heroskin_2.bytes" in leaves
     has_595_assets = any(
         "595_" in PurePosixPath(name).name.lower()
         or "595" in PurePosixPath(name).name.lower()
         for name in names
         if PurePosixPath(name).suffix.lower() == ".assetbundle"
     )
+
+    if not looks_like_aov:
+        source_role = "ordinary_zip"
+    elif has_mod_skin_container:
+        source_role = "aov_skin_mod_container_candidate"
+    elif has_vtk_ifix and has_595_assets:
+        source_role = "aov_actor595_mod_candidate"
+    else:
+        source_role = "aov_mod_unclassified"
+
     return {
         "name": Path(path).name,
         "entries": len(names),
         "looks_like_aov": looks_like_aov,
-        "has_base": has_base,
+        "source_role": source_role,
+        "has_mod_skin_container": has_mod_skin_container,
         "has_vtk_ifix": has_vtk_ifix,
         "has_595_assets": has_595_assets,
         "extensions": sorted(extensions),
@@ -80,27 +94,41 @@ def _archive_profile(path: str) -> dict[str, Any]:
 
 def _select_adapter(profiles: list[dict[str, Any]]) -> str:
     if any(item["looks_like_aov"] for item in profiles):
+        mod_containers = [
+            item for item in profiles if item["has_mod_skin_container"]
+        ]
+        actor595_mods = [
+            item for item in profiles
+            if item["has_vtk_ifix"] and item["has_595_assets"]
+        ]
+        # The supported route is mod pack + mod overlay. The 10-skin archive
+        # is itself a mod pack; the official game package is neither required
+        # nor added to the output.
         supported_pair = (
-            sum(bool(item["has_base"]) for item in profiles) == 1
-            and any(item["has_vtk_ifix"] and item["has_595_assets"] for item in profiles)
+            len(mod_containers) == 1
+            and len(actor595_mods) >= 1
+            and all(item["looks_like_aov"] for item in profiles)
         )
         if supported_pair:
-            return "aov_vtk_actor595_1.64.1"
+            return "aov_mod_to_mod_vtk_actor595_1.64.1"
+
         names = ", ".join(item["name"] for item in profiles if item["looks_like_aov"])
         raise ModPipelineError(
             "Phát hiện tài nguyên AoV nhưng chưa có adapter ghép đã xác minh cho bộ này: "
-            f"{names}. Hệ thống không ghi đè .bytes, AssetBundle hoặc soundbank theo kiểu ZIP thường. "
-            "Hiện adapter chuyên biệt chỉ nhận đúng bộ nền 10 skin + Vấn Tâm Kiếm Actor 595 "
-            "đã khóa phiên bản; các loại mod khác cần parser và quy tắc tương thích riêng."
+            f"{names}. Không dùng gói game gốc làm nền và không ghi đè .bytes, "
+            "AssetBundle hoặc soundbank theo kiểu ZIP thường. "
+            "Adapter hiện có chỉ ghép gói mod 10 skin do người dùng cung cấp "
+            "với mod Vấn Tâm Kiếm Actor 595 đúng phiên bản; các mod khác cần "
+            "parser, serializer và quy tắc tương thích riêng."
         )
     return "generic_zip"
 
 
 def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, Any]:
-    """Inspect, select a verified adapter, merge transactionally, and CRC-validate output.
+    """Select a verified adapter and merge transactionally.
 
-    This intentionally fails closed for AoV resource packs without a dedicated adapter.
-    A detector match is never treated as proof that two game resources are compatible.
+    AoV packs without a dedicated parser/serializer fail closed. The supported
+    Actor 595 route is mod-to-mod and never uses the official game package.
     """
     if not archive_paths:
         raise ModPipelineError("Chưa có ZIP đầu vào.")
@@ -117,7 +145,7 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
     temporary.unlink(missing_ok=True)
 
     try:
-        if adapter == "aov_vtk_actor595_1.64.1":
+        if adapter == "aov_mod_to_mod_vtk_actor595_1.64.1":
             result = merge_aov_archives(archive_paths, str(temporary))
         else:
             size = merge_zip_files(archive_paths, str(temporary))
@@ -135,6 +163,7 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
             "output_bytes": destination.stat().st_size,
             "structurally_validated": True,
             "game_compatibility_tested": False,
+            "official_game_package_used": False,
         })
         return result
     except (MergeError, AOVMergeError) as exc:
