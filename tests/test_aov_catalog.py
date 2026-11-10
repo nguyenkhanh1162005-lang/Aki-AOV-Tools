@@ -52,7 +52,7 @@ class AOVCatalogTests(unittest.TestCase):
         with self.assertRaises(AOVCatalogMergeError):
             merge_resource_packer_tree(base, overlay)
 
-    def test_merges_verification_lists_and_keeps_base_conflict(self):
+    def test_merges_verification_lists_and_overrides_selected_checksum(self):
         base = {
             "m_Name": "ResourceVerificationInfoSetXML",
             "AllZipVerificationInfo": [
@@ -74,7 +74,7 @@ class AOVCatalogTests(unittest.TestCase):
         }
         merged, report = merge_resource_verification_tree(base, overlay, prefer_overlay_paths={"a.zip"})
         self.assertEqual(merged["AllZipVerificationInfo"], [
-            {"PathInIFS": "a.zip", "CrcXor": 1},
+            {"PathInIFS": "a.zip", "CrcXor": 99},
             {"PathInIFS": "b.zip", "CrcXor": 3},
         ])
         self.assertEqual(len(merged["AllDatabinVerificationInfo"]), 2)
