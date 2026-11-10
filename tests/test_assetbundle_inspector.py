@@ -83,6 +83,46 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertTrue(report["structural_checks_pass"])
         self.assertFalse(report["merge_safe"])
 
+    def test_marks_duplicate_cab_basenames_as_ambiguous(self):
+        source_obj = SimpleNamespace(
+            type=SimpleNamespace(name="GameObject"),
+            path_id=100,
+            read_typetree=lambda: {"external": {"m_FileID": 1, "m_PathID": 300}},
+        )
+        source_file = SimpleNamespace(
+            name="CAB-main",
+            unity_version="2022.3.0f1",
+            target_platform=SimpleNamespace(name="iOS"),
+            objects={100: source_obj},
+            externals=[SimpleNamespace(path="archive:/CAB-shared.assets", name="CAB-shared.assets")],
+        )
+        target_a = SimpleNamespace(
+            name="folder-a/CAB-shared.assets",
+            unity_version="2022.3.0f1",
+            target_platform=SimpleNamespace(name="iOS"),
+            objects={300: SimpleNamespace(type=SimpleNamespace(name="Texture2D"), path_id=300)},
+            externals=[],
+        )
+        target_b = SimpleNamespace(
+            name="folder-b/CAB-shared.assets",
+            unity_version="2022.3.0f1",
+            target_platform=SimpleNamespace(name="iOS"),
+            objects={300: SimpleNamespace(type=SimpleNamespace(name="Mesh"), path_id=300)},
+            externals=[],
+        )
+        env = SimpleNamespace(
+            assets=[source_file, target_a, target_b],
+            container={},
+            files={"bundle": object()},
+        )
+        fake_unity = SimpleNamespace(load=lambda data: env)
+        with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
+            report = inspect_assetbundle(b"UnityFS\\x00fixture")
+        integrity = report["reference_integrity"]
+        self.assertEqual(integrity["external_resolved"], 0)
+        self.assertEqual(len(integrity["external_ambiguous_targets"]), 1)
+        self.assertEqual(integrity["external_ambiguous_targets"][0]["path_id"], 300)
+
     def test_resolves_overlay_external_ptrs_against_base_cab_path_ids(self):
         base_obj = SimpleNamespace(type=SimpleNamespace(name="Texture2D"), path_id=300)
         base_file = SimpleNamespace(
