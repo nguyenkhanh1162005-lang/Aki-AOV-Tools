@@ -60,6 +60,10 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
                 "object_count": 2,
                 "container_entry_count": 2,
                 "external_reference_count": 0,
+                "object_reference_count": 0,
+                "reference_scan_complete": True,
+                "reference_scan_errors": [],
+                "object_references": [],
                 "object_type_counts": {"GameObject": 2},
                 "external_paths": [],
             }), patch("app.aov_inspector.compare_assetbundle_overlays", return_value=comparison):
