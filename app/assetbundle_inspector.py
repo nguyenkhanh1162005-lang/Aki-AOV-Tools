@@ -717,7 +717,7 @@ def build_external_file_id_remap_plan(
     def normalize(value: str) -> str | None:
         if not isinstance(value, str) or not value.strip():
             return None
-        normalized = value.strip().replace("\\\\", "/")
+        normalized = value.strip().replace(chr(92), "/")
         while "//" in normalized:
             normalized = normalized.replace("//", "/")
         return normalized
