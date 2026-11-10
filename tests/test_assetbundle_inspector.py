@@ -130,16 +130,16 @@ class AssetBundleInspectorTests(unittest.TestCase):
         env = SimpleNamespace(assets=[serialized], container={}, files={"bundle": object()})
         fake_unity = SimpleNamespace(load=lambda data: env)
         with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
-            report = inspect_assetbundle(b"UnityFS\\x00fixture")
+            report = inspect_assetbundle(b"UnityFS\x00fixture")
         self.assertEqual(report["object_reference_count"], 2)
         self.assertTrue(report["reference_scan_complete"])
         self.assertEqual(report["object_references"][0]["target_file"], "CAB-dependency.resS")
         self.assertEqual(report["object_references"][1]["target_file"], "local")
 
     def test_real_unityfs_null_terminated_signature_is_required(self):
-        self.assertTrue(b"UnityFS\\x00fixture".startswith(b"UnityFS\\x00"))
+        self.assertTrue(b"UnityFS\x00fixture".startswith(b"UnityFS\x00"))
         with self.assertRaises(AssetBundleInspectError):
-            inspect_assetbundle(b"UnityFS\\\\x00fixture")
+            inspect_assetbundle(b"UnityFS\\\x00fixture")
 
     def test_wraps_parser_errors_as_inspection_errors(self):
         fake_unity = SimpleNamespace(load=lambda data: (_ for _ in ()).throw(RuntimeError("bad bundle")))
