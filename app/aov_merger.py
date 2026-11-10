@@ -95,15 +95,6 @@ def _encode(data: bytes, resource_name: str, mode: str) -> bytes:
         raise AOVMergeError(f"Không mã hóa lại được tài nguyên {resource_name}: {exc}") from exc
 
 
-def _decode_package_entry(data: bytes, name: str) -> tuple[bytes, str]:
-    # CommonActions contains raw XML, Zstandard, and occasionally AES-wrapped entries.
-    if data[:3] == b"\x22\x4a\x67" or (
-        data[:2] == b"\x22\x4a" and data.find(ZSTD_MAGIC) >= 0
-    ):
-        return _decode(data, name)
-    return data, "raw"
-
-
 def _merge_ifix(base_data: bytes, vtk_data: bytes) -> tuple[bytes, int, int]:
     base_raw, base_mode = _decode(base_data, "HeroSkin_1")
     vtk_raw, _ = _decode(vtk_data, "HeroSkin_2")
