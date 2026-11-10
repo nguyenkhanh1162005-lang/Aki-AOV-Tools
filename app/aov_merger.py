@@ -382,19 +382,6 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                     except AOVResourceMergeError as exc:
                         raise AOVMergeError(str(exc)) from exc
 
-                replacements[PACKER_PATH] = _merge_packer_metadata(
-                    read_base(PACKER_PATH),
-                    read_vtk(PACKER_PATH),
-                    read_base(VERIFICATION_PATH),
-                    read_vtk(VERIFICATION_PATH),
-                    asset_paths,
-                )[0]
-                common_files = len(common_report["merged_files"])
-                common_tracks = sum(
-                    len(item.get("replaced_tracks", [])) + len(item.get("appended_tracks", []))
-                    for item in common_report["merged_files"].values()
-                )
-
                 skip_vtk = {
                     PACKER_PATH, VERIFICATION_PATH, HERO_SKIN_VTK_PATH,
                     "KernelLua.pkg.bytes", "StableSystems_3.pkg.bytes",
@@ -404,6 +391,28 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                 for name in vtk_sources:
                     if name.startswith("Sound/Android/"):
                         skip_vtk.add(name)
+                verification_included_paths = (
+                    set(vtk_sources) - skip_vtk
+                ) | {
+                    COMMON_ACTIONS_PATH, RES_SKIN_PATH, BATTLE_BANK_PATH,
+                    LOBBY_BANK_PATH, SKILL_COMBINE_PATH,
+                }
+
+                (replacements[PACKER_PATH], packer_replaced, packer_added,
+                 packer_entry_count) = _merge_packer_metadata(
+                    read_base(PACKER_PATH), read_vtk(PACKER_PATH), asset_paths
+                )
+                (replacements[VERIFICATION_PATH], verification_updated,
+                 verification_version_drift) = _merge_verification_metadata(
+                    read_base(VERIFICATION_PATH), read_vtk(VERIFICATION_PATH),
+                    verification_included_paths,
+                )
+
+                common_files = len(common_report["merged_files"])
+                common_tracks = sum(
+                    len(item.get("replaced_tracks", [])) + len(item.get("appended_tracks", []))
+                    for item in common_report["merged_files"].values()
+                )
 
                 inner_output_path = temp_dir / "Resources-merged.zip"
                 added_files: list[str] = []
@@ -487,8 +496,12 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                     "mses_reports": mses_reports,
                     "assetbundles": len(asset_paths),
                     "new_files": len(added_files),
-                    "packer_entries": len(packer_tree["AllResourcePackInfo"]),
-                    "validation": "ZIP/CRC, IFix index, MSES tables, CommonActions XML and PackerInfo passed",
+                    "packer_entries": packer_entry_count,
+                    "packer_replaced": packer_replaced,
+                    "packer_added": packer_added,
+                    "verification_updated": verification_updated,
+                    "verification_version_drift_kept": verification_version_drift,
+                    "validation": "ZIP/CRC, IFix index, MSES tables, CommonActions XML, PackerInfo and ResourceVerification passed",
                     "game_tested": False,
                 }
             finally:
