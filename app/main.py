@@ -177,14 +177,23 @@ async def merge_aov_chunked_upload(upload_id: str):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
     output_path = Path(session["workdir"]) / "Aki-AOV-10Skin-VanTamKiem.zip"
     try:
-        await run_in_threadpool(merge_aov_archives, session["paths"], str(output_path))
+        report = await run_in_threadpool(merge_aov_archives, session["paths"], str(output_path))
     except AOVMergeError as exc:
         raise HTTPException(400, str(exc)) from exc
     UPLOAD_SESSIONS.pop(upload_id, None)
+    result_headers = {
+        "X-AOV-Validation": "passed" if report.get("validation") else "incomplete",
+        "X-AOV-Game-Tested": "true" if report.get("game_tested") else "false",
+        "X-AOV-Base-Version": str(report.get("base_version", "unknown")),
+        "X-AOV-VTK-Version": str(report.get("vtk_version", "unknown")),
+        "X-AOV-AssetBundles": str(report.get("assetbundles", 0)),
+        "X-AOV-New-Files": str(report.get("new_files", 0)),
+    }
     return FileResponse(
         path=output_path,
         media_type="application/zip",
         filename="Aki-AOV-10Skin-VanTamKiem.zip",
+        headers=result_headers,
         background=BackgroundTask(shutil.rmtree, session["workdir"], ignore_errors=True),
     )
 
