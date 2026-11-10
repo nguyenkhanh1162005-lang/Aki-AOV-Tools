@@ -109,9 +109,21 @@ def plan_resource_compatibility(resources: list[dict[str, Any]]) -> dict[str, An
         elif len(entries) > 1:
             status = "NEEDS_RULE"
             reasons.append("Cùng đường dẫn nhưng payload khác nhau; mặc định không ghi đè.")
-        elif entries[0]["format"] == "generic_zip" and not entries[0].get("is_aov_resource", False):
+        elif (
+            entries[0]["format"] == "generic_zip"
+            and not entries[0].get("is_aov_resource", False)
+            and PurePosixPath(path.lower()).suffix in {".txt", ".md", ".rst", ".license"}
+        ):
             status = "SAFE_MERGE"
-            reasons.append("Đường dẫn mới thuộc phạm vi ZIP thông thường, không được đánh dấu là tài nguyên AoV.")
+            reasons.append(
+                "Chỉ an toàn ở mức thêm tệp văn bản vào ZIP; không phải xác nhận tương thích trong game."
+            )
+        elif entries[0]["format"] == "generic_zip" and not entries[0].get("is_aov_resource", False):
+            status = "NEEDS_RULE"
+            reasons.append(
+                "Tệp không thuộc định dạng AoV đã nhận diện nhưng có thể là tài nguyên runtime; "
+                "chỉ ghép ZIP theo đường dẫn chưa chứng minh game sẽ dùng được."
+            )
         elif entries[0].get("is_aov_resource", False):
             status = "UNSUPPORTED"
             reasons.append("Tài nguyên AoV cần adapter đúng định dạng, phiên bản và fixture; detector không cấp quyền ghép.")
