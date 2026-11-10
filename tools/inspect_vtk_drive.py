@@ -15,6 +15,19 @@ from tools.ifix_parse import PatchParser
 
 DRIVE_URL = "https://drive.google.com/file/d/1JpKeA82ha9CmCeGL1pmAEfBhQWr19Mxe/view?usp=drivesdk"
 report = {"download": {}, "archives": []}
+metadata_report = {}
+
+
+def json_safe(value):
+    if isinstance(value, dict):
+        return {str(key): json_safe(child) for key, child in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(child) for child in value]
+    if isinstance(value, bytes):
+        return {"$bytes_hex": value.hex()}
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 def inspect_bytes(name: str, payload: bytes) -> dict:
@@ -116,6 +129,21 @@ with tempfile.TemporaryDirectory(prefix="aki-vtk-audit-") as temp:
                                     })
                             except Exception:
                                 pass
+                    if info.filename.endswith(("/resourcepackerinfosetall.assetbundle", "/resourceverificationinfosetall.assetbundle")):
+                        mono_trees = []
+                        for obj in env.objects:
+                            if obj.type.name == "MonoBehaviour":
+                                try:
+                                    mono_trees.append({
+                                        "path_id": obj.path_id,
+                                        "tree": json_safe(obj.read_typetree()),
+                                    })
+                                except Exception as exc:
+                                    mono_trees.append({
+                                        "path_id": obj.path_id,
+                                        "error": f"{type(exc).__name__}: {exc}",
+                                    })
+                        metadata_report[info.filename] = mono_trees
                     record["unity"] = {
                         "ok": True,
                         "object_count": len(env.objects),
@@ -149,4 +177,5 @@ with tempfile.TemporaryDirectory(prefix="aki-vtk-audit-") as temp:
             report["archives"].append(record)
 
 Path("vtk-audit.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+Path("vtk-assetbundle-metadata.json").write_text(json.dumps(metadata_report, ensure_ascii=False, indent=2), encoding="utf-8")
 print(json.dumps(report, ensure_ascii=False, indent=2))
