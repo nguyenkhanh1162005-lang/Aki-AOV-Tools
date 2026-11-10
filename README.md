@@ -14,8 +14,10 @@ Công cụ web và Telegram bot dùng chung bộ xử lý ZIP, kiểm kê cấu 
 ## Bộ ghép AOV được hỗ trợ
 
 Bản hiện tại khóa theo đúng cặp tài nguyên đã kiểm tra:
-- ZIP nền iOS 1.64.1.12: bộ 10 skin + nút bấm/thông báo.
-- ZIP Vấn Tâm Kiếm Actor 595, dữ liệu 1.64.1.11: có thể là một ZIP hoặc nhiều phần ZIP.
+- Gói MOD 10 skin iOS 1.64.1.12: bộ 10 skin + nút bấm/thông báo. Đây là gói mod do người dùng cung cấp, không phải gói game gốc.
+- Gói MOD Vấn Tâm Kiếm Actor 595, dữ liệu 1.64.1.11: có thể là một ZIP hoặc nhiều phần ZIP.
+
+**Quy tắc nguồn:** chỉ ghép gói mod với gói mod. Engine không tải, không yêu cầu và không chèn tài nguyên từ bộ cài Liên Quân gốc. Từ "nền" trong mô tả kỹ thuật cũ chỉ gói mod 10 skin được dùng làm pack đích, không có nghĩa là game gốc.
 
 Engine thực hiện:
 - Ghép IFix của `Thanos/HeroSkin_2.bytes` vào `HeroSkin_1.bytes`, remap chỉ số type/method/field/string và kiểm tra lại patch.
@@ -48,7 +50,7 @@ python bot.py
 - Hai URL phải trỏ tới Local Bot API Server có thể truy cập từ bot. Không dùng URL ví dụ nếu chưa triển khai server.
 - Local Bot API Server cần `TELEGRAM_API_ID` và `TELEGRAM_API_HASH` lấy từ https://my.telegram.org. Không đưa các giá trị này lên GitHub.
 - Trước khi chuyển bot từ Bot API chính thức sang Local Bot API Server, gọi `logOut` trên Bot API chính thức, dừng worker cũ, rồi mới đổi URL và khởi động worker mới.
-- Khi bật Local Bot API: tối đa 500 MB mỗi ZIP, tổng đầu vào 500 MB, tối đa 10 ZIP; ZIP đầu ra tối đa 1 GB. Máy chủ vẫn cần đủ RAM và dung lượng ổ đĩa tạm.
+- Khi bật Local Bot API theo cấu hình hiện tại: tối đa 500 MB mỗi ZIP, tổng đầu vào 500 MB, tối đa 10 ZIP và giới hạn gửi ZIP kết quả 500 MB. Máy chủ vẫn cần đủ RAM và dung lượng ổ đĩa tạm.
 
 ## Triển khai web + Telegram với Local Bot API
 
@@ -63,7 +65,7 @@ docker compose -f docker-compose.local-bot-api.yml up -d --build
 Đọc [hướng dẫn triển khai Local Bot API](docs/telegram-local-api.md) trước khi chuyển bot từ máy chủ Telegram mặc định. Phải dừng worker cũ và gọi `logOut` đúng quy trình; không chạy hai polling worker cùng một bot. Không đưa file `.env` lên GitHub.
 
 ## Nhập ZIP từ Google Drive
-- Dán link ZIP nền và link Vấn Tâm Kiếm, mỗi link một dòng. Nếu VTK được chia thành nhiều phần, dán tất cả các link phần đó.
+- Dán link gói MOD 10 skin và link các phần gói MOD Vấn Tâm Kiếm, mỗi link một dòng. Không cần link bộ cài game gốc.
 - File phải bật quyền “Bất kỳ ai có đường liên kết”.
 - Chỉ nhận link `drive.google.com` hoặc `docs.google.com`; máy chủ tự tải file, giới hạn 500 MB mỗi ZIP và tổng 500 MB.
 - Sau khi tải và kiểm tra, dùng nút ghép AOV chuyên sâu trước khi phiên upload hết hạn (1 giờ).
