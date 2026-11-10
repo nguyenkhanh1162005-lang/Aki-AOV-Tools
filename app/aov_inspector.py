@@ -77,15 +77,17 @@ def inspect_archives(paths: list[str]) -> str:
                 if total_uncompressed > MAX_TOTAL_UNCOMPRESSED:
                     raise InspectError("Tổng dung lượng giải nén vượt quá 1 GB.")
                 name = _safe_name(info.filename)
-                try:
-                    with archive.open(info, "r") as resource_stream:
-                        header = resource_stream.read(32)
-                except (RuntimeError, zipfile.BadZipFile, OSError) as exc:
-                    raise InspectError(f"Không đọc được header tài nguyên: {name}") from exc
-                format_name, _ = detect_resource_format(name, header)
-                detected_formats.append((format_name, f"{Path(path).name} :: {name}"))
                 if info.flag_bits & 1:
+                    format_name = "Encrypted ZIP entry"
                     important.append(f"ZIP mã hóa: {name}")
+                else:
+                    try:
+                        with archive.open(info, "r") as resource_stream:
+                            header = resource_stream.read(32)
+                    except (RuntimeError, zipfile.BadZipFile, OSError) as exc:
+                        raise InspectError(f"Không đọc được header tài nguyên: {name}") from exc
+                    format_name, _ = detect_resource_format(name, header)
+                detected_formats.append((format_name, f"{Path(path).name} :: {name}"))
                 ext = Path(name).suffix.lower() or "[không đuôi]"
                 extensions[ext] += 1
                 files[name] = (info.file_size, info.CRC)
