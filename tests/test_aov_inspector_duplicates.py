@@ -14,6 +14,32 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
                 archive.writestr(entry, payload)
         return str(path)
 
+    def test_inspects_small_wwise_bnk_inside_zip(self):
+        import struct
+
+        def chunk(name, payload):
+            return name.encode("ascii") + struct.pack("<I", len(payload)) + payload
+
+        bank = chunk("BKHD", struct.pack("<II", 134, 4321))
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            path = self._zip(folder, "audio.zip", {"Sound/Hero.bnk": bank})
+            report = inspect_archives([path])
+            self.assertIn("KIỂM TRA CẤU TRÚC WWISE BNK", report)
+            self.assertIn("Version 134 | Bank ID 4321", report)
+            self.assertIn("Media: 0 | HIRC objects: 0", report)
+
+    def test_reports_malformed_wwise_bnk_without_aborting_inventory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            path = self._zip(
+                folder,
+                "bad-audio.zip",
+                {"Sound/Hero.bnk": b"BKHD" + b"\\x63\\x00\\x00\\x00"},
+            )
+            report = inspect_archives([path])
+            self.assertIn("BNK không hợp lệ hoặc chưa hỗ trợ", report)
+
     def test_reports_identical_duplicate_by_sha256(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
