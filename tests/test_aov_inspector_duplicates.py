@@ -29,6 +29,10 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
                 "object_count": 9,
                 "container_entry_count": 3,
                 "external_reference_count": 1,
+                "object_reference_count": 2,
+                "reference_scan_complete": True,
+                "reference_scan_errors": [],
+                "object_references": [],
                 "object_type_counts": {"Texture2D": 5, "Mesh": 4},
                 "external_paths": ["archive:/CAB-other.resS"],
             }
