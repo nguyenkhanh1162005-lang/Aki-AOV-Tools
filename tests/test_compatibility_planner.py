@@ -14,6 +14,13 @@ class CompatibilityPlannerTests(unittest.TestCase):
         self.assertTrue(result["advisory_only"])
         self.assertFalse(result["merge_authorized"])
 
+    def test_runtime_like_generic_file_is_not_called_safe(self):
+        result = plan_resource_compatibility([
+            resource("skins/hero.png", "b", detected_format="PNG image")
+        ])
+        self.assertEqual(result["resources"][0]["status"], "NEEDS_RULE")
+        self.assertIn("runtime", result["resources"][0]["reasons"][0])
+
     def test_identical_duplicate_is_classified(self):
         result = plan_resource_compatibility([
             resource("same.txt", "b", source="one.zip"),
