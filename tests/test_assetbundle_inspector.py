@@ -6,6 +6,7 @@ from app.assetbundle_inspector import (
     AssetBundleInspectError,
     build_path_id_remap_plan,
     build_external_file_id_remap_plan,
+    build_pptr_remap_plan,
     compare_assetbundle_overlays,
     inspect_assetbundle,
     verify_assetbundle_roundtrip,
@@ -59,6 +60,46 @@ class AssetBundleInspectorTests(unittest.TestCase):
         plan = build_external_file_id_remap_plan(["archive:/CAB-base"], [""])
         self.assertFalse(plan["ready"])
         self.assertEqual(plan["merged_externals"], [])
+
+    def test_pptr_remap_plan_resolves_local_and_external_targets(self):
+        plan = build_pptr_remap_plan(
+            [{"file_id": 0, "path_id": 10}, {"file_id": 2, "path_id": 20}],
+            {"1": 1, "2": 3},
+            {"10": 11},
+            {"2": {"20": 21}},
+            local_target_path_ids={11},
+            external_target_path_ids={"3": {21}},
+        )
+        self.assertTrue(plan["ready"])
+        self.assertEqual(
+            [(item["file_id"], item["path_id"]) for item in plan["rewritten_references"]],
+            [(0, 11), (3, 21)],
+        )
+
+    def test_pptr_remap_plan_blocks_missing_external_mapping_or_target(self):
+        plan = build_pptr_remap_plan(
+            [{"file_id": 4, "path_id": 99}],
+            {"1": 1},
+            {},
+            {},
+            local_target_path_ids=set(),
+            external_target_path_ids={"1": {99}},
+        )
+        self.assertFalse(plan["ready"])
+        self.assertEqual(plan["rewritten_references"], [])
+        self.assertIn("file_id", plan["blocked_references"][0]["reason"])
+
+    def test_pptr_remap_plan_blocks_missing_local_path_id(self):
+        plan = build_pptr_remap_plan(
+            [{"file_id": 0, "path_id": 123}],
+            {},
+            {},
+            {},
+            local_target_path_ids={1, 2},
+            external_target_path_ids={},
+        )
+        self.assertFalse(plan["ready"])
+        self.assertEqual(plan["rewritten_references"], [])
 
     def test_path_id_plan_blocks_type_conflicts_and_unknown_payloads(self):
         plan = build_path_id_remap_plan(
