@@ -249,6 +249,8 @@ def inspect_archives(paths: list[str]) -> str:
         except (OSError, zipfile.BadZipFile) as exc:
             raise InspectError(f"Không mở lại được ZIP: {Path(path).name}") from exc
 
+    nested_archives = list(dict.fromkeys(nested_archives))
+
     lines = [
         "BÁO CÁO KIỂM TRA CẤU TRÚC ZIP AOV",
         "Chế độ chỉ đọc: không sửa hoặc xóa tài nguyên; có đọc header AES/MSES khi nhận diện được.",
@@ -316,7 +318,7 @@ def inspect_archives(paths: list[str]) -> str:
     lines.extend(["", "DẤU HIỆU CẦN KIỂM TRA THÊM"])
     lines.append(f"- Mục có tên gợi ý thông báo/khởi động/popup: {len(suspicious_files)}")
     lines.extend(f"  • {item}" for item in suspicious_files[:80])
-    lines.append(f"- ZIP/lưu trữ lồng bên trong: {len(nested_archives)}")
+    lines.append(f"- ZIP/lưu trữ lồng đã mở: {len(nested_archives)}")
     lines.extend(f"  • {item}" for item in nested_archives[:40])
     lines.append(f"- Mục được đánh dấu mã hóa ZIP: {len(encrypted_files)}")
     lines.extend(f"  • {item}" for item in encrypted_files[:40])
