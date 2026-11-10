@@ -74,6 +74,7 @@ def inspect_archives(paths: list[str]) -> str:
     encrypted_files: list[str] = []
     method_counts: Counter[str] = Counter()
     mses_tables: list[tuple[str, str, int, int, int]] = []
+    package_entries: list[tuple[str, str]] = []
 
     for path in paths:
         try:
@@ -161,6 +162,8 @@ def inspect_archives(paths: list[str]) -> str:
             path_sources.setdefault(key, []).append(
                 (source_label, child_info.file_size, child_info.CRC)
             )
+            if package_prefix:
+                package_entries.append((source_label, child_name))
             if Path(child_name).name.lower() in {"battlebank.bytes", "lobbybank.bytes"}:
                 bank_files.append((
                     f"{source_label} :: {child_name}",
@@ -282,6 +285,13 @@ def inspect_archives(paths: list[str]) -> str:
         lines.append("- Đã giải mã/đọc header AES theo tên tài nguyên; chưa parse nội dung record hoặc checksum bảng.")
     else:
         lines.append("- Không nhận diện được header MSES trong các .bytes đã quét.")
+
+    lines.extend(["", "TỆP BÊN TRONG CÁC PKG"])
+    if package_entries:
+        lines.append(f"- Đã đọc {len(package_entries)} mục trong các PKG dạng ZIP:")
+        lines.extend(f"  • {source} :: {name}" for source, name in package_entries[:100])
+    else:
+        lines.append("- Không phát hiện tệp con trong PKG dạng ZIP.")
 
     lines.extend(["", "ĐƯỜNG DẪN TRÙNG GIỮA CÁC FILE"])
     same_metadata = []
