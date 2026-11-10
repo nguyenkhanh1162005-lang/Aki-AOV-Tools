@@ -8,6 +8,7 @@ from app.assetbundle_inspector import (
     build_external_file_id_remap_plan,
     build_pptr_remap_plan,
     build_assetbundle_metadata_remap_plan,
+    build_assetbundle_metadata_merge_plan,
     compare_assetbundle_overlays,
     inspect_assetbundle,
     verify_assetbundle_roundtrip,
@@ -62,6 +63,57 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertFalse(plan["ready"])
         self.assertEqual(plan["merged_externals"], [])
 
+
+
+    def test_assetbundle_metadata_merge_offsets_overlay_preload_ranges(self):
+        base = {
+            "inspection_complete": True, "assetbundle_name": "shared",
+            "preload_table_count": 2,
+            "preload_pointer_inventory": [{"file_id": 0, "path_id": 1}, {"file_id": 0, "path_id": 2}],
+            "container_record_inventory": [{
+                "path": "base/path", "preload_index": 0, "preload_size": 2,
+                "asset": {"file_id": 0, "path_id": 1},
+            }],
+            "main_asset": None, "dependencies": ["dep-a"],
+        }
+        overlay = {
+            "inspection_complete": True, "assetbundle_name": "shared",
+            "preload_table_count": 2,
+            "preload_pointer_inventory": [{"file_id": 0, "path_id": 3}, {"file_id": 0, "path_id": 4}],
+            "container_record_inventory": [{
+                "path": "overlay/path", "preload_index": 0, "preload_size": 2,
+                "asset": {"file_id": 0, "path_id": 3},
+            }],
+            "main_asset": None, "dependencies": ["dep-a", "dep-b"],
+        }
+        rewritten = {
+            "ready": True,
+            "rewritten": {
+                "preload": [{"file_id": 0, "path_id": 30}, {"file_id": 0, "path_id": 40}],
+                "container": [{"file_id": 0, "path_id": 30}],
+                "main_asset": None,
+            },
+        }
+        plan = build_assetbundle_metadata_merge_plan(base, overlay, rewritten)
+        self.assertTrue(plan["ready"])
+        self.assertEqual(plan["preload_offset"], 2)
+        self.assertEqual(plan["container_records"][1]["preload_index"], 2)
+        self.assertEqual(plan["container_records"][1]["preload_size"], 2)
+        self.assertEqual(plan["dependencies"], ["dep-a", "dep-b"])
+
+    def test_assetbundle_metadata_merge_rejects_container_collision(self):
+        base = {
+            "inspection_complete": True, "assetbundle_name": "shared",
+            "preload_table_count": 0, "preload_pointer_inventory": [],
+            "container_record_inventory": [{"path": "same", "preload_index": 0, "preload_size": 0,
+                                             "asset": {"file_id": 0, "path_id": 1}}],
+            "main_asset": None, "dependencies": [],
+        }
+        overlay = dict(base)
+        rewritten = {"ready": True, "rewritten": {"preload": [], "container": [], "main_asset": None}}
+        plan = build_assetbundle_metadata_merge_plan(base, overlay, rewritten)
+        self.assertFalse(plan["ready"])
+        self.assertIn("Container path collisions", plan["reason"])
 
     def test_assetbundle_metadata_plan_remaps_preload_container_and_main_asset(self):
         metadata = {
