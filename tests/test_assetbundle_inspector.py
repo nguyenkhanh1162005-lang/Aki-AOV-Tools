@@ -10,6 +10,7 @@ from app.assetbundle_inspector import (
     build_assetbundle_metadata_remap_plan,
     build_assetbundle_metadata_merge_plan,
     build_streamed_resource_merge_plan,
+    build_cross_cab_reference_merge_plan,
     compare_assetbundle_overlays,
     inspect_assetbundle,
     verify_assetbundle_roundtrip,
@@ -66,6 +67,51 @@ class AssetBundleInspectorTests(unittest.TestCase):
 
 
 
+
+
+    def test_cross_cab_plan_resolves_local_and_external_pptrs(self):
+        base = {
+            "cab-a": {
+                "inventories_complete": True, "path_ids": [1], "types": {"1": "GameObject"},
+                "payload_hashes": {"1": "base-a"}, "externals": ["cab-b"], "references": [],
+            },
+            "cab-b": {
+                "inventories_complete": True, "path_ids": [2], "types": {"2": "Texture2D"},
+                "payload_hashes": {"2": "base-b"}, "externals": [], "references": [],
+            },
+        }
+        overlay = {
+            "cab-a": {
+                "inventories_complete": True, "path_ids": [1, 3],
+                "types": {"1": "GameObject", "3": "GameObject"},
+                "payload_hashes": {"1": "overlay-a", "3": "overlay-a3"},
+                "externals": ["cab-b"],
+                "references": [{"file_id": 0, "path_id": 1}, {"file_id": 1, "path_id": 2}],
+            },
+            "cab-b": {
+                "inventories_complete": True, "path_ids": [2], "types": {"2": "Texture2D"},
+                "payload_hashes": {"2": "overlay-b"}, "externals": [],
+                "references": [{"file_id": 0, "path_id": 2}],
+            },
+        }
+        plan = build_cross_cab_reference_merge_plan(base, overlay)
+        self.assertTrue(plan["ready"])
+        refs = plan["cabs"]["cab-a"]["pptr_plan"]["rewritten_references"]
+        self.assertEqual(refs[0]["file_id"], 0)
+        self.assertEqual(refs[1]["file_id"], 1)
+        self.assertEqual(refs[1]["path_id"], 3)
+
+    def test_cross_cab_plan_blocks_unknown_external_target(self):
+        overlay = {
+            "cab-a": {
+                "inventories_complete": True, "path_ids": [1], "types": {"1": "GameObject"},
+                "payload_hashes": {"1": "a"}, "externals": ["missing-cab"],
+                "references": [{"file_id": 1, "path_id": 99}],
+            },
+        }
+        plan = build_cross_cab_reference_merge_plan({}, overlay)
+        self.assertFalse(plan["ready"])
+        self.assertIn("PPtr plan blocked", plan["reason"])
 
     def test_streamed_resource_plan_offsets_overlay_ranges_for_shared_sidecar(self):
         plan = build_streamed_resource_merge_plan(
