@@ -335,6 +335,14 @@ def inspect_archives(paths: list[str]) -> str:
                         f"  • Payload Object: {payload_identical} giống nhau | "
                         f"{payload_changed} đã thay đổi | {payload_unknown} chưa đối chiếu được"
                     )
+                    for overlap in object_overlaps[:5]:
+                        plan = overlap["path_id_merge_plan"]
+                        lines.append(
+                            f"  • Kế hoạch PathID {overlap['cab']}: "
+                            f"{'có thể lập kế hoạch' if plan['ready'] else 'bị chặn'} | "
+                            f"gộp trùng={plan.get('deduplicated_object_count', 0)} | "
+                            f"cấp ID mới={plan.get('new_object_count', 0)}"
+                        )
                 if result["ambiguous_object_id_cabs"]:
                     lines.append(
                         "  • CAB trùng tên, không thể đối chiếu PathID chắc chắn: "
