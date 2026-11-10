@@ -161,6 +161,8 @@ def merge_common_actions(
                 base_payloads[name] = merged_payload
                 changed.append(name)
                 total_tracks += added
+            else:
+                skipped.append(name)
 
         output_buffer = io.BytesIO()
         with zipfile.ZipFile(output_buffer, "w", allowZip64=True) as output:
