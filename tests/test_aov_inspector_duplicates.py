@@ -76,6 +76,7 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
                 "unmatched_base_assetbundle_names": [],
                 "unmatched_overlay_assetbundle_names": [],
                 "assetbundle_metadata_integrity_pass": True,
+                "cross_bundle_reference_integrity_pass": True,
                 "cross_bundle_references": {
                     "resolved_count": 0,
                     "missing_path_id_count": 0,
