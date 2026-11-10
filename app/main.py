@@ -17,6 +17,7 @@ from .mod_pipeline import merge_mod_archives, ModPipelineError
 from .aov_inspector import inspect_archives, InspectError
 from .drive_import import download_drive_zip, DriveImportError
 from .aov_merger import merge_aov_archives, AOVMergeError
+from .assetbundle_inspector import verify_assetbundle_roundtrip, AssetBundleInspectError, MAX_ASSETBUNDLE_BYTES
 
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -225,6 +226,26 @@ async def import_drive_links(payload: dict = Body(...)):
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "Aki AOV Tools"}
+
+
+@app.post("/api/assetbundle/roundtrip-check")
+async def roundtrip_check_assetbundle(file: UploadFile = File(...)):
+    """Check whether a UnityFS bundle survives an unchanged save/reopen cycle."""
+    data = bytearray()
+    try:
+        while True:
+            chunk = await file.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            if len(data) + len(chunk) > MAX_ASSETBUNDLE_BYTES:
+                raise HTTPException(413, "AssetBundle vượt quá giới hạn kiểm tra round-trip 64 MiB.")
+            data.extend(chunk)
+        try:
+            return await run_in_threadpool(verify_assetbundle_roundtrip, bytes(data))
+        except AssetBundleInspectError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    finally:
+        await file.close()
 
 
 @app.post("/api/merge")
