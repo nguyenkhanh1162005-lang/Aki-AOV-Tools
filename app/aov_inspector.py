@@ -4,6 +4,8 @@ import zipfile
 from collections import Counter
 from pathlib import Path, PurePosixPath
 
+from .aov_crypto import AoVResourceError, peek_mses_header
+
 
 MAX_FILES = 10
 MAX_ENTRIES = 20000
@@ -69,6 +71,7 @@ def inspect_archives(paths: list[str]) -> str:
     suspicious_files: list[str] = []
     encrypted_files: list[str] = []
     method_counts: Counter[str] = Counter()
+    mses_tables: list[tuple[str, str, int, int, int]] = []
 
     for path in paths:
         try:
@@ -112,12 +115,20 @@ def inspect_archives(paths: list[str]) -> str:
                     suspicious_files.append(f"{source_label} :: {name}")
                 if Path(name).name.lower() in {"battlebank.bytes", "lobbybank.bytes"}:
                     bank_files.append((source_label + " :: " + name, info.file_size, info.CRC))
+                if ext == ".bytes" and info.file_size >= 16:
+                    try:
+                        prefix = archive.open(info, "r").read(24)
+                        header = peek_mses_header(name, prefix)
+                        if header:
+                            mses_tables.append((source_label, name, header.version, header.field_count, header.row_count))
+                    except (OSError, RuntimeError, AoVResourceError):
+                        pass
 
         inventories.append((Path(path).name, files, extensions, important, local_duplicates))
 
     lines = [
         "BÁO CÁO KIỂM TRA CẤU TRÚC ZIP AOV",
-        "Chế độ chỉ đọc: không sửa, không giải mã và không tự ý xóa tài nguyên.",
+        "Chế độ chỉ đọc: không sửa hoặc xóa tài nguyên; có đọc header AES/MSES khi nhận diện được.",
         f"Tổng ZIP: {len(paths)} | Tổng tệp: {total_entries:,} | Dung lượng giải nén khai báo: {total_uncompressed:,} byte",
         "",
     ]
@@ -143,6 +154,14 @@ def inspect_archives(paths: list[str]) -> str:
         lines.append("- Chỉ nhận diện tên và metadata; chưa phân tích cấu trúc nhị phân bên trong.")
     else:
         lines.append("- Không tìm thấy BattleBank.bytes hoặc LobbyBank.bytes trong các ZIP đã chọn.")
+
+    lines.extend(["", "KIỂM TRA HEADER BẢNG MSES"])
+    if mses_tables:
+        for source, name, version, fields, rows in mses_tables:
+            lines.append(f"- {source} :: {name}: MSES v{version} | {fields} fields | {rows} records")
+        lines.append("- Đã giải mã/đọc header AES theo tên tài nguyên; chưa parse nội dung record hoặc checksum bảng.")
+    else:
+        lines.append("- Không nhận diện được header MSES trong các .bytes đã quét.")
 
     lines.extend(["", "ĐƯỜNG DẪN TRÙNG GIỮA CÁC FILE"])
     same_metadata = []
@@ -179,7 +198,8 @@ def inspect_archives(paths: list[str]) -> str:
         "- Báo cáo giúp tìm đường dẫn trùng và dấu hiệu tài nguyên; không chứng minh các gói mod tương thích.",
         "- Cùng kích thước + CRC32 chỉ là đối chiếu nhanh, không thay thế so sánh SHA-256 từng nội dung.",
         "- Tên có chữ notify/startup/popup chỉ là manh mối, không đủ căn cứ để xóa file.",
-        "- Giải nén được một lớp nén không đồng nghĩa giải mã hoặc hợp nhất được asset độc quyền.",
+        "- Header MSES hợp lệ không đồng nghĩa đã parse hoặc hợp nhất được record bên trong.",
+        "- Giải nén được một lớp nén không đồng nghĩa hợp nhất được asset độc quyền.",
         "- Chỉ nên tạo bản mod sau khi xác định đúng cấu trúc, phiên bản game và quan hệ phụ thuộc của tài nguyên.",
     ])
     return "\n".join(lines)
