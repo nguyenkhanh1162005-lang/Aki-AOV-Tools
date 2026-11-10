@@ -667,6 +667,12 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
             else:
                 cross_bundle_references["missing_path_ids"].append(item)
 
+    cross_bundle_reference_integrity_pass = (
+        not cross_bundle_references["missing_path_ids"]
+        and not cross_bundle_references["ambiguous_cab_names"]
+        and not cross_bundle_references["index_incomplete"]
+    )
+
     return {
         "unity_versions_match": version_match,
         "base_unity_versions": sorted(base_versions),
@@ -691,6 +697,7 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
         "unmatched_base_assetbundle_names": unmatched_base_assetbundle_names,
         "unmatched_overlay_assetbundle_names": unmatched_overlay_assetbundle_names,
         "assetbundle_metadata_integrity_pass": assetbundle_metadata_integrity_pass,
+        "cross_bundle_reference_integrity_pass": cross_bundle_reference_integrity_pass,
         "cross_bundle_references": {
             "resolved_count": len(cross_bundle_references["resolved"]),
             "missing_path_id_count": len(cross_bundle_references["missing_path_ids"]),
@@ -706,6 +713,7 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
             version_match and platform_match and inventory_complete and not type_conflicts
             and object_id_types_match
             and assetbundle_metadata_integrity_pass
+            and cross_bundle_reference_integrity_pass
         ),
         # Unity object references, preload tables, CAB remapping and bundle metadata
         # still need a version-specific adapter before any actual merge is safe.
