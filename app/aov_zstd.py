@@ -39,7 +39,7 @@ def decode_aov_bytes(data: bytes, *, verify_size: bool = True) -> bytes:
     try:
         decoded = pyzstd.decompress(
             data[frame_offset:],
-            pyzstd.ZstdDict(ZSTD_DICT, True),
+            pyzstd.ZstdDict(ZSTD_DICT),
         )
     except Exception as exc:
         raise AoVZstdError(f"Giải nén Zstandard thất bại: {exc}") from exc
@@ -61,7 +61,7 @@ def encode_aov_bytes(data: bytes, *, level: int = 17) -> bytes:
         compressed = pyzstd.compress(
             raw,
             level,
-            pyzstd.ZstdDict(ZSTD_DICT, True),
+            pyzstd.ZstdDict(ZSTD_DICT),
         )
     except Exception as exc:
         raise AoVZstdError(f"Nén Zstandard thất bại: {exc}") from exc
