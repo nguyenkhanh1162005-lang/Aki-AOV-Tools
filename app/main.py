@@ -20,6 +20,7 @@ from .aov_merger import merge_aov_archives, AOVMergeError
 from .assetbundle_inspector import verify_assetbundle_roundtrip, AssetBundleInspectError, MAX_ASSETBUNDLE_BYTES
 from .adapter_registry import get_adapter_capabilities
 from .compatibility_planner import CompatibilityPlanError, plan_resource_compatibility
+from .resource_manifest import ResourceManifestError, build_resource_manifest
 
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -399,6 +400,49 @@ async def inspect(files: list[UploadFile] = File(...)):
         from fastapi.responses import PlainTextResponse
         return PlainTextResponse(report)
     finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+@app.post("/api/compatibility/inspect")
+async def inspect_compatibility(files: list[UploadFile] = File(...)):
+    """Inspect uploaded ZIPs and return a read-only manifest plus advisory conflict plan."""
+    if not files or len(files) > MAX_FILES:
+        raise HTTPException(400, f"Chọn từ 1 đến {MAX_FILES} file ZIP.")
+    workdir = Path(tempfile.mkdtemp(prefix="aki-aov-compatibility-"))
+    input_paths: list[str] = []
+    total_bytes = 0
+    try:
+        for index, upload in enumerate(files, start=1):
+            filename = upload.filename or ""
+            if not filename.lower().endswith(".zip"):
+                raise HTTPException(400, "Chỉ chấp nhận file .zip.")
+            destination = workdir / f"{index}_{Path(filename).name}"
+            with destination.open("wb") as target:
+                while True:
+                    chunk = await upload.read(CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_INPUT_BYTES:
+                        raise HTTPException(413, "Tổng dung lượng ZIP vượt quá 500 MB.")
+                    target.write(chunk)
+            await upload.close()
+            input_paths.append(str(destination))
+        try:
+            manifest = await run_in_threadpool(build_resource_manifest, input_paths)
+            plan = await run_in_threadpool(
+                plan_resource_compatibility, manifest["resources"]
+            )
+        except (ResourceManifestError, CompatibilityPlanError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {
+            "manifest": manifest,
+            "compatibility_plan": plan,
+            "warning": "Báo cáo chỉ đọc và tư vấn; không giải mã, sửa payload hoặc cấp quyền ghép tài nguyên AoV.",
+        }
+    finally:
+        for upload in files:
+            await upload.close()
         shutil.rmtree(workdir, ignore_errors=True)
 
 
