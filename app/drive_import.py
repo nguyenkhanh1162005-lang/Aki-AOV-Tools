@@ -94,7 +94,7 @@ def _filename_from_headers(headers, fallback: str) -> str:
     message["content-disposition"] = value
     name = message.get_filename()
     if name:
-        name = Path(name.replace("\\\\", "/")).name
+        name = Path(name.replace("\\", "/")).name
         if name.lower().endswith(".zip"):
             return name
     return fallback
