@@ -45,5 +45,56 @@ class ArchiveInspectorTests(unittest.TestCase):
                 inspect_archives([path])
 
 
+    def test_scans_nested_resources_zip_and_reads_encrypted_mses_header(self):
+        import io
+        from app.aov_crypto import encrypt_aov_resource
+
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            resource_path = "Databin/Client/Sound/BattleBank.bytes"
+            mses = (
+                b"MSES" + (7).to_bytes(4, "little")
+                + (59).to_bytes(4, "little") + (1932).to_bytes(4, "little")
+                + b"table-data"
+            )
+            encrypted = encrypt_aov_resource(resource_path, mses)
+            nested_buffer = io.BytesIO()
+            with zipfile.ZipFile(nested_buffer, "w", zipfile.ZIP_DEFLATED) as resources:
+                resources.writestr("Resources/1.64.1/" + resource_path, encrypted)
+            outer = self.make_zip(
+                folder, "outer.zip",
+                {"mod/Resources.zip": nested_buffer.getvalue()},
+            )
+            loose = self.make_zip(folder, "loose.zip", {resource_path: encrypted + b"x"})
+            report = inspect_archives([outer, loose])
+
+            self.assertIn("MSES v7 | 59 fields | 1932 records", report)
+            self.assertIn("Databin/Client/Sound/BattleBank.bytes", report)
+            self.assertIn("Trùng đường dẫn nhưng khác kích thước hoặc CRC32: 1", report)
+            self.assertIn("Resources.zip", report)
+
+    def test_scans_zip_based_pkg_inside_resources_archive(self):
+        import io
+
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            pkg_buffer = io.BytesIO()
+            with zipfile.ZipFile(pkg_buffer, "w", zipfile.ZIP_DEFLATED) as pkg:
+                pkg.writestr("commonresource/Back.xml", b"compressed-xml")
+            resources_buffer = io.BytesIO()
+            with zipfile.ZipFile(resources_buffer, "w", zipfile.ZIP_DEFLATED) as resources:
+                resources.writestr(
+                    "Resources/1.64.1/Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes",
+                    pkg_buffer.getvalue(),
+                )
+            outer = self.make_zip(
+                folder, "mod.zip", {"mod/Resources.zip": resources_buffer.getvalue()}
+            )
+            report = inspect_archives([outer])
+            self.assertIn("CommonActions.pkg.bytes", report)
+            self.assertIn("commonresource/Back.xml", report)
+            self.assertIn("ZIP/lưu trữ lồng đã mở", report)
+
+
 if __name__ == "__main__":
     unittest.main()
