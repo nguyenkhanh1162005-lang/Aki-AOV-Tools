@@ -75,6 +75,15 @@ class MSESTests(unittest.TestCase):
         with self.assertRaises(MSESError):
             parse_mses(bytes(original))
 
+    def test_rejects_oversized_row_length_before_reading_payload(self):
+        header = bytearray(0x8C)
+        header[:4] = b"MSES"
+        struct.pack_into("<III", header, 4, 7, 1, 1)
+        oversized = 64 * 1024 * 1024 + 1
+        payload = bytes(header) + struct.pack("<I", oversized)
+        with self.assertRaisesRegex(MSESError, "Độ dài bản ghi MSES"):
+            parse_mses(payload, verify_checksum=False)
+
     def test_rejects_trailing_bytes(self):
         original = make_table(4, [struct.pack("<I", 1) + b"one"]) + b"x"
         with self.assertRaises(MSESError):
