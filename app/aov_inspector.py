@@ -109,7 +109,9 @@ def inspect_archives(paths: list[str]) -> str:
                     # Inventory only. Full decompression can expand dramatically and
                     # monopolize a small web instance; keep this endpoint responsive.
                     bank_files.append((Path(path).name + " :: " + name, info.file_size, info.CRC))
-                collisions.setdefault(name, []).append(\n                    (Path(path).name, path, info.file_size, info.CRC, info)\n                )
+                collisions.setdefault(name, []).append(
+                    (Path(path).name, path, info.file_size, info.CRC, info)
+                )
 
         inventories.append((Path(path).name, files, extensions, important))
 
