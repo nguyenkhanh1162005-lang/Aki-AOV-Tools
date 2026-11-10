@@ -12,7 +12,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from .large_merger import merge_zip_files, MergeError, MAX_FILES, MAX_INPUT_BYTES
+from .large_merger import MAX_FILES, MAX_INPUT_BYTES
+from .mod_pipeline import merge_mod_archives, ModPipelineError
 from .aov_inspector import inspect_archives, InspectError
 from .drive_import import download_drive_zip, DriveImportError
 from .aov_merger import merge_aov_archives, AOVMergeError
@@ -114,16 +115,16 @@ async def merge_chunked_upload(upload_id: str):
     session = _get_upload_session(upload_id)
     if any(item["received"] != item["size"] for item in session["files"]):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
-    output_path = Path(session["workdir"]) / "aki-merged.zip"
+    output_path = Path(session["workdir"]) / "aki-mod-merged.zip"
     try:
-        await run_in_threadpool(merge_zip_files, session["paths"], str(output_path))
-    except MergeError as exc:
+        await run_in_threadpool(merge_mod_archives, session["paths"], str(output_path))
+    except ModPipelineError as exc:
         raise HTTPException(400, str(exc)) from exc
     UPLOAD_SESSIONS.pop(upload_id, None)
     return FileResponse(
         path=output_path,
         media_type="application/zip",
-        filename="aki-merged.zip",
+        filename="aki-mod-merged.zip",
         background=BackgroundTask(shutil.rmtree, session["workdir"], ignore_errors=True),
     )
 
@@ -253,16 +254,16 @@ async def merge(files: list[UploadFile] = File(...)):
             await upload.close()
             input_paths.append(str(destination))
 
-        output_path = workdir / "aki-merged.zip"
+        output_path = workdir / "aki-mod-merged.zip"
         try:
-            await run_in_threadpool(merge_zip_files, input_paths, str(output_path))
-        except MergeError as exc:
+            await run_in_threadpool(merge_mod_archives, input_paths, str(output_path))
+        except ModPipelineError as exc:
             raise HTTPException(400, str(exc)) from exc
 
         return FileResponse(
             path=output_path,
             media_type="application/zip",
-            filename="aki-merged.zip",
+            filename="aki-mod-merged.zip",
             background=BackgroundTask(shutil.rmtree, workdir, ignore_errors=True),
         )
     except Exception:
