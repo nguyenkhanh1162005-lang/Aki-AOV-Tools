@@ -20,6 +20,7 @@ class MSESTable:
     field_count: int
     rows: tuple[bytes, ...]
     header: bytes
+    checksum_valid: bool
 
 
 def parse_mses(data: bytes, *, verify_checksum: bool = True) -> MSESTable:
@@ -31,11 +32,11 @@ def parse_mses(data: bytes, *, verify_checksum: bool = True) -> MSESTable:
         raise MSESError(f"Chỉ hỗ trợ MSES version 7, nhận được {version}.")
     if not 0 < field_count <= 10000 or not 0 <= row_count <= 2_000_000:
         raise MSESError("Số trường hoặc số bản ghi MSES không hợp lệ.")
-    if verify_checksum:
-        stored = data[CHECKSUM_START:CHECKSUM_END]
-        actual = hashlib.md5(data[HEADER_SIZE:]).hexdigest().encode("ascii")
-        if stored != actual:
-            raise MSESError("MD5 phần dữ liệu MSES không khớp header.")
+    stored = data[CHECKSUM_START:CHECKSUM_END]
+    actual = hashlib.md5(data[HEADER_SIZE:]).hexdigest().encode("ascii")
+    checksum_valid = stored == actual
+    if verify_checksum and not checksum_valid:
+        raise MSESError("MD5 phần dữ liệu MSES không khớp header.")
     rows: list[bytes] = []
     offset = HEADER_SIZE
     for index in range(row_count):
@@ -50,7 +51,7 @@ def parse_mses(data: bytes, *, verify_checksum: bool = True) -> MSESTable:
         offset = end
     if offset != len(data):
         raise MSESError(f"MSES còn {len(data) - offset} byte dư sau bản ghi cuối.")
-    return MSESTable(version, field_count, tuple(rows), data[:HEADER_SIZE])
+    return MSESTable(version, field_count, tuple(rows), data[:HEADER_SIZE], checksum_valid)
 
 
 def build_mses(table: MSESTable, rows: list[bytes] | tuple[bytes, ...], *, field_count: int | None = None) -> bytes:
@@ -76,6 +77,8 @@ def merge_mses_rows(
     *,
     override_keys: set[int] | None = None,
     allow_schema_mismatch: bool = False,
+    verify_base_checksum: bool = True,
+    verify_overlay_checksum: bool = True,
 ) -> tuple[bytes, dict]:
     """Merge rows by their leading uint32 key, retaining base rows unless explicitly overridden.
 
@@ -83,8 +86,8 @@ def merge_mses_rows(
     This lets a newer base table retain its schema while adding proven-compatible rows from
     an older/specialized overlay.
     """
-    base = parse_mses(base_data)
-    overlay = parse_mses(overlay_data)
+    base = parse_mses(base_data, verify_checksum=verify_base_checksum)
+    overlay = parse_mses(overlay_data, verify_checksum=verify_overlay_checksum)
     if base.version != overlay.version:
         raise MSESError("Không thể ghép hai phiên bản MSES khác nhau.")
     if base.field_count != overlay.field_count and not allow_schema_mismatch:
@@ -148,5 +151,7 @@ def merge_mses_rows(
         "replaced_keys": [f"0x{x:08x}" for x in replaced],
         "retained_base_conflicts": [f"0x{x:08x}" for x in retained_conflicts],
         "shared_rows_identical": len(common) - len(differing_common),
+        "base_checksum_valid": base.checksum_valid,
+        "overlay_checksum_valid": overlay.checksum_valid,
     }
     return output, report
