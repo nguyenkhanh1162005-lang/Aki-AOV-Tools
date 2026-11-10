@@ -53,7 +53,7 @@ def inspect_archives(paths: list[str]) -> str:
     total_entries = 0
     total_uncompressed = 0
     inventories: list[tuple[str, dict[str, tuple[int, int]], Counter[str], list[str]]] = []
-    collisions: dict[str, list[str]] = {}
+    collisions: dict[str, list[tuple[str, int, int, str]]] = {}
     bank_files: list[tuple[str, int, int]] = []
     detected_formats: list[tuple[str, str]] = []
 
@@ -98,7 +98,7 @@ def inspect_archives(paths: list[str]) -> str:
                     # Inventory only. Full decompression can expand dramatically and
                     # monopolize a small web instance; keep this endpoint responsive.
                     bank_files.append((Path(path).name + " :: " + name, info.file_size, info.CRC))
-                collisions.setdefault(name, []).append(Path(path).name)
+                collisions.setdefault(name, []).append((Path(path).name, info.CRC, info.file_size, format_name))
 
         inventories.append((Path(path).name, files, extensions, important))
 
@@ -135,9 +135,22 @@ def inspect_archives(paths: list[str]) -> str:
         lines.append("- Không tìm thấy BattleBank.bytes hoặc LobbyBank.bytes trong các ZIP đã chọn.")
 
     duplicate_names = [(name, sources) for name, sources in collisions.items() if len(sources) > 1]
+    identical = []
+    conflicting = []
+    for name, sources in duplicate_names:
+        fingerprints = {(size, crc) for _, crc, size, _ in sources}
+        (identical if len(fingerprints) == 1 else conflicting).append((name, sources))
     lines.append(f"Tên đường dẫn xuất hiện ở nhiều ZIP: {len(duplicate_names)}")
-    for name, sources in duplicate_names[:80]:
-        lines.append(f"- {name} [{', '.join(sources)}]")
+    lines.append(f"- Trùng nội dung theo kích thước + CRC32: {len(identical)}")
+    lines.append(f"- Xung đột nội dung cần xử lý: {len(conflicting)}")
+    for name, sources in conflicting[:100]:
+        details = "; ".join(
+            f"{filename} (size={size}, CRC32={crc:08x}, {fmt})"
+            for filename, crc, size, fmt in sources
+        )
+        lines.append(f"- XUNG ĐỘT: {name} [{details}]")
+    for name, sources in identical[:30]:
+        lines.append(f"- Trùng giống nhau: {name} [{', '.join(item[0] for item in sources)}]")
 
     lines.extend([
         "",
