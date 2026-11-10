@@ -223,6 +223,66 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertEqual(len(integrity["external_ambiguous_targets"]), 1)
         self.assertEqual(integrity["external_ambiguous_targets"][0]["path_id"], 300)
 
+    def test_compares_assetbundle_preload_and_container_metadata(self):
+        def make_env(target_path_id):
+            target = SimpleNamespace(
+                type=SimpleNamespace(name="Texture2D"),
+                path_id=target_path_id,
+                byte_size=0,
+                get_raw_data=lambda: b"",
+                read_typetree=lambda: {},
+            )
+            def ptr(path_id):
+                return SimpleNamespace(file_id=0, path_id=path_id)
+            asset_info = SimpleNamespace(
+                preload_index=0,
+                preload_size=1,
+                asset=ptr(target_path_id),
+            )
+            parsed = SimpleNamespace(
+                m_PreloadTable=[ptr(target_path_id)],
+                m_ContainerEntries=[("assets/hero", asset_info)],
+                m_Container={"assets/hero": asset_info},
+                m_MainAsset=asset_info,
+                m_AssetBundleName="hero-bundle",
+                m_Dependencies=["shared-dependency"],
+                m_IsStreamedSceneAssetBundle=False,
+            )
+            bundle_obj = SimpleNamespace(
+                type=SimpleNamespace(name="AssetBundle"),
+                path_id=50,
+                read=lambda return_typetree_on_error=False: parsed,
+                read_typetree=lambda: {},
+                byte_size=0,
+                get_raw_data=lambda: b"",
+            )
+            serialized = SimpleNamespace(
+                name="CAB-main",
+                unity_version="2022.3.0f1",
+                target_platform=SimpleNamespace(name="iOS"),
+                objects={target_path_id: target, 50: bundle_obj},
+                externals=[],
+            )
+            return SimpleNamespace(
+                assets=[serialized],
+                container={"assets/hero": target},
+                files={"bundle": object()},
+            )
+
+        envs = iter([make_env(10), make_env(11)])
+        fake_unity = SimpleNamespace(load=lambda data: next(envs))
+        with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
+            report = compare_assetbundle_overlays(
+                b"UnityFS\\x00base",
+                b"UnityFS\\x00overlay",
+            )
+
+        self.assertEqual(len(report["assetbundle_metadata_comparisons"]), 1)
+        metadata = report["assetbundle_metadata_comparisons"][0]
+        self.assertFalse(metadata["preload_table_match"])
+        self.assertFalse(metadata["container_metadata_match"])
+        self.assertTrue(metadata["dependencies_match"])
+
     def test_resolves_overlay_external_ptrs_against_base_cab_path_ids(self):
         base_obj = SimpleNamespace(type=SimpleNamespace(name="Texture2D"), path_id=300)
         base_file = SimpleNamespace(
