@@ -43,7 +43,7 @@ python bot.py
 ### Nhập ZIP từ Google Drive
 - Dán mỗi link chia sẻ Google Drive trên một dòng trong giao diện web. File phải bật quyền “Bất kỳ ai có đường liên kết”.
 - Chỉ nhận link `drive.google.com` hoặc `docs.google.com`; máy chủ tự tải nội dung, giới hạn 500 MB mỗi file và tổng 500 MB.
-- Phiên tải tạm hết hạn sau 1 giờ và file sẽ bị xóa sau khi kiểm tra xong hoặc khi phiên hết hạn.
+- Phiên tải tạm hết hạn sau 1 giờ; có thể kiểm tra rồi ghép ZIP thông thường trước khi phiên hết hạn. File sẽ bị xóa sau khi tải ZIP kết quả hoặc khi phiên hết hạn.
 - Đây là nhập file để kiểm tra, không phải chức năng giải mã hoặc hợp nhất tài nguyên game.
 
 ## Giới hạn về Liên Quân
