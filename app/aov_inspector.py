@@ -302,6 +302,19 @@ def inspect_archives(paths: list[str]) -> str:
                         "  • Xung đột loại object: "
                         + ", ".join(result["container_type_conflicts"][:8])
                     )
+                object_overlaps = result["object_id_overlaps"]
+                if object_overlaps:
+                    overlap_total = sum(item["shared_path_id_count"] for item in object_overlaps)
+                    type_conflicts = sum(item["type_conflict_count"] for item in object_overlaps)
+                    lines.append(
+                        f"  • PathID trùng trong CAB tương ứng: {overlap_total} | "
+                        f"xung đột loại Object: {type_conflicts}"
+                    )
+                if result["ambiguous_object_id_cabs"]:
+                    lines.append(
+                        "  • CAB trùng tên, không thể đối chiếu PathID chắc chắn: "
+                        + ", ".join(result["ambiguous_object_id_cabs"][:8])
+                    )
                 cross_refs = result["cross_bundle_references"]
                 lines.append(
                     f"  • PPtr overlay → CAB base hợp lệ: {cross_refs['resolved_count']} | "
