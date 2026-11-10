@@ -211,6 +211,127 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
     }
 
 
+
+def build_cross_cab_reference_merge_plan(
+    base_cabs: dict[str, dict[str, Any]],
+    overlay_cabs: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a dry-run PathID/external-table/PPtr plan across serialized CABs.
+
+    CAB keys must be stable normalized identities shared by external table
+    entries. Each descriptor supplies path_ids, types, payload_hashes,
+    externals and a complete PPtr reference inventory. No bytes are changed.
+    """
+    def normalize(value: Any) -> str | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        path = value.strip().replace(chr(92), "/")
+        while "//" in path:
+            path = path.replace("//", "/")
+        if path.startswith("/") or ":" in path or any(
+            part in ("", ".", "..") for part in path.split("/")
+        ):
+            return None
+        return path
+
+    if not isinstance(base_cabs, dict) or not isinstance(overlay_cabs, dict):
+        return {"ready": False, "reason": "CAB inventories must be mappings.", "cabs": {}}
+    base = {}
+    overlay = {}
+    for source, target, label in (
+        (base_cabs, base, "base"),
+        (overlay_cabs, overlay, "overlay"),
+    ):
+        for raw_key, descriptor in source.items():
+            key = normalize(raw_key)
+            if key is None or key in target or not isinstance(descriptor, dict):
+                return {"ready": False, "reason": f"{label} CAB identity is invalid or duplicated.", "cabs": {}}
+            target[key] = descriptor
+
+    for label, inventory in (("base", base), ("overlay", overlay)):
+        for key, descriptor in inventory.items():
+            if descriptor.get("inventories_complete") is not True:
+                return {"ready": False, "reason": f"{label} CAB inventory is incomplete: {key}", "cabs": {}}
+            if not all(isinstance(descriptor.get(field), expected) for field, expected in (
+                ("path_ids", list), ("types", dict), ("payload_hashes", dict),
+                ("externals", list), ("references", list),
+            )):
+                return {"ready": False, "reason": f"{label} CAB descriptor is malformed: {key}", "cabs": {}}
+
+    path_plans = {}
+    final_path_ids = {}
+    for key, descriptor in overlay.items():
+        base_descriptor = base.get(key, {})
+        plan = build_path_id_remap_plan(
+            base_descriptor.get("path_ids", []),
+            descriptor["path_ids"],
+            base_descriptor.get("types", {}),
+            descriptor["types"],
+            base_descriptor.get("payload_hashes", {}),
+            descriptor["payload_hashes"],
+            inventories_complete=True,
+        )
+        if not plan.get("ready"):
+            return {"ready": False, "reason": f"PathID plan blocked for {key}: {plan.get('reason')}",
+                    "blocked_cab": key, "cabs": {}}
+        remap = plan["remap"]
+        merged_ids = set(base_descriptor.get("path_ids", []))
+        merged_ids.update(remap.get(str(value), value) for value in descriptor["path_ids"])
+        path_plans[key] = plan
+        final_path_ids[key] = merged_ids
+
+    cab_plans = {}
+    for key, descriptor in overlay.items():
+        base_descriptor = base.get(key, {})
+        external_plan = build_external_file_id_remap_plan(
+            base_descriptor.get("externals", []), descriptor["externals"]
+        )
+        if not external_plan.get("ready"):
+            return {"ready": False, "reason": f"External table plan blocked for {key}: {external_plan.get('reason')}",
+                    "blocked_cab": key, "cabs": {}}
+
+        external_path_id_remaps = {}
+        external_target_path_ids = {}
+        for old_file_id, external_path in enumerate(descriptor["externals"], start=1):
+            target_key = normalize(external_path)
+            final_file_id = external_plan["file_id_remap"].get(str(old_file_id))
+            if target_key is None or final_file_id is None:
+                continue
+            if target_key not in final_path_ids:
+                continue
+            target_plan = path_plans[target_key]
+            external_path_id_remaps[str(old_file_id)] = target_plan["remap"]
+            external_target_path_ids[str(final_file_id)] = final_path_ids[target_key]
+
+        local_ids = final_path_ids[key]
+        pptr_plan = build_pptr_remap_plan(
+            descriptor["references"],
+            external_plan["file_id_remap"],
+            path_plans[key]["remap"],
+            external_path_id_remaps,
+            local_target_path_ids=local_ids,
+            external_target_path_ids=external_target_path_ids,
+        )
+        if not pptr_plan.get("ready"):
+            return {"ready": False, "reason": f"PPtr plan blocked for {key}: {pptr_plan.get('reason')}",
+                    "blocked_cab": key, "blocked_references": pptr_plan.get("blocked_references", []),
+                    "cabs": {}}
+        cab_plans[key] = {
+            "path_id_plan": path_plans[key],
+            "external_table_plan": external_plan,
+            "pptr_plan": pptr_plan,
+        }
+
+    return {
+        "ready": True,
+        "cabs": cab_plans,
+        "matched_base_cabs": sorted(set(base) & set(overlay)),
+        "overlay_only_cabs": sorted(set(overlay) - set(base)),
+        "scope": "cross-CAB reference preflight only; object bytes, metadata tables, sidecars and bundle serialization are not changed",
+    }
+
+
+
 def build_assetbundle_metadata_remap_plan(
     metadata: dict[str, Any],
     file_id_remap: dict[str, int],
