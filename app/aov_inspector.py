@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import zipfile
+import zlib
 from collections import Counter
 from pathlib import Path, PurePosixPath
 
@@ -94,7 +95,7 @@ def inspect_archives(paths: list[str]) -> str:
                     try:
                         with archive.open(info, "r") as resource_stream:
                             header = resource_stream.read(32)
-                    except (RuntimeError, zipfile.BadZipFile, OSError) as exc:
+                    except (RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
                         raise InspectError(f"Không đọc được header tài nguyên: {name}") from exc
                     format_name, _ = detect_resource_format(name, header)
                 detected_formats.append((format_name, f"{Path(path).name} :: {name}"))
@@ -156,7 +157,7 @@ def inspect_archives(paths: list[str]) -> str:
                 _entry_sha256(source_path, info)
                 for _, source_path, _, _, info in sources
             ]
-        except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+        except (OSError, RuntimeError, zipfile.BadZipFile, zlib.error) as exc:
             raise InspectError(
                 f"Không thể so sánh nội dung file trùng: {name}"
             ) from exc
