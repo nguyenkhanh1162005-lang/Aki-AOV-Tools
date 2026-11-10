@@ -431,7 +431,10 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
         for path in archive_paths:
             try:
                 zf = zipfile.ZipFile(path)
-                zf.testzip()
+                bad = zf.testzip()
+                if bad:
+                    zf.close()
+                    raise AOVMergeError(f"ZIP đầu vào lỗi CRC tại {bad}: {Path(path).name}")
             except Exception as exc:
                 raise AOVMergeError(f"File đầu vào không phải ZIP hợp lệ: {Path(path).name}") from exc
             opened.append(zf)
@@ -441,7 +444,7 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
         for path, zf in archives:
             names = zf.namelist()
             if any(name.endswith("/Resources.zip") or name == "Resources.zip" for name in names) and any(
-                name.endswith("/danhsachskin.txt") for name in names
+                (name.endswith("/danhsachskin.txt") or name == "danhsachskin.txt") for name in names
             ):
                 base_candidates.append((path, zf))
         if len(base_candidates) != 1:
@@ -455,7 +458,7 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
             info for info in base_outer.infolist()
             if info.filename.endswith("/Resources.zip") or info.filename == "Resources.zip"
         ]
-        skin_entries = [info for info in base_outer.infolist() if info.filename.endswith("/danhsachskin.txt")]
+        skin_entries = [info for info in base_outer.infolist() if info.filename.endswith("/danhsachskin.txt") or info.filename == "danhsachskin.txt"]
         if len(resources_entries) != 1 or len(skin_entries) != 1:
             raise AOVMergeError("ZIP nền có cấu trúc Resources.zip không rõ ràng.")
         resources_info = resources_entries[0]
