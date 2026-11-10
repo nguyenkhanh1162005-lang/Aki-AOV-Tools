@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .large_merger import merge_zip_files, MergeError, MAX_FILES, MAX_INPUT_BYTES
 from .aov_inspector import inspect_archives, InspectError
+from .drive_import import download_drive_zip, DriveImportError
 
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -102,6 +103,48 @@ async def inspect_chunked_upload(upload_id: str):
     finally:
         shutil.rmtree(session["workdir"], ignore_errors=True)
         UPLOAD_SESSIONS.pop(upload_id, None)
+
+
+@app.post("/api/drive/import")
+async def import_drive_links(payload: dict = Body(...)):
+    links = payload.get("links")
+    if not isinstance(links, list) or not links or len(links) > MAX_FILES:
+        raise HTTPException(400, f"Dán từ 1 đến {MAX_FILES} link Google Drive.")
+    if not all(isinstance(link, str) and link.strip() for link in links):
+        raise HTTPException(400, "Có link Google Drive không hợp lệ.")
+
+    upload_id = uuid.uuid4().hex
+    workdir = Path(tempfile.mkdtemp(prefix="aki-aov-drive-"))
+    files = []
+    paths = []
+    total_bytes = 0
+    try:
+        for index, link in enumerate(links, start=1):
+            destination = workdir / f"{index}_drive-import.zip"
+            try:
+                name, size = await run_in_threadpool(download_drive_zip, link, str(destination))
+            except DriveImportError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            total_bytes += size
+            if total_bytes > MAX_INPUT_BYTES:
+                raise HTTPException(413, "Tổng dung lượng ZIP từ Drive vượt quá 500 MB.")
+            files.append({"name": name, "size": size, "received": size})
+            paths.append(str(destination))
+
+        UPLOAD_SESSIONS[upload_id] = {
+            "created": time.time(),
+            "workdir": str(workdir),
+            "files": files,
+            "paths": paths,
+        }
+        return {
+            "upload_id": upload_id,
+            "files": [{"name": item["name"], "size": item["size"]} for item in files],
+            "expires_in_seconds": UPLOAD_TTL_SECONDS,
+        }
+    except Exception:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise
 
 
 @app.get("/health")
