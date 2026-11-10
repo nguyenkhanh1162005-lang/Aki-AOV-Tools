@@ -157,6 +157,12 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
         }
 
     path_counts = Counter(container_paths)
+    metadata_integrity_pass = (
+        not invalid_preload_ranges
+        and not invalid_pointer_indices
+        and not missing_local_pointers
+        and not any(count > 1 for count in path_counts.values())
+    )
     dependencies = getattr(parsed, "m_Dependencies", []) or []
     dependency_digest = hashlib.sha256()
     for dependency in dependencies:
@@ -180,6 +186,7 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
         "preload_table_count": len(preload_table),
         "container_entry_count": len(entries),
         "duplicate_container_path_count": sum(count - 1 for count in path_counts.values() if count > 1),
+        "metadata_integrity_pass": metadata_integrity_pass,
         "preload_table_sha256": preload_digest.hexdigest(),
         "container_metadata_sha256": container_digest.hexdigest(),
         "invalid_preload_ranges": invalid_preload_ranges,
@@ -611,7 +618,22 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
             "overlay_container_count": overlay_meta["container_entry_count"],
             "base_inspection_complete": base_meta["inspection_complete"],
             "overlay_inspection_complete": overlay_meta["inspection_complete"],
+            "base_integrity_pass": base_meta["metadata_integrity_pass"],
+            "overlay_integrity_pass": overlay_meta["metadata_integrity_pass"],
         })
+
+    assetbundle_metadata_integrity_pass = all(
+        item["metadata_integrity_pass"]
+        for item in base.get("assetbundle_metadata", []) + overlay.get("assetbundle_metadata", [])
+    ) and all(
+        item["inspection_complete"]
+        for item in base.get("assetbundle_metadata", []) + overlay.get("assetbundle_metadata", [])
+    )
+
+    base_assetbundle_name_set = set(base_assetbundle_names)
+    overlay_assetbundle_name_set = set(overlay_assetbundle_names)
+    unmatched_base_assetbundle_names = sorted(base_assetbundle_name_set - overlay_assetbundle_name_set)
+    unmatched_overlay_assetbundle_names = sorted(overlay_assetbundle_name_set - base_assetbundle_name_set)
 
     cross_bundle_references = {
         "resolved": [],
@@ -664,6 +686,9 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
         "object_id_types_match": object_id_types_match,
         "assetbundle_metadata_comparisons": assetbundle_metadata_comparisons,
         "ambiguous_assetbundle_metadata_names": ambiguous_assetbundle_metadata_names,
+        "unmatched_base_assetbundle_names": unmatched_base_assetbundle_names,
+        "unmatched_overlay_assetbundle_names": unmatched_overlay_assetbundle_names,
+        "assetbundle_metadata_integrity_pass": assetbundle_metadata_integrity_pass,
         "cross_bundle_references": {
             "resolved_count": len(cross_bundle_references["resolved"]),
             "missing_path_id_count": len(cross_bundle_references["missing_path_ids"]),
@@ -678,6 +703,7 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
         "structural_checks_pass": (
             version_match and platform_match and inventory_complete and not type_conflicts
             and object_id_types_match
+            and assetbundle_metadata_integrity_pass
         ),
         # Unity object references, preload tables, CAB remapping and bundle metadata
         # still need a version-specific adapter before any actual merge is safe.
