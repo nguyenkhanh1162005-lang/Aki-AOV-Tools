@@ -141,6 +141,55 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
             "external_count": len(externals),
         })
 
+    # Resolve PPtr targets only against serialized files already loaded in this
+    # bundle. Missing external CABs are reported as dependencies, not assumed broken:
+    # they may be supplied by another bundle or a sidecar resource.
+    serialized_by_name = {
+        Path(summary["name"]).name.lower(): asset_file
+        for summary, asset_file in zip(serialized_summaries, serialized_files)
+    }
+    reference_integrity = {
+        "local_resolved": 0,
+        "local_missing": [],
+        "external_resolved": 0,
+        "external_dependencies": [],
+        "invalid_external_indices": [],
+    }
+    for reference in object_references:
+        source_file = next(
+            (item for item in serialized_files if _safe_text(getattr(item, "name", "")) == reference["from_file"]),
+            None,
+        )
+        file_id = reference["file_id"]
+        path_id = reference["path_id"]
+        if file_id == 0:
+            if source_file is not None and path_id in (getattr(source_file, "objects", {}) or {}):
+                reference_integrity["local_resolved"] += 1
+            else:
+                reference_integrity["local_missing"].append({
+                    "from_file": reference["from_file"],
+                    "from_path_id": reference["from_path_id"],
+                    "path_id": path_id,
+                })
+        elif reference["target_file"] == "invalid-external-index":
+            reference_integrity["invalid_external_indices"].append({
+                "from_file": reference["from_file"],
+                "from_path_id": reference["from_path_id"],
+                "file_id": file_id,
+                "path_id": path_id,
+            })
+        else:
+            target = serialized_by_name.get(Path(reference["target_file"]).name.lower())
+            if target is not None and path_id in (getattr(target, "objects", {}) or {}):
+                reference_integrity["external_resolved"] += 1
+            else:
+                reference_integrity["external_dependencies"].append({
+                    "from_file": reference["from_file"],
+                    "from_path_id": reference["from_path_id"],
+                    "target_file": reference["target_file"],
+                    "path_id": path_id,
+                })
+
     container_items: list[dict[str, str]] = []
     for path, obj in list(container.items())[:MAX_REPORTED_CONTAINERS]:
         object_type = getattr(getattr(obj, "type", None), "name", "Unknown")
