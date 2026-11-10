@@ -16,6 +16,7 @@ from telegram import FSInputFile
 
 from app.large_merger import merge_zip_files, MergeError
 from app.aov_inspector import inspect_archives, InspectError
+from app.aov_merger import merge_aov_archives, AOVMergeError
 
 MIB = 1024 * 1024
 LOCAL_API = bool(
@@ -50,7 +51,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Aki-AOV Bot đã sẵn sàng.\n"
         f"Chế độ nhận file: {mode}.\n\n"
-        "Gửi lần lượt các file ZIP, sau đó dùng /merge để ghép.\n"
+        "Gửi ZIP nền 10 skin và ZIP Vấn Tâm Kiếm (có thể gồm nhiều phần), sau đó dùng /aovmerge để ghép mod.\n"
+        "/merge ghép ZIP thông thường\n"
         "/status xem giới hạn hiện tại\n"
         "/inspect kiểm tra cấu trúc ZIP đã gửi\n"
         "/clear xóa danh sách file"
@@ -150,6 +152,53 @@ async def inspect(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def aovmerge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    files = context.user_data.get("zips", [])
+    if len(files) < 2:
+        await update.effective_message.reply_text(
+            "Cần ZIP nền 10 skin và ít nhất một ZIP Vấn Tâm Kiếm trước khi dùng /aovmerge."
+        )
+        return
+
+    folder = _workdir(context)
+    output_path = folder / "Aki-AOV-10Skin-VanTamKiem.zip"
+    status_message = await update.effective_message.reply_text(
+        "Đang ghép tài nguyên AOV theo phiên bản. Quá trình này có thể mất vài phút..."
+    )
+    try:
+        report = await asyncio.to_thread(
+            merge_aov_archives,
+            [path for _, path in files],
+            str(output_path),
+        )
+        await status_message.edit_text(
+            "Đã ghép và kiểm tra cấu trúc nội bộ:\n"
+            f"Base {report['base_version']} + VTK {report['vtk_version']}\n"
+            f"IFix: {report['ifix_fixes']} FixInfo / {report['ifix_methods']} method\n"
+            f"CommonActions: {report['common_actions_files']} file XML, "
+            f"{report['common_actions_tracks']} track\n"
+            f"AssetBundle: {report['assetbundles']}\n"
+            "Chưa được xác nhận chạy trong Liên Quân iOS. Đang gửi ZIP..."
+        )
+        await update.effective_message.reply_document(
+            document=FSInputFile(str(output_path), filename="Aki-AOV-10Skin-VanTamKiem.zip"),
+            read_timeout=1800,
+            write_timeout=1800,
+            connect_timeout=60,
+            pool_timeout=60,
+        )
+        _cleanup(context)
+    except AOVMergeError as exc:
+        await status_message.edit_text(
+            f"Không ghép được AOV: {exc}\nCác file nguồn vẫn được giữ lại."
+        )
+    except Exception as exc:
+        await status_message.edit_text(
+            f"Ghép hoặc gửi thất bại: {type(exc).__name__}. "
+            "Các file nguồn vẫn được giữ lại; có thể dùng /aovmerge để thử lại."
+        )
+
+
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _cleanup(context)
     await update.effective_message.reply_text("Đã xóa danh sách file.")
@@ -208,6 +257,7 @@ def main():
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("merge", merge))
+    app.add_handler(CommandHandler("aovmerge", aovmerge))
     app.add_handler(CommandHandler("inspect", inspect))
     app.add_handler(MessageHandler(filters.Document.ALL, receive))
     app.run_polling()

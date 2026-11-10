@@ -6,7 +6,7 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Body, Header
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Body, Header, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
@@ -14,6 +14,8 @@ from starlette.concurrency import run_in_threadpool
 
 from .large_merger import merge_zip_files, MergeError, MAX_FILES, MAX_INPUT_BYTES
 from .aov_inspector import inspect_archives, InspectError
+from .drive_import import download_drive_zip, DriveImportError
+from .aov_merger import merge_aov_archives, AOVMergeError
 
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -89,19 +91,134 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
 
 
 @app.post("/api/upload/{upload_id}/inspect")
-async def inspect_chunked_upload(upload_id: str):
+async def inspect_chunked_upload(upload_id: str, keep_session: bool = Query(False)):
     session = _get_upload_session(upload_id)
     if any(item["received"] != item["size"] for item in session["files"]):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
     try:
         report = await run_in_threadpool(inspect_archives, session["paths"])
         from fastapi.responses import PlainTextResponse
+        if keep_session:
+            session["created"] = time.time()
         return PlainTextResponse(report)
     except InspectError as exc:
         raise HTTPException(400, str(exc)) from exc
     finally:
-        shutil.rmtree(session["workdir"], ignore_errors=True)
-        UPLOAD_SESSIONS.pop(upload_id, None)
+        if not keep_session:
+            shutil.rmtree(session["workdir"], ignore_errors=True)
+            UPLOAD_SESSIONS.pop(upload_id, None)
+
+
+@app.post("/api/upload/{upload_id}/merge")
+async def merge_chunked_upload(upload_id: str):
+    session = _get_upload_session(upload_id)
+    if any(item["received"] != item["size"] for item in session["files"]):
+        raise HTTPException(400, "File chưa tải lên đầy đủ.")
+    output_path = Path(session["workdir"]) / "aki-merged.zip"
+    try:
+        await run_in_threadpool(merge_zip_files, session["paths"], str(output_path))
+    except MergeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    UPLOAD_SESSIONS.pop(upload_id, None)
+    return FileResponse(
+        path=output_path,
+        media_type="application/zip",
+        filename="aki-merged.zip",
+        background=BackgroundTask(shutil.rmtree, session["workdir"], ignore_errors=True),
+    )
+
+
+@app.post("/api/upload/{upload_id}/aov-merge")
+async def merge_aov_chunked_upload(upload_id: str):
+    session = _get_upload_session(upload_id)
+    if any(item["received"] != item["size"] for item in session["files"]):
+        raise HTTPException(400, "File chưa tải lên đầy đủ.")
+    output_path = Path(session["workdir"]) / "Aki-AOV-10Skin-VanTamKiem.zip"
+    try:
+        await run_in_threadpool(merge_aov_archives, session["paths"], str(output_path))
+    except AOVMergeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    UPLOAD_SESSIONS.pop(upload_id, None)
+    return FileResponse(
+        path=output_path,
+        media_type="application/zip",
+        filename="Aki-AOV-10Skin-VanTamKiem.zip",
+        background=BackgroundTask(shutil.rmtree, session["workdir"], ignore_errors=True),
+    )
+
+
+@app.post("/api/drive/import")
+async def import_drive_links(payload: dict = Body(...)):
+    links = payload.get("links")
+    if not isinstance(links, list) or not links or not all(
+        isinstance(link, str) and link.strip() for link in links
+    ):
+        raise HTTPException(400, "Dán ít nhất một link Google Drive hợp lệ.")
+    if len(links) > MAX_FILES:
+        raise HTTPException(400, f"Tối đa {MAX_FILES} link Google Drive.")
+
+    existing_upload_id = payload.get("upload_id")
+    is_new_session = not existing_upload_id
+    if existing_upload_id:
+        upload_id = str(existing_upload_id)
+        session = _get_upload_session(upload_id)
+        if any(item["received"] != item["size"] for item in session["files"]):
+            raise HTTPException(400, "ZIP tải từ thiết bị chưa được tải lên đầy đủ.")
+        workdir = Path(session["workdir"])
+        files = session["files"]
+        paths = session["paths"]
+        original_count = len(files)
+        total_bytes = sum(item["size"] for item in files)
+        if original_count + len(links) > MAX_FILES:
+            raise HTTPException(400, f"Tổng số ZIP không được vượt quá {MAX_FILES}.")
+    else:
+        upload_id = uuid.uuid4().hex
+        workdir = Path(tempfile.mkdtemp(prefix="aki-aov-drive-"))
+        files = []
+        paths = []
+        original_count = 0
+        total_bytes = 0
+        session = None
+
+    added_paths = []
+    try:
+        for link in links:
+            index = len(files) + 1
+            destination = workdir / f"{index}_drive-import.zip"
+            try:
+                name, size = await run_in_threadpool(download_drive_zip, link, str(destination))
+            except DriveImportError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            total_bytes += size
+            if total_bytes > MAX_INPUT_BYTES:
+                destination.unlink(missing_ok=True)
+                raise HTTPException(413, "Tổng dung lượng ZIP đầu vào vượt quá 500 MB.")
+            files.append({"name": name, "size": size, "received": size})
+            paths.append(str(destination))
+            added_paths.append(destination)
+
+        if is_new_session:
+            UPLOAD_SESSIONS[upload_id] = {
+                "created": time.time(),
+                "workdir": str(workdir),
+                "files": files,
+                "paths": paths,
+            }
+        else:
+            session["created"] = time.time()
+        return {
+            "upload_id": upload_id,
+            "files": [{"name": item["name"], "size": item["size"]} for item in files],
+            "expires_in_seconds": UPLOAD_TTL_SECONDS,
+        }
+    except Exception:
+        del files[original_count:]
+        del paths[original_count:]
+        for path in added_paths:
+            Path(path).unlink(missing_ok=True)
+        if is_new_session:
+            shutil.rmtree(workdir, ignore_errors=True)
+        raise
 
 
 @app.get("/health")

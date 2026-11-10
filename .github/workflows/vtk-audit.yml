@@ -1,0 +1,42 @@
+name: One-time VTK archive audit
+
+on:
+  push:
+    branches: ["feature/google-drive-import"]
+
+jobs:
+  audit-vtk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pip install UnityPy sm4==1.0.2 tabulate numpy
+      - name: Fetch AoV-specific UnityPy parser
+        run: git clone --depth 1 https://github.com/Alanshown/AOV_UABE_2022.git /tmp/AOV_UABE_2022
+      - name: Download and inspect the shared 141 MB VTK archive
+        run: python tools/inspect_vtk_drive.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vtk-archive-audit
+          path: vtk-audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vtk-source-archive
+          path: vtk-source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vtk-assetbundle-metadata
+          path: vtk-assetbundle-metadata.json
+      - name: Prepare offline AoV parser environment
+        run: python -m pip download pyzstd pycryptodome sm4 tabulate numpy UnityPy setuptools wheel -d /tmp/aov-wheels
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aov-runtime-wheels
+          path: /tmp/aov-wheels/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aov-unitypy-source
+          path: /tmp/AOV_UABE_2022/AssetbundleUtils/UnityPy_AOV/

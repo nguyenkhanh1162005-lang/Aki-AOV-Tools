@@ -1,0 +1,51 @@
+name: Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Vendor the AoV-specific UnityPy parser
+        if: github.event_name == 'push'
+        run: |
+          if [ ! -d app/vendor/UnityPy_AOV ]; then
+            git clone --depth 1 https://github.com/Alanshown/AOV_UABE_2022.git /tmp/AOV_UABE_2022
+            mkdir -p app/vendor
+            cp -a /tmp/AOV_UABE_2022/AssetbundleUtils/UnityPy_AOV app/vendor/UnityPy_AOV
+            rm -f app/vendor/UnityPy_AOV/helpers/global-metadata.dat
+            find app/vendor/UnityPy_AOV -type d -name __pycache__ -prune -exec rm -rf {} +
+            find app/vendor/UnityPy_AOV -type f -name '*.pyc' -delete
+            cp /tmp/AOV_UABE_2022/LICENSE app/vendor/UnityPy_AOV/LICENSE.AOV
+            curl -fsSL https://raw.githubusercontent.com/K0lb3/UnityPy/master/LICENSE -o app/vendor/UnityPy_AOV/LICENSE.UnityPy
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add app/vendor/UnityPy_AOV
+            git commit -m "Vendor AoV-specific UnityPy parser"
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python -m compileall -q app bot.py
+      - name: Check web JavaScript syntax
+        run: python -c "import re,pathlib; h=pathlib.Path('web/index.html').read_text(); pathlib.Path('/tmp/aki-web.js').write_text('\\n'.join(re.findall(r'<script>(.*?)</script>',h,re.S)))" && node --check /tmp/aki-web.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ifix-parser-source
+          path: tools/ifix_parse.py
+      - name: Package app source for integration validation
+        run: zip -qr /tmp/aki-aov-app-source.zip app web bot.py requirements.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aki-aov-app-source
+          path: /tmp/aki-aov-app-source.zip

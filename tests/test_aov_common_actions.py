@@ -1,0 +1,142 @@
+import io
+import unittest
+import zipfile
+from xml.etree import ElementTree as ET
+
+from app.aov_bytes import encode_aov_resource, decode_aov_resource
+from app.aov_common_actions import merge_action_xml, merge_common_actions_pkg
+
+
+def action_xml(track_name, special=False):
+    root = ET.Element("Project")
+    ET.SubElement(root, "TemplateObjectList")
+    ET.SubElement(root, "RefParamList")
+    action = ET.SubElement(root, "Action", {"length": "1.000", "loop": "false"})
+    track = ET.SubElement(action, "Track", {
+        "trackName": track_name,
+        "eventType": "TriggerParticleTick",
+        "enabled": "true",
+    })
+    if special:
+        ET.SubElement(track, "SkinOrAvatarList", {"id": "59500"})
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def package(files):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+class CommonActionsMergeTests(unittest.TestCase):
+    def test_merges_595_track_and_preserves_base_tracks(self):
+        name = "commonresource/Back.xml"
+        base = encode_aov_resource(action_xml("TriggerParticleTick0"), name, "zstd")
+        overlay = encode_aov_resource(action_xml("0_TriggerParticleTick0", True), name, "zstd")
+        output, report = merge_action_xml(base, overlay, name)
+        decoded, mode = decode_aov_resource(output, name)
+        root = ET.fromstring(decoded)
+        tracks = root.find("Action").findall("Track")
+        self.assertEqual(mode, "zstd")
+        self.assertEqual(len(tracks), 1)
+        self.assertEqual(tracks[0].attrib["trackName"], "TriggerParticleTick0")
+        self.assertEqual(tracks[0].find("SkinOrAvatarList").attrib["id"], "59500")
+        self.assertEqual(report["replaced_tracks"], ["TriggerParticleTick0"])
+        self.assertTrue(report["verified"])
+
+    def test_appends_new_595_track(self):
+        name = "commonresource/HasteE1.xml"
+        base = encode_aov_resource(action_xml("ExistingTrack"), name, "zstd")
+        overlay = encode_aov_resource(action_xml("1_PlayHeroSoundTick2", True), name, "zstd")
+        output, report = merge_action_xml(base, overlay, name)
+        root = ET.fromstring(decode_aov_resource(output, name)[0])
+        tracks = root.find("Action").findall("Track")
+        self.assertEqual(len(tracks), 2)
+        self.assertTrue(tracks[-1].attrib.get("guid"))
+        self.assertEqual(report["appended_tracks"], ["PlayHeroSoundTick2"])
+
+    def test_merges_multiple_595_variants_for_same_track(self):
+        name = "commonresource/Back.xml"
+        root = ET.Element("Project")
+        action = ET.SubElement(root, "Action")
+        base_track = ET.SubElement(action, "Track", {
+            "trackName": "TriggerParticleTick0",
+            "eventType": "TriggerParticleTick",
+            "guid": "base-guid",
+        })
+        ET.SubElement(base_track, "SkinOrAvatarList", {"id": "59500"})
+        overlay_root = ET.Element("Project")
+        overlay_action = ET.SubElement(overlay_root, "Action")
+        for skin_id in ("59500", "59501"):
+            track = ET.SubElement(overlay_action, "Track", {
+                "trackName": "0_TriggerParticleTick0",
+                "eventType": "TriggerParticleTick",
+            })
+            ET.SubElement(track, "SkinOrAvatarList", {"id": skin_id})
+        base = encode_aov_resource(ET.tostring(root), name, "zstd")
+        overlay = encode_aov_resource(ET.tostring(overlay_root), name, "zstd")
+        output, report = merge_action_xml(base, overlay, name)
+        merged_root = ET.fromstring(decode_aov_resource(output, name)[0])
+        merged_track = merged_root.find("Action").find("Track")
+        ids = {node.attrib["id"] for node in merged_track.findall("SkinOrAvatarList")}
+        self.assertEqual(ids, {"59500", "59501"})
+        self.assertTrue(report["merged_into_existing_tracks"])
+
+    def test_keeps_same_name_tracks_with_different_event_flags(self):
+        name = "commonresource/HasteE1.xml"
+        base_root = ET.Element("Project")
+        base_action = ET.SubElement(base_root, "Action")
+        overlay_root = ET.Element("Project")
+        overlay_action = ET.SubElement(overlay_root, "Action")
+        for index, completed in enumerate(("false", "true")):
+            track = ET.SubElement(overlay_action, "Track", {
+                "trackName": f"{85 + index}_SetAnimationParamsTick0",
+                "eventType": "SetAnimationParamsTick",
+                "enabled": "true",
+                "execOnActionCompleted": completed,
+                "SkinAvatarFilterType": "9",
+            })
+            event = ET.SubElement(track, "Event", {
+                "eventName": "SetAnimationParamsTick",
+                "time": "0.000",
+                "isDuration": "false",
+            })
+            ET.SubElement(event, "String", {"name": "variant", "value": completed})
+            ET.SubElement(track, "SkinOrAvatarList", {"id": "59500"})
+        base = encode_aov_resource(ET.tostring(base_root), name, "zstd")
+        overlay = encode_aov_resource(ET.tostring(overlay_root), name, "zstd")
+        output, report = merge_action_xml(base, overlay, name)
+        decoded, _ = decode_aov_resource(output, name)
+        result = ET.fromstring(decoded).find("Action").findall("Track")
+        self.assertEqual(len(result), 2)
+        self.assertEqual(
+            {track.attrib["execOnActionCompleted"] for track in result},
+            {"false", "true"},
+        )
+        self.assertEqual(len(report["appended_tracks"]), 2)
+
+    def test_package_merge_replaces_only_selected_xml(self):
+        path = "commonresource/Back.xml"
+        other = "commonresource/Unrelated.xml"
+        base = package({
+            path: encode_aov_resource(action_xml("BackTrack"), path, "zstd"),
+            other: b"base",
+        })
+        overlay = package({
+            path: encode_aov_resource(action_xml("0_BackTrack", True), path, "zstd"),
+            other: b"overlay",
+        })
+        merged, report = merge_common_actions_pkg(base, overlay)
+        with zipfile.ZipFile(io.BytesIO(merged)) as z:
+            decoded, _ = decode_aov_resource(z.read(path), path)
+            root = ET.fromstring(decoded)
+            self.assertEqual(root.find("Action").find("Track").find("SkinOrAvatarList").attrib["id"], "59500")
+            self.assertEqual(z.read(other), b"base")
+        self.assertEqual(report["merged_files"][path]["replaced_tracks"], ["BackTrack"])
+        self.assertTrue(report["verified"])
+
+
+if __name__ == "__main__":
+    unittest.main()
