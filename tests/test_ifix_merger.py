@@ -65,6 +65,20 @@ class IFixMergerTests(unittest.TestCase):
         final_bytes = serialize_ifix_patch(merged)
         self.assertEqual(serialize_ifix_patch(parse_ifix_patch(final_bytes)), final_bytes)
 
+    def test_negative_collection_count_is_rejected(self):
+        import struct
+
+        malformed = struct.pack("<Q", 0) + b"\\x00" + struct.pack("<i", -1)
+        with self.assertRaisesRegex(IFixMergeError, "Số lượng bản ghi trong IFix"):
+            parse_ifix_patch(malformed)
+
+    def test_invalid_utf8_string_is_rejected_as_ifix_error(self):
+        import struct
+
+        malformed = struct.pack("<Q", 0) + b"\\x01\\xff"
+        with self.assertRaisesRegex(IFixMergeError, "không phải UTF-8"):
+            parse_ifix_patch(malformed)
+
     def test_unknown_opcode_is_rejected(self):
         base = make_patch("BaseFix", "BaseType", "base-string", "baseField")
         incoming = make_patch("IncomingFix", "IncomingType", "incoming-string", "incomingField", opcode=999)
