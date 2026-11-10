@@ -6,7 +6,7 @@ import shutil
 import sys
 import tempfile
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .aov_bytes import AOVBytesError, decode_aov_resource, encode_aov_resource
@@ -65,13 +65,27 @@ def _load_unitypy_aov():
 
 
 def _normalise_vtk_path(name: str) -> str:
-    name = name.replace("\\", "/").lstrip("/")
+    # ZIP names are untrusted input. Never silently strip an absolute prefix or
+    # allow traversal components into the rebuilt Resources.zip.
+    name = name.replace("\\", "/")
+    if not name or name.startswith("/") or "\x00" in name:
+        raise AOVMergeError("ZIP Vấn Tâm Kiếm chứa đường dẫn tuyệt đối hoặc rỗng.")
+    raw_parts = name.split("/")
+    if any(part in ("", ".", "..") for part in raw_parts):
+        raise AOVMergeError(f"Đường dẫn tài nguyên VTK không an toàn: {name}")
+    if raw_parts[0].endswith(":"):
+        raise AOVMergeError(f"Đường dẫn tài nguyên VTK có ổ đĩa không an toàn: {name}")
+
     if name.startswith("Resources/1.64.1/"):
         name = name[len("Resources/1.64.1/"):]
     elif name.startswith("Resources/"):
         parts = name.split("/", 2)
         if len(parts) == 3:
             name = parts[2]
+    if not name or PurePosixPath(name).is_absolute() or any(
+        part in ("", ".", "..") for part in name.split("/")
+    ):
+        raise AOVMergeError(f"Đường dẫn tài nguyên VTK không an toàn sau chuẩn hóa: {name}")
     if name.endswith(".assetbundle") and not name.startswith("assetbundle/"):
         name = "assetbundle/" + name
     return name
