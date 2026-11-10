@@ -29,7 +29,7 @@ def _load_unitypy_aov():
 
 
 def _safe_text(value: Any, limit: int = 240) -> str:
-    text = str(value or "").replace("\\x00", "")
+    text = str(value or "").replace("\x00", "")
     return text[:limit]
 
 
@@ -39,7 +39,7 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
         raise AssetBundleInspectError("AssetBundle rỗng.")
     if len(data) > MAX_ASSETBUNDLE_BYTES:
         raise AssetBundleInspectError("AssetBundle vượt quá giới hạn phân tích sâu 64 MiB.")
-    if not (data.startswith(b"UnityFS\\x00") or data.startswith(b"UnityRaw\\x00") or data.startswith(b"UnityWeb\\x00")):
+    if not (data.startswith(b"UnityFS\x00") or data.startswith(b"UnityRaw\x00") or data.startswith(b"UnityWeb\x00")):
         raise AssetBundleInspectError("Không nhận diện được chữ ký UnityFS/UnityRaw/UnityWeb.")
 
     UnityPy_AOV = _load_unitypy_aov()
