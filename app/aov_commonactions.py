@@ -78,7 +78,7 @@ def _merge_xml(base_payload: bytes, incoming_payload: bytes, member_name: str, h
     }
     pattern = re.compile(
         rb"(?<![0-9])(?:" + b"|".join(
-            re.escape(prefix.encode("ascii")) + rb"\\d{2}"
+            re.escape(prefix.encode("ascii")) + rb"[0-9]{2}"
             for prefix in hero_prefixes
         ) + rb")(?![0-9])"
     )
