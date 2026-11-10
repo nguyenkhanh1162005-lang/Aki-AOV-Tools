@@ -14,6 +14,30 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
                 archive.writestr(entry, payload)
         return str(path)
 
+    def test_inspects_assetbundle_dependencies_inside_zip(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            path = self._zip(
+                folder,
+                "assets.zip",
+                {"Resources/Actor.assetbundle": b"UnityFS\\x00fixture"},
+            )
+            report_data = {
+                "serialized_file_count": 2,
+                "object_count": 9,
+                "container_entry_count": 3,
+                "external_reference_count": 1,
+                "object_type_counts": {"Texture2D": 5, "Mesh": 4},
+                "unresolved_external_paths": ["archive:/CAB-other.resS"],
+            }
+            with patch("app.aov_inspector.inspect_assetbundle", return_value=report_data):
+                report = inspect_archives([path])
+            self.assertIn("KIỂM TRA CẤU TRÚC VÀ PHỤ THUỘC ASSETBUNDLE", report)
+            self.assertIn("Serialized files: 2 | Objects: 9 | Container entries: 3", report)
+            self.assertIn("archive:/CAB-other.resS", report)
+
     def test_inspects_small_wwise_bnk_inside_zip(self):
         import struct
 
