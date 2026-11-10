@@ -15,7 +15,7 @@
 const driveLinks=document.querySelector('#driveLinks'),driveImport=document.querySelector('#driveImport'),driveMerge=document.querySelector('#driveMerge');let driveUploadId=null,localAovUploadId=null;const input=document.querySelector('#upload'),go=document.querySelector('#go'),aovMerge=document.querySelector('#aovMerge'),inspectBtn=document.querySelector('#inspect'),report=document.querySelector('#report'),list=document.querySelector('#files'),status=document.querySelector('#status');
 const CHUNK_BYTES=4*1024*1024;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-async function fetchWithRetry(url,options,attempts=4){let last;for(let n=0;n<attempts;n++){try{const r=await fetch(url,options);if(!r.ok){let msg='HTTP '+r.status;try{const j=await r.json();msg=j.detail||msg}catch{}throw Error(msg)}return r}catch(e){last=e;if(n===attempts-1)break;await sleep(700*(n+1));}}throw last;}
+async function fetchWithRetry(url,options,attempts=4){let last;for(let n=0;n<attempts;n++){try{const r=await fetch(url,options);if(!r.ok){let msg='HTTP '+r.status;try{const j=await r.json();msg=j.detail||msg}catch{}const error=Error(msg);error.status=r.status;throw error}return r}catch(e){last=e;if(n===attempts-1)break;await sleep(700*(n+1));}}throw last;}
 const UPLOAD_STATE_KEY='aki-aov-upload-session-v1';
 function uploadFingerprint(files){return JSON.stringify(files.map(f=>({name:f.name,size:f.size,lastModified:f.lastModified||0})));}
 function saveUploadState(state){try{localStorage.setItem(UPLOAD_STATE_KEY,JSON.stringify(state));}catch{}}
@@ -23,16 +23,24 @@ function clearUploadState(){try{localStorage.removeItem(UPLOAD_STATE_KEY);}catch
 async function uploadInChunks(files){
   const fingerprint=uploadFingerprint(files);
   let uploadId=null,offsets=[];
-  try{
-    const saved=JSON.parse(localStorage.getItem(UPLOAD_STATE_KEY)||'null');
-    if(saved&&saved.fingerprint===fingerprint&&saved.upload_id){
+  let saved=null;
+  try{saved=JSON.parse(localStorage.getItem(UPLOAD_STATE_KEY)||'null');}
+  catch{clearUploadState();}
+  if(saved&&saved.fingerprint===fingerprint&&saved.upload_id){
+    let session=null;
+    try{
       const statusResponse=await fetchWithRetry('/api/upload/'+encodeURIComponent(saved.upload_id)+'/status',{method:'GET'},2);
-      const session=await statusResponse.json();
+      session=await statusResponse.json();
+    }catch(e){
+      if(e.status===404)clearUploadState();
+      else throw e;
+    }
+    if(session){
       const matches=Array.isArray(session.files)&&session.files.length===files.length&&session.files.every((item,i)=>item.name===files[i].name&&item.size===files[i].size&&Number.isInteger(item.received)&&item.received>=0&&item.received<=item.size);
       if(matches){uploadId=saved.upload_id;offsets=session.files.map(item=>item.received);status.textContent='Đã tìm thấy phiên tải dở, tiếp tục từ phần còn thiếu...';}
       else clearUploadState();
     }
-  }catch{clearUploadState();}
+  }
   if(!uploadId){
     const start=await fetchWithRetry('/api/upload/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:files.map(f=>({name:f.name,size:f.size}))})});
     const data=await start.json();uploadId=data.upload_id;offsets=files.map(()=>0);
