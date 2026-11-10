@@ -302,7 +302,7 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
         base_ids = set(base_item["object_path_ids"])
         overlay_ids = set(overlay_item["object_path_ids"])
         shared_ids = base_ids & overlay_ids
-        type_conflicts = sorted(
+        object_type_conflict_ids = sorted(
             path_id for path_id in shared_ids
             if base_item["object_types_by_path_id"].get(str(path_id))
             != overlay_item["object_types_by_path_id"].get(str(path_id))
@@ -312,8 +312,8 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
             "shared_path_id_count": len(shared_ids),
             "base_only_path_id_count": len(base_ids - overlay_ids),
             "overlay_only_path_id_count": len(overlay_ids - base_ids),
-            "type_conflict_count": len(type_conflicts),
-            "type_conflict_path_ids": type_conflicts[:MAX_REPORTED_REFERENCES],
+            "type_conflict_count": len(object_type_conflict_ids),
+            "type_conflict_path_ids": object_type_conflict_ids[:MAX_REPORTED_REFERENCES],
         })
 
     object_id_types_match = (
