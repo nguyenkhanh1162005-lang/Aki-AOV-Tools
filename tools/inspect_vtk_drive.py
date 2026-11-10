@@ -18,6 +18,7 @@ with tempfile.TemporaryDirectory(prefix="aki-vtk-audit-") as temp:
     outer_path = Path(temp) / "vtk-outer.zip"
     name, size = download_drive_zip(DRIVE_URL, str(outer_path))
     report["download"] = {"name": name, "bytes": size}
+    Path("vtk-source.zip").write_bytes(outer_path.read_bytes())
     with zipfile.ZipFile(outer_path) as outer:
         for info in outer.infolist():
             if info.is_dir():
