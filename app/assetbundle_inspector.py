@@ -704,6 +704,78 @@ def build_path_id_remap_plan(
     }
 
 
+
+def build_external_file_id_remap_plan(
+    base_externals: list[str],
+    overlay_externals: list[str],
+) -> dict[str, Any]:
+    """Plan 1-based PPtr file_id remapping by exact external path identity.
+
+    This only plans the external table. It does not rewrite PPtrs or prove that
+    a referenced CAB/resource exists in the final bundle.
+    """
+    def normalize(value: str) -> str | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        normalized = value.strip().replace("\\\\", "/")
+        while "//" in normalized:
+            normalized = normalized.replace("//", "/")
+        return normalized
+
+    base_paths = [normalize(value) for value in base_externals]
+    overlay_paths = [normalize(value) for value in overlay_externals]
+    if any(value is None for value in base_paths + overlay_paths):
+        return {
+            "ready": False,
+            "reason": "External table contains an empty or invalid path.",
+            "file_id_remap": {},
+            "merged_externals": [],
+            "appended_count": 0,
+        }
+
+    def duplicates(paths: list[str]) -> list[str]:
+        seen: set[str] = set()
+        repeated: set[str] = set()
+        for value in paths:
+            if value in seen:
+                repeated.add(value)
+            seen.add(value)
+        return sorted(repeated)
+
+    duplicate_base = duplicates(base_paths)
+    duplicate_overlay = duplicates(overlay_paths)
+    if duplicate_base or duplicate_overlay:
+        return {
+            "ready": False,
+            "reason": "Duplicate external paths make PPtr file_id identity ambiguous.",
+            "duplicate_base_paths": duplicate_base[:MAX_REPORTED_REFERENCES],
+            "duplicate_overlay_paths": duplicate_overlay[:MAX_REPORTED_REFERENCES],
+            "file_id_remap": {},
+            "merged_externals": [],
+            "appended_count": 0,
+        }
+
+    merged = list(base_paths)
+    base_index = {path: index + 1 for index, path in enumerate(merged)}
+    remap: dict[str, int] = {}
+    for overlay_index, path in enumerate(overlay_paths, start=1):
+        target_index = base_index.get(path)
+        if target_index is None:
+            merged.append(path)
+            target_index = len(merged)
+            base_index[path] = target_index
+        remap[str(overlay_index)] = target_index
+
+    return {
+        "ready": True,
+        "reason": "External PPtr file_id table remap planned; no pointers or files were changed.",
+        "file_id_remap": remap,
+        "merged_externals": merged,
+        "appended_count": len(merged) - len(base_paths),
+        "scope": "external table only; CAB existence, PathID targets and resource sidecars require separate validation",
+    }
+
+
 def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[str, Any]:
     """Compare two bundles conservatively; this never rewrites or certifies a merge."""
     base = inspect_assetbundle(base_data, "base")
