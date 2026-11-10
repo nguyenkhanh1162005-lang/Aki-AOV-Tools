@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import zipfile
 from collections import Counter
 from pathlib import Path, PurePosixPath
@@ -45,6 +46,15 @@ def _safe_name(name: str) -> str:
     return normalized
 
 
+def _entry_sha256(archive_path: str, info: zipfile.ZipInfo) -> str:
+    digest = hashlib.sha256()
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        with archive.open(info, "r") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
 def inspect_archives(paths: list[str]) -> str:
     """Create a read-only inventory; never alters or decrypts game assets."""
     if not paths or len(paths) > MAX_FILES:
@@ -53,7 +63,7 @@ def inspect_archives(paths: list[str]) -> str:
     total_entries = 0
     total_uncompressed = 0
     inventories: list[tuple[str, dict[str, tuple[int, int]], Counter[str], list[str]]] = []
-    collisions: dict[str, list[str]] = {}
+    collisions: dict[str, list[tuple[str, str, int, int, zipfile.ZipInfo]]] = {}
     bank_files: list[tuple[str, int, int]] = []
     detected_formats: list[tuple[str, str]] = []
 
@@ -98,7 +108,7 @@ def inspect_archives(paths: list[str]) -> str:
                     # Inventory only. Full decompression can expand dramatically and
                     # monopolize a small web instance; keep this endpoint responsive.
                     bank_files.append((Path(path).name + " :: " + name, info.file_size, info.CRC))
-                collisions.setdefault(name, []).append(Path(path).name)
+                collisions.setdefault(name, []).append(\n                    (Path(path).name, path, info.file_size, info.CRC, info)\n                )
 
         inventories.append((Path(path).name, files, extensions, important))
 
@@ -134,10 +144,42 @@ def inspect_archives(paths: list[str]) -> str:
     else:
         lines.append("- Không tìm thấy BattleBank.bytes hoặc LobbyBank.bytes trong các ZIP đã chọn.")
 
-    duplicate_names = [(name, sources) for name, sources in collisions.items() if len(sources) > 1]
-    lines.append(f"Tên đường dẫn xuất hiện ở nhiều ZIP: {len(duplicate_names)}")
+    duplicate_names = [
+        (name, sources) for name, sources in collisions.items() if len(sources) > 1
+    ]
+    lines.append(f"Tên đường dẫn xuất hiện nhiều lần: {len(duplicate_names)}")
+    identical_count = 0
+    conflict_count = 0
     for name, sources in duplicate_names[:80]:
-        lines.append(f"- {name} [{', '.join(sources)}]")
+        try:
+            digests = [
+                _entry_sha256(source_path, info)
+                for _, source_path, _, _, info in sources
+            ]
+        except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+            raise InspectError(
+                f"Không thể so sánh nội dung file trùng: {name}"
+            ) from exc
+        identical = len(set(digests)) == 1
+        if identical:
+            identical_count += 1
+            verdict = "NỘI DUNG GIỐNG HỆT (SHA-256)"
+        else:
+            conflict_count += 1
+            verdict = "XUNG ĐỘT NỘI DUNG (SHA-256 KHÁC)"
+        details = ", ".join(
+            f"{filename}: {size:,} byte, CRC32 {crc:08x}"
+            for filename, _, size, crc, _ in sources
+        )
+        lines.append(f"- {name}: {verdict} [{details}]")
+    lines.append(
+        f"Kết quả so sánh: {identical_count} đường dẫn giống hệt; "
+        f"{conflict_count} đường dẫn có nội dung khác."
+    )
+    if len(duplicate_names) > 80:
+        lines.append(
+            f"- Còn {len(duplicate_names) - 80} đường dẫn trùng chưa hiển thị chi tiết."
+        )
 
     lines.extend([
         "",
