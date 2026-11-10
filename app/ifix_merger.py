@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import io
 import struct
 from typing import Any
@@ -407,7 +408,12 @@ def validate_ifix_patch(patch: dict[str, Any]) -> None:
 
 
 def merge_ifix_patches(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
-    """Merge an incoming patch into a base patch, remapping every table index."""
+    """Merge patches without mutating caller-owned inputs, remapping every table index."""
+    validate_ifix_patch(base)
+    validate_ifix_patch(incoming)
+    base = copy.deepcopy(base)
+    incoming = copy.deepcopy(incoming)
+
     for key in ("magic", "bridge", "wrappers", "assembly"):
         if base[key] != incoming[key]:
             raise IFixMergeError(f"Không thể ghép IFix: trường {key} không khớp.")
