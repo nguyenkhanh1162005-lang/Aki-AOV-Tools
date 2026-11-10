@@ -110,7 +110,11 @@ class AssetBundleInspectorTests(unittest.TestCase):
             "main_asset": None, "dependencies": [],
         }
         overlay = dict(base)
-        rewritten = {"ready": True, "rewritten": {"preload": [], "container": [], "main_asset": None}}
+        rewritten = {"ready": True, "rewritten": {
+            "preload": [],
+            "container": [{"file_id": 0, "path_id": 1}],
+            "main_asset": None,
+        }}
         plan = build_assetbundle_metadata_merge_plan(base, overlay, rewritten)
         self.assertFalse(plan["ready"])
         self.assertIn("Container path collisions", plan["reason"])
