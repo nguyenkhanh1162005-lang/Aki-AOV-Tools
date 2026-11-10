@@ -6,7 +6,7 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Body, Header
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Body, Header, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
@@ -90,19 +90,41 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
 
 
 @app.post("/api/upload/{upload_id}/inspect")
-async def inspect_chunked_upload(upload_id: str):
+async def inspect_chunked_upload(upload_id: str, keep_session: bool = Query(False)):
     session = _get_upload_session(upload_id)
     if any(item["received"] != item["size"] for item in session["files"]):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
     try:
         report = await run_in_threadpool(inspect_archives, session["paths"])
         from fastapi.responses import PlainTextResponse
+        if keep_session:
+            session["created"] = time.time()
         return PlainTextResponse(report)
     except InspectError as exc:
         raise HTTPException(400, str(exc)) from exc
     finally:
-        shutil.rmtree(session["workdir"], ignore_errors=True)
-        UPLOAD_SESSIONS.pop(upload_id, None)
+        if not keep_session:
+            shutil.rmtree(session["workdir"], ignore_errors=True)
+            UPLOAD_SESSIONS.pop(upload_id, None)
+
+
+@app.post("/api/upload/{upload_id}/merge")
+async def merge_chunked_upload(upload_id: str):
+    session = _get_upload_session(upload_id)
+    if any(item["received"] != item["size"] for item in session["files"]):
+        raise HTTPException(400, "File chưa tải lên đầy đủ.")
+    output_path = Path(session["workdir"]) / "aki-merged.zip"
+    try:
+        await run_in_threadpool(merge_zip_files, session["paths"], str(output_path))
+    except MergeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    UPLOAD_SESSIONS.pop(upload_id, None)
+    return FileResponse(
+        path=output_path,
+        media_type="application/zip",
+        filename="aki-merged.zip",
+        background=BackgroundTask(shutil.rmtree, session["workdir"], ignore_errors=True),
+    )
 
 
 @app.post("/api/drive/import")
