@@ -3,7 +3,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from app.aov_inspector import InspectError, inspect_archives
+from app.aov_inspector import InspectError, inspect_archives, requires_format_aware_merge
 
 
 class ArchiveInspectorTests(unittest.TestCase):
@@ -94,6 +94,18 @@ class ArchiveInspectorTests(unittest.TestCase):
             self.assertIn("CommonActions.pkg.bytes", report)
             self.assertIn("commonresource/Back.xml", report)
             self.assertIn("ZIP/lưu trữ lồng đã mở", report)
+
+
+    def test_format_aware_merge_guard_blocks_nested_or_mses_archives(self):
+        self.assertTrue(requires_format_aware_merge(
+            "- ZIP/lưu trữ lồng đã mở: 1"
+        ))
+        self.assertTrue(requires_format_aware_merge(
+            "- table.bytes: MSES v7 | 59 fields | 1932 records"
+        ))
+        self.assertFalse(requires_format_aware_merge(
+            "- ZIP/lưu trữ lồng đã mở: 0"
+        ))
 
 
 if __name__ == "__main__":
