@@ -5,7 +5,8 @@ Công cụ web và Telegram bot dùng chung bộ xử lý ZIP, kiểm kê cấu 
 ## Tính năng
 - Web UI tiếng Việt, dùng được trên điện thoại.
 - Web: tải tối đa 10 ZIP theo khối 4 MB, kiểm tra cấu trúc, ghép ZIP thông thường hoặc ghép mod AOV chuyên sâu.
-- Web API `/api/inspect`: liệt kê phần mở rộng, tên có dấu hiệu là tài nguyên game và đường dẫn trùng giữa các ZIP.
+- Web API `/api/inspect`: liệt kê phần mở rộng, tên có dấu hiệu là tài nguyên game và so sánh SHA-256 các đường dẫn trùng để phân biệt nội dung giống hệt với xung đột thật (tối đa 80 đường dẫn trùng được hiển thị chi tiết).
+- Bộ kiểm tra `/inspect` và `/api/inspect` đọc chữ ký 32 byte đầu mỗi mục để phân loại sơ bộ AoV AES/Zstandard, Unity AssetBundle, ZIP lồng, Wwise, ảnh, XML/JSON và dữ liệu chưa nhận diện; chỉ đọc, không sửa tài nguyên.
 - Web API `/api/drive/import`: tải ZIP từ link Google Drive công khai trực tiếp về máy chủ, tối đa 10 link và tổng 500 MB.
 - Web API `/api/upload/{upload_id}/aov-merge`: chạy bộ ghép Vấn Tâm Kiếm chuyên sâu trên phiên upload.
 - Telegram: `/inspect`, `/merge`, `/aovmerge`, `/clear`, `/status`. Web và bot dùng chung engine AOV.
@@ -13,8 +14,10 @@ Công cụ web và Telegram bot dùng chung bộ xử lý ZIP, kiểm kê cấu 
 ## Bộ ghép AOV được hỗ trợ
 
 Bản hiện tại khóa theo đúng cặp tài nguyên đã kiểm tra:
-- ZIP nền iOS 1.64.1.12: bộ 10 skin + nút bấm/thông báo.
-- ZIP Vấn Tâm Kiếm Actor 595, dữ liệu 1.64.1.11: có thể là một ZIP hoặc nhiều phần ZIP.
+- Gói MOD 10 skin iOS 1.64.1.12: bộ 10 skin + nút bấm/thông báo. Đây là gói mod do người dùng cung cấp, không phải gói game gốc.
+- Gói MOD Vấn Tâm Kiếm Actor 595, dữ liệu 1.64.1.11: có thể là một ZIP hoặc nhiều phần ZIP.
+
+**Quy tắc nguồn:** chỉ ghép gói mod với gói mod. Engine không tải, không yêu cầu và không chèn tài nguyên từ bộ cài Liên Quân gốc. Từ "nền" trong mô tả kỹ thuật cũ chỉ gói mod 10 skin được dùng làm pack đích, không có nghĩa là game gốc.
 
 Engine thực hiện:
 - Ghép IFix của `Thanos/HeroSkin_2.bytes` vào `HeroSkin_1.bytes`, remap chỉ số type/method/field/string và kiểm tra lại patch.
@@ -23,7 +26,7 @@ Engine thực hiện:
 - Cập nhật ResourcePackerInfoSet cho 10 AssetBundle Vấn Tâm Kiếm; cập nhật CrcXor trong ResourceVerificationInfoSet cho các file VTK thực sự được đưa vào kết quả và giữ giá trị 1.64.1.12 cho những file chỉ khác do lệch phiên bản.
 - Thêm AssetBundle và soundbank iOS của Vấn Tâm Kiếm; giữ `KernelLua.pkg.bytes` và `StableSystems_3.pkg.bytes` của bản nền 1.64.1.12 để tránh hạ phiên bản hệ thống dùng chung.
 
-Bộ ghép từ chối nếu phiên bản, số lượng AssetBundle, bảng chỉ mục hoặc dữ liệu dùng chung không khớp với cấu hình được hỗ trợ. Đây không phải bộ giải mã/hợp nhất tổng quát cho mọi bản mod Liên Quân.
+Bộ ghép từ chối nếu phiên bản, số lượng AssetBundle, bảng chỉ mục hoặc dữ liệu dùng chung không khớp với cấu hình được hỗ trợ. Bộ nhận diện định dạng chỉ giúp kiểm kê nhiều loại tài nguyên; nó không phải bộ giải mã/hợp nhất tổng quát cho mọi bản mod Liên Quân. Engine ghép vẫn chỉ hỗ trợ đúng cặp phiên bản nêu trên.
 
 ## Chạy web
 ```bash
@@ -47,7 +50,7 @@ python bot.py
 - Hai URL phải trỏ tới Local Bot API Server có thể truy cập từ bot. Không dùng URL ví dụ nếu chưa triển khai server.
 - Local Bot API Server cần `TELEGRAM_API_ID` và `TELEGRAM_API_HASH` lấy từ https://my.telegram.org. Không đưa các giá trị này lên GitHub.
 - Trước khi chuyển bot từ Bot API chính thức sang Local Bot API Server, gọi `logOut` trên Bot API chính thức, dừng worker cũ, rồi mới đổi URL và khởi động worker mới.
-- Khi bật Local Bot API: tối đa 500 MB mỗi ZIP, tổng đầu vào 500 MB, tối đa 10 ZIP; ZIP đầu ra tối đa 1 GB. Máy chủ vẫn cần đủ RAM và dung lượng ổ đĩa tạm.
+- Khi bật Local Bot API theo cấu hình hiện tại: tối đa 500 MB mỗi ZIP, tổng đầu vào 500 MB, tối đa 10 ZIP và giới hạn gửi ZIP kết quả 500 MB. Máy chủ vẫn cần đủ RAM và dung lượng ổ đĩa tạm.
 
 ## Triển khai web + Telegram với Local Bot API
 
@@ -62,7 +65,7 @@ docker compose -f docker-compose.local-bot-api.yml up -d --build
 Đọc [hướng dẫn triển khai Local Bot API](docs/telegram-local-api.md) trước khi chuyển bot từ máy chủ Telegram mặc định. Phải dừng worker cũ và gọi `logOut` đúng quy trình; không chạy hai polling worker cùng một bot. Không đưa file `.env` lên GitHub.
 
 ## Nhập ZIP từ Google Drive
-- Dán link ZIP nền và link Vấn Tâm Kiếm, mỗi link một dòng. Nếu VTK được chia thành nhiều phần, dán tất cả các link phần đó.
+- Dán link gói MOD 10 skin và link các phần gói MOD Vấn Tâm Kiếm, mỗi link một dòng. Không cần link bộ cài game gốc.
 - File phải bật quyền “Bất kỳ ai có đường liên kết”.
 - Chỉ nhận link `drive.google.com` hoặc `docs.google.com`; máy chủ tự tải file, giới hạn 500 MB mỗi ZIP và tổng 500 MB.
 - Sau khi tải và kiểm tra, dùng nút ghép AOV chuyên sâu trước khi phiên upload hết hạn (1 giờ).

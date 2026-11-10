@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import io
 import shutil
+import stat
 import sys
 import tempfile
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .aov_bytes import AOVBytesError, decode_aov_resource, encode_aov_resource
@@ -23,6 +25,11 @@ BASE_VERSION = "1.64.1.12"
 VTK_VERSION = "1.64.1.11"
 BASE_PREFIX = "Resources/1.64.1/"
 MAX_AOV_INPUTS = 10
+MAX_ARCHIVE_ENTRIES = 20_000
+MAX_TOTAL_UNCOMPRESSED = 1024 * 1024 * 1024
+MAX_SINGLE_ENTRY = 512 * 1024 * 1024
+MAX_TOTAL_INPUT_BYTES = 500 * 1024 * 1024
+MAX_TOTAL_OUTPUT_BYTES = 1024 * 1024 * 1024
 
 COMMON_ACTIONS_PATH = "Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes"
 HERO_SKIN_BASE_PATH = "Thanos/HeroSkin_1.bytes"
@@ -64,8 +71,53 @@ def _load_unitypy_aov():
     return UnityPy_AOV
 
 
+def _validate_archive_paths(zf: zipfile.ZipFile, label: str) -> None:
+    entries = zf.infolist()
+    if len(entries) > MAX_ARCHIVE_ENTRIES:
+        raise AOVMergeError(f"ZIP {label} vượt quá {MAX_ARCHIVE_ENTRIES} mục.")
+    total_uncompressed = sum(info.file_size for info in entries)
+    if total_uncompressed > MAX_TOTAL_UNCOMPRESSED:
+        raise AOVMergeError(f"ZIP {label} vượt quá giới hạn giải nén 1 GiB.")
+    seen_files: set[str] = set()
+    for info in entries:
+        if info.file_size > MAX_SINGLE_ENTRY:
+            raise AOVMergeError(
+                f"ZIP {label} có mục vượt quá 512 MiB: {info.filename}"
+            )
+        normalized = info.filename.replace("\\", "/")
+        path = PurePosixPath(normalized)
+        mode = (info.external_attr >> 16) & 0xFFFF
+        if (
+            not normalized
+            or path.is_absolute()
+            or ".." in path.parts
+            or "\x00" in normalized
+            or (path.parts and path.parts[0].endswith(":"))
+            or stat.S_ISLNK(mode)
+        ):
+            raise AOVMergeError(
+                f"ZIP {label} chứa đường dẫn hoặc mục không an toàn: {info.filename}"
+            )
+        if not info.is_dir():
+            if normalized in seen_files:
+                raise AOVMergeError(
+                    f"ZIP {label} có đường dẫn tệp bị lặp, không rõ dữ liệu nào được ưu tiên: {normalized}"
+                )
+            seen_files.add(normalized)
+
+
 def _normalise_vtk_path(name: str) -> str:
-    name = name.replace("\\", "/").lstrip("/")
+    name = name.replace("\\", "/")
+    path = PurePosixPath(name)
+    if (
+        not name
+        or path.is_absolute()
+        or ".." in path.parts
+        or "\x00" in name
+        or (path.parts and path.parts[0].endswith(":"))
+    ):
+        raise AOVMergeError(f"Đường dẫn tài nguyên VTK không an toàn: {name}")
+    name = name.lstrip("/")
     if name.startswith("Resources/1.64.1/"):
         name = name[len("Resources/1.64.1/"):]
     elif name.startswith("Resources/"):
@@ -75,6 +127,19 @@ def _normalise_vtk_path(name: str) -> str:
     if name.endswith(".assetbundle") and not name.startswith("assetbundle/"):
         name = "assetbundle/" + name
     return name
+
+
+def _zip_entry_sha256(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> str:
+    digest = hashlib.sha256()
+    try:
+        with archive.open(info, "r") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except (OSError, RuntimeError, zipfile.BadZipFile, EOFError) as exc:
+        raise AOVMergeError(
+            f"Không thể so sánh nội dung tài nguyên ZIP: {info.filename}"
+        ) from exc
+    return digest.hexdigest()
 
 
 def _is_noise_path(name: str) -> bool:
@@ -268,19 +333,34 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
 
     opened: list[zipfile.ZipFile] = []
     try:
+        total_input_bytes = sum(Path(path).stat().st_size for path in archive_paths)
+        if total_input_bytes > MAX_TOTAL_INPUT_BYTES:
+            raise AOVMergeError("Tổng dung lượng ZIP đầu vào vượt quá 500 MB.")
         archives: list[tuple[str, zipfile.ZipFile]] = []
+        total_entries = 0
+        total_uncompressed = 0
         for path in archive_paths:
             try:
                 zf = zipfile.ZipFile(path)
-                bad = zf.testzip()
-                if bad:
-                    zf.close()
-                    raise AOVMergeError(f"ZIP đầu vào lỗi CRC tại {bad}: {Path(path).name}")
-            except AOVMergeError:
-                raise
             except Exception as exc:
                 raise AOVMergeError(f"File đầu vào không phải ZIP hợp lệ: {Path(path).name}") from exc
             opened.append(zf)
+            entries = zf.infolist()
+            total_entries += len(entries)
+            total_uncompressed += sum(info.file_size for info in entries)
+            if total_entries > MAX_ARCHIVE_ENTRIES:
+                raise AOVMergeError("Tổng số mục ZIP vượt quá 20.000.")
+            if total_uncompressed > MAX_TOTAL_UNCOMPRESSED:
+                raise AOVMergeError("Tổng dung lượng giải nén vượt quá 1 GiB.")
+            _validate_archive_paths(zf, Path(path).name)
+            try:
+                bad = zf.testzip()
+            except Exception as exc:
+                raise AOVMergeError(
+                    f"Không thể kiểm tra CRC ZIP: {Path(path).name}"
+                ) from exc
+            if bad:
+                raise AOVMergeError(f"ZIP đầu vào lỗi CRC tại {bad}: {Path(path).name}")
             archives.append((path, zf))
 
         base_candidates = []
@@ -314,8 +394,13 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                     continue
                 name = _normalise_vtk_path(info.filename)
                 if name in vtk_sources:
-                    previous = vtk_sources[name][1]
-                    if previous.CRC != info.CRC or previous.file_size != info.file_size:
+                    previous_archive, previous = vtk_sources[name]
+                    if (
+                        previous.file_size != info.file_size
+                        or previous.CRC != info.CRC
+                        or _zip_entry_sha256(previous_archive, previous)
+                        != _zip_entry_sha256(zf, info)
+                    ):
                         raise AOVMergeError(f"Các phần VTK có file trùng nhưng khác nội dung: {name}")
                     continue
                 vtk_sources[name] = (zf, info)
@@ -347,6 +432,12 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                 _copy_stream(src, dst)
             base_inner = zipfile.ZipFile(base_inner_path)
             try:
+                _validate_archive_paths(base_inner, "Resources.zip bên trong gói mod")
+                bad_inner = base_inner.testzip()
+                if bad_inner:
+                    raise AOVMergeError(
+                        f"Resources.zip của gói mod lỗi CRC tại {bad_inner}"
+                    )
                 base_names = set(base_inner.namelist())
                 required_base = [
                     BASE_PREFIX + HERO_SKIN_BASE_PATH,
@@ -483,6 +574,9 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                             ) as dst:
                                 _copy_stream(src, dst)
 
+                if output_path_obj.stat().st_size > MAX_TOTAL_OUTPUT_BYTES:
+                    output_path_obj.unlink(missing_ok=True)
+                    raise AOVMergeError("ZIP kết quả vượt quá giới hạn 1 GiB.")
                 with zipfile.ZipFile(output_path_obj) as check_outer:
                     bad = check_outer.testzip()
                     if bad:

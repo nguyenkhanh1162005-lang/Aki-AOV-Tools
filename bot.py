@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 from telegram import FSInputFile
 
-from app.large_merger import merge_zip_files, MergeError
+from app.mod_pipeline import merge_mod_archives, ModPipelineError
 from app.aov_inspector import inspect_archives, InspectError
 from app.aov_merger import merge_aov_archives, AOVMergeError
 
@@ -25,6 +25,7 @@ LOCAL_API = bool(
 )
 MAX_FILE_BYTES = 500 * MIB if LOCAL_API else 20 * MIB
 MAX_TOTAL_BYTES = 500 * MIB if LOCAL_API else 100 * MIB
+MAX_SEND_BYTES = 500 * MIB if LOCAL_API else 50 * MIB
 MAX_FILES = 10
 
 
@@ -51,7 +52,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Aki-AOV Bot đã sẵn sàng.\n"
         f"Chế độ nhận file: {mode}.\n\n"
-        "Gửi ZIP nền 10 skin và ZIP Vấn Tâm Kiếm (có thể gồm nhiều phần), sau đó dùng /aovmerge để ghép mod.\n"
+        "Gửi gói MOD 10 skin và các ZIP phần của MOD Vấn Tâm Kiếm, sau đó dùng /aovmerge để ghép hai bộ mod.\n"
         "/merge ghép ZIP thông thường\n"
         "/status xem giới hạn hiện tại\n"
         "/inspect kiểm tra cấu trúc ZIP đã gửi\n"
@@ -67,6 +68,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Chế độ: {mode}\n"
         f"Giới hạn mỗi ZIP: {MAX_FILE_BYTES // MIB} MB\n"
         f"Tổng dung lượng nhận: {MAX_TOTAL_BYTES // MIB} MB\n"
+        f"Giới hạn gửi ZIP kết quả: {MAX_SEND_BYTES // MIB} MB\n"
         f"Đã nhận: {len(files)}/{MAX_FILES} file, {total / MIB:.1f} MB"
     )
 
@@ -156,7 +158,7 @@ async def aovmerge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     files = context.user_data.get("zips", [])
     if len(files) < 2:
         await update.effective_message.reply_text(
-            "Cần ZIP nền 10 skin và ít nhất một ZIP Vấn Tâm Kiếm trước khi dùng /aovmerge."
+            "Cần một gói MOD 10 skin và ít nhất một phần ZIP của MOD Vấn Tâm Kiếm trước khi dùng /aovmerge."
         )
         return
 
@@ -171,9 +173,18 @@ async def aovmerge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [path for _, path in files],
             str(output_path),
         )
+        output_size = output_path.stat().st_size
+        if output_size > MAX_SEND_BYTES:
+            api_mode = "Local Bot API" if LOCAL_API else "Bot API mặc định"
+            await status_message.edit_text(
+                f"Đã ghép xong ({output_size / MIB:.1f} MB) nhưng vượt giới hạn gửi "
+                f"{MAX_SEND_BYTES // MIB} MB của {api_mode}. "
+                "File nguồn vẫn được giữ trong phiên này."
+            )
+            return
         await status_message.edit_text(
             "Đã ghép và kiểm tra cấu trúc nội bộ:\n"
-            f"Base {report['base_version']} + VTK {report['vtk_version']}\n"
+            f"Mod 10 skin {report['base_version']} + mod Vấn Tâm Kiếm {report['vtk_version']}\n"
             f"IFix: {report['ifix_fixes']} FixInfo / {report['ifix_methods']} method\n"
             f"CommonActions: {report['common_actions_files']} file XML, "
             f"{report['common_actions_tracks']} track\n"
@@ -216,23 +227,34 @@ async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Đang kiểm tra và ghép ZIP. Đừng gửi /clear trong lúc xử lý nhé."
     )
     try:
-        await asyncio.to_thread(
-            merge_zip_files,
+        report = await asyncio.to_thread(
+            merge_mod_archives,
             [path for _, path in files],
             str(output_path),
         )
+        output_size = output_path.stat().st_size
+        if output_size > MAX_SEND_BYTES:
+            api_mode = "Local Bot API" if LOCAL_API else "Bot API mặc định"
+            await status_message.edit_text(
+                f"Đã ghép xong ({output_size / MIB:.1f} MB) nhưng vượt giới hạn gửi "
+                f"{MAX_SEND_BYTES // MIB} MB của {api_mode}. "
+                "File nguồn vẫn được giữ trong phiên này."
+            )
+            return
         await status_message.edit_text(
-            f"Đã ghép xong ({output_path.stat().st_size / MIB:.1f} MB). Đang gửi file..."
+            f"Đã ghép bằng adapter {report['adapter']} "
+            f"({output_size / MIB:.1f} MB). "
+            "Đã kiểm tra CRC ZIP, chưa xác nhận tương thích trong game. Đang gửi file..."
         )
         await update.effective_message.reply_document(
-            document=FSInputFile(str(output_path), filename="aki-merged.zip"),
+            document=FSInputFile(str(output_path), filename="aki-mod-merged.zip"),
             read_timeout=1800,
             write_timeout=1800,
             connect_timeout=60,
             pool_timeout=60,
         )
         _cleanup(context)
-    except MergeError as exc:
+    except ModPipelineError as exc:
         await status_message.edit_text(f"Không ghép được: {exc}")
     except Exception as exc:
         await status_message.edit_text(
@@ -250,7 +272,13 @@ def main():
     api_base = os.environ.get("TELEGRAM_API_BASE_URL")
     file_base = os.environ.get("TELEGRAM_FILE_BASE_URL")
     if api_base and file_base:
-        builder = builder.base_url(api_base).base_file_url(file_base)
+        # Local Bot API may return absolute local file paths from getFile.
+        # PTB local_mode enables handling those paths for file downloads/uploads.
+        builder = (
+            builder.base_url(api_base)
+            .base_file_url(file_base)
+            .local_mode(True)
+        )
 
     app = builder.build()
     app.add_handler(CommandHandler("start", start))

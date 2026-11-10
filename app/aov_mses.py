@@ -8,6 +8,7 @@ MAGIC = b"MSES"
 HEADER_SIZE = 0x8C
 CHECKSUM_START = 0x60
 CHECKSUM_END = 0x80
+MAX_MSES_ROW_BYTES = 64 * 1024 * 1024
 
 
 class MSESError(ValueError):
@@ -45,7 +46,7 @@ def parse_mses(data: bytes, *, verify_checksum: bool = True) -> MSESTable:
         row_size = struct.unpack_from("<I", data, offset)[0]
         start = offset + 4
         end = start + row_size
-        if row_size < 4 or end > len(data):
+        if row_size < 4 or row_size > MAX_MSES_ROW_BYTES or end > len(data):
             raise MSESError(f"Độ dài bản ghi MSES thứ {index} không hợp lệ.")
         rows.append(data[start:end])
         offset = end
@@ -61,7 +62,7 @@ def build_mses(table: MSESTable, rows: list[bytes] | tuple[bytes, ...], *, field
         raise MSESError("Số trường MSES mới không hợp lệ.")
     body = bytearray()
     for row in rows:
-        if not isinstance(row, bytes) or len(row) < 4 or len(row) > 64 * 1024 * 1024:
+        if not isinstance(row, bytes) or len(row) < 4 or len(row) > MAX_MSES_ROW_BYTES:
             raise MSESError("Bản ghi MSES có kích thước không hợp lệ.")
         body.extend(struct.pack("<I", len(row)))
         body.extend(row)
@@ -112,12 +113,22 @@ def merge_mses_rows(
     overlay_map, overlay_order = index_rows(overlay.rows, "overlay")
     common = set(base_map).intersection(overlay_map)
     differing_common = {key for key in common if base_map[key] != overlay_map[key]}
-    if base.field_count != overlay.field_count and differing_common:
+    overrides = set(override_keys or ())
+    missing_override_keys = overrides - set(overlay_map)
+    if missing_override_keys:
+        formatted = ", ".join(f"0x{key:08x}" for key in sorted(missing_override_keys))
         raise MSESError(
-            "Schema MSES khác nhau và có bản ghi chung khác nội dung; từ chối ghép an toàn."
+            f"Khóa ghi đè MSES không tồn tại trong overlay: {formatted}."
         )
 
-    overrides = override_keys or set()
+    if base.field_count != overlay.field_count:
+        unsafe_differing_common = differing_common - overrides
+        if unsafe_differing_common:
+            raise MSESError(
+                "Schema MSES khác nhau và có bản ghi chung không được cho phép ghi đè; "
+                "từ chối ghép an toàn."
+            )
+
     merged = dict(base_map)
     replaced = []
     appended = []
