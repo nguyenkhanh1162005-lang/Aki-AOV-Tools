@@ -44,7 +44,7 @@ jobs:
           name: ifix-parser-source
           path: tools/ifix_parse.py
       - name: Package app source for integration validation
-        run: zip -qr /tmp/aki-aov-app-source.zip app web bot.py requirements.txt
+        run: zip -qr /tmp/aki-aov-app-source.zip app web bot.py requirements.txt -x '*/__pycache__/*' '*.pyc'
       - uses: actions/upload-artifact@v4
         with:
           name: aki-aov-app-source
