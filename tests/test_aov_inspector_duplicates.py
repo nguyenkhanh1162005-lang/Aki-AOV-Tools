@@ -33,6 +33,10 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
                 "reference_scan_complete": True,
                 "reference_scan_errors": [],
                 "object_references": [],
+                "assetbundle_metadata": [],
+                "assetbundle_metadata_count": 0,
+                "assetbundle_metadata_complete": True,
+                "assetbundle_metadata_errors": [],
                 "reference_integrity": {
                     "local_resolved": 0,
                     "local_missing": [],
@@ -91,6 +95,10 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
                 "reference_scan_complete": True,
                 "reference_scan_errors": [],
                 "object_references": [],
+                "assetbundle_metadata": [],
+                "assetbundle_metadata_count": 0,
+                "assetbundle_metadata_complete": True,
+                "assetbundle_metadata_errors": [],
                 "reference_integrity": {
                     "local_resolved": 0,
                     "local_missing": [],
