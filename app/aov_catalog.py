@@ -115,7 +115,7 @@ def merge_resource_packer_tree(base_tree: dict, overlay_tree: dict) -> tuple[dic
     }
 
 
-def merge_resource_verification_tree(base_tree: dict, overlay_tree: dict) -> tuple[dict, dict]:
+def merge_resource_verification_tree(base_tree: dict, overlay_tree: dict, *, prefer_overlay_paths: set[str] | None = None) -> tuple[dict, dict]:
     """Union verification path lists, retaining base checksums on conflicts."""
     if base_tree.get("m_Name") != overlay_tree.get("m_Name"):
         raise AOVCatalogMergeError("Tên ResourceVerificationInfoSet không khớp.")
@@ -134,6 +134,8 @@ def merge_resource_verification_tree(base_tree: dict, overlay_tree: dict) -> tup
             index[path] = i
         appended = []
         conflicts = []
+        overridden = []
+        preferred = prefer_overlay_paths or set()
         for row in overlay_rows:
             path = row.get("PathInIFS")
             if path not in index:
@@ -141,7 +143,11 @@ def merge_resource_verification_tree(base_tree: dict, overlay_tree: dict) -> tup
                 base_rows.append(copy.deepcopy(row))
                 appended.append(path)
             elif base_rows[index[path]].get("CrcXor") != row.get("CrcXor"):
-                conflicts.append(path)
+                if path in preferred:
+                    base_rows[index[path]] = copy.deepcopy(row)
+                    overridden.append(path)
+                else:
+                    conflicts.append(path)
         result[field] = base_rows
         report[field] = {
             "base_count": len(base_rows) - len(appended),
@@ -149,6 +155,7 @@ def merge_resource_verification_tree(base_tree: dict, overlay_tree: dict) -> tup
             "output_count": len(base_rows),
             "appended_paths": appended,
             "checksum_conflicts_kept_base": conflicts,
+            "checksum_conflicts_overridden_with_overlay": overridden,
         }
     return result, report
 
@@ -185,7 +192,7 @@ def _mono_behaviours(env):
     return objects
 
 
-def merge_aov_metadata_assetbundle(base_bytes: bytes, overlay_bytes: bytes, *, kind: str) -> tuple[bytes, dict]:
+def merge_aov_metadata_assetbundle(base_bytes: bytes, overlay_bytes: bytes, *, kind: str, prefer_overlay_paths: set[str] | None = None) -> tuple[bytes, dict]:
     """Merge AoV UnityFS metadata and preserve the source bundle's encryption flags."""
     parser = _unitypy_aov()
     try:
@@ -211,7 +218,12 @@ def merge_aov_metadata_assetbundle(base_bytes: bytes, overlay_bytes: bytes, *, k
             continue
         _, overlay_tree = overlay_objects[name]
         if kind == "resource_packer" and "AllResourcePackInfo" in base_tree:
-            merged_tree, report = merge_fn(base_tree, overlay_tree)
+            if kind == "resource_verification":
+                merged_tree, report = merge_resource_verification_tree(
+                    base_tree, overlay_tree, prefer_overlay_paths=prefer_overlay_paths
+                )
+            else:
+                merged_tree, report = merge_fn(base_tree, overlay_tree)
             base_obj.save_typetree(merged_tree)
             reports[name] = report
         elif kind == "resource_verification" and (
