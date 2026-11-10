@@ -113,22 +113,20 @@ def merge_mses_rows(
     overlay_map, overlay_order = index_rows(overlay.rows, "overlay")
     common = set(base_map).intersection(overlay_map)
     differing_common = {key for key in common if base_map[key] != overlay_map[key]}
-    if base.field_count != overlay.field_count and differing_common:
+    overrides = set(override_keys or ())
+    missing_override_keys = overrides - set(overlay_map)
+    if missing_override_keys:
+        formatted = ", ".join(f"0x{key:08x}" for key in sorted(missing_override_keys))
         raise MSESError(
-            "Schema MSES khác nhau và có bản ghi chung khác nội dung; từ chối ghép an toàn."
+            f"Khóa ghi đè MSES không tồn tại trong overlay: {formatted}."
         )
 
-    overrides = set(override_keys or ())
-    if overrides:
-        if base.field_count != overlay.field_count:
+    if base.field_count != overlay.field_count:
+        unsafe_differing_common = differing_common - overrides
+        if unsafe_differing_common:
             raise MSESError(
-                "Không thể ghi đè khóa MSES khi schema giữa base và overlay khác nhau."
-            )
-        missing_override_keys = overrides - common
-        if missing_override_keys:
-            formatted = ", ".join(f"0x{key:08x}" for key in sorted(missing_override_keys))
-            raise MSESError(
-                f"Khóa ghi đè MSES không tồn tại ở cả base và overlay: {formatted}."
+                "Schema MSES khác nhau và có bản ghi chung không được cho phép ghi đè; "
+                "từ chối ghép an toàn."
             )
 
     merged = dict(base_map)
