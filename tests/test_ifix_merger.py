@@ -65,6 +65,24 @@ class IFixMergerTests(unittest.TestCase):
         final_bytes = serialize_ifix_patch(merged)
         self.assertEqual(serialize_ifix_patch(parse_ifix_patch(final_bytes)), final_bytes)
 
+    def test_merge_does_not_mutate_input_patches(self):
+        import copy
+
+        base = make_patch("BaseFix", "BaseType", "base-string", "baseField")
+        incoming = make_patch("IncomingFix", "IncomingType", "incoming-string", "incomingField")
+        base_before = copy.deepcopy(base)
+        incoming_before = copy.deepcopy(incoming)
+        merge_ifix_patches(base, incoming)
+        self.assertEqual(base, base_before)
+        self.assertEqual(incoming, incoming_before)
+
+    def test_invalid_input_references_raise_ifix_error_before_remapping(self):
+        base = make_patch("BaseFix", "BaseType", "base-string", "baseField")
+        incoming = make_patch("IncomingFix", "IncomingType", "incoming-string", "incomingField")
+        incoming["fixes"][0]["type"] = 99
+        with self.assertRaisesRegex(IFixMergeError, "FixInfo trỏ tới type"):
+            merge_ifix_patches(base, incoming)
+
     def test_negative_collection_count_is_rejected(self):
         import struct
 
