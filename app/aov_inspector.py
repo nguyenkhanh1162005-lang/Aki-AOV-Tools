@@ -4,7 +4,6 @@ import zipfile
 from collections import Counter
 from pathlib import Path, PurePosixPath
 
-from app.aov_zstd import AoVZstdError, decode_aov_bytes
 
 MAX_FILES = 10
 MAX_ENTRIES = 20000
@@ -53,7 +52,7 @@ def inspect_archives(paths: list[str]) -> str:
     total_uncompressed = 0
     inventories: list[tuple[str, dict[str, tuple[int, int]], Counter[str], list[str]]] = []
     collisions: dict[str, list[str]] = {}
-    zstd_results: list[tuple[str, str, int | None]] = []
+    bank_files: list[tuple[str, int, int]] = []
 
     for path in paths:
         try:
@@ -84,21 +83,16 @@ def inspect_archives(paths: list[str]) -> str:
                 if any(token in lower for token in IMPORTANT_NAMES):
                     important.append(name)
                 if Path(name).name.lower() in {"battlebank.bytes", "lobbybank.bytes"}:
-                    try:
-                        payload = archive.read(info)
-                        decoded = decode_aov_bytes(payload)
-                        zstd_results.append((Path(path).name + " :: " + name,
-                                             "GIẢI NÉN ZSTD THÀNH CÔNG", len(decoded)))
-                    except AoVZstdError as exc:
-                        zstd_results.append((Path(path).name + " :: " + name,
-                                             "CHƯA GIẢI NÉN ĐƯỢC: " + str(exc), None))
+                    # Inventory only. Full decompression can expand dramatically and
+                    # monopolize a small web instance; keep this endpoint responsive.
+                    bank_files.append((Path(path).name + " :: " + name, info.file_size, info.CRC))
                 collisions.setdefault(name, []).append(Path(path).name)
 
         inventories.append((Path(path).name, files, extensions, important))
 
     lines = [
         "BÁO CÁO KIỂM TRA CẤU TRÚC ZIP AOV",
-        "Có thử giải nén Zstandard cho BattleBank/LobbyBank theo wrapper AoV đã nhận diện; không sửa file gốc.",
+        "Chế độ kiểm tra nhanh chỉ lập danh mục ZIP; không giải nén toàn bộ BattleBank/LobbyBank.",
         "",
     ]
     for filename, files, extensions, important in inventories:
@@ -114,10 +108,10 @@ def inspect_archives(paths: list[str]) -> str:
         lines.append("")
 
     lines.extend(["", "KIỂM TRA BATTLEBANK / LOBBYBANK"])
-    if zstd_results:
-        for name, status, decoded_size in zstd_results:
-            suffix = f" | dữ liệu sau giải nén: {decoded_size:,} byte" if decoded_size is not None else ""
-            lines.append(f"- {name}: {status}{suffix}")
+    if bank_files:
+        for name, size, crc in bank_files:
+            lines.append(f"- {name}: đã nhận diện | kích thước trong ZIP: {size:,} byte | CRC32: {crc:08x}")
+        lines.append("- Chưa giải nén nội dung ngân hàng ở bước kiểm tra nhanh để tránh treo máy chủ.")
     else:
         lines.append("- Không tìm thấy BattleBank.bytes hoặc LobbyBank.bytes trong các ZIP đã chọn.")
 
