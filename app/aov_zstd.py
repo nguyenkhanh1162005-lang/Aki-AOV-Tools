@@ -51,6 +51,23 @@ def decode_aov_bytes(data: bytes, *, verify_size: bool = True) -> bytes:
     return decoded
 
 
+
+def encode_aov_bytes(data: bytes, *, level: int = 17) -> bytes:
+    """Encode raw bytes in the AoV 22 4A 00 EF + size + Zstd wrapper."""
+    if not isinstance(data, (bytes, bytearray, memoryview)):
+        raise TypeError("data must be bytes-like")
+    raw = bytes(data)
+    try:
+        compressed = pyzstd.compress(
+            raw,
+            level,
+            pyzstd.ZstdDict(ZSTD_DICT, True),
+        )
+    except Exception as exc:
+        raise AoVZstdError(f"Nén Zstandard thất bại: {exc}") from exc
+    return WRAPPER_MAGIC + len(raw).to_bytes(4, "little") + compressed
+
+
 def decode_file(source: str | Path, destination: str | Path) -> dict:
     source, destination = Path(source), Path(destination)
     raw = source.read_bytes()
