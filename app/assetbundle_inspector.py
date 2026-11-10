@@ -148,6 +148,10 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
         Path(summary["name"]).name.lower(): asset_file
         for summary, asset_file in zip(serialized_summaries, serialized_files)
     }
+    serialized_by_exact_name = {
+        _safe_text(getattr(asset_file, "name", "")): asset_file
+        for asset_file in serialized_files
+    }
     reference_integrity = {
         "local_resolved": 0,
         "local_missing": [],
@@ -156,10 +160,7 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
         "invalid_external_indices": [],
     }
     for reference in object_references:
-        source_file = next(
-            (item for item in serialized_files if _safe_text(getattr(item, "name", "")) == reference["from_file"]),
-            None,
-        )
+        source_file = serialized_by_exact_name.get(reference["from_file"])
         file_id = reference["file_id"]
         path_id = reference["path_id"]
         if file_id == 0:
