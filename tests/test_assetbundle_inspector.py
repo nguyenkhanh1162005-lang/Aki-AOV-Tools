@@ -434,6 +434,8 @@ class AssetBundleInspectorTests(unittest.TestCase):
         refs = report["cross_bundle_references"]
         self.assertEqual(refs["resolved_count"], 1)
         self.assertEqual(refs["missing_path_id_count"], 1)
+        self.assertFalse(report["cross_bundle_reference_integrity_pass"])
+        self.assertFalse(report["structural_checks_pass"])
         self.assertEqual(refs["resolved"][0]["path_id"], 300)
         self.assertEqual(refs["missing_path_ids"][0]["path_id"], 999)
         self.assertFalse(refs["index_incomplete"])
