@@ -2,7 +2,9 @@ import hashlib
 import struct
 import unittest
 
-from app.aov_mses import MSESError, merge_mses, parse_mses
+from app.aov_mses import MSESError, merge_aov_mses_resource, merge_mses, parse_mses
+from app.aov_crypto import decode_aov_resource, encrypt_aov_resource
+from app.aov_zstd import encode_aov_bytes
 
 
 def make_mses(fields, rows):
@@ -69,6 +71,36 @@ class MSESMergeTests(unittest.TestCase):
         table = make_mses(1, [row(595001, b"one")])
         with self.assertRaises(MSESError):
             merge_mses(table, table, target_prefixes=())
+
+
+    def test_resource_pipeline_merges_aes_base_with_zstd_incoming(self):
+        resource_name = "Databin/Client/Sound/BattleBank.bytes"
+        base_plain = make_mses(59, [
+            row(5950001, b"old-sfx"),
+            row(1230001, b"keep-base"),
+        ])
+        incoming_plain = make_mses(59, [
+            row(5950001, b"new-sfx"),
+            row(5950002, b"new-voice"),
+        ])
+        base_wrapped = encrypt_aov_resource(resource_name, base_plain)
+        incoming_wrapped = encode_aov_bytes(incoming_plain)
+
+        merged_wrapped, report = merge_aov_mses_resource(
+            resource_name,
+            base_wrapped,
+            incoming_wrapped,
+            target_prefixes=("595",),
+        )
+        self.assertTrue(merged_wrapped.startswith(b"\\x22\\x4a\\x67\\x00"))
+        merged_plain = decode_aov_resource(resource_name, merged_wrapped)
+        parsed = parse_mses(merged_plain)
+        by_key = {struct.unpack_from("<I", r, 0)[0]: r for r in parsed.rows}
+        self.assertEqual(by_key[5950001], row(5950001, b"new-sfx"))
+        self.assertEqual(by_key[5950002], row(5950002, b"new-voice"))
+        self.assertEqual(by_key[1230001], row(1230001, b"keep-base"))
+        self.assertEqual(report.rows_added, 1)
+        self.assertEqual(report.rows_replaced, 1)
 
 
 if __name__ == "__main__":
