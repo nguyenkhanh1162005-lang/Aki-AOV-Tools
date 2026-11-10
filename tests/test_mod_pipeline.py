@@ -3,7 +3,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from app.mod_pipeline import ModPipelineError, _archive_profile, merge_mod_archives
+from app.mod_pipeline import ModPipelineError, _archive_profile, _select_adapter, merge_mod_archives
 
 
 class ModPipelineTests(unittest.TestCase):
@@ -38,6 +38,28 @@ class ModPipelineTests(unittest.TestCase):
             profile = _archive_profile(source)
             self.assertEqual(profile["source_role"], "aov_skin_mod_container_candidate")
             self.assertTrue(profile["has_mod_skin_container"])
+
+    def test_actor595_overlay_evidence_can_span_multiple_zip_parts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            mod_pack = self._zip(folder, "10-skin-mod.zip", {
+                "Resources.zip": b"nested mod resources",
+                "DanhSachSkin.txt": b"skin mod list",
+            })
+            ifix_part = self._zip(folder, "vtk-ifix-part.zip", {
+                "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"VTK IFix payload",
+            })
+            asset_part = self._zip(folder, "vtk-assets-part.zip", {
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"Actor 595 bundle",
+            })
+            profiles = [
+                _archive_profile(path)
+                for path in (mod_pack, ifix_part, asset_part)
+            ]
+            self.assertEqual(
+                _select_adapter(profiles),
+                "aov_mod_to_mod_vtk_actor595_1.64.1",
+            )
 
     def test_unknown_aov_resource_pack_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
