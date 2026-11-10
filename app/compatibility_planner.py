@@ -45,6 +45,15 @@ def _validate_resource(item: Any, index: int) -> dict[str, Any]:
     dependencies = item.get("dependencies", [])
     if not isinstance(dependencies, list) or any(not isinstance(dep, str) or not dep.strip() for dep in dependencies):
         raise CompatibilityPlanError(f"Danh sách dependency không hợp lệ cho resource: {path}")
+    unity_dependencies = item.get("unity_dependencies", [])
+    unity_external_paths = item.get("unity_external_paths", [])
+    for field_name, values in (("unity_dependencies", unity_dependencies),
+                               ("unity_external_paths", unity_external_paths)):
+        if not isinstance(values, list) or any(not isinstance(value, str) or not value.strip() for value in values):
+            raise CompatibilityPlanError(f"Danh sách {field_name} không hợp lệ cho resource: {path}")
+    dependency_inventory_complete = item.get("dependency_inventory_complete", False)
+    if not isinstance(dependency_inventory_complete, bool):
+        raise CompatibilityPlanError(f"Cờ dependency_inventory_complete không hợp lệ cho resource: {path}")
     result = dict(item)
     result.update({
         "path": path,
@@ -122,6 +131,12 @@ def plan_resource_compatibility(resources: list[dict[str, Any]]) -> dict[str, An
             "skin_ids": sorted(skins),
             "dependencies": dependencies,
             "missing_dependencies": missing_dependencies,
+            "unity_dependencies": sorted({value for item in entries for value in item.get("unity_dependencies", [])}),
+            "unity_external_paths": sorted({value for item in entries for value in item.get("unity_external_paths", [])}),
+            "dependency_inventory_complete": all(
+                item.get("dependency_inventory_complete", False) for item in entries
+                if item.get("format") == "unity_assetbundle"
+            ) if any(item.get("format") == "unity_assetbundle" for item in entries) else None,
             "reasons": reasons,
         })
 
