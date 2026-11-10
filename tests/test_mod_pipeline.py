@@ -23,7 +23,7 @@ class ModPipelineTests(unittest.TestCase):
             result = merge_mod_archives([first, second], str(output))
             self.assertEqual(result["adapter"], "generic_zip")
             self.assertTrue(result["structurally_validated"])
-            self.assertFalse(result["official_game_package_used"])
+            self.assertFalse(result["official_game_package_injected"])
             with zipfile.ZipFile(output) as archive:
                 self.assertEqual(set(archive.namelist()), {"readme.txt", "extra.txt"})
                 self.assertIsNone(archive.testzip())
