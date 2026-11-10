@@ -9,11 +9,13 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .aov_format_detector import detect_resource_format
+from .assetbundle_inspector import AssetBundleInspectError, inspect_assetbundle
 
 MAX_FILES = 10
 MAX_ENTRIES = 20000
 MAX_TOTAL_UNCOMPRESSED = 1024 * 1024 * 1024
 MAX_ENTRY_UNCOMPRESSED = 256 * 1024 * 1024
+MAX_ASSETBUNDLE_DEPENDENCY_INSPECT_BYTES = 64 * 1024 * 1024
 
 
 class ResourceManifestError(ValueError):
@@ -139,6 +141,45 @@ def build_resource_manifest(paths: list[str]) -> dict[str, Any]:
                     item["game_version"] = version
                 if platform:
                     item["platform"] = platform
+                if detected == "Unity AssetBundle":
+                    item["dependency_inventory_complete"] = False
+                    item["unity_dependencies"] = []
+                    item["unity_external_paths"] = []
+                    if info.file_size <= MAX_ASSETBUNDLE_DEPENDENCY_INSPECT_BYTES:
+                        try:
+                            bundle_report = inspect_assetbundle(
+                                archive.read(info), f"{source} :: {path}"
+                            )
+                            metadata = bundle_report.get("assetbundle_metadata", [])
+                            unity_dependencies = sorted({
+                                str(dependency)
+                                for record in metadata
+                                for dependency in record.get("dependencies", [])
+                                if isinstance(dependency, str) and dependency.strip()
+                            })
+                            external_paths = sorted({
+                                str(reference.get("to"))
+                                for reference in bundle_report.get("external_references", [])
+                                if isinstance(reference, dict)
+                                and isinstance(reference.get("to"), str)
+                                and reference.get("to").strip()
+                            })
+                            item["unity_dependencies"] = unity_dependencies
+                            item["unity_external_paths"] = external_paths
+                            item["dependency_inventory_complete"] = bool(
+                                bundle_report.get("assetbundle_metadata_complete")
+                                and bundle_report.get("reference_scan_complete")
+                            )
+                            item["dependency_inspection"] = (
+                                "complete" if item["dependency_inventory_complete"]
+                                else "partial"
+                            )
+                        except (AssetBundleInspectError, RuntimeError, ValueError, OSError) as exc:
+                            item["dependency_inspection_error"] = str(exc)[:240]
+                    else:
+                        item["dependency_inspection_error"] = (
+                            "AssetBundle vượt quá giới hạn phân tích dependency 64 MiB."
+                        )
                 resources.append(item)
         archive_reports.append({"source": source, "resource_count": source_count})
 
