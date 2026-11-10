@@ -22,6 +22,9 @@ jobs:
         with:
           name: aov-zstd-dict
           path: aov-zstd-dict.bin
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
       - name: Prepare temporary UnityPy wheels for local metadata inspection
         run: python -m pip download UnityPy -d /tmp/unitypy-wheels
       - uses: actions/upload-artifact@v4
