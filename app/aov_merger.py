@@ -97,8 +97,10 @@ def _encode(data: bytes, resource_name: str, mode: str) -> bytes:
 
 
 def _decode_package_entry(data: bytes, name: str) -> tuple[bytes, str]:
-    # CommonActions contains a mixture of raw XML and the game's Zstandard wrapper.
-    if data.startswith(b"\x22\x4a"):
+    # CommonActions contains raw XML, Zstandard, and occasionally AES-wrapped entries.
+    if data[:3] == b"\x22\x4a\x67" or (
+        data[:2] == b"\x22\x4a" and data.find(ZSTD_MAGIC) >= 0
+    ):
         return _decode(data, name)
     return data, "raw"
 
