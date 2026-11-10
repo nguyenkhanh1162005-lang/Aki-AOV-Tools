@@ -3,8 +3,8 @@ name: Aki free Drive AOV processor
 on:
   workflow_dispatch:
     inputs:
-      drive_links:
-        description: "Google Drive links, one ZIP per line (2-10 links; files must be shared as Anyone with the link - Viewer)"
+      confirm:
+        description: "Nhập RUN để xác nhận chạy bằng link Drive đã lưu trong GitHub Secret AKI_DRIVE_LINKS"
         required: true
         type: string
 
@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   merge:
+    if: ${{ inputs.confirm == 'RUN' }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -39,8 +40,10 @@ jobs:
 
       - name: Download Drive ZIPs and run the existing AOV merger
         env:
-          AKI_DRIVE_LINKS: ${{ inputs.drive_links }}
-        run: python tools/process_drive_aov.py
+          AKI_DRIVE_LINKS: ${{ secrets.AKI_DRIVE_LINKS }}
+        run: |
+          test -n "$AKI_DRIVE_LINKS" || (echo "Thiếu GitHub Secret AKI_DRIVE_LINKS" && exit 1)
+          python tools/process_drive_aov.py
 
       - name: Upload result for download on iPhone
         uses: actions/upload-artifact@v4
