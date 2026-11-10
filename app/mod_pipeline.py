@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import tempfile
 import zipfile
@@ -25,6 +26,14 @@ AOV_MARKERS = {
     "resourceverificationinfosetall.assetbundle",
 }
 AOV_EXTENSIONS = {".bytes", ".assetbundle", ".bnk", ".wem"}
+
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _archive_profile(path: str) -> dict[str, Any]:
@@ -167,6 +176,11 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
             "structurally_validated": True,
             "game_compatibility_tested": False,
             "official_game_package_injected": False,
+            "input_sha256": [
+                {"name": Path(path).name, "sha256": _sha256_file(path)}
+                for path in archive_paths
+            ],
+            "output_sha256": _sha256_file(str(destination)),
         })
         return result
     except (MergeError, AOVMergeError) as exc:
