@@ -24,8 +24,10 @@ class ModPipelineTests(unittest.TestCase):
             folder = Path(tmp)
             first = folder / "large-a.zip"
             second = folder / "large-b.zip"
-            first.write_bytes(b"x" * (250 * 1024 * 1024))
-            second.write_bytes(b"x" * (250 * 1024 * 1024 + 1))
+            with first.open("wb") as stream:
+                stream.truncate(250 * 1024 * 1024)
+            with second.open("wb") as stream:
+                stream.truncate(250 * 1024 * 1024 + 1)
             with self.assertRaisesRegex(ModPipelineError, "500 MB"):
                 _preflight_inputs([str(first), str(second)])
 
