@@ -316,6 +316,12 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
             "type_conflict_path_ids": type_conflicts[:MAX_REPORTED_REFERENCES],
         })
 
+    object_id_types_match = (
+        not object_id_inventory_incomplete
+        and not ambiguous_object_id_cabs
+        and all(item["type_conflict_count"] == 0 for item in object_id_overlaps)
+    )
+
     cross_bundle_references = {
         "resolved": [],
         "missing_path_ids": [],
@@ -364,6 +370,7 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
         "object_id_overlaps": object_id_overlaps,
         "object_id_inventory_incomplete": object_id_inventory_incomplete,
         "ambiguous_object_id_cabs": ambiguous_object_id_cabs[:MAX_REPORTED_REFERENCES],
+        "object_id_types_match": object_id_types_match,
         "cross_bundle_references": {
             "resolved_count": len(cross_bundle_references["resolved"]),
             "missing_path_id_count": len(cross_bundle_references["missing_path_ids"]),
@@ -377,6 +384,7 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
         },
         "structural_checks_pass": (
             version_match and platform_match and inventory_complete and not type_conflicts
+            and object_id_types_match
         ),
         # Unity object references, preload tables, CAB remapping and bundle metadata
         # still need a version-specific adapter before any actual merge is safe.
