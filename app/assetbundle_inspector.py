@@ -214,6 +214,7 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
         "reference_scan_complete": reference_scan_complete,
         "reference_scan_nodes": min(reference_scan_nodes, MAX_REFERENCE_SCAN_NODES),
         "reference_scan_errors": reference_scan_errors,
+        "reference_integrity": reference_integrity,
         "container_entries": container_items,
         "container_entry_count": len(container),
         "container_inventory_complete": len(container) <= MAX_REPORTED_CONTAINERS,
