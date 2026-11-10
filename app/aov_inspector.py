@@ -378,6 +378,10 @@ def inspect_archives(paths: list[str]) -> str:
                     f"index chưa đầy đủ: {cross_refs['index_incomplete']}"
                 )
                 lines.append(
+                    f"  • PPtr overlay → CAB nền đã xác minh: "
+                    f"{result['cross_bundle_reference_integrity_pass']}"
+                )
+                lines.append(
                     f"  • Kiểm tra cấu trúc đạt: {result['structural_checks_pass']} | "
                     "Cho phép ghép tự động: False"
                 )
