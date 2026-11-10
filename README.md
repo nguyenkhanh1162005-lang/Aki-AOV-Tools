@@ -93,3 +93,5 @@ API `POST /api/compatibility/inspect` nhận nhiều ZIP qua multipart field `fi
 Với mục AssetBundle UnityFS có kích thước không quá 64 MiB, manifest còn thử đọc metadata AssetBundle để lấy danh sách `m_Dependencies` và external CAB paths ở chế độ chỉ đọc. Kết quả có cờ `dependency_inventory_complete`; nếu parser lỗi, dữ liệu vượt giới hạn hoặc quét tham chiếu chưa đầy đủ thì dependency được đánh dấu chưa hoàn chỉnh. Đây chưa phải xác minh mọi dependency đã được đóng gói, và không tạo ra quyền sửa hoặc ghép bundle.
 
 Compatibility planner giữ riêng các trường `unity_dependencies`, `unity_external_paths` và `dependency_inventory_complete` trong báo cáo cho từng AssetBundle. Các tham chiếu Unity này không bị ép thành đường dẫn ZIP thông thường để tránh kết luận sai về dependency còn thiếu.
+
+Trong báo cáo tương thích, `SAFE_MERGE` chỉ dành cho tệp văn bản tài liệu không thuộc tài nguyên AoV (ví dụ `.txt`, `.md`, `.rst`, `.license`) và chỉ có nghĩa là có thể thêm đường dẫn ở cấp ZIP. Ảnh, âm thanh, JSON cấu hình, bundle và các tệp có thể được game sử dụng vẫn cần quy tắc riêng; không được hiểu `SAFE_MERGE` là bảo đảm chạy trong Liên Quân.
