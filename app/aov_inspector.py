@@ -119,7 +119,7 @@ def inspect_archives(paths: list[str]) -> str:
                             wwise_reports.append((label, inspect_wwise_bnk(archive.read(info))))
                         except (WwiseBNKError, RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
                             wwise_reports.append((label, f"BNK không hợp lệ hoặc chưa hỗ trợ: {exc}"))
-                if Path(name).suffix.lower() == ".assetbundle" and header.startswith((b"UnityFS\\x00", b"UnityRaw\\x00", b"UnityWeb\\x00")):
+                if Path(name).suffix.lower() == ".assetbundle" and header.startswith((b"UnityFS\x00", b"UnityRaw\x00", b"UnityWeb\x00")):
                     label = Path(path).name + " :: " + name
                     if info.file_size > MAX_ASSETBUNDLE_INSPECT_BYTES:
                         assetbundle_reports.append((label, "Bỏ qua phân tích sâu: AssetBundle vượt quá 64 MiB."))
