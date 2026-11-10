@@ -63,6 +63,10 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
                 "container_inventory_complete": True,
                 "shared_container_paths": 2,
                 "replacement_candidates": ["assets/hero.prefab"],
+                "object_id_overlaps": [],
+                "object_id_inventory_incomplete": False,
+                "ambiguous_object_id_cabs": [],
+                "object_id_types_match": True,
                 "cross_bundle_references": {
                     "resolved_count": 0,
                     "missing_path_id_count": 0,
