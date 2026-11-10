@@ -72,8 +72,28 @@ class AssetBundleInspectorTests(unittest.TestCase):
 
 
     def test_combined_preflight_requires_all_sidecar_inputs_together(self):
+        base = {
+            "cab-a": {
+                "inventories_complete": True,
+                "path_ids": [1],
+                "types": {"1": "Texture2D"},
+                "payload_hashes": {"1": "base"},
+                "externals": [],
+                "references": [],
+            }
+        }
+        overlay = {
+            "cab-a": {
+                "inventories_complete": True,
+                "path_ids": [2],
+                "types": {"2": "Texture2D"},
+                "payload_hashes": {"2": "overlay"},
+                "externals": [],
+                "references": [],
+            }
+        }
         plan = build_assetbundle_merge_preflight(
-            {}, {}, base_resources={"base.resS": 10}
+            base, overlay, base_resources={"base.resS": 10}
         )
         self.assertFalse(plan["ready"])
         self.assertEqual(plan["stage"], "sidecar")
