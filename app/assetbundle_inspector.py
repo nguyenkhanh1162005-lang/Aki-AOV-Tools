@@ -158,10 +158,25 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
 
     path_counts = Counter(container_paths)
     dependencies = getattr(parsed, "m_Dependencies", []) or []
+    dependency_digest = hashlib.sha256()
+    for dependency in dependencies:
+        dependency_digest.update(str(dependency).encode("utf-8", "replace"))
+        dependency_digest.update(b"\0")
+    main_asset_digest = hashlib.sha256()
+    if main_info is not None:
+        main_asset_digest.update(
+            (
+                f"{main_info['preload_index']}:{main_info['preload_size']}:"
+                f"{main_info['asset']['file_id']}:{main_info['asset']['path_id']}"
+            ).encode("ascii")
+        )
     return {
         "path_id": _safe_text(getattr(obj, "path_id", "")),
         "assetbundle_name": _safe_text(getattr(parsed, "m_AssetBundleName", "")),
         "dependencies": [_safe_text(item) for item in dependencies[:MAX_REPORTED_REFERENCES]],
+        "dependency_count": len(dependencies),
+        "dependencies_sha256": dependency_digest.hexdigest(),
+        "main_asset_sha256": main_asset_digest.hexdigest(),
         "preload_table_count": len(preload_table),
         "container_entry_count": len(entries),
         "duplicate_container_path_count": sum(count - 1 for count in path_counts.values() if count > 1),
@@ -583,7 +598,13 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
             "container_metadata_match": (
                 base_meta["container_metadata_sha256"] == overlay_meta["container_metadata_sha256"]
             ),
-            "dependencies_match": base_meta["dependencies"] == overlay_meta["dependencies"],
+            "dependencies_match": (
+                base_meta["dependency_count"] == overlay_meta["dependency_count"]
+                and base_meta["dependencies_sha256"] == overlay_meta["dependencies_sha256"]
+            ),
+            "main_asset_match": (
+                base_meta["main_asset_sha256"] == overlay_meta["main_asset_sha256"]
+            ),
             "base_preload_count": base_meta["preload_table_count"],
             "overlay_preload_count": overlay_meta["preload_table_count"],
             "base_container_count": base_meta["container_entry_count"],
