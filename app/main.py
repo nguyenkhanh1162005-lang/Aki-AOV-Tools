@@ -95,6 +95,22 @@ async def start_chunked_upload(payload: dict = Body(...)):
     return {"upload_id": upload_id, "chunk_size": UPLOAD_CHUNK_BYTES}
 
 
+@app.get("/api/upload/{upload_id}/status")
+async def chunked_upload_status(upload_id: str):
+    """Return received offsets so a browser can resume an interrupted upload."""
+    session = _get_upload_session(upload_id)
+    session["created"] = time.time()
+    return {
+        "upload_id": upload_id,
+        "chunk_size": UPLOAD_CHUNK_BYTES,
+        "files": [
+            {"name": item["name"], "size": item["size"], "received": item["received"]}
+            for item in session["files"]
+        ],
+        "expires_in_seconds": UPLOAD_TTL_SECONDS,
+    }
+
+
 @app.put("/api/upload/{upload_id}/{file_index}")
 async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_offset: int = Header(..., alias="X-Chunk-Offset")):
     session = _get_upload_session(upload_id)
