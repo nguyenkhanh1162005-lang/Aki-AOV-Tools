@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import io
 import shutil
 import stat
@@ -119,6 +120,19 @@ def _normalise_vtk_path(name: str) -> str:
     if name.endswith(".assetbundle") and not name.startswith("assetbundle/"):
         name = "assetbundle/" + name
     return name
+
+
+def _zip_entry_sha256(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> str:
+    digest = hashlib.sha256()
+    try:
+        with archive.open(info, "r") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except (OSError, RuntimeError, zipfile.BadZipFile, EOFError) as exc:
+        raise AOVMergeError(
+            f"Không thể so sánh nội dung tài nguyên ZIP: {info.filename}"
+        ) from exc
+    return digest.hexdigest()
 
 
 def _is_noise_path(name: str) -> bool:
@@ -373,8 +387,13 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                     continue
                 name = _normalise_vtk_path(info.filename)
                 if name in vtk_sources:
-                    previous = vtk_sources[name][1]
-                    if previous.CRC != info.CRC or previous.file_size != info.file_size:
+                    previous_archive, previous = vtk_sources[name]
+                    if (
+                        previous.file_size != info.file_size
+                        or previous.CRC != info.CRC
+                        or _zip_entry_sha256(previous_archive, previous)
+                        != _zip_entry_sha256(zf, info)
+                    ):
                         raise AOVMergeError(f"Các phần VTK có file trùng nhưng khác nội dung: {name}")
                     continue
                 vtk_sources[name] = (zf, info)
