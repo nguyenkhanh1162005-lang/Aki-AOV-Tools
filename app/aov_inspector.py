@@ -340,6 +340,18 @@ def inspect_archives(paths: list[str]) -> str:
                         "  • CAB trùng tên, không thể đối chiếu PathID chắc chắn: "
                         + ", ".join(result["ambiguous_object_id_cabs"][:8])
                     )
+                for metadata in result["assetbundle_metadata_comparisons"][:5]:
+                    lines.append(
+                        f"  • Metadata {metadata['assetbundle_name']}: "
+                        f"preload khớp={metadata['preload_table_match']} | "
+                        f"Container khớp={metadata['container_metadata_match']} | "
+                        f"dependencies khớp={metadata['dependencies_match']}"
+                    )
+                if result["ambiguous_assetbundle_metadata_names"]:
+                    lines.append(
+                        "  • Metadata AssetBundle trùng tên, không thể ghép cặp: "
+                        + ", ".join(result["ambiguous_assetbundle_metadata_names"][:8])
+                    )
                 cross_refs = result["cross_bundle_references"]
                 lines.append(
                     f"  • PPtr overlay → CAB base hợp lệ: {cross_refs['resolved_count']} | "
