@@ -4,6 +4,7 @@ import hashlib
 import os
 import shutil
 import zipfile
+import zlib
 from pathlib import Path, PurePosixPath
 
 MAX_FILES = 10
@@ -36,7 +37,7 @@ def _digest_entry(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> str:
                 if not chunk:
                     break
                 digest.update(chunk)
-    except (RuntimeError, zipfile.BadZipFile, OSError) as exc:
+    except (RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
         raise MergeError(f"Không đọc được tệp: {info.filename}") from exc
     return digest.hexdigest()
 
