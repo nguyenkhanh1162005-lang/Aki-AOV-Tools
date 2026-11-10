@@ -12,8 +12,8 @@ from app.assetbundle_inspector import (
 
 
 class AssetBundleInspectorTests(unittest.TestCase):
-    def test_path_id_plan_deduplicates_identical_objects_and_remaps_changed_payloads(self):
-        plan = build_path_id_remap_plan(
+    def test_path_id_plan_requires_explicit_proof_before_deduplication(self):
+        args = (
             [10, 20],
             [10, 20, 30],
             {"10": "Texture2D", "20": "Mesh"},
@@ -21,11 +21,16 @@ class AssetBundleInspectorTests(unittest.TestCase):
             {"10": "same", "20": "base-hash"},
             {"10": "same", "20": "overlay-hash"},
         )
+        conservative = build_path_id_remap_plan(*args)
+        self.assertFalse(conservative["ready"])
+        self.assertEqual(conservative["deduplicate"], {})
+        self.assertIn("PPtr/dependency equivalence", conservative["blocked_path_ids"][0]["reason"])
 
-        self.assertTrue(plan["ready"])
-        self.assertEqual(plan["deduplicate"], {"10": 10})
-        self.assertEqual(plan["remap"], {"20": 31})
-        self.assertEqual(plan["preserved_overlay_only_count"], 1)
+        proven = build_path_id_remap_plan(*args, allow_payload_deduplication=True)
+        self.assertTrue(proven["ready"])
+        self.assertEqual(proven["deduplicate"], {"10": 10})
+        self.assertEqual(proven["remap"], {"20": 31})
+        self.assertEqual(proven["preserved_overlay_only_count"], 1)
 
     def test_path_id_plan_blocks_type_conflicts_and_unknown_payloads(self):
         plan = build_path_id_remap_plan(
