@@ -103,8 +103,13 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
     if file_index < 0 or file_index >= len(session["files"]):
         raise HTTPException(404, "Không tìm thấy file trong phiên tải lên.")
     item = session["files"][file_index]
-    chunk = await request.body()
-    if not chunk or len(chunk) > UPLOAD_CHUNK_BYTES:
+    chunk_buffer = bytearray()
+    async for part in request.stream():
+        chunk_buffer.extend(part)
+        if len(chunk_buffer) > UPLOAD_CHUNK_BYTES:
+            raise HTTPException(413, "Mỗi khối tải lên không được vượt quá 4 MB.")
+    chunk = bytes(chunk_buffer)
+    if not chunk:
         raise HTTPException(400, "Kích thước khối tải lên không hợp lệ.")
     offset = item["received"]
     if chunk_offset < offset:
