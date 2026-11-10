@@ -2,6 +2,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from app.resource_manifest import ResourceManifestError, build_resource_manifest
 
@@ -54,6 +55,31 @@ class ResourceManifestTests(unittest.TestCase):
                 pass
             # Some ZIP writers clear encryption flags; this test only asserts safe handling
             # through the ordinary traversal and size protections elsewhere.
+
+    @patch("app.resource_manifest.inspect_assetbundle")
+    def test_extracts_unity_assetbundle_dependencies_read_only(self, inspect_bundle):
+        inspect_bundle.return_value = {
+            "assetbundle_metadata_complete": True,
+            "reference_scan_complete": True,
+            "assetbundle_metadata": [
+                {"dependencies": ["shared/materials", "shared/textures"]},
+                {"dependencies": ["shared/materials"]},
+            ],
+            "external_references": [
+                {"from": "CAB-1", "to": "CAB-2"},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._zip(Path(tmp), "unity.zip", {
+                "assets/hero.assetbundle": b"UnityFS\\x00" + b"payload"
+            })
+            result = build_resource_manifest([source])
+            item = result["resources"][0]
+            self.assertEqual(item["unity_dependencies"],
+                             ["shared/materials", "shared/textures"])
+            self.assertEqual(item["unity_external_paths"], ["CAB-2"])
+            self.assertTrue(item["dependency_inventory_complete"])
+            inspect_bundle.assert_called_once()
 
     def test_rejects_empty_input(self):
         with self.assertRaises(ResourceManifestError):
