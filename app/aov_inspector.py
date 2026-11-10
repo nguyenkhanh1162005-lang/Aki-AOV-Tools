@@ -335,3 +335,16 @@ def inspect_archives(paths: list[str]) -> str:
         "- Chỉ nên tạo bản mod sau khi xác định đúng cấu trúc, phiên bản game và quan hệ phụ thuộc của tài nguyên.",
     ])
     return "\n".join(lines)
+
+
+def requires_format_aware_merge(report: str) -> bool:
+    """Return True when generic ZIP merging could flatten or overwrite AOV resources."""
+    if "MSES v7" in report:
+        return True
+    for line in report.splitlines():
+        if line.startswith("- ZIP/lưu trữ lồng đã mở:"):
+            try:
+                return int(line.rsplit(":", 1)[1].strip()) > 0
+            except (IndexError, ValueError):
+                return True
+    return False
