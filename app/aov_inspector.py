@@ -251,6 +251,24 @@ def inspect_archives(paths: list[str]) -> str:
                         f"  • PPtr {reference['from_file']}:{reference['from_path_id']} "
                         f"→ {reference['target_file']}:{reference['path_id']}"
                     )
+                if result["assetbundle_metadata"]:
+                    for metadata in result["assetbundle_metadata"][:5]:
+                        lines.append(
+                            f"  • AssetBundle object {metadata['path_id']}: "
+                            f"preload={metadata['preload_table_count']} | "
+                            f"Container={metadata['container_entry_count']} | "
+                            f"trùng key={metadata['duplicate_container_path_count']}"
+                        )
+                        lines.append(
+                            f"    Preload range lỗi={len(metadata['invalid_preload_ranges'])} | "
+                            f"PPtr nội bộ thiếu={len(metadata['missing_local_pointers'])} | "
+                            f"FileID ngoài phạm vi={len(metadata['invalid_pointer_indices'])}"
+                        )
+                if not result["assetbundle_metadata_complete"]:
+                    lines.append(
+                        "  • Cảnh báo: có AssetBundle object không đọc được metadata: "
+                        + ", ".join(result["assetbundle_metadata_errors"][:5])
+                    )
                 integrity = result["reference_integrity"]
                 lines.append(
                     f"  • PPtr nội bộ hợp lệ: {integrity['local_resolved']} | "
@@ -278,7 +296,7 @@ def inspect_archives(paths: list[str]) -> str:
                     )
     else:
         lines.append("- Không tìm thấy AssetBundle UnityFS/UnityRaw/UnityWeb phù hợp để phân tích sâu.")
-    lines.append("- Chỉ lập danh mục object và external path; chưa sửa hoặc hợp nhất AssetBundle.")
+    lines.append("- Đã kiểm tra thêm preload table, Container AssetInfo và PPtr của AssetBundle; chưa sửa hoặc hợp nhất.")
 
     lines.extend(["", "ĐỐI CHIẾU ASSETBUNDLE TRÙNG ĐƯỜNG DẪN"])
     if assetbundle_comparisons:
