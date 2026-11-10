@@ -1,3 +1,4 @@
+import hashlib
 import tempfile
 import unittest
 import zipfile
@@ -24,6 +25,11 @@ class ModPipelineTests(unittest.TestCase):
             self.assertEqual(result["adapter"], "generic_zip")
             self.assertTrue(result["structurally_validated"])
             self.assertFalse(result["official_game_package_injected"])
+            self.assertEqual(
+                result["output_sha256"],
+                hashlib.sha256(output.read_bytes()).hexdigest(),
+            )
+            self.assertEqual(len(result["input_sha256"]), 2)
             with zipfile.ZipFile(output) as archive:
                 self.assertEqual(set(archive.namelist()), {"readme.txt", "extra.txt"})
                 self.assertIsNone(archive.testzip())
