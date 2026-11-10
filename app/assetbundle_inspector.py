@@ -466,6 +466,105 @@ def build_assetbundle_metadata_merge_plan(
 
 
 
+
+def build_streamed_resource_merge_plan(
+    base_resources: dict[str, int],
+    overlay_resources: dict[str, int],
+    base_streams: list[dict[str, Any]],
+    overlay_streams: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Plan sidecar resource concatenation and m_StreamData offset rewrites.
+
+    Inputs map normalized relative resource paths to verified byte lengths.
+    Stream entries contain path, offset and size. This planner never reads,
+    copies, or writes resource bytes; callers must verify actual file hashes.
+    """
+    def normalize_path(value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        path = value.strip().replace(chr(92), "/")
+        if not path or path.startswith("/") or ":" in path:
+            return None
+        parts = path.split("/")
+        if any(part in ("", ".", "..") for part in parts):
+            return None
+        return "/".join(parts)
+
+    def validate_resources(resources: dict[str, int], label: str) -> dict[str, int] | None:
+        if not isinstance(resources, dict):
+            return None
+        normalized = {}
+        for raw_path, length in resources.items():
+            path = normalize_path(raw_path)
+            if path is None or path in normalized:
+                return None
+            if not isinstance(length, int) or isinstance(length, bool) or length < 0:
+                return None
+            normalized[path] = length
+        return normalized
+
+    base = validate_resources(base_resources, "base")
+    overlay = validate_resources(overlay_resources, "overlay")
+    if base is None or overlay is None:
+        return {"ready": False, "reason": "Resource paths or byte lengths are invalid or ambiguous."}
+
+    merged_lengths = dict(base)
+    overlay_offsets: dict[str, int] = {}
+    path_mapping: dict[str, str] = {}
+    for path, length in overlay.items():
+        if path in merged_lengths:
+            overlay_offsets[path] = merged_lengths[path]
+            merged_lengths[path] += length
+        else:
+            overlay_offsets[path] = 0
+            merged_lengths[path] = length
+        path_mapping[path] = path
+
+    def rewrite_streams(streams: list[dict[str, Any]], *, is_overlay: bool):
+        if not isinstance(streams, list):
+            return None, "StreamData inventory is unavailable."
+        result = []
+        for index, entry in enumerate(streams):
+            if not isinstance(entry, dict):
+                return None, "StreamData entry is invalid."
+            path = normalize_path(entry.get("path"))
+            offset = entry.get("offset")
+            size = entry.get("size")
+            if (path is None or path not in (overlay if is_overlay else base)
+                    or not isinstance(offset, int) or isinstance(offset, bool) or offset < 0
+                    or not isinstance(size, int) or isinstance(size, bool) or size < 0):
+                return None, f"StreamData entry {index} has an invalid path, offset or size."
+            source_length = (overlay if is_overlay else base)[path]
+            if offset + size > source_length:
+                return None, f"StreamData entry {index} exceeds its source resource file."
+            final_offset = offset + (overlay_offsets[path] if is_overlay else 0)
+            result.append({
+                "path": path_mapping.get(path, path),
+                "offset": final_offset,
+                "size": size,
+                "source_path": path,
+            })
+        return result, None
+
+    base_plan, error = rewrite_streams(base_streams, is_overlay=False)
+    if error:
+        return {"ready": False, "reason": error}
+    overlay_plan, error = rewrite_streams(overlay_streams, is_overlay=True)
+    if error:
+        return {"ready": False, "reason": error}
+
+    return {
+        "ready": True,
+        "merged_resource_lengths": merged_lengths,
+        "overlay_append_offsets": overlay_offsets,
+        "base_streams": base_plan,
+        "overlay_streams": overlay_plan,
+        "scope": "offset/path plan only; resource bytes are not copied, hashed or written",
+        "requires": "verify source sidecar identity and bytes, then rewrite every m_StreamData record before serialization",
+    }
+
+
+
 def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, Any]:
     """Read-only inventory of Unity serialized files, object types and external references."""
     if not data:
