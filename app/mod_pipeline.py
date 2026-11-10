@@ -4,6 +4,7 @@ import hashlib
 import os
 import stat
 import tempfile
+import zlib
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -81,7 +82,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
                 raise ModPipelineError(f"ZIP lỗi CRC tại {bad}: {Path(path).name}")
     except ModPipelineError:
         raise
-    except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
+    except (OSError, zipfile.BadZipFile, RuntimeError, zlib.error) as exc:
         raise ModPipelineError(f"Không đọc được ZIP: {Path(path).name}") from exc
 
     leaves = {PurePosixPath(name).name.lower() for name in names}
