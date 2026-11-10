@@ -8,12 +8,14 @@ from pathlib import Path, PurePosixPath
 
 from .aov_format_detector import detect_resource_format, summarize_formats
 from .wwise_bnk import WwiseBNKError, inspect_wwise_bnk
+from .assetbundle_inspector import AssetBundleInspectError, inspect_assetbundle
 
 
 MAX_FILES = 10
 MAX_ENTRIES = 20000
 MAX_TOTAL_UNCOMPRESSED = 1024 * 1024 * 1024
 MAX_BNK_INSPECT_BYTES = 64 * 1024 * 1024
+MAX_ASSETBUNDLE_INSPECT_BYTES = 64 * 1024 * 1024
 IMPORTANT_NAMES = (
     "battlebank.bytes",
     "lobbybank.bytes",
@@ -70,6 +72,7 @@ def inspect_archives(paths: list[str]) -> str:
     bank_files: list[tuple[str, int, int]] = []
     detected_formats: list[tuple[str, str]] = []
     wwise_reports: list[tuple[str, dict | str]] = []
+    assetbundle_reports: list[tuple[str, dict | str]] = []
 
     for path in paths:
         try:
@@ -111,6 +114,15 @@ def inspect_archives(paths: list[str]) -> str:
                             wwise_reports.append((label, inspect_wwise_bnk(archive.read(info))))
                         except (WwiseBNKError, RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
                             wwise_reports.append((label, f"BNK không hợp lệ hoặc chưa hỗ trợ: {exc}"))
+                if Path(name).suffix.lower() == ".assetbundle" and header.startswith((b"UnityFS\\x00", b"UnityRaw\\x00", b"UnityWeb\\x00")):
+                    label = Path(path).name + " :: " + name
+                    if info.file_size > MAX_ASSETBUNDLE_INSPECT_BYTES:
+                        assetbundle_reports.append((label, "Bỏ qua phân tích sâu: AssetBundle vượt quá 64 MiB."))
+                    else:
+                        try:
+                            assetbundle_reports.append((label, inspect_assetbundle(archive.read(info), label)))
+                        except (AssetBundleInspectError, RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
+                            assetbundle_reports.append((label, f"AssetBundle không hợp lệ hoặc chưa hỗ trợ: {exc}"))
                 ext = Path(name).suffix.lower() or "[không đuôi]"
                 extensions[ext] += 1
                 files[name] = (info.file_size, info.CRC)
@@ -172,6 +184,36 @@ def inspect_archives(paths: list[str]) -> str:
     else:
         lines.append("- Không tìm thấy Wwise BNK có chữ ký BKHD để phân tích.")
     lines.append("- Chỉ kiểm tra cấu trúc và chỉ mục; chưa chỉnh sửa hoặc hợp nhất SoundBank.")
+
+    lines.extend(["", "KIỂM TRA CẤU TRÚC VÀ PHỤ THUỘC ASSETBUNDLE"])
+    if assetbundle_reports:
+        for name, result in assetbundle_reports:
+            lines.append(f"- {name}")
+            if isinstance(result, str):
+                lines.append(f"  • {result}")
+            else:
+                lines.append(
+                    f"  • Serialized files: {result['serialized_file_count']} | "
+                    f"Objects: {result['object_count']} | "
+                    f"Container entries: {result['container_entry_count']}"
+                )
+                lines.append(
+                    f"  • External references: {result['external_reference_count']}"
+                )
+                if result["object_type_counts"]:
+                    types = ", ".join(
+                        f"{key}={value}"
+                        for key, value in list(result["object_type_counts"].items())[:8]
+                    )
+                    lines.append("  • Object types: " + types)
+                if result["unresolved_external_paths"]:
+                    lines.append(
+                        "  • External paths cần đối chiếu: "
+                        + ", ".join(result["unresolved_external_paths"][:8])
+                    )
+    else:
+        lines.append("- Không tìm thấy AssetBundle UnityFS/UnityRaw/UnityWeb phù hợp để phân tích sâu.")
+    lines.append("- Chỉ lập danh mục object và external path; chưa sửa hoặc hợp nhất AssetBundle.")
 
     lines.extend(["", "KIỂM TRA BATTLEBANK / LOBBYBANK"])
     if bank_files:
