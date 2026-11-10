@@ -322,6 +322,9 @@ def build_cross_cab_reference_merge_plan(
         cab_plans[key] = {
             "path_id_plan": path_plans[key],
             "external_table_plan": external_plan,
+            "external_path_id_remaps": external_path_id_remaps,
+            "external_target_path_ids": external_target_path_ids,
+            "final_local_path_ids": local_ids,
             "pptr_plan": pptr_plan,
         }
 
@@ -588,6 +591,83 @@ def build_assetbundle_metadata_merge_plan(
         "scope": "metadata plan only; serialized AssetBundle object and CAB/resource files are not rewritten",
     }
 
+
+
+
+
+def build_assetbundle_merge_preflight(
+    base_cabs: dict[str, dict[str, Any]],
+    overlay_cabs: dict[str, dict[str, Any]],
+    *,
+    base_resources: dict[str, int] | None = None,
+    overlay_resources: dict[str, int] | None = None,
+    base_streams: list[dict[str, Any]] | None = None,
+    overlay_streams: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Combine CAB, metadata and sidecar dry-run checks into one fail-closed plan."""
+    cab_plan = build_cross_cab_reference_merge_plan(base_cabs, overlay_cabs)
+    if not cab_plan.get("ready"):
+        return {"ready": False, "stage": "cross_cab", "reason": cab_plan.get("reason")}
+
+    base_names = {
+        key.replace(chr(92), "/"): value for key, value in base_cabs.items()
+    }
+    overlay_names = {
+        key.replace(chr(92), "/"): value for key, value in overlay_cabs.items()
+    }
+    metadata_plans = {}
+    for key, descriptor in overlay_names.items():
+        metadata = descriptor.get("assetbundle_metadata")
+        if metadata is None:
+            continue
+        cab_info = cab_plan["cabs"].get(key)
+        if cab_info is None:
+            return {"ready": False, "stage": "metadata", "reason": f"Missing CAB remap plan for {key}."}
+        remap = build_assetbundle_metadata_remap_plan(
+            metadata,
+            cab_info["external_table_plan"]["file_id_remap"],
+            cab_info["path_id_plan"]["remap"],
+            cab_info["external_path_id_remaps"],
+            local_target_path_ids=cab_info["final_local_path_ids"],
+            external_target_path_ids=cab_info["external_target_path_ids"],
+        )
+        if not remap.get("ready"):
+            return {"ready": False, "stage": "metadata", "blocked_cab": key,
+                    "reason": remap.get("reason")}
+        base_descriptor = base_names.get(key, {})
+        base_metadata = base_descriptor.get("assetbundle_metadata")
+        if base_metadata is not None:
+            merged = build_assetbundle_metadata_merge_plan(base_metadata, metadata, remap)
+            if not merged.get("ready"):
+                return {"ready": False, "stage": "metadata_merge", "blocked_cab": key,
+                        "reason": merged.get("reason")}
+            metadata_plans[key] = {"remap": remap, "merge": merged}
+        else:
+            metadata_plans[key] = {"remap": remap, "merge": None}
+
+    resource_plan = None
+    resource_args = (base_resources, overlay_resources, base_streams, overlay_streams)
+    if any(value is not None for value in resource_args):
+        if any(value is None for value in resource_args):
+            return {"ready": False, "stage": "sidecar", "reason": "Both resource inventories and both StreamData inventories are required."}
+        resource_plan = build_streamed_resource_merge_plan(*resource_args)
+        if not resource_plan.get("ready"):
+            return {"ready": False, "stage": "sidecar", "reason": resource_plan.get("reason")}
+
+    return {
+        "ready": True,
+        "cross_cab": cab_plan,
+        "metadata": metadata_plans,
+        "sidecars": resource_plan,
+        "scope": "combined dry-run preflight only; no serialized objects, AssetBundle bytes or sidecar bytes are rewritten",
+        "remaining_requirements": [
+            "rewrite and serialize every object and PPtr using a format-aware writer",
+            "write AssetBundle metadata and dependencies",
+            "copy and verify sidecar bytes by cryptographic hash",
+            "reopen output and compare complete semantic inventories against the plan",
+            "validate against real AoV and HoK mod samples before enabling merge output",
+        ],
+    }
 
 
 
