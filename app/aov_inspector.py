@@ -185,10 +185,10 @@ def inspect_archives(paths: list[str]) -> str:
             try:
                 with nested.open(child_info, "r") as source:
                     signature = source.read(4)
-                    source.seek(0)
                     if not signature.startswith(b"PK\\x03\\x04"):
                         continue
                     with tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024) as spool:
+                        spool.write(signature)
                         shutil.copyfileobj(source, spool, length=1024 * 1024)
                         spool.seek(0)
                         with zipfile.ZipFile(spool, "r") as pkg:
@@ -222,10 +222,10 @@ def inspect_archives(paths: list[str]) -> str:
                     try:
                         with outer.open(outer_info, "r") as source:
                             signature = source.read(4)
-                            source.seek(0)
                             if not signature.startswith(b"PK\\x03\\x04"):
                                 continue
                             with tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024) as spool:
+                                spool.write(signature)
                                 shutil.copyfileobj(source, spool, length=1024 * 1024)
                                 spool.seek(0)
                                 with zipfile.ZipFile(spool, "r") as nested:
