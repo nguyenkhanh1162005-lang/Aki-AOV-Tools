@@ -437,6 +437,8 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                 if bad:
                     zf.close()
                     raise AOVMergeError(f"ZIP đầu vào lỗi CRC tại {bad}: {Path(path).name}")
+            except AOVMergeError:
+                raise
             except Exception as exc:
                 raise AOVMergeError(f"File đầu vào không phải ZIP hợp lệ: {Path(path).name}") from exc
             opened.append(zf)
