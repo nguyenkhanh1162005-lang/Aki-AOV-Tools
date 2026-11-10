@@ -64,18 +64,22 @@ with tempfile.TemporaryDirectory(prefix="aki-vtk-audit-") as temp:
                     named = []
                     for obj in env.objects:
                         type_counts[obj.type.name] += 1
+                        if obj.type.name == "AssetBundle":
+                            try:
+                                tree = obj.read_typetree()
+                                record["assetbundle_catalog"] = {
+                                    "path_id": obj.path_id,
+                                    "container_entries": len(tree.get("m_Container", [])),
+                                    "preload_entries": len(tree.get("m_PreloadTable", [])),
+                                    "dependencies": list(tree.get("m_Dependencies", [])),
+                                    "container_sample": [str(x[0]) for x in tree.get("m_Container", [])[:120]],
+                                }
+                            except Exception as exc:
+                                record["assetbundle_catalog"] = {"error": f"{type(exc).__name__}: {exc}"}
                         if len(named) < 100:
                             try:
                                 data = obj.read()
                                 obj_name = getattr(data, "name", "") or getattr(data, "m_Name", "")
-                                if obj.type.name == "AssetBundle":
-                                    tree = obj.read_typetree()
-                                    obj_name = tree.get("m_Name", obj_name)
-                                    record["assetbundle_catalog"] = {
-                                        "container_entries": len(tree.get("m_Container", [])),
-                                        "dependencies": list(tree.get("m_Dependencies", [])),
-                                        "container_sample": [str(x[0]) for x in tree.get("m_Container", [])[:80]],
-                                    }
                                 if obj_name:
                                     named.append({
                                         "type": obj.type.name,
