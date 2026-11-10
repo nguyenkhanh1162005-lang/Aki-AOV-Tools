@@ -12,7 +12,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from .aov_bytes import AOVBytesError, decode_aov_resource, encode_aov_resource
+from .aov_bytes import AOVBytesError, ZSTD_MAGIC, decode_aov_resource, encode_aov_resource
 from .ifix_merger import (
     IFixMergeError,
     merge_ifix_patches,
