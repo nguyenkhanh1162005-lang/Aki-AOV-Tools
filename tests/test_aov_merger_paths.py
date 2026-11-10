@@ -25,6 +25,10 @@ class AOVArchivePathTests(unittest.TestCase):
                 with self.assertRaises(AOVMergeError):
                     _normalise_vtk_path(name)
 
+    def test_rejects_windows_drive_path(self):
+        with self.assertRaises(AOVMergeError):
+            _normalise_vtk_path("C:/outside/file.bytes")
+
     def test_rejects_unsafe_archive_entry(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "unsafe.zip"
