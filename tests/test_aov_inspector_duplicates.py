@@ -71,6 +71,8 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
                 "object_id_inventory_incomplete": False,
                 "ambiguous_object_id_cabs": [],
                 "object_id_types_match": True,
+                "assetbundle_metadata_comparisons": [],
+                "ambiguous_assetbundle_metadata_names": [],
                 "cross_bundle_references": {
                     "resolved_count": 0,
                     "missing_path_id_count": 0,
