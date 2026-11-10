@@ -182,4 +182,4 @@ def inspect_archives(paths: list[str]) -> str:
         "- Giải nén được một lớp nén không đồng nghĩa giải mã hoặc hợp nhất được asset độc quyền.",
         "- Chỉ nên tạo bản mod sau khi xác định đúng cấu trúc, phiên bản game và quan hệ phụ thuộc của tài nguyên.",
     ])
-    return "\\n".join(lines)
+    return "\n".join(lines)
