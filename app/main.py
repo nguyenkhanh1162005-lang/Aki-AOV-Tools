@@ -150,18 +150,40 @@ async def merge_aov_chunked_upload(upload_id: str):
 @app.post("/api/drive/import")
 async def import_drive_links(payload: dict = Body(...)):
     links = payload.get("links")
-    if not isinstance(links, list) or not links or len(links) > MAX_FILES:
-        raise HTTPException(400, f"Dán từ 1 đến {MAX_FILES} link Google Drive.")
-    if not all(isinstance(link, str) and link.strip() for link in links):
-        raise HTTPException(400, "Có link Google Drive không hợp lệ.")
+    if not isinstance(links, list) or not links or not all(
+        isinstance(link, str) and link.strip() for link in links
+    ):
+        raise HTTPException(400, "Dán ít nhất một link Google Drive hợp lệ.")
+    if len(links) > MAX_FILES:
+        raise HTTPException(400, f"Tối đa {MAX_FILES} link Google Drive.")
 
-    upload_id = uuid.uuid4().hex
-    workdir = Path(tempfile.mkdtemp(prefix="aki-aov-drive-"))
-    files = []
-    paths = []
-    total_bytes = 0
+    existing_upload_id = payload.get("upload_id")
+    is_new_session = not existing_upload_id
+    if existing_upload_id:
+        upload_id = str(existing_upload_id)
+        session = _get_upload_session(upload_id)
+        if any(item["received"] != item["size"] for item in session["files"]):
+            raise HTTPException(400, "ZIP tải từ thiết bị chưa được tải lên đầy đủ.")
+        workdir = Path(session["workdir"])
+        files = session["files"]
+        paths = session["paths"]
+        original_count = len(files)
+        total_bytes = sum(item["size"] for item in files)
+        if original_count + len(links) > MAX_FILES:
+            raise HTTPException(400, f"Tổng số ZIP không được vượt quá {MAX_FILES}.")
+    else:
+        upload_id = uuid.uuid4().hex
+        workdir = Path(tempfile.mkdtemp(prefix="aki-aov-drive-"))
+        files = []
+        paths = []
+        original_count = 0
+        total_bytes = 0
+        session = None
+
+    added_paths = []
     try:
-        for index, link in enumerate(links, start=1):
+        for link in links:
+            index = len(files) + 1
             destination = workdir / f"{index}_drive-import.zip"
             try:
                 name, size = await run_in_threadpool(download_drive_zip, link, str(destination))
@@ -169,23 +191,33 @@ async def import_drive_links(payload: dict = Body(...)):
                 raise HTTPException(400, str(exc)) from exc
             total_bytes += size
             if total_bytes > MAX_INPUT_BYTES:
-                raise HTTPException(413, "Tổng dung lượng ZIP từ Drive vượt quá 500 MB.")
+                destination.unlink(missing_ok=True)
+                raise HTTPException(413, "Tổng dung lượng ZIP đầu vào vượt quá 500 MB.")
             files.append({"name": name, "size": size, "received": size})
             paths.append(str(destination))
+            added_paths.append(destination)
 
-        UPLOAD_SESSIONS[upload_id] = {
-            "created": time.time(),
-            "workdir": str(workdir),
-            "files": files,
-            "paths": paths,
-        }
+        if is_new_session:
+            UPLOAD_SESSIONS[upload_id] = {
+                "created": time.time(),
+                "workdir": str(workdir),
+                "files": files,
+                "paths": paths,
+            }
+        else:
+            session["created"] = time.time()
         return {
             "upload_id": upload_id,
             "files": [{"name": item["name"], "size": item["size"]} for item in files],
             "expires_in_seconds": UPLOAD_TTL_SECONDS,
         }
     except Exception:
-        shutil.rmtree(workdir, ignore_errors=True)
+        del files[original_count:]
+        del paths[original_count:]
+        for path in added_paths:
+            Path(path).unlink(missing_ok=True)
+        if is_new_session:
+            shutil.rmtree(workdir, ignore_errors=True)
         raise
 
 
