@@ -223,6 +223,63 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertEqual(len(integrity["external_ambiguous_targets"]), 1)
         self.assertEqual(integrity["external_ambiguous_targets"][0]["path_id"], 300)
 
+    def test_structural_checks_fail_for_invalid_assetbundle_metadata(self):
+        def make_env():
+            target = SimpleNamespace(
+                type=SimpleNamespace(name="Texture2D"),
+                path_id=10,
+                byte_size=0,
+                get_raw_data=lambda: b"",
+                read_typetree=lambda: {},
+            )
+            pointer = SimpleNamespace(file_id=0, path_id=999)
+            asset_info = SimpleNamespace(
+                preload_index=5,
+                preload_size=2,
+                asset=pointer,
+            )
+            parsed = SimpleNamespace(
+                m_PreloadTable=[],
+                m_ContainerEntries=[("assets/hero", asset_info)],
+                m_Container={"assets/hero": asset_info},
+                m_MainAsset=None,
+                m_AssetBundleName="hero-bundle",
+                m_Dependencies=[],
+                m_IsStreamedSceneAssetBundle=False,
+            )
+            bundle_obj = SimpleNamespace(
+                type=SimpleNamespace(name="AssetBundle"),
+                path_id=50,
+                byte_size=0,
+                get_raw_data=lambda: b"",
+                read=lambda return_typetree_on_error=False: parsed,
+                read_typetree=lambda: {},
+            )
+            serialized = SimpleNamespace(
+                name="CAB-main",
+                unity_version="2022.3.0f1",
+                target_platform=SimpleNamespace(name="iOS"),
+                objects={10: target, 50: bundle_obj},
+                externals=[],
+            )
+            return SimpleNamespace(
+                assets=[serialized],
+                container={"assets/hero": target},
+                files={"bundle": object()},
+            )
+
+        envs = iter([make_env(), make_env()])
+        fake_unity = SimpleNamespace(load=lambda data: next(envs))
+        with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
+            report = compare_assetbundle_overlays(
+                b"UnityFS\\x00base",
+                b"UnityFS\\x00overlay",
+            )
+
+        self.assertFalse(report["assetbundle_metadata_integrity_pass"])
+        self.assertFalse(report["structural_checks_pass"])
+        self.assertFalse(report["merge_safe"])
+
     def test_compares_assetbundle_preload_and_container_metadata(self):
         def make_env(target_path_id):
             target = SimpleNamespace(
