@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from app.assetbundle_inspector import (
     AssetBundleInspectError,
+    build_path_id_remap_plan,
     compare_assetbundle_overlays,
     inspect_assetbundle,
     verify_assetbundle_roundtrip,
@@ -11,6 +12,47 @@ from app.assetbundle_inspector import (
 
 
 class AssetBundleInspectorTests(unittest.TestCase):
+    def test_path_id_plan_deduplicates_identical_objects_and_remaps_changed_payloads(self):
+        plan = build_path_id_remap_plan(
+            [10, 20],
+            [10, 20, 30],
+            {"10": "Texture2D", "20": "Mesh"},
+            {"10": "Texture2D", "20": "Mesh"},
+            {"10": "same", "20": "base-hash"},
+            {"10": "same", "20": "overlay-hash"},
+        )
+
+        self.assertTrue(plan["ready"])
+        self.assertEqual(plan["deduplicate"], {"10": 10})
+        self.assertEqual(plan["remap"], {"20": 31})
+        self.assertEqual(plan["preserved_overlay_only_count"], 1)
+
+    def test_path_id_plan_blocks_type_conflicts_and_unknown_payloads(self):
+        plan = build_path_id_remap_plan(
+            [10, 20],
+            [10, 20],
+            {"10": "Texture2D", "20": "Mesh"},
+            {"10": "AudioClip", "20": "Mesh"},
+            {"10": "a", "20": "b"},
+            {"10": "c"},
+        )
+
+        self.assertFalse(plan["ready"])
+        self.assertEqual(plan["remap"], {})
+        self.assertEqual(plan["deduplicate"], {})
+        self.assertEqual(len(plan["blocked_path_ids"]), 2)
+
+    def test_path_id_plan_rejects_incomplete_and_invalid_inventories(self):
+        incomplete = build_path_id_remap_plan(
+            [1], [1], {}, {}, {}, {}, inventories_complete=False
+        )
+        invalid = build_path_id_remap_plan(
+            [1, True], [1], {}, {}, {}, {}
+        )
+
+        self.assertFalse(incomplete["ready"])
+        self.assertFalse(invalid["ready"])
+
     def test_rejects_empty_or_unknown_bundle_signature(self):
         with self.assertRaisesRegex(AssetBundleInspectError, "rỗng"):
             inspect_assetbundle(b"")
