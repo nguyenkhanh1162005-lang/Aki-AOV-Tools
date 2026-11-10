@@ -117,7 +117,19 @@ def merge_mses_rows(
             "Schema MSES khác nhau và có bản ghi chung khác nội dung; từ chối ghép an toàn."
         )
 
-    overrides = override_keys or set()
+    overrides = set(override_keys or ())
+    if overrides:
+        if base.field_count != overlay.field_count:
+            raise MSESError(
+                "Không thể ghi đè khóa MSES khi schema giữa base và overlay khác nhau."
+            )
+        missing_override_keys = overrides - common
+        if missing_override_keys:
+            formatted = ", ".join(f"0x{key:08x}" for key in sorted(missing_override_keys))
+            raise MSESError(
+                f"Khóa ghi đè MSES không tồn tại ở cả base và overlay: {formatted}."
+            )
+
     merged = dict(base_map)
     replaced = []
     appended = []
