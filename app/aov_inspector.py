@@ -1,15 +1,25 @@
 from __future__ import annotations
 
+import hashlib
 import zipfile
+import zlib
 from collections import Counter
 from pathlib import Path, PurePosixPath
 
 from .aov_format_detector import detect_resource_format, summarize_formats
+from .wwise_bnk import WwiseBNKError, inspect_wwise_bnk
+from .assetbundle_inspector import (
+    AssetBundleInspectError,
+    compare_assetbundle_overlays,
+    inspect_assetbundle,
+)
 
 
 MAX_FILES = 10
 MAX_ENTRIES = 20000
 MAX_TOTAL_UNCOMPRESSED = 1024 * 1024 * 1024
+MAX_BNK_INSPECT_BYTES = 64 * 1024 * 1024
+MAX_ASSETBUNDLE_INSPECT_BYTES = 64 * 1024 * 1024
 IMPORTANT_NAMES = (
     "battlebank.bytes",
     "lobbybank.bytes",
@@ -45,6 +55,15 @@ def _safe_name(name: str) -> str:
     return normalized
 
 
+def _entry_sha256(archive_path: str, info: zipfile.ZipInfo) -> str:
+    digest = hashlib.sha256()
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        with archive.open(info, "r") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
 def inspect_archives(paths: list[str]) -> str:
     """Create a read-only inventory; never alters or decrypts game assets."""
     if not paths or len(paths) > MAX_FILES:
@@ -53,9 +72,12 @@ def inspect_archives(paths: list[str]) -> str:
     total_entries = 0
     total_uncompressed = 0
     inventories: list[tuple[str, dict[str, tuple[int, int]], Counter[str], list[str]]] = []
-    collisions: dict[str, list[str]] = {}
+    collisions: dict[str, list[tuple[str, str, int, int, zipfile.ZipInfo]]] = {}
     bank_files: list[tuple[str, int, int]] = []
     detected_formats: list[tuple[str, str]] = []
+    wwise_reports: list[tuple[str, dict | str]] = []
+    assetbundle_reports: list[tuple[str, dict | str]] = []
+    assetbundle_comparisons: list[tuple[str, dict | str]] = []
 
     for path in paths:
         try:
@@ -84,10 +106,28 @@ def inspect_archives(paths: list[str]) -> str:
                     try:
                         with archive.open(info, "r") as resource_stream:
                             header = resource_stream.read(32)
-                    except (RuntimeError, zipfile.BadZipFile, OSError) as exc:
+                    except (RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
                         raise InspectError(f"Không đọc được header tài nguyên: {name}") from exc
                     format_name, _ = detect_resource_format(name, header)
                 detected_formats.append((format_name, f"{Path(path).name} :: {name}"))
+                if format_name == "Wwise SoundBank" and Path(name).suffix.lower() == ".bnk":
+                    label = Path(path).name + " :: " + name
+                    if info.file_size > MAX_BNK_INSPECT_BYTES:
+                        wwise_reports.append((label, "Bỏ qua phân tích sâu: BNK vượt quá 64 MiB."))
+                    else:
+                        try:
+                            wwise_reports.append((label, inspect_wwise_bnk(archive.read(info))))
+                        except (WwiseBNKError, RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
+                            wwise_reports.append((label, f"BNK không hợp lệ hoặc chưa hỗ trợ: {exc}"))
+                if Path(name).suffix.lower() == ".assetbundle" and header.startswith((b"UnityFS\x00", b"UnityRaw\x00", b"UnityWeb\x00")):
+                    label = Path(path).name + " :: " + name
+                    if info.file_size > MAX_ASSETBUNDLE_INSPECT_BYTES:
+                        assetbundle_reports.append((label, "Bỏ qua phân tích sâu: AssetBundle vượt quá 64 MiB."))
+                    else:
+                        try:
+                            assetbundle_reports.append((label, inspect_assetbundle(archive.read(info), label)))
+                        except (AssetBundleInspectError, RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
+                            assetbundle_reports.append((label, f"AssetBundle không hợp lệ hoặc chưa hỗ trợ: {exc}"))
                 ext = Path(name).suffix.lower() or "[không đuôi]"
                 extensions[ext] += 1
                 files[name] = (info.file_size, info.CRC)
@@ -98,9 +138,43 @@ def inspect_archives(paths: list[str]) -> str:
                     # Inventory only. Full decompression can expand dramatically and
                     # monopolize a small web instance; keep this endpoint responsive.
                     bank_files.append((Path(path).name + " :: " + name, info.file_size, info.CRC))
-                collisions.setdefault(name, []).append(Path(path).name)
+                collisions.setdefault(name, []).append(
+                    (Path(path).name, path, info.file_size, info.CRC, info)
+                )
 
         inventories.append((Path(path).name, files, extensions, important))
+
+    # Compare only a small number of same-path AssetBundles across input ZIPs.
+    # This is a structural report, not an authorization to merge their objects.
+    compared_assetbundles = 0
+    for name, sources in collisions.items():
+        if compared_assetbundles >= 5 or Path(name).suffix.lower() != ".assetbundle":
+            continue
+        unique_sources = []
+        seen_archives = set()
+        for filename, source_path, size, crc, info in sources:
+            if source_path not in seen_archives:
+                unique_sources.append((filename, source_path, size, info))
+                seen_archives.add(source_path)
+        if len(unique_sources) < 2:
+            continue
+        left, right = unique_sources[:2]
+        label = f"{name} [{left[0]} vs {right[0]}]"
+        if left[2] > MAX_ASSETBUNDLE_INSPECT_BYTES or right[2] > MAX_ASSETBUNDLE_INSPECT_BYTES:
+            assetbundle_comparisons.append((label, "Bỏ qua so sánh sâu: ít nhất một AssetBundle vượt quá 64 MiB."))
+            compared_assetbundles += 1
+            continue
+        try:
+            with zipfile.ZipFile(left[1], "r") as left_zip, zipfile.ZipFile(right[1], "r") as right_zip:
+                left_data = left_zip.read(left[3])
+                right_data = right_zip.read(right[3])
+            assetbundle_comparisons.append((
+                label,
+                compare_assetbundle_overlays(left_data, right_data),
+            ))
+        except (AssetBundleInspectError, RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
+            assetbundle_comparisons.append((label, f"Không thể so sánh an toàn: {exc}"))
+        compared_assetbundles += 1
 
     format_counts, format_examples = summarize_formats(detected_formats)
     lines = [
@@ -126,6 +200,203 @@ def inspect_archives(paths: list[str]) -> str:
             lines.append("  • Chưa thấy tên tệp nhận diện được theo bộ từ khóa.")
         lines.append("")
 
+    lines.extend(["", "KIỂM TRA CẤU TRÚC WWISE BNK"])
+    if wwise_reports:
+        for name, result in wwise_reports:
+            lines.append(f"- {name}")
+            if isinstance(result, str):
+                lines.append(f"  • {result}")
+            else:
+                chunk_names = ", ".join(item["id"] for item in result["chunks"])
+                lines.append(
+                    f"  • Version {result['version']} | Bank ID {result['bank_id']} | "
+                    f"Chunk: {chunk_names}"
+                )
+                lines.append(
+                    f"  • Media: {result['media_count']} | "
+                    f"HIRC objects: {result['hirc_object_count']}"
+                )
+                if result["unknown_chunks"]:
+                    lines.append("  • Chunk chưa nhận diện: " + ", ".join(result["unknown_chunks"]))
+    else:
+        lines.append("- Không tìm thấy Wwise BNK có chữ ký BKHD để phân tích.")
+    lines.append("- Chỉ kiểm tra cấu trúc và chỉ mục; chưa chỉnh sửa hoặc hợp nhất SoundBank.")
+
+    lines.extend(["", "KIỂM TRA CẤU TRÚC VÀ PHỤ THUỘC ASSETBUNDLE"])
+    if assetbundle_reports:
+        for name, result in assetbundle_reports:
+            lines.append(f"- {name}")
+            if isinstance(result, str):
+                lines.append(f"  • {result}")
+            else:
+                lines.append(
+                    f"  • Serialized files: {result['serialized_file_count']} | "
+                    f"Objects: {result['object_count']} | "
+                    f"Container entries: {result['container_entry_count']}"
+                )
+                lines.append(
+                    f"  • External references: {result['external_reference_count']}"
+                )
+                lines.append(
+                    f"  • Object references: {result['object_reference_count']} | "
+                    f"Quét đầy đủ: {result['reference_scan_complete']}"
+                )
+                if result["reference_scan_errors"]:
+                    lines.append(
+                        "  • Object không đọc được: "
+                        + ", ".join(result["reference_scan_errors"][:5])
+                    )
+                for reference in result["object_references"][:8]:
+                    lines.append(
+                        f"  • PPtr {reference['from_file']}:{reference['from_path_id']} "
+                        f"→ {reference['target_file']}:{reference['path_id']}"
+                    )
+                if result["assetbundle_metadata"]:
+                    for metadata in result["assetbundle_metadata"][:5]:
+                        lines.append(
+                            f"  • AssetBundle object {metadata['path_id']}: "
+                            f"preload={metadata['preload_table_count']} | "
+                            f"Container={metadata['container_entry_count']} | "
+                            f"trùng key={metadata['duplicate_container_path_count']}"
+                        )
+                        lines.append(
+                            f"    Preload range lỗi={len(metadata['invalid_preload_ranges'])} | "
+                            f"PPtr nội bộ thiếu={len(metadata['missing_local_pointers'])} | "
+                            f"FileID ngoài phạm vi={len(metadata['invalid_pointer_indices'])}"
+                        )
+                if not result["assetbundle_metadata_complete"]:
+                    lines.append(
+                        "  • Cảnh báo: có AssetBundle object không đọc được metadata: "
+                        + ", ".join(result["assetbundle_metadata_errors"][:5])
+                    )
+                integrity = result["reference_integrity"]
+                lines.append(
+                    f"  • PPtr nội bộ hợp lệ: {integrity['local_resolved']} | "
+                    f"thiếu Path ID nội bộ: {len(integrity['local_missing'])}"
+                )
+                lines.append(
+                    f"  • PPtr CAB đã tìm thấy: {integrity['external_resolved']} | "
+                    f"phụ thuộc CAB ngoài gói: {len(integrity['external_dependencies'])} | "
+                    f"tên CAB mơ hồ: {len(integrity['external_ambiguous_targets'])}"
+                )
+                if integrity["invalid_external_indices"]:
+                    lines.append(
+                        f"  • FileID ngoài phạm vi: {len(integrity['invalid_external_indices'])}"
+                    )
+                if result["object_type_counts"]:
+                    types = ", ".join(
+                        f"{key}={value}"
+                        for key, value in list(result["object_type_counts"].items())[:8]
+                    )
+                    lines.append("  • Object types: " + types)
+                if result["external_paths"]:
+                    lines.append(
+                        "  • External paths cần đối chiếu: "
+                        + ", ".join(result["external_paths"][:8])
+                    )
+    else:
+        lines.append("- Không tìm thấy AssetBundle UnityFS/UnityRaw/UnityWeb phù hợp để phân tích sâu.")
+    lines.append("- Đã kiểm tra thêm preload table, Container AssetInfo và PPtr của AssetBundle; chưa sửa hoặc hợp nhất.")
+
+    lines.extend(["", "ĐỐI CHIẾU ASSETBUNDLE TRÙNG ĐƯỜNG DẪN"])
+    if assetbundle_comparisons:
+        for name, result in assetbundle_comparisons:
+            lines.append(f"- {name}")
+            if isinstance(result, str):
+                lines.append(f"  • {result}")
+            else:
+                lines.append(
+                    f"  • Unity version khớp: {result['unity_versions_match']} | "
+                    f"Platform khớp: {result['platforms_match']} | "
+                    f"Container đầy đủ: {result['container_inventory_complete']}"
+                )
+                lines.append(
+                    f"  • Đường dẫn chung: {result['shared_container_paths']} | "
+                    f"ứng viên thay thế: {len(result['replacement_candidates'])} | "
+                    f"đường dẫn mới: {len(result['new_container_paths'])}"
+                )
+                if result["container_type_conflicts"]:
+                    lines.append(
+                        "  • Xung đột loại object: "
+                        + ", ".join(result["container_type_conflicts"][:8])
+                    )
+                object_overlaps = result["object_id_overlaps"]
+                if object_overlaps:
+                    overlap_total = sum(item["shared_path_id_count"] for item in object_overlaps)
+                    type_conflicts = sum(item["type_conflict_count"] for item in object_overlaps)
+                    lines.append(
+                        f"  • PathID trùng trong CAB tương ứng: {overlap_total} | "
+                        f"xung đột loại Object: {type_conflicts}"
+                    )
+                    payload_changed = sum(item["payload_changed_count"] for item in object_overlaps)
+                    payload_identical = sum(item["payload_identical_count"] for item in object_overlaps)
+                    payload_unknown = sum(item["payload_unknown_count"] for item in object_overlaps)
+                    lines.append(
+                        f"  • Payload Object: {payload_identical} giống nhau | "
+                        f"{payload_changed} đã thay đổi | {payload_unknown} chưa đối chiếu được"
+                    )
+                    for overlap in object_overlaps[:5]:
+                        plan = overlap["path_id_merge_plan"]
+                        lines.append(
+                            f"  • Kế hoạch PathID {overlap['cab']}: "
+                            f"{'có thể lập kế hoạch' if plan['ready'] else 'bị chặn'} | "
+                            f"gộp trùng={plan.get('deduplicated_object_count', 0)} | "
+                            f"cấp ID mới={plan.get('new_object_count', 0)}"
+                        )
+                if result["ambiguous_object_id_cabs"]:
+                    lines.append(
+                        "  • CAB trùng tên, không thể đối chiếu PathID chắc chắn: "
+                        + ", ".join(result["ambiguous_object_id_cabs"][:8])
+                    )
+                for metadata in result["assetbundle_metadata_comparisons"][:5]:
+                    lines.append(
+                        f"  • Metadata {metadata['assetbundle_name']}: "
+                        f"preload khớp={metadata['preload_table_match']} | "
+                        f"Container khớp={metadata['container_metadata_match']} | "
+                        f"dependencies khớp={metadata['dependencies_match']} | "
+                        f"main asset khớp={metadata['main_asset_match']}"
+                    )
+                if result["ambiguous_assetbundle_metadata_names"]:
+                    lines.append(
+                        "  • Metadata AssetBundle trùng tên, không thể ghép cặp: "
+                        + ", ".join(result["ambiguous_assetbundle_metadata_names"][:8])
+                    )
+                if result["unmatched_base_assetbundle_names"]:
+                    lines.append(
+                        "  • Chỉ có trong bundle nền: "
+                        + ", ".join(result["unmatched_base_assetbundle_names"][:8])
+                    )
+                if result["unmatched_overlay_assetbundle_names"]:
+                    lines.append(
+                        "  • Chỉ có trong bundle mod: "
+                        + ", ".join(result["unmatched_overlay_assetbundle_names"][:8])
+                    )
+                lines.append(
+                    f"  • Kiểm tra preload/Container/PPtr nội bộ: "
+                    f"{result['assetbundle_metadata_integrity_pass']}"
+                )
+                cross_refs = result["cross_bundle_references"]
+                lines.append(
+                    f"  • PPtr overlay → CAB base hợp lệ: {cross_refs['resolved_count']} | "
+                    f"Path ID thiếu: {cross_refs['missing_path_id_count']}"
+                )
+                lines.append(
+                    f"  • CAB tên mơ hồ: {cross_refs['ambiguous_cab_count']} | "
+                    f"chưa tìm thấy CAB: {cross_refs['unknown_cab_count']} | "
+                    f"index chưa đầy đủ: {cross_refs['index_incomplete']}"
+                )
+                lines.append(
+                    f"  • PPtr overlay → CAB nền đã xác minh: "
+                    f"{result['cross_bundle_reference_integrity_pass']}"
+                )
+                lines.append(
+                    f"  • Kiểm tra cấu trúc đạt: {result['structural_checks_pass']} | "
+                    "Cho phép ghép tự động: False"
+                )
+    else:
+        lines.append("- Không có đường dẫn AssetBundle trùng giữa các ZIP để đối chiếu.")
+    lines.append("- Đối chiếu chỉ mang tính cấu trúc; chưa remap object ID, preload table hoặc CAB reference.")
+
     lines.extend(["", "KIỂM TRA BATTLEBANK / LOBBYBANK"])
     if bank_files:
         for name, size, crc in bank_files:
@@ -134,10 +405,42 @@ def inspect_archives(paths: list[str]) -> str:
     else:
         lines.append("- Không tìm thấy BattleBank.bytes hoặc LobbyBank.bytes trong các ZIP đã chọn.")
 
-    duplicate_names = [(name, sources) for name, sources in collisions.items() if len(sources) > 1]
-    lines.append(f"Tên đường dẫn xuất hiện ở nhiều ZIP: {len(duplicate_names)}")
+    duplicate_names = [
+        (name, sources) for name, sources in collisions.items() if len(sources) > 1
+    ]
+    lines.append(f"Tên đường dẫn xuất hiện nhiều lần: {len(duplicate_names)}")
+    identical_count = 0
+    conflict_count = 0
     for name, sources in duplicate_names[:80]:
-        lines.append(f"- {name} [{', '.join(sources)}]")
+        try:
+            digests = [
+                _entry_sha256(source_path, info)
+                for _, source_path, _, _, info in sources
+            ]
+        except (OSError, RuntimeError, zipfile.BadZipFile, zlib.error) as exc:
+            raise InspectError(
+                f"Không thể so sánh nội dung file trùng: {name}"
+            ) from exc
+        identical = len(set(digests)) == 1
+        if identical:
+            identical_count += 1
+            verdict = "NỘI DUNG GIỐNG HỆT (SHA-256)"
+        else:
+            conflict_count += 1
+            verdict = "XUNG ĐỘT NỘI DUNG (SHA-256 KHÁC)"
+        details = ", ".join(
+            f"{filename}: {size:,} byte, CRC32 {crc:08x}"
+            for filename, _, size, crc, _ in sources
+        )
+        lines.append(f"- {name}: {verdict} [{details}]")
+    lines.append(
+        f"Kết quả so sánh: {identical_count} đường dẫn giống hệt; "
+        f"{conflict_count} đường dẫn có nội dung khác."
+    )
+    if len(duplicate_names) > 80:
+        lines.append(
+            f"- Còn {len(duplicate_names) - 80} đường dẫn trùng chưa hiển thị chi tiết."
+        )
 
     lines.extend([
         "",

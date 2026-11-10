@@ -65,6 +65,38 @@ class IFixMergerTests(unittest.TestCase):
         final_bytes = serialize_ifix_patch(merged)
         self.assertEqual(serialize_ifix_patch(parse_ifix_patch(final_bytes)), final_bytes)
 
+    def test_merge_does_not_mutate_input_patches(self):
+        import copy
+
+        base = make_patch("BaseFix", "BaseType", "base-string", "baseField")
+        incoming = make_patch("IncomingFix", "IncomingType", "incoming-string", "incomingField")
+        base_before = copy.deepcopy(base)
+        incoming_before = copy.deepcopy(incoming)
+        merge_ifix_patches(base, incoming)
+        self.assertEqual(base, base_before)
+        self.assertEqual(incoming, incoming_before)
+
+    def test_invalid_input_references_raise_ifix_error_before_remapping(self):
+        base = make_patch("BaseFix", "BaseType", "base-string", "baseField")
+        incoming = make_patch("IncomingFix", "IncomingType", "incoming-string", "incomingField")
+        incoming["fixes"][0]["type"] = 99
+        with self.assertRaisesRegex(IFixMergeError, "FixInfo trỏ tới type"):
+            merge_ifix_patches(base, incoming)
+
+    def test_negative_collection_count_is_rejected(self):
+        import struct
+
+        malformed = struct.pack("<Q", 0) + b"\x00" + struct.pack("<i", -1)
+        with self.assertRaisesRegex(IFixMergeError, "Số lượng bản ghi trong IFix"):
+            parse_ifix_patch(malformed)
+
+    def test_invalid_utf8_string_is_rejected_as_ifix_error(self):
+        import struct
+
+        malformed = struct.pack("<Q", 0) + b"\x01\xff"
+        with self.assertRaisesRegex(IFixMergeError, "không phải UTF-8"):
+            parse_ifix_patch(malformed)
+
     def test_unknown_opcode_is_rejected(self):
         base = make_patch("BaseFix", "BaseType", "base-string", "baseField")
         incoming = make_patch("IncomingFix", "IncomingType", "incoming-string", "incomingField", opcode=999)

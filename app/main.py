@@ -12,10 +12,12 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from .large_merger import merge_zip_files, MergeError, MAX_FILES, MAX_INPUT_BYTES
+from .large_merger import MAX_FILES, MAX_INPUT_BYTES
+from .mod_pipeline import merge_mod_archives, ModPipelineError
 from .aov_inspector import inspect_archives, InspectError
 from .drive_import import download_drive_zip, DriveImportError
 from .aov_merger import merge_aov_archives, AOVMergeError
+from .assetbundle_inspector import verify_assetbundle_roundtrip, AssetBundleInspectError, MAX_ASSETBUNDLE_BYTES
 
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -23,6 +25,31 @@ CHUNK_SIZE = 1024 * 1024
 UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 UPLOAD_SESSIONS: dict[str, dict] = {}
 UPLOAD_TTL_SECONDS = 3600
+MAX_ACTIVE_UPLOAD_SESSIONS = 8
+
+
+def _cleanup_expired_upload_sessions(now: float | None = None) -> int:
+    """Remove abandoned upload directories so public web uploads cannot pile up forever."""
+    current = time.time() if now is None else now
+    expired = [
+        upload_id
+        for upload_id, session in UPLOAD_SESSIONS.items()
+        if current - session["created"] > UPLOAD_TTL_SECONDS
+    ]
+    for upload_id in expired:
+        session = UPLOAD_SESSIONS.pop(upload_id, None)
+        if session:
+            shutil.rmtree(session["workdir"], ignore_errors=True)
+    return len(expired)
+
+
+def _ensure_upload_capacity() -> None:
+    _cleanup_expired_upload_sessions()
+    if len(UPLOAD_SESSIONS) >= MAX_ACTIVE_UPLOAD_SESSIONS:
+        raise HTTPException(
+            429,
+            "Máy chủ đang có quá nhiều phiên tải file. Hãy thử lại sau ít phút.",
+        )
 
 
 def _get_upload_session(upload_id: str) -> dict:
@@ -37,15 +64,23 @@ def _get_upload_session(upload_id: str) -> dict:
 
 @app.post("/api/upload/start")
 async def start_chunked_upload(payload: dict = Body(...)):
+    _ensure_upload_capacity()
     files = payload.get("files")
     if not isinstance(files, list) or not files or len(files) > MAX_FILES:
         raise HTTPException(400, f"Chọn từ 1 đến {MAX_FILES} file ZIP.")
     total = 0
     clean_files = []
     for item in files:
+        if not isinstance(item, dict):
+            raise HTTPException(400, "Thông tin file ZIP không hợp lệ.")
         name = Path(str(item.get("name", ""))).name
         size = item.get("size")
-        if not name.lower().endswith(".zip") or not isinstance(size, int) or size < 0:
+        if (
+            not name.lower().endswith(".zip")
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or size <= 0
+        ):
             raise HTTPException(400, "Thông tin file ZIP không hợp lệ.")
         total += size
         clean_files.append({"name": name, "size": size, "received": 0})
@@ -60,14 +95,37 @@ async def start_chunked_upload(payload: dict = Body(...)):
     return {"upload_id": upload_id, "chunk_size": UPLOAD_CHUNK_BYTES}
 
 
+@app.get("/api/upload/{upload_id}/status")
+async def chunked_upload_status(upload_id: str):
+    """Return received offsets so a browser can resume an interrupted upload."""
+    session = _get_upload_session(upload_id)
+    session["created"] = time.time()
+    return {
+        "upload_id": upload_id,
+        "chunk_size": UPLOAD_CHUNK_BYTES,
+        "files": [
+            {"name": item["name"], "size": item["size"], "received": item["received"]}
+            for item in session["files"]
+        ],
+        "expires_in_seconds": UPLOAD_TTL_SECONDS,
+    }
+
+
 @app.put("/api/upload/{upload_id}/{file_index}")
 async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_offset: int = Header(..., alias="X-Chunk-Offset")):
     session = _get_upload_session(upload_id)
+    if chunk_offset < 0:
+        raise HTTPException(400, "Vị trí khối tải lên không hợp lệ.")
     if file_index < 0 or file_index >= len(session["files"]):
         raise HTTPException(404, "Không tìm thấy file trong phiên tải lên.")
     item = session["files"][file_index]
-    chunk = await request.body()
-    if not chunk or len(chunk) > UPLOAD_CHUNK_BYTES:
+    chunk_buffer = bytearray()
+    async for part in request.stream():
+        chunk_buffer.extend(part)
+        if len(chunk_buffer) > UPLOAD_CHUNK_BYTES:
+            raise HTTPException(413, "Mỗi khối tải lên không được vượt quá 4 MB.")
+    chunk = bytes(chunk_buffer)
+    if not chunk:
         raise HTTPException(400, "Kích thước khối tải lên không hợp lệ.")
     offset = item["received"]
     if chunk_offset < offset:
@@ -114,16 +172,16 @@ async def merge_chunked_upload(upload_id: str):
     session = _get_upload_session(upload_id)
     if any(item["received"] != item["size"] for item in session["files"]):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
-    output_path = Path(session["workdir"]) / "aki-merged.zip"
+    output_path = Path(session["workdir"]) / "aki-mod-merged.zip"
     try:
-        await run_in_threadpool(merge_zip_files, session["paths"], str(output_path))
-    except MergeError as exc:
+        await run_in_threadpool(merge_mod_archives, session["paths"], str(output_path))
+    except ModPipelineError as exc:
         raise HTTPException(400, str(exc)) from exc
     UPLOAD_SESSIONS.pop(upload_id, None)
     return FileResponse(
         path=output_path,
         media_type="application/zip",
-        filename="aki-merged.zip",
+        filename="aki-mod-merged.zip",
         background=BackgroundTask(shutil.rmtree, session["workdir"], ignore_errors=True),
     )
 
@@ -135,14 +193,23 @@ async def merge_aov_chunked_upload(upload_id: str):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
     output_path = Path(session["workdir"]) / "Aki-AOV-10Skin-VanTamKiem.zip"
     try:
-        await run_in_threadpool(merge_aov_archives, session["paths"], str(output_path))
+        report = await run_in_threadpool(merge_aov_archives, session["paths"], str(output_path))
     except AOVMergeError as exc:
         raise HTTPException(400, str(exc)) from exc
     UPLOAD_SESSIONS.pop(upload_id, None)
+    result_headers = {
+        "X-AOV-Validation": "passed" if report.get("validation") else "incomplete",
+        "X-AOV-Game-Tested": "true" if report.get("game_tested") else "false",
+        "X-AOV-Base-Version": str(report.get("base_version", "unknown")),
+        "X-AOV-VTK-Version": str(report.get("vtk_version", "unknown")),
+        "X-AOV-AssetBundles": str(report.get("assetbundles", 0)),
+        "X-AOV-New-Files": str(report.get("new_files", 0)),
+    }
     return FileResponse(
         path=output_path,
         media_type="application/zip",
         filename="Aki-AOV-10Skin-VanTamKiem.zip",
+        headers=result_headers,
         background=BackgroundTask(shutil.rmtree, session["workdir"], ignore_errors=True),
     )
 
@@ -159,6 +226,8 @@ async def import_drive_links(payload: dict = Body(...)):
 
     existing_upload_id = payload.get("upload_id")
     is_new_session = not existing_upload_id
+    if is_new_session:
+        _ensure_upload_capacity()
     if existing_upload_id:
         upload_id = str(existing_upload_id)
         session = _get_upload_session(upload_id)
@@ -226,6 +295,26 @@ def health():
     return {"status": "ok", "service": "Aki AOV Tools"}
 
 
+@app.post("/api/assetbundle/roundtrip-check")
+async def roundtrip_check_assetbundle(file: UploadFile = File(...)):
+    """Check whether a UnityFS bundle survives an unchanged save/reopen cycle."""
+    data = bytearray()
+    try:
+        while True:
+            chunk = await file.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            if len(data) + len(chunk) > MAX_ASSETBUNDLE_BYTES:
+                raise HTTPException(413, "AssetBundle vượt quá giới hạn kiểm tra round-trip 64 MiB.")
+            data.extend(chunk)
+        try:
+            return await run_in_threadpool(verify_assetbundle_roundtrip, bytes(data))
+        except AssetBundleInspectError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    finally:
+        await file.close()
+
+
 @app.post("/api/merge")
 async def merge(files: list[UploadFile] = File(...)):
     if not files or len(files) > MAX_FILES:
@@ -253,16 +342,16 @@ async def merge(files: list[UploadFile] = File(...)):
             await upload.close()
             input_paths.append(str(destination))
 
-        output_path = workdir / "aki-merged.zip"
+        output_path = workdir / "aki-mod-merged.zip"
         try:
-            await run_in_threadpool(merge_zip_files, input_paths, str(output_path))
-        except MergeError as exc:
+            await run_in_threadpool(merge_mod_archives, input_paths, str(output_path))
+        except ModPipelineError as exc:
             raise HTTPException(400, str(exc)) from exc
 
         return FileResponse(
             path=output_path,
             media_type="application/zip",
-            filename="aki-merged.zip",
+            filename="aki-mod-merged.zip",
             background=BackgroundTask(shutil.rmtree, workdir, ignore_errors=True),
         )
     except Exception:
