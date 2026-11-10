@@ -67,10 +67,12 @@ class ResourceManifestTests(unittest.TestCase):
         inspect_bundle.return_value = {
             "assetbundle_metadata_complete": True,
             "reference_scan_complete": True,
+            "assetbundle_metadata_count": 2,
             "assetbundle_metadata": [
-                {"dependencies": ["shared/materials", "shared/textures"]},
-                {"dependencies": ["shared/materials"]},
+                {"dependency_count": 2, "dependencies": ["shared/materials", "shared/textures"]},
+                {"dependency_count": 1, "dependencies": ["shared/materials"]},
             ],
+            "external_reference_count": 1,
             "external_references": [
                 {"from": "CAB-1", "to": "CAB-2"},
             ],
@@ -86,6 +88,26 @@ class ResourceManifestTests(unittest.TestCase):
             self.assertEqual(item["unity_external_paths"], ["CAB-2"])
             self.assertTrue(item["dependency_inventory_complete"])
             inspect_bundle.assert_called_once()
+
+    @patch("app.resource_manifest.inspect_assetbundle")
+    def test_truncated_unity_dependency_inventory_is_not_complete(self, inspect_bundle):
+        inspect_bundle.return_value = {
+            "assetbundle_metadata_complete": True,
+            "reference_scan_complete": True,
+            "assetbundle_metadata_count": 2,
+            "assetbundle_metadata": [
+                {"dependency_count": 201, "dependencies": ["only-first-200"]}
+            ],
+            "external_reference_count": 101,
+            "external_references": [{"from": "CAB-1", "to": "CAB-2"}],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._zip(Path(tmp), "unity.zip", {
+                "assets/hero.assetbundle": b"UnityFS\\x00" + b"payload"
+            })
+            item = build_resource_manifest([source])["resources"][0]
+            self.assertFalse(item["dependency_inventory_complete"])
+            self.assertEqual(item["dependency_inspection"], "partial")
 
     def test_rejects_empty_input(self):
         with self.assertRaises(ResourceManifestError):
