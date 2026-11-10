@@ -66,6 +66,12 @@ def _load_unitypy_aov():
 
 def _normalise_vtk_path(name: str) -> str:
     name = name.replace("\\", "/").lstrip("/")
+    if name.startswith("Resources/1.64.1/"):
+        name = name[len("Resources/1.64.1/"):]
+    elif name.startswith("Resources/"):
+        parts = name.split("/", 2)
+        if len(parts) == 3:
+            name = parts[2]
     if name.endswith(".assetbundle") and not name.startswith("assetbundle/"):
         name = "assetbundle/" + name
     return name
