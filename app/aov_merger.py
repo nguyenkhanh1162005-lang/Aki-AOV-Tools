@@ -27,6 +27,8 @@ MAX_AOV_INPUTS = 10
 MAX_ARCHIVE_ENTRIES = 20_000
 MAX_TOTAL_UNCOMPRESSED = 1024 * 1024 * 1024
 MAX_SINGLE_ENTRY = 512 * 1024 * 1024
+MAX_TOTAL_INPUT_BYTES = 500 * 1024 * 1024
+MAX_TOTAL_OUTPUT_BYTES = 1024 * 1024 * 1024
 
 COMMON_ACTIONS_PATH = "Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes"
 HERO_SKIN_BASE_PATH = "Thanos/HeroSkin_1.bytes"
@@ -310,13 +312,25 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
 
     opened: list[zipfile.ZipFile] = []
     try:
+        total_input_bytes = sum(Path(path).stat().st_size for path in archive_paths)
+        if total_input_bytes > MAX_TOTAL_INPUT_BYTES:
+            raise AOVMergeError("Tổng dung lượng ZIP đầu vào vượt quá 500 MB.")
         archives: list[tuple[str, zipfile.ZipFile]] = []
+        total_entries = 0
+        total_uncompressed = 0
         for path in archive_paths:
             try:
                 zf = zipfile.ZipFile(path)
             except Exception as exc:
                 raise AOVMergeError(f"File đầu vào không phải ZIP hợp lệ: {Path(path).name}") from exc
             opened.append(zf)
+            entries = zf.infolist()
+            total_entries += len(entries)
+            total_uncompressed += sum(info.file_size for info in entries)
+            if total_entries > MAX_ARCHIVE_ENTRIES:
+                raise AOVMergeError("Tổng số mục ZIP vượt quá 20.000.")
+            if total_uncompressed > MAX_TOTAL_UNCOMPRESSED:
+                raise AOVMergeError("Tổng dung lượng giải nén vượt quá 1 GiB.")
             _validate_archive_paths(zf, Path(path).name)
             try:
                 bad = zf.testzip()
@@ -534,6 +548,9 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                             ) as dst:
                                 _copy_stream(src, dst)
 
+                if output_path_obj.stat().st_size > MAX_TOTAL_OUTPUT_BYTES:
+                    output_path_obj.unlink(missing_ok=True)
+                    raise AOVMergeError("ZIP kết quả vượt quá giới hạn 1 GiB.")
                 with zipfile.ZipFile(output_path_obj) as check_outer:
                     bad = check_outer.testzip()
                     if bad:
