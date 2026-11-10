@@ -6,3 +6,5 @@ pyzstd>=0.15.2,<0.20
 pycryptodome==3.23.0
 UnityPy==1.25.4
 sm4==1.0.2
+tabulate==0.10.0
+numpy>=2.0,<3
