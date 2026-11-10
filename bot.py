@@ -111,7 +111,13 @@ async def receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     try:
         telegram_file = await doc.get_file()
-        await telegram_file.download_to_drive(custom_path=destination)
+        await telegram_file.download_to_drive(
+            custom_path=destination,
+            read_timeout=1800,
+            write_timeout=1800,
+            connect_timeout=60,
+            pool_timeout=60,
+        )
         actual_size = destination.stat().st_size
         if actual_size > MAX_FILE_BYTES or current_total + actual_size > MAX_TOTAL_BYTES:
             destination.unlink(missing_ok=True)
