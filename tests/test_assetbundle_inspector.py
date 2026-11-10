@@ -85,6 +85,67 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertTrue(report["structural_checks_pass"])
         self.assertFalse(report["merge_safe"])
 
+    def test_inspects_assetbundle_preload_and_container_pointer_metadata(self):
+        def ptr(file_id, path_id):
+            return SimpleNamespace(file_id=file_id, path_id=path_id)
+
+        local_target = SimpleNamespace(
+            type=SimpleNamespace(name="Texture2D"),
+            path_id=10,
+            read_typetree=lambda: {},
+        )
+        parsed = SimpleNamespace(
+            m_PreloadTable=[ptr(0, 10)],
+            m_ContainerEntries=[
+                ("assets/a", SimpleNamespace(
+                    preload_index=0, preload_size=1, asset=ptr(0, 10)
+                )),
+                ("assets/a", SimpleNamespace(
+                    preload_index=3, preload_size=1, asset=ptr(4, 999)
+                )),
+            ],
+            m_Container={},
+            m_MainAsset=SimpleNamespace(
+                preload_index=0, preload_size=1, asset=ptr(0, 10)
+            ),
+            m_AssetBundleName="hero-bundle",
+            m_Dependencies=["shared-dependency"],
+            m_IsStreamedSceneAssetBundle=False,
+        )
+        bundle_obj = SimpleNamespace(
+            type=SimpleNamespace(name="AssetBundle"),
+            path_id=50,
+            read=lambda return_typetree_on_error=False: parsed,
+            read_typetree=lambda: {},
+        )
+        serialized = SimpleNamespace(
+            name="CAB-main",
+            unity_version="2022.3.0f1",
+            target_platform=SimpleNamespace(name="iOS"),
+            objects={10: local_target, 50: bundle_obj},
+            externals=[],
+        )
+        env = SimpleNamespace(
+            assets=[serialized],
+            container={},
+            files={"bundle": object()},
+        )
+        fake_unity = SimpleNamespace(load=lambda data: env)
+        with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
+            report = inspect_assetbundle(b"UnityFS\\x00fixture")
+
+        self.assertEqual(report["assetbundle_metadata_count"], 1)
+        self.assertTrue(report["assetbundle_metadata_complete"])
+        metadata = report["assetbundle_metadata"][0]
+        self.assertEqual(metadata["assetbundle_name"], "hero-bundle")
+        self.assertEqual(metadata["preload_table_count"], 1)
+        self.assertEqual(metadata["container_entry_count"], 2)
+        self.assertEqual(metadata["duplicate_container_path_count"], 1)
+        self.assertEqual(len(metadata["invalid_preload_ranges"]), 1)
+        self.assertEqual(len(metadata["invalid_pointer_indices"]), 1)
+        self.assertEqual(metadata["missing_local_pointers"], [])
+        self.assertEqual(metadata["dependencies"], ["shared-dependency"])
+
     def test_reports_changed_object_payload_for_shared_path_id(self):
         def make_env(payload):
             obj = SimpleNamespace(
