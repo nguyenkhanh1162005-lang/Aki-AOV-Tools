@@ -345,7 +345,8 @@ def inspect_archives(paths: list[str]) -> str:
                         f"  • Metadata {metadata['assetbundle_name']}: "
                         f"preload khớp={metadata['preload_table_match']} | "
                         f"Container khớp={metadata['container_metadata_match']} | "
-                        f"dependencies khớp={metadata['dependencies_match']}"
+                        f"dependencies khớp={metadata['dependencies_match']} | "
+                        f"main asset khớp={metadata['main_asset_match']}"
                     )
                 if result["ambiguous_assetbundle_metadata_names"]:
                     lines.append(
