@@ -170,6 +170,25 @@ async def inspect_chunked_upload(upload_id: str, keep_session: bool = Query(Fals
             UPLOAD_SESSIONS.pop(upload_id, None)
 
 
+@app.post("/api/upload/{upload_id}/compatibility")
+async def inspect_chunked_compatibility(upload_id: str):
+    """Create a read-only manifest and compatibility plan for a completed chunked upload."""
+    session = _get_upload_session(upload_id)
+    if any(item["received"] != item["size"] for item in session["files"]):
+        raise HTTPException(400, "File chưa tải lên đầy đủ.")
+    try:
+        manifest = await run_in_threadpool(build_resource_manifest, session["paths"])
+        plan = await run_in_threadpool(plan_resource_compatibility, manifest["resources"])
+        session["created"] = time.time()
+        return {
+            "manifest": manifest,
+            "compatibility_plan": plan,
+            "warning": "Báo cáo chỉ đọc và tư vấn; không giải mã, sửa payload hoặc cấp quyền ghép tài nguyên AoV.",
+        }
+    except (ResourceManifestError, CompatibilityPlanError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.post("/api/upload/{upload_id}/merge")
 async def merge_chunked_upload(upload_id: str):
     session = _get_upload_session(upload_id)
