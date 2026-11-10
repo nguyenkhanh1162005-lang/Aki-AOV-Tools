@@ -6,6 +6,7 @@ from app.assetbundle_inspector import (
     AssetBundleInspectError,
     compare_assetbundle_overlays,
     inspect_assetbundle,
+    verify_assetbundle_roundtrip,
 )
 
 
@@ -45,6 +46,77 @@ class AssetBundleInspectorTests(unittest.TestCase):
             ["archive:/CAB-dependency.resS"],
         )
         self.assertTrue(report["read_only"])
+
+    def test_verifies_unityfs_save_and_reopen_roundtrip(self):
+        report = {
+            "reference_scan_complete": True,
+            "container_inventory_complete": True,
+            "assetbundle_metadata_complete": True,
+            "object_reference_count": 0,
+            "external_reference_count": 0,
+            "container_entry_count": 0,
+            "assetbundle_metadata_count": 0,
+            "serialized_files": [{
+                "name": "CAB-main",
+                "unity_version": "2022.3.0f1",
+                "target_platform": "iOS",
+                "object_count": 1,
+                "external_count": 0,
+                "object_path_ids": [7],
+                "object_id_inventory_complete": True,
+                "object_types_by_path_id": {"7": "Texture2D"},
+                "object_payload_hashes": {"7": "abc123"},
+                "object_payload_hashes_complete": True,
+            }],
+            "assetbundle_metadata": [],
+            "object_references": [],
+            "external_references": [],
+            "container_entries": [],
+            "reference_integrity": {
+                "local_resolved": 0,
+                "local_missing": [],
+                "external_resolved": 0,
+                "external_dependencies": [],
+                "external_ambiguous_targets": [],
+                "invalid_external_indices": [],
+            },
+            "serialized_file_count": 1,
+            "object_count": 1,
+        }
+        bundle = SimpleNamespace(
+            signature="UnityFS",
+            save=lambda packer=None: b"UnityFS\\x00roundtrip",
+        )
+        env = SimpleNamespace(files={"bundle": bundle})
+        fake_unity = SimpleNamespace(load=lambda data: env)
+        with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
+            with patch("app.assetbundle_inspector.inspect_assetbundle", return_value=report) as inspect:
+                result = verify_assetbundle_roundtrip(b"UnityFS\\x00original")
+
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["original_size"], len(b"UnityFS\\x00original"))
+        self.assertEqual(result["roundtrip_size"], len(b"UnityFS\\x00roundtrip"))
+        self.assertEqual(inspect.call_count, 2)
+
+    def test_roundtrip_refuses_incomplete_object_payload_inventory(self):
+        report = {
+            "reference_scan_complete": True,
+            "container_inventory_complete": True,
+            "assetbundle_metadata_complete": True,
+            "object_reference_count": 0,
+            "external_reference_count": 0,
+            "container_entry_count": 0,
+            "assetbundle_metadata_count": 0,
+            "serialized_files": [{
+                "object_id_inventory_complete": True,
+                "object_payload_hashes_complete": False,
+            }],
+        }
+        with patch("app.assetbundle_inspector.inspect_assetbundle", return_value=report):
+            result = verify_assetbundle_roundtrip(b"UnityFS\\x00original")
+
+        self.assertFalse(result["verified"])
+        self.assertIn("inventory chưa hoàn chỉnh", result["reason"])
 
     def test_compares_overlay_container_paths_without_claiming_merge_safety(self):
         def make_env(entries):
