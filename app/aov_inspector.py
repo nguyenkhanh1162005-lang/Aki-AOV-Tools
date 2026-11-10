@@ -7,11 +7,13 @@ from collections import Counter
 from pathlib import Path, PurePosixPath
 
 from .aov_format_detector import detect_resource_format, summarize_formats
+from .wwise_bnk import WwiseBNKError, inspect_wwise_bnk
 
 
 MAX_FILES = 10
 MAX_ENTRIES = 20000
 MAX_TOTAL_UNCOMPRESSED = 1024 * 1024 * 1024
+MAX_BNK_INSPECT_BYTES = 64 * 1024 * 1024
 IMPORTANT_NAMES = (
     "battlebank.bytes",
     "lobbybank.bytes",
@@ -67,6 +69,7 @@ def inspect_archives(paths: list[str]) -> str:
     collisions: dict[str, list[tuple[str, str, int, int, zipfile.ZipInfo]]] = {}
     bank_files: list[tuple[str, int, int]] = []
     detected_formats: list[tuple[str, str]] = []
+    wwise_reports: list[tuple[str, dict | str]] = []
 
     for path in paths:
         try:
@@ -99,6 +102,15 @@ def inspect_archives(paths: list[str]) -> str:
                         raise InspectError(f"Không đọc được header tài nguyên: {name}") from exc
                     format_name, _ = detect_resource_format(name, header)
                 detected_formats.append((format_name, f"{Path(path).name} :: {name}"))
+                if format_name == "Wwise SoundBank" and Path(name).suffix.lower() == ".bnk":
+                    label = Path(path).name + " :: " + name
+                    if info.file_size > MAX_BNK_INSPECT_BYTES:
+                        wwise_reports.append((label, "Bỏ qua phân tích sâu: BNK vượt quá 64 MiB."))
+                    else:
+                        try:
+                            wwise_reports.append((label, inspect_wwise_bnk(archive.read(info))))
+                        except (WwiseBNKError, RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
+                            wwise_reports.append((label, f"BNK không hợp lệ hoặc chưa hỗ trợ: {exc}"))
                 ext = Path(name).suffix.lower() or "[không đuôi]"
                 extensions[ext] += 1
                 files[name] = (info.file_size, info.CRC)
@@ -138,6 +150,28 @@ def inspect_archives(paths: list[str]) -> str:
         if not important:
             lines.append("  • Chưa thấy tên tệp nhận diện được theo bộ từ khóa.")
         lines.append("")
+
+    lines.extend(["", "KIỂM TRA CẤU TRÚC WWISE BNK"])
+    if wwise_reports:
+        for name, result in wwise_reports:
+            lines.append(f"- {name}")
+            if isinstance(result, str):
+                lines.append(f"  • {result}")
+            else:
+                chunk_names = ", ".join(item["id"] for item in result["chunks"])
+                lines.append(
+                    f"  • Version {result['version']} | Bank ID {result['bank_id']} | "
+                    f"Chunk: {chunk_names}"
+                )
+                lines.append(
+                    f"  • Media: {result['media_count']} | "
+                    f"HIRC objects: {result['hirc_object_count']}"
+                )
+                if result["unknown_chunks"]:
+                    lines.append("  • Chunk chưa nhận diện: " + ", ".join(result["unknown_chunks"]))
+    else:
+        lines.append("- Không tìm thấy Wwise BNK có chữ ký BKHD để phân tích.")
+    lines.append("- Chỉ kiểm tra cấu trúc và chỉ mục; chưa chỉnh sửa hoặc hợp nhất SoundBank.")
 
     lines.extend(["", "KIỂM TRA BATTLEBANK / LOBBYBANK"])
     if bank_files:
