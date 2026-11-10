@@ -8,6 +8,7 @@ from app.aov_bytes import (
     decrypt_aes_resource,
     encrypt_aes_resource,
     encrypt_aes_zstd_resource,
+    encode_aov_resource,
 )
 
 
@@ -48,7 +49,7 @@ class AOVBytesTests(unittest.TestCase):
         original = (b"MSES\x07\x00\x00\x00" + b"test-resource-" * 200)
         encoded = encrypt_aes_zstd_resource(original, "111_AssetRef")
         decoded, mode = decode_aov_resource(encoded, "111_AssetRef.bytes")
-        self.assertEqual(mode, "aes-zstd")
+        self.assertEqual(mode, "aes+zstd")
         self.assertEqual(decoded, original)
 
     def test_decodes_aes_wrapped_zstd_lua_resource(self):
