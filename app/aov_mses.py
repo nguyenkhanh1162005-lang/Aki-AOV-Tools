@@ -5,6 +5,9 @@ import hashlib
 import struct
 from dataclasses import dataclass
 
+from .aov_crypto import AES_MAGIC, ZSTD_WRAPPER_MAGIC, AoVResourceError, decode_aov_resource, encrypt_aov_resource
+from .aov_zstd import AoVZstdError, encode_aov_bytes
+
 MSES_MAGIC = b"MSES"
 FIXED_HEADER_SIZE = 140
 MAX_ROWS = 10_000_000
@@ -150,3 +153,43 @@ def merge_mses(
         final_rows=len(rows),
         target_prefixes=prefixes,
     )
+
+
+def merge_aov_mses_resource(
+    resource_name: str,
+    base_payload: bytes,
+    incoming_payload: bytes,
+    *,
+    target_prefixes: tuple[str, ...] | list[str],
+) -> tuple[bytes, MSESMergeReport]:
+    """Decode, merge and re-wrap an AoV MSES resource using the base wrapper type."""
+    try:
+        base_plain = decode_aov_resource(resource_name, base_payload)
+        incoming_plain = decode_aov_resource(resource_name, incoming_payload)
+    except AoVResourceError as exc:
+        raise MSESError(f"Không giải mã được tài nguyên {resource_name}: {exc}") from exc
+
+    merged_plain, report = merge_mses(
+        base_plain,
+        incoming_plain,
+        target_prefixes=target_prefixes,
+    )
+    try:
+        if base_payload.startswith(AES_MAGIC):
+            marker = base_payload[3:4]
+            if marker == bytes.fromhex("ef"):
+                return encrypt_aov_resource(
+                    resource_name,
+                    encode_aov_bytes(merged_plain),
+                    marker=marker,
+                ), report
+            return encrypt_aov_resource(
+                resource_name, merged_plain, marker=marker
+            ), report
+        if base_payload.startswith(ZSTD_WRAPPER_MAGIC):
+            return encode_aov_bytes(merged_plain), report
+        if base_payload.startswith(MSES_MAGIC):
+            return merged_plain, report
+    except (AoVResourceError, AoVZstdError) as exc:
+        raise MSESError(f"Không đóng gói lại được {resource_name}: {exc}") from exc
+    raise MSESError(f"Wrapper gốc không được hỗ trợ: {resource_name}")
