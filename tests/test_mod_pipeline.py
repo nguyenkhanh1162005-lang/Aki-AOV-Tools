@@ -99,6 +99,25 @@ class ModPipelineTests(unittest.TestCase):
             with zipfile.ZipFile(output) as archive:
                 self.assertEqual(archive.namelist(), ["same.txt"])
 
+    def test_windows_drive_path_is_rejected_during_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            source = self._zip(folder, "drive.zip", {"C:/outside.txt": b"bad"})
+            with self.assertRaisesRegex(ModPipelineError, "không an toàn"):
+                _archive_profile(source)
+
+    def test_symlink_is_rejected_during_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            path = folder / "symlink.zip"
+            info = zipfile.ZipInfo("link")
+            info.create_system = 3
+            info.external_attr = (0o120777 << 16)
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr(info, b"target")
+            with self.assertRaisesRegex(ModPipelineError, "không an toàn"):
+                _archive_profile(str(path))
+
     def test_traversal_is_rejected_before_merge(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
