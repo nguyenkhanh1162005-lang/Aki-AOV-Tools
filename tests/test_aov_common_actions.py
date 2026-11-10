@@ -57,6 +57,33 @@ class CommonActionsMergeTests(unittest.TestCase):
         self.assertTrue(tracks[-1].attrib.get("guid"))
         self.assertEqual(report["appended_tracks"], ["PlayHeroSoundTick2"])
 
+    def test_merges_multiple_595_variants_for_same_track(self):
+        name = "commonresource/Back.xml"
+        root = ET.Element("Project")
+        action = ET.SubElement(root, "Action")
+        base_track = ET.SubElement(action, "Track", {
+            "trackName": "TriggerParticleTick0",
+            "eventType": "TriggerParticleTick",
+            "guid": "base-guid",
+        })
+        ET.SubElement(base_track, "SkinOrAvatarList", {"id": "59500"})
+        overlay_root = ET.Element("Project")
+        overlay_action = ET.SubElement(overlay_root, "Action")
+        for skin_id in ("59500", "59501"):
+            track = ET.SubElement(overlay_action, "Track", {
+                "trackName": "0_TriggerParticleTick0",
+                "eventType": "TriggerParticleTick",
+            })
+            ET.SubElement(track, "SkinOrAvatarList", {"id": skin_id})
+        base = encode_aov_resource(ET.tostring(root), name, "zstd")
+        overlay = encode_aov_resource(ET.tostring(overlay_root), name, "zstd")
+        output, report = merge_action_xml(base, overlay, name)
+        merged_root = ET.fromstring(decode_aov_resource(output, name)[0])
+        merged_track = merged_root.find("Action").find("Track")
+        ids = {node.attrib["id"] for node in merged_track.findall("SkinOrAvatarList")}
+        self.assertEqual(ids, {"59500", "59501"})
+        self.assertTrue(report["merged_into_existing_tracks"])
+
     def test_package_merge_replaces_only_selected_xml(self):
         path = "commonresource/Back.xml"
         other = "commonresource/Unrelated.xml"
