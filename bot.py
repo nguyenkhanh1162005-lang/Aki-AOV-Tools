@@ -270,9 +270,36 @@ async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Đang kiểm tra xung đột, ghép ZIP và đọc lại từng tệp để xác minh SHA-256 + CRC. ZIP gốc được giữ nguyên..."
     )
     try:
+        input_paths = [path for _, path in files]
+        safety_report = await asyncio.to_thread(inspect_archives, input_paths)
+        nested_line = next(
+            (line for line in safety_report.splitlines()
+             if line.startswith("- ZIP/lưu trữ lồng đã mở:")),
+            "",
+        )
+        try:
+            nested_count = int(nested_line.rsplit(":", 1)[1].strip()) if nested_line else 0
+        except (IndexError, ValueError):
+            nested_count = 0
+
+        if nested_count or "MSES v7" in safety_report:
+            report_path = folder / "aov-merge-safety-report.txt"
+            report_path.write_text(safety_report, encoding="utf-8")
+            await status_message.edit_text(
+                "Đã phát hiện cấu trúc tài nguyên AOV lồng hoặc bảng MSES. "
+                "Bot dừng ghép ZIP thường để tránh tạo gói sai hoặc làm mất skin/hiệu ứng/âm thanh. "
+                "Báo cáo kiểm tra được gửi kèm; ZIP nguồn vẫn được giữ nguyên."
+            )
+            await update.effective_message.reply_document(
+                document=FSInputFile(str(report_path), filename="aov-merge-safety-report.txt"),
+                read_timeout=120,
+                write_timeout=120,
+            )
+            return
+
         output_size = await asyncio.to_thread(
             merge_zip_files,
-            [path for _, path in files],
+            input_paths,
             str(output_path),
         )
         if not LOCAL_API and output_size > 48 * MIB:
