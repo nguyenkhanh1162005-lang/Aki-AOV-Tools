@@ -35,7 +35,7 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
             path = self._zip(
                 folder,
                 "bad-audio.zip",
-                {"Sound/Hero.bnk": b"BKHD" + b"\\x63\\x00\\x00\\x00"},
+                {"Sound/Hero.bnk": b"BKHD" + bytes([99, 0, 0, 0])},
             )
             report = inspect_archives([path])
             self.assertIn("BNK không hợp lệ hoặc chưa hỗ trợ", report)
