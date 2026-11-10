@@ -20,3 +20,7 @@ jobs:
         with:
           name: vtk-archive-audit
           path: vtk-audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vtk-source-archive
+          path: vtk-source.zip
