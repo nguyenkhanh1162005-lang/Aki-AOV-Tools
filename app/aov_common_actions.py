@@ -143,6 +143,7 @@ def merge_action_xml(
             for attr in ("useRefParam", "refParamName"):
                 if attr not in target.attrib and attr in source_track.attrib:
                     target.attrib[attr] = source_track.attrib[attr]
+                    changed = True
             if changed:
                 if was_special:
                     merged_into_existing.append(name)
