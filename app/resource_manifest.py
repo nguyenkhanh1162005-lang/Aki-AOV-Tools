@@ -164,11 +164,24 @@ def build_resource_manifest(paths: list[str]) -> dict[str, Any]:
                                 and isinstance(reference.get("to"), str)
                                 and reference.get("to").strip()
                             })
+                            metadata_inventory_complete = (
+                                bundle_report.get("assetbundle_metadata_count") == len(metadata)
+                                and all(
+                                    record.get("dependency_count") == len(record.get("dependencies", []))
+                                    for record in metadata
+                                )
+                            )
+                            external_inventory = bundle_report.get("external_references", [])
+                            external_inventory_complete = (
+                                bundle_report.get("external_reference_count") == len(external_inventory)
+                            )
                             item["unity_dependencies"] = unity_dependencies
                             item["unity_external_paths"] = external_paths
                             item["dependency_inventory_complete"] = bool(
                                 bundle_report.get("assetbundle_metadata_complete")
                                 and bundle_report.get("reference_scan_complete")
+                                and metadata_inventory_complete
+                                and external_inventory_complete
                             )
                             item["dependency_inspection"] = (
                                 "complete" if item["dependency_inventory_complete"]
