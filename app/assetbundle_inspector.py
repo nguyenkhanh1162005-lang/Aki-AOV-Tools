@@ -586,6 +586,8 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
     for name in sorted(set(base_assetbundle_names) | set(overlay_assetbundle_names)):
         base_matches = base_assetbundle_names.get(name, [])
         overlay_matches = overlay_assetbundle_names.get(name, [])
+        if not base_matches or not overlay_matches:
+            continue
         if len(base_matches) != 1 or len(overlay_matches) != 1:
             ambiguous_assetbundle_metadata_names.append(name)
             continue
