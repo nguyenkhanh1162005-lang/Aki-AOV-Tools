@@ -22,7 +22,7 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
             path = self._zip(
                 folder,
                 "assets.zip",
-                {"Resources/Actor.assetbundle": b"UnityFS\\x00fixture"},
+                {"Resources/Actor.assetbundle": b"UnityFS\x00fixture"},
             )
             report_data = {
                 "serialized_file_count": 2,
@@ -43,8 +43,8 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
-            first = self._zip(folder, "first.zip", {"Actor/hero.assetbundle": b"UnityFS\\x00one"})
-            second = self._zip(folder, "second.zip", {"Actor/hero.assetbundle": b"UnityFS\\x00two"})
+            first = self._zip(folder, "first.zip", {"Actor/hero.assetbundle": b"UnityFS\x00one"})
+            second = self._zip(folder, "second.zip", {"Actor/hero.assetbundle": b"UnityFS\x00two"})
             comparison = {
                 "unity_versions_match": True,
                 "platforms_match": True,
