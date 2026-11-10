@@ -301,6 +301,16 @@ def inspect_archives(paths: list[str]) -> str:
                         "  • Xung đột loại object: "
                         + ", ".join(result["container_type_conflicts"][:8])
                     )
+                cross_refs = result["cross_bundle_references"]
+                lines.append(
+                    f"  • PPtr overlay → CAB base hợp lệ: {cross_refs['resolved_count']} | "
+                    f"Path ID thiếu: {cross_refs['missing_path_id_count']}"
+                )
+                lines.append(
+                    f"  • CAB tên mơ hồ: {cross_refs['ambiguous_cab_count']} | "
+                    f"chưa tìm thấy CAB: {cross_refs['unknown_cab_count']} | "
+                    f"index chưa đầy đủ: {cross_refs['index_incomplete']}"
+                )
                 lines.append(
                     f"  • Kiểm tra cấu trúc đạt: {result['structural_checks_pass']} | "
                     "Cho phép ghép tự động: False"
