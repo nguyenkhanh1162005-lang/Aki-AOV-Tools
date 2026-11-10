@@ -59,7 +59,7 @@ async def start_chunked_upload(payload: dict = Body(...)):
 
 
 @app.put("/api/upload/{upload_id}/{file_index}")
-async def upload_chunk(upload_id: str, file_index: int, request: Request):
+async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_offset: int = Header(..., alias="X-Chunk-Offset")):
     session = _get_upload_session(upload_id)
     if file_index < 0 or file_index >= len(session["files"]):
         raise HTTPException(404, "Không tìm thấy file trong phiên tải lên.")
@@ -68,6 +68,17 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request):
     if not chunk or len(chunk) > UPLOAD_CHUNK_BYTES:
         raise HTTPException(400, "Kích thước khối tải lên không hợp lệ.")
     offset = item["received"]
+    if chunk_offset < offset:
+        # Idempotent retry: accept an already-written identical chunk.
+        if chunk_offset + len(chunk) > offset:
+            raise HTTPException(409, "Khối tải lên bị chồng lấn, hãy chọn lại file.")
+        with open(session["paths"][file_index], "rb") as existing:
+            existing.seek(chunk_offset)
+            if existing.read(len(chunk)) != chunk:
+                raise HTTPException(409, "Khối gửi lại khác dữ liệu đã nhận.")
+        return {"received": offset, "size": item["size"]}
+    if chunk_offset != offset:
+        raise HTTPException(409, "Sai vị trí khối tải lên, hãy thử lại.")
     if offset + len(chunk) > item["size"]:
         raise HTTPException(400, "Khối tải lên vượt quá kích thước file.")
     with open(session["paths"][file_index], "ab") as target:
