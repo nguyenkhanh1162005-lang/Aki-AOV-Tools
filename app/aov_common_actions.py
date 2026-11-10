@@ -117,6 +117,7 @@ def merge_action_xml(
         candidates = index.get(key, [])
         if candidates:
             target = candidates[0]
+            was_special = _is_595_track(target)
             existing_nodes = {
                 node.attrib.get("id"): node
                 for node in target.findall("SkinOrAvatarList")
@@ -138,7 +139,7 @@ def merge_action_xml(
                     changed = True
 
             if changed:
-                if _is_595_track(target):
+                if was_special:
                     merged_into_existing.append(name)
                 else:
                     replaced.append(name)
