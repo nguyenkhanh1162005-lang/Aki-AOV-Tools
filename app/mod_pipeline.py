@@ -15,6 +15,8 @@ from .aov_merger import AOVMergeError, merge_aov_archives
 MAX_PROFILE_ENTRIES = 20_000
 MAX_PROFILE_UNCOMPRESSED = 1024 * 1024 * 1024
 MAX_PROFILE_ENTRY = 512 * 1024 * 1024
+MAX_INPUT_FILES = 10
+MAX_TOTAL_INPUT_BYTES = 500 * 1024 * 1024
 
 
 class ModPipelineError(ValueError):
@@ -40,6 +42,20 @@ def _sha256_file(path: str) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _preflight_inputs(paths: list[str]) -> int:
+    if not paths:
+        raise ModPipelineError("Chưa có ZIP đầu vào.")
+    if len(paths) > MAX_INPUT_FILES:
+        raise ModPipelineError(f"Chỉ nhận tối đa {MAX_INPUT_FILES} ZIP mỗi lần.")
+    try:
+        total_bytes = sum(Path(path).stat().st_size for path in paths)
+    except OSError as exc:
+        raise ModPipelineError("Không đọc được thông tin một trong các ZIP đầu vào.") from exc
+    if total_bytes > MAX_TOTAL_INPUT_BYTES:
+        raise ModPipelineError("Tổng dung lượng ZIP đầu vào vượt quá 500 MB.")
+    return total_bytes
 
 
 def _archive_profile(path: str) -> dict[str, Any]:
@@ -171,9 +187,11 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
     AoV packs without a dedicated parser/serializer fail closed. The supported
     Actor 595 route is mod-to-mod and never uses the official game package.
     """
-    if not archive_paths:
-        raise ModPipelineError("Chưa có ZIP đầu vào.")
+    total_input_bytes = _preflight_inputs(archive_paths)
     profiles = [_archive_profile(path) for path in archive_paths]
+    total_profile_entries = sum(item["entries"] for item in profiles)
+    if total_profile_entries > MAX_PROFILE_ENTRIES:
+        raise ModPipelineError("Tổng số mục trong các ZIP vượt quá 20.000.")
     adapter = _select_adapter(profiles)
 
     destination = Path(output_path)
@@ -200,6 +218,7 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
         result.update({
             "adapter": adapter,
             "input_count": len(archive_paths),
+            "input_bytes": total_input_bytes,
             "input_profiles": profiles,
             "output_bytes": destination.stat().st_size,
             "structurally_validated": True,
