@@ -68,14 +68,14 @@ class IFixMergerTests(unittest.TestCase):
     def test_negative_collection_count_is_rejected(self):
         import struct
 
-        malformed = struct.pack("<Q", 0) + b"\\x00" + struct.pack("<i", -1)
+        malformed = struct.pack("<Q", 0) + b"\x00" + struct.pack("<i", -1)
         with self.assertRaisesRegex(IFixMergeError, "Số lượng bản ghi trong IFix"):
             parse_ifix_patch(malformed)
 
     def test_invalid_utf8_string_is_rejected_as_ifix_error(self):
         import struct
 
-        malformed = struct.pack("<Q", 0) + b"\\x01\\xff"
+        malformed = struct.pack("<Q", 0) + b"\x01\xff"
         with self.assertRaisesRegex(IFixMergeError, "không phải UTF-8"):
             parse_ifix_patch(malformed)
 
