@@ -11,6 +11,7 @@ from app.assetbundle_inspector import (
     build_assetbundle_metadata_merge_plan,
     build_streamed_resource_merge_plan,
     build_cross_cab_reference_merge_plan,
+    build_assetbundle_merge_preflight,
     compare_assetbundle_overlays,
     inspect_assetbundle,
     verify_assetbundle_roundtrip,
@@ -68,6 +69,19 @@ class AssetBundleInspectorTests(unittest.TestCase):
 
 
 
+
+
+    def test_combined_preflight_requires_all_sidecar_inputs_together(self):
+        plan = build_assetbundle_merge_preflight(
+            {}, {}, base_resources={"base.resS": 10}
+        )
+        self.assertFalse(plan["ready"])
+        self.assertEqual(plan["stage"], "sidecar")
+
+    def test_combined_preflight_returns_dry_run_scope_for_empty_inventories(self):
+        plan = build_assetbundle_merge_preflight({}, {})
+        self.assertTrue(plan["ready"])
+        self.assertIn("no serialized objects", plan["scope"])
 
     def test_cross_cab_plan_resolves_local_and_external_pptrs(self):
         base = {
