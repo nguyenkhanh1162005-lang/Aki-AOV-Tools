@@ -18,7 +18,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 Mở http://localhost:8000
 
 ## Chạy Telegram bot
-Thiết lập biến môi trường `BOT_TOKEN` trong phần Secrets của nền tảng triển khai. Không commit token vào GitHub.
+Thiết lập `BOT_TOKEN` và `ALLOWED_USER_IDS` trong phần Environment/Secrets của nền tảng triển khai. `ALLOWED_USER_IDS` là danh sách Telegram ID dạng số, phân cách bằng dấu phẩy; chức năng tải ZIP qua link sẽ bị khóa nếu biến này để trống. Không commit token hoặc ID vào GitHub.
 ```bash
 python bot.py
 ```
