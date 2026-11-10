@@ -64,8 +64,9 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = "Local Bot API" if LOCAL_API else "Bot API mặc định"
     await update.message.reply_text(
         f"Chế độ: {mode}\n"
-        f"Giới hạn mỗi ZIP: {MAX_FILE_BYTES // MIB} MB\n"
-        f"Tổng dung lượng nhận: {MAX_TOTAL_BYTES // MIB} MB\n"
+        f"ZIP gửi trực tiếp qua Telegram: {MAX_FILE_BYTES // MIB} MB/file\n"
+        "ZIP tải từ link HTTPS trực tiếp: tối đa 500 MB tổng\n"
+        "Giới hạn gửi ZIP kết quả qua Bot API mặc định: 50 MB\n"
         f"Đã nhận: {len(files)}/{MAX_FILES} file, {total / MIB:.1f} MB"
     )
 
