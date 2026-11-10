@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import io
-import re
 import shutil
 import sys
 import tempfile
-import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 from typing import Any
 
-from .aov_bytes import AOVBytesError, ZSTD_MAGIC, decode_aov_resource, encode_aov_resource
+from .aov_bytes import AOVBytesError, decode_aov_resource, encode_aov_resource
+from .aov_merge import AOVResourceMergeError, merge_aov_mses_resource
+from .aov_common_actions import CommonActionsMergeError, merge_common_actions_pkg
 from .ifix_merger import (
     IFixMergeError,
     merge_ifix_patches,
@@ -105,97 +104,6 @@ def _decode_package_entry(data: bytes, name: str) -> tuple[bytes, str]:
     return data, "raw"
 
 
-def _merge_bank(base_data: bytes, vtk_data: bytes, resource_name: str,
-                required_vtk_strings: tuple[bytes, ...]) -> bytes:
-    base_raw, base_mode = _decode(base_data, resource_name)
-    vtk_raw, vtk_mode = _decode(vtk_data, resource_name)
-    if not base_raw.startswith(b"MSES") or not vtk_raw.startswith(b"MSES"):
-        raise AOVMergeError(f"{resource_name} không có header MSES hợp lệ.")
-    if base_raw[8:16] != vtk_raw[8:16]:
-        raise AOVMergeError(f"Schema hoặc số dòng {resource_name} không tương thích.")
-    if any(value not in vtk_raw for value in required_vtk_strings):
-        raise AOVMergeError(f"{resource_name} thiếu chuỗi âm thanh Vấn Tâm Kiếm cần thiết.")
-    # The VTK table is the same schema and changes the LiXin sound aliases only.
-    result = _encode(vtk_raw, resource_name, base_mode)
-    decoded, decoded_mode = _decode(result, resource_name)
-    if decoded != vtk_raw or decoded_mode != base_mode:
-        raise AOVMergeError(f"Không xác minh được dữ liệu sau khi mã hóa {resource_name}.")
-    return result
-
-
-def _merge_skillcombine(base_data: bytes, vtk_data: bytes) -> bytes:
-    base_raw, base_mode = _decode(base_data, "skillcombine")
-    vtk_raw, _ = _decode(vtk_data, "skillcombine")
-    if not base_raw.startswith(b"MSES") or not vtk_raw.startswith(b"MSES"):
-        raise AOVMergeError("skillcombine không có header MSES hợp lệ.")
-    if len(base_raw) < 140 or len(vtk_raw) < 140:
-        raise AOVMergeError("Header skillcombine quá ngắn.")
-    base_rows = int.from_bytes(base_raw[12:16], "little")
-    vtk_rows = int.from_bytes(vtk_raw[12:16], "little")
-    if base_rows != 14608 or vtk_rows != 14613:
-        raise AOVMergeError("Số dòng skillcombine không đúng phiên bản được hỗ trợ.")
-    base_body = base_raw[140:]
-    vtk_body = vtk_raw[140:]
-    if not vtk_body.startswith(base_body):
-        raise AOVMergeError("skillcombine VTK không giữ nguyên dữ liệu nền 1.64.1.12.")
-    # Keep the newer base schema/header and append the five VTK rows.
-    merged = bytearray(base_raw[:140] + vtk_body)
-    merged[12:16] = vtk_rows.to_bytes(4, "little")
-    merged[96:128] = hashlib.md5(merged[140:]).hexdigest().encode("ascii")
-    encoded = _encode(bytes(merged), "skillcombine", base_mode)
-    check, _ = _decode(encoded, "skillcombine")
-    if check != bytes(merged):
-        raise AOVMergeError("Kiểm tra lại skillcombine sau mã hóa thất bại.")
-    return encoded
-
-
-def _parse_label_rows(raw: bytes) -> list[tuple[int, bytes]]:
-    if not raw.startswith(b"MSES") or len(raw) < 140:
-        raise AOVMergeError("ResSkinSeniorLabelCfg không có header MSES hợp lệ.")
-    count = int.from_bytes(raw[12:16], "little")
-    offset = 140
-    rows: list[tuple[int, bytes]] = []
-    keys: set[int] = set()
-    if count > 100_000:
-        raise AOVMergeError("Số dòng ResSkinSeniorLabelCfg không hợp lệ.")
-    for _ in range(count):
-        if offset + 12 > len(raw):
-            raise AOVMergeError("ResSkinSeniorLabelCfg bị cắt cụt.")
-        key = int.from_bytes(raw[offset + 4:offset + 8], "little")
-        text_length = int.from_bytes(raw[offset + 8:offset + 12], "little")
-        size = 32 + text_length
-        row = raw[offset:offset + size]
-        if len(row) != size:
-            raise AOVMergeError("Dòng ResSkinSeniorLabelCfg bị cắt cụt.")
-        if key in keys:
-            raise AOVMergeError(f"ResSkinSeniorLabelCfg có ID trùng: {key}.")
-        keys.add(key)
-        rows.append((key, row))
-        offset += size
-    if offset != len(raw):
-        raise AOVMergeError("ResSkinSeniorLabelCfg có dữ liệu dư không nhận diện được.")
-    return rows
-
-
-def _merge_res_skin(base_data: bytes, vtk_data: bytes) -> bytes:
-    base_raw, base_mode = _decode(base_data, "ResSkinSeniorLabelCfg")
-    vtk_raw, _ = _decode(vtk_data, "ResSkinSeniorLabelCfg")
-    base_rows = _parse_label_rows(base_raw)
-    vtk_rows = _parse_label_rows(vtk_raw)
-    base_keys = {key for key, _ in base_rows}
-    new_rows = [row for key, row in vtk_rows if key not in base_keys]
-    if [int.from_bytes(row[4:8], "little") for row in new_rows] != [59500]:
-        raise AOVMergeError("ResSkinSeniorLabelCfg không có đúng một dòng mới cho skin 59500.")
-    merged = bytearray(base_raw[:140] + b"".join(row for _, row in base_rows) + b"".join(new_rows))
-    merged[12:16] = (len(base_rows) + len(new_rows)).to_bytes(4, "little")
-    merged[96:128] = hashlib.md5(merged[140:]).hexdigest().encode("ascii")
-    encoded = _encode(bytes(merged), "ResSkinSeniorLabelCfg", base_mode)
-    check, _ = _decode(encoded, "ResSkinSeniorLabelCfg")
-    if len(_parse_label_rows(check)) != len(base_rows) + 1:
-        raise AOVMergeError("Kiểm tra ResSkinSeniorLabelCfg sau ghép thất bại.")
-    return encoded
-
-
 def _merge_ifix(base_data: bytes, vtk_data: bytes) -> tuple[bytes, int, int]:
     base_raw, base_mode = _decode(base_data, "HeroSkin_1")
     vtk_raw, _ = _decode(vtk_data, "HeroSkin_2")
@@ -216,114 +124,6 @@ def _merge_ifix(base_data: bytes, vtk_data: bytes) -> tuple[bytes, int, int]:
     if len(parsed["fixes"]) != 17 or len(parsed["methods"]) != 25:
         raise AOVMergeError("Không xác minh được IFix HeroSkin sau mã hóa.")
     return encoded, len(parsed["fixes"]), len(parsed["methods"])
-
-
-def _merge_common_action_xml(base_raw: bytes, vtk_raw: bytes) -> tuple[bytes, list[str]]:
-    try:
-        base_root = ET.fromstring(base_raw)
-        vtk_root = ET.fromstring(vtk_raw)
-    except ET.ParseError as exc:
-        raise AOVMergeError(f"CommonActions có XML lỗi: {exc}") from exc
-    base_action = base_root.find("Action")
-    vtk_action = vtk_root.find("Action")
-    if base_action is None or vtk_action is None:
-        raise AOVMergeError("CommonActions thiếu node Action.")
-
-    def merge_root_list(tag: str, key_attr: str) -> None:
-        base_list = base_root.find(tag)
-        vtk_list = vtk_root.find(tag)
-        if base_list is None or vtk_list is None:
-            return
-        keys = {item.attrib.get(key_attr) for item in list(base_list)}
-        for item in list(vtk_list):
-            key = item.attrib.get(key_attr)
-            if key not in keys:
-                base_list.append(copy.deepcopy(item))
-                keys.add(key)
-
-    merge_root_list("TemplateObjectList", "id")
-    merge_root_list("RefParamList", "name")
-
-    existing = {track.attrib.get("trackName") for track in base_action.findall("Track")}
-    added: list[str] = []
-    for track in vtk_action.findall("Track"):
-        if not any(
-            item.tag == "SkinOrAvatarList" and item.attrib.get("id") == "59500"
-            for item in track.iter()
-        ):
-            continue
-        name = track.attrib.get("trackName")
-        if not name or name in existing:
-            raise AOVMergeError(f"CommonActions có track trùng hoặc thiếu tên: {name!r}.")
-        clone = copy.deepcopy(track)
-        for parent in clone.iter():
-            for child in list(parent):
-                if child.tag == "SkinOrAvatarList" and child.attrib.get("id") != "59500":
-                    parent.remove(child)
-        if not any(
-            item.tag == "SkinOrAvatarList" and item.attrib.get("id") == "59500"
-            for item in clone.iter()
-        ):
-            continue
-        base_action.append(clone)
-        existing.add(name)
-        added.append(name)
-
-    try:
-        base_length = float(base_action.attrib.get("length", "0"))
-        vtk_length = float(vtk_action.attrib.get("length", "0"))
-        base_action.set("length", f"{max(base_length, vtk_length):.3f}")
-    except ValueError:
-        pass
-
-    output = ET.tostring(base_root, encoding="utf-8", xml_declaration=True)
-    if base_raw.endswith(b"\n"):
-        output += b"\n"
-    return output, added
-
-
-def _merge_common_actions(base_data: bytes, vtk_data: bytes) -> tuple[bytes, int, int]:
-    if not zipfile.is_zipfile(io.BytesIO(base_data)) or not zipfile.is_zipfile(io.BytesIO(vtk_data)):
-        raise AOVMergeError("CommonActions.pkg.bytes không phải ZIP hợp lệ.")
-    base_zip = zipfile.ZipFile(io.BytesIO(base_data))
-    vtk_zip = zipfile.ZipFile(io.BytesIO(vtk_data))
-    output = io.BytesIO()
-    modified_count = 0
-    added_track_count = 0
-    vtk_names = set(vtk_zip.namelist())
-    try:
-        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as merged_zip:
-            base_names = set(base_zip.namelist())
-            for info in base_zip.infolist():
-                if info.is_dir():
-                    merged_zip.writestr(info, b"")
-                    continue
-                data = base_zip.read(info.filename)
-                if info.filename.endswith(".xml") and info.filename in vtk_names:
-                    base_raw, base_mode = _decode_package_entry(data, info.filename)
-                    vtk_raw, _ = _decode_package_entry(vtk_zip.read(info.filename), info.filename)
-                    merged_raw, tracks = _merge_common_action_xml(base_raw, vtk_raw)
-                    if tracks:
-                        data = _encode(merged_raw, info.filename, base_mode) if base_mode != "raw" else merged_raw
-                        modified_count += 1
-                        added_track_count += len(tracks)
-                merged_zip.writestr(info, data)
-            for info in vtk_zip.infolist():
-                if info.is_dir() or info.filename in base_names:
-                    continue
-                merged_zip.writestr(info, vtk_zip.read(info.filename))
-    finally:
-        base_zip.close()
-        vtk_zip.close()
-    if modified_count != 6 or added_track_count != 29:
-        raise AOVMergeError(
-            f"CommonActions delta không đúng: {modified_count} file, {added_track_count} track."
-        )
-    result = output.getvalue()
-    with zipfile.ZipFile(io.BytesIO(result)) as check:
-        if check.testzip() is not None:
-            raise AOVMergeError("CommonActions ZIP sau ghép bị lỗi CRC.")
-    return result, modified_count, added_track_count
 
 
 def _find_mono_behaviour(env: Any, name: str):
@@ -532,23 +332,22 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                 replacements[HERO_SKIN_BASE_PATH], fix_count, method_count = _merge_ifix(
                     read_base(HERO_SKIN_BASE_PATH), read_vtk(HERO_SKIN_VTK_PATH)
                 )
-                replacements[COMMON_ACTIONS_PATH], common_files, common_tracks = _merge_common_actions(
-                    read_base(COMMON_ACTIONS_PATH), read_vtk(COMMON_ACTIONS_PATH)
-                )
-                replacements[RES_SKIN_PATH] = _merge_res_skin(
-                    read_base(RES_SKIN_PATH), read_vtk(RES_SKIN_PATH)
-                )
-                replacements[BATTLE_BANK_PATH] = _merge_bank(
-                    read_base(BATTLE_BANK_PATH), read_vtk(BATTLE_BANK_PATH), "BattleBank",
-                    (b"Hero_LiXin_Skin_C_SFX", b"Hero_LiXin_Skin_C_VO"),
-                )
-                replacements[LOBBY_BANK_PATH] = _merge_bank(
-                    read_base(LOBBY_BANK_PATH), read_vtk(LOBBY_BANK_PATH), "LobbyBank",
-                    (b"Hero_LiXin_Skin_C_Show",),
-                )
-                replacements[SKILL_COMBINE_PATH] = _merge_skillcombine(
-                    read_base(SKILL_COMBINE_PATH), read_vtk(SKILL_COMBINE_PATH)
-                )
+                try:
+                    replacements[COMMON_ACTIONS_PATH], common_report = merge_common_actions_pkg(
+                        read_base(COMMON_ACTIONS_PATH), read_vtk(COMMON_ACTIONS_PATH)
+                    )
+                except CommonActionsMergeError as exc:
+                    raise AOVMergeError(f"CommonActions: {exc}") from exc
+
+                mses_reports = {}
+                for relative in (RES_SKIN_PATH, BATTLE_BANK_PATH, LOBBY_BANK_PATH, SKILL_COMBINE_PATH):
+                    try:
+                        replacements[relative], mses_reports[relative] = merge_aov_mses_resource(
+                            read_base(relative), read_vtk(relative), relative
+                        )
+                    except AOVResourceMergeError as exc:
+                        raise AOVMergeError(str(exc)) from exc
+
                 replacements[PACKER_PATH] = _merge_packer_metadata(
                     read_base(PACKER_PATH),
                     read_vtk(PACKER_PATH),
@@ -556,6 +355,11 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                     read_vtk(VERIFICATION_PATH),
                     asset_paths,
                 )[0]
+                common_files = len(common_report["merged_files"])
+                common_tracks = sum(
+                    len(item.get("replaced_tracks", [])) + len(item.get("appended_tracks", []))
+                    for item in common_report["merged_files"].values()
+                )
 
                 skip_vtk = {
                     PACKER_PATH, VERIFICATION_PATH, HERO_SKIN_VTK_PATH,
@@ -645,6 +449,8 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                     "ifix_methods": method_count,
                     "common_actions_files": common_files,
                     "common_actions_tracks": common_tracks,
+                    "common_actions_report": common_report,
+                    "mses_reports": mses_reports,
                     "assetbundles": len(asset_paths),
                     "new_files": len(added_files),
                     "packer_entries": len(packer_tree["AllResourcePackInfo"]),
