@@ -363,6 +363,10 @@ def validate_ifix_patch(patch: dict[str, Any]) -> None:
     for fix in patch["fixes"]:
         if not 0 <= fix["type"] < type_count or not 0 <= fix["patch"] < method_count:
             raise IFixMergeError("FixInfo trỏ tới type hoặc method không tồn tại.")
+        if any(not 0 <= value < type_count for value in fix["g"]):
+            raise IFixMergeError("FixInfo generic argument trỏ tới type không tồn tại.")
+        if any(kind == "i" and not 0 <= value < type_count for kind, value in fix["params"]):
+            raise IFixMergeError("FixInfo parameter trỏ tới type không tồn tại.")
     for method in patch["extern_methods"]:
         if not 0 <= method["type"] < type_count:
             raise IFixMergeError("External method trỏ tới type không tồn tại.")
