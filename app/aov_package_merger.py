@@ -172,7 +172,9 @@ def merge_aov_archives(
 
         for archive_index, (label, archive, buffer, infos) in enumerate(outer_archives):
             for info in infos:
-                if archive_index == base_outer_index and Path(info.filename).name.lower() == "resources.zip":
+                # The base outer ZIP contributes its existing Resources.zip and wrapper
+                # metadata only; do not copy manifest.json or other wrapper files into Resources.zip.
+                if archive_index == base_outer_index:
                     continue
                 name = _safe_name(info.filename)
                 if any(name.startswith(prefix) for prefix in MACOS_PREFIXES):
