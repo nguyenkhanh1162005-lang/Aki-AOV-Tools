@@ -1,0 +1,25 @@
+name: Export AoV Zstd dictionary for offline analysis
+
+on:
+  push:
+    branches:
+      - debug/zstd-dictionary-export
+
+jobs:
+  export-dictionary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode dictionary fixture
+        run: |
+          python - <<'PY'
+          import base64
+          from pathlib import Path
+          data = base64.b64decode(Path("tools/zstd_dict.b64").read_text())
+          Path("zstd_dict.bin").write_bytes(data)
+          print("dictionary_bytes=", len(data))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aov-zstd-dictionary
+          path: zstd_dict.bin
