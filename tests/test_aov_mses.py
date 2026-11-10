@@ -30,6 +30,13 @@ class MSESTests(unittest.TestCase):
         self.assertEqual(parsed.field_count, 4)
         self.assertEqual([row[4:] for row in parsed.rows], [b"base", b"same", b"new"])
         self.assertEqual(report["appended_keys"], ["0x00000003"])
+        self.assertEqual(report["retained_base_conflicts"], [])
+
+    def test_keeps_base_row_when_same_schema_conflicts(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(4, [struct.pack("<I", 1) + b"overlay"])
+        output, report = merge_mses_rows(base, overlay)
+        self.assertEqual(parse_mses(output).rows[0][4:], b"base")
         self.assertEqual(report["retained_base_conflicts"], ["0x00000001"])
 
     def test_rejects_schema_mismatch_with_changed_shared_row(self):
