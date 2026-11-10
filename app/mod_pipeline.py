@@ -97,16 +97,19 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
         mod_containers = [
             item for item in profiles if item["has_mod_skin_container"]
         ]
-        actor595_mods = [
-            item for item in profiles
-            if item["has_vtk_ifix"] and item["has_595_assets"]
-        ]
-        # The supported route is mod pack + mod overlay. The 10-skin archive
-        # is itself a mod pack; the official game package is neither required
-        # nor downloaded or injected into the output.
+        # VTK is often distributed as multiple ZIP parts. Its IFix payload
+        # and Actor 595 AssetBundles may therefore be in different input files.
+        # Validate the evidence across the complete overlay set, then let the
+        # specialist merger verify the exact required asset list and versions.
+        has_actor595_overlay = (
+            any(item["has_vtk_ifix"] for item in profiles)
+            and any(item["has_595_assets"] for item in profiles)
+        )
+        # The supported route is user-supplied mod pack + user-supplied mod
+        # overlay. The 10-skin archive is a mod container, not the official game.
         supported_pair = (
             len(mod_containers) == 1
-            and len(actor595_mods) >= 1
+            and has_actor595_overlay
             and all(item["looks_like_aov"] for item in profiles)
         )
         if supported_pair:
