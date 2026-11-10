@@ -314,16 +314,18 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
         for path in archive_paths:
             try:
                 zf = zipfile.ZipFile(path)
-                bad = zf.testzip()
-                if bad:
-                    zf.close()
-                    raise AOVMergeError(f"ZIP đầu vào lỗi CRC tại {bad}: {Path(path).name}")
-            except AOVMergeError:
-                raise
             except Exception as exc:
                 raise AOVMergeError(f"File đầu vào không phải ZIP hợp lệ: {Path(path).name}") from exc
-            _validate_archive_paths(zf, Path(path).name)
             opened.append(zf)
+            _validate_archive_paths(zf, Path(path).name)
+            try:
+                bad = zf.testzip()
+            except Exception as exc:
+                raise AOVMergeError(
+                    f"Không thể kiểm tra CRC ZIP: {Path(path).name}"
+                ) from exc
+            if bad:
+                raise AOVMergeError(f"ZIP đầu vào lỗi CRC tại {bad}: {Path(path).name}")
             archives.append((path, zf))
 
         base_candidates = []
