@@ -31,3 +31,13 @@ jobs:
         with:
           name: unitypy-wheels
           path: /tmp/unitypy-wheels/
+      - name: Fetch AOV UnityPy fork for metadata inspection
+        run: |
+          git clone --depth 1 https://github.com/Alanshown/AOV_UABE_2022.git /tmp/AOV_UABE_2022
+          mkdir -p /tmp/aov-unitypy/AssetbundleUtils
+          cp -r /tmp/AOV_UABE_2022/AssetbundleUtils/UnityPy_AOV /tmp/aov-unitypy/AssetbundleUtils/
+          cp /tmp/AOV_UABE_2022/AssetbundleUtils/AssetBundleMetadata.py /tmp/aov-unitypy/AssetbundleUtils/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aov-unitypy-source
+          path: /tmp/aov-unitypy/
