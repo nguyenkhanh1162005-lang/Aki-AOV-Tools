@@ -81,3 +81,9 @@ docker compose -f docker-compose.local-bot-api.yml up -d --build
 - Bộ ghép kiểm tra CRC ZIP, checksum MSES, IFix index, XML CommonActions và cấu trúc PackerInfo.
 - Chưa có xác nhận chạy thực tế trong Liên Quân iOS. ZIP kết quả phải được thử trong game; không xem kiểm tra cấu trúc là bảo đảm tương thích 100%.
 - Chỉ hỗ trợ đúng cặp phiên bản nêu trên. Không tự áp dụng cho bản game/skin khác.
+
+### Lập kế hoạch tương thích tài nguyên (chỉ tư vấn)
+
+API `POST /api/compatibility/plan` nhận manifest JSON dạng `{"resources":[...]}`. Mỗi mục cần `path`, `sha256` (64 ký tự hex) và `format`; có thể thêm `source`, `game_version`, `platform`, `actor_id`, `skin_id`, `is_aov_resource` và `dependencies`.
+
+API phân loại từng đường dẫn thành `SAFE_MERGE`, `IDENTICAL_DUPLICATE`, `NEEDS_RULE`, `UNSUPPORTED` hoặc `VERSION_CONFLICT`. Đây là báo cáo tư vấn từ metadata được gửi lên, không phải bộ phân tích ZIP tự động, không xác thực payload và tuyệt đối không cấp quyền cho bộ ghép bỏ qua adapter. Chỉ executor với adapter đã xác minh mới được tạo ZIP đầu ra.
