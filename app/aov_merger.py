@@ -24,6 +24,9 @@ BASE_VERSION = "1.64.1.12"
 VTK_VERSION = "1.64.1.11"
 BASE_PREFIX = "Resources/1.64.1/"
 MAX_AOV_INPUTS = 10
+MAX_ARCHIVE_ENTRIES = 20_000
+MAX_TOTAL_UNCOMPRESSED = 1024 * 1024 * 1024
+MAX_SINGLE_ENTRY = 512 * 1024 * 1024
 
 COMMON_ACTIONS_PATH = "Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes"
 HERO_SKIN_BASE_PATH = "Thanos/HeroSkin_1.bytes"
@@ -66,7 +69,17 @@ def _load_unitypy_aov():
 
 
 def _validate_archive_paths(zf: zipfile.ZipFile, label: str) -> None:
-    for info in zf.infolist():
+    entries = zf.infolist()
+    if len(entries) > MAX_ARCHIVE_ENTRIES:
+        raise AOVMergeError(f"ZIP {label} vượt quá {MAX_ARCHIVE_ENTRIES} mục.")
+    total_uncompressed = sum(info.file_size for info in entries)
+    if total_uncompressed > MAX_TOTAL_UNCOMPRESSED:
+        raise AOVMergeError(f"ZIP {label} vượt quá giới hạn giải nén 1 GiB.")
+    for info in entries:
+        if info.file_size > MAX_SINGLE_ENTRY:
+            raise AOVMergeError(
+                f"ZIP {label} có mục vượt quá 512 MiB: {info.filename}"
+            )
         normalized = info.filename.replace("\\", "/")
         path = PurePosixPath(normalized)
         mode = (info.external_attr >> 16) & 0xFFFF
@@ -378,6 +391,11 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
             base_inner = zipfile.ZipFile(base_inner_path)
             try:
                 _validate_archive_paths(base_inner, "Resources.zip bên trong gói mod")
+                bad_inner = base_inner.testzip()
+                if bad_inner:
+                    raise AOVMergeError(
+                        f"Resources.zip của gói mod lỗi CRC tại {bad_inner}"
+                    )
                 base_names = set(base_inner.namelist())
                 required_base = [
                     BASE_PREFIX + HERO_SKIN_BASE_PATH,
