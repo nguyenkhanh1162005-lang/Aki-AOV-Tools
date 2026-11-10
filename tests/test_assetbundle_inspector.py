@@ -85,17 +85,17 @@ class AssetBundleInspectorTests(unittest.TestCase):
         }
         bundle = SimpleNamespace(
             signature="UnityFS",
-            save=lambda packer=None: b"UnityFS\\x00roundtrip",
+            save=lambda packer=None: b"UnityFS\x00roundtrip",
         )
         env = SimpleNamespace(files={"bundle": bundle})
         fake_unity = SimpleNamespace(load=lambda data: env)
         with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
             with patch("app.assetbundle_inspector.inspect_assetbundle", return_value=report) as inspect:
-                result = verify_assetbundle_roundtrip(b"UnityFS\\x00original")
+                result = verify_assetbundle_roundtrip(b"UnityFS\x00original")
 
         self.assertTrue(result["verified"])
-        self.assertEqual(result["original_size"], len(b"UnityFS\\x00original"))
-        self.assertEqual(result["roundtrip_size"], len(b"UnityFS\\x00roundtrip"))
+        self.assertEqual(result["original_size"], len(b"UnityFS\x00original"))
+        self.assertEqual(result["roundtrip_size"], len(b"UnityFS\x00roundtrip"))
         self.assertEqual(inspect.call_count, 2)
 
     def test_roundtrip_refuses_incomplete_object_payload_inventory(self):
@@ -113,7 +113,7 @@ class AssetBundleInspectorTests(unittest.TestCase):
             }],
         }
         with patch("app.assetbundle_inspector.inspect_assetbundle", return_value=report):
-            result = verify_assetbundle_roundtrip(b"UnityFS\\x00original")
+            result = verify_assetbundle_roundtrip(b"UnityFS\x00original")
 
         self.assertFalse(result["verified"])
         self.assertIn("inventory chưa hoàn chỉnh", result["reason"])
