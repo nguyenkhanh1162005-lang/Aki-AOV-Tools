@@ -103,7 +103,7 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
         ]
         # The supported route is mod pack + mod overlay. The 10-skin archive
         # is itself a mod pack; the official game package is neither required
-        # nor added to the output.
+        # nor downloaded or injected into the output.
         supported_pair = (
             len(mod_containers) == 1
             and len(actor595_mods) >= 1
@@ -163,7 +163,7 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
             "output_bytes": destination.stat().st_size,
             "structurally_validated": True,
             "game_compatibility_tested": False,
-            "official_game_package_used": False,
+            "official_game_package_injected": False,
         })
         return result
     except (MergeError, AOVMergeError) as exc:
