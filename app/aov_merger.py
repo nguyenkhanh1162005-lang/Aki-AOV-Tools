@@ -78,6 +78,7 @@ def _validate_archive_paths(zf: zipfile.ZipFile, label: str) -> None:
     total_uncompressed = sum(info.file_size for info in entries)
     if total_uncompressed > MAX_TOTAL_UNCOMPRESSED:
         raise AOVMergeError(f"ZIP {label} vượt quá giới hạn giải nén 1 GiB.")
+    seen_files: set[str] = set()
     for info in entries:
         if info.file_size > MAX_SINGLE_ENTRY:
             raise AOVMergeError(
@@ -97,6 +98,12 @@ def _validate_archive_paths(zf: zipfile.ZipFile, label: str) -> None:
             raise AOVMergeError(
                 f"ZIP {label} chứa đường dẫn hoặc mục không an toàn: {info.filename}"
             )
+        if not info.is_dir():
+            if normalized in seen_files:
+                raise AOVMergeError(
+                    f"ZIP {label} có đường dẫn tệp bị lặp, không rõ dữ liệu nào được ưu tiên: {normalized}"
+                )
+            seen_files.add(normalized)
 
 
 def _normalise_vtk_path(name: str) -> str:
