@@ -5,7 +5,8 @@ Công cụ web và Telegram bot dùng chung bộ xử lý ZIP trên ổ đĩa, k
 ## Tính năng
 - Web UI tiếng Việt, dùng được trên điện thoại.
 - Web: chọn tối đa 10 ZIP để kiểm tra cấu trúc hoặc ghép ZIP thông thường.
-- Web API `/api/inspect`: liệt kê phần mở rộng, tên có dấu hiệu là tài nguyên game và đường dẫn trùng giữa các ZIP.\n- Web API `/api/drive/import`: tải ZIP từ link chia sẻ Google Drive công khai trực tiếp về máy chủ, hỗ trợ tối đa 10 link và tổng 500 MB. Sau khi nhập, dùng phiên upload trả về để kiểm tra cấu trúc.
+- Web API `/api/inspect`: liệt kê phần mở rộng, tên có dấu hiệu là tài nguyên game và đường dẫn trùng giữa các ZIP.
+- Web API `/api/drive/import`: tải ZIP từ link chia sẻ Google Drive công khai trực tiếp về máy chủ, hỗ trợ tối đa 10 link và tổng 500 MB. Sau khi nhập, dùng phiên upload trả về để kiểm tra cấu trúc.
 - Telegram bot: dùng `/inspect` để tạo cùng loại báo cáo kiểm kê trước khi cân nhắc ghép.
 - Telegram bot: gửi ZIP, dùng `/merge` để ghép, `/clear` để xóa danh sách, `/status` để xem giới hạn.
 - Bot xử lý ZIP theo luồng trên ổ đĩa tạm, tránh giữ toàn bộ file lớn trong RAM.
@@ -39,5 +40,11 @@ python bot.py
 - Telegram bot: triển khai như worker riêng, lệnh chạy `python bot.py`, có biến `BOT_TOKEN`.
 - Local Bot API Server: là dịch vụ riêng, cần Docker và ổ đĩa lưu trữ đủ lớn. Worker bot phải truy cập được server qua mạng nội bộ hoặc URL riêng an toàn.
 
-### Nhập ZIP từ Google Drive\n- Dán mỗi link chia sẻ Google Drive trên một dòng trong giao diện web. File phải bật quyền “Bất kỳ ai có đường liên kết”.\n- Chỉ nhận link `drive.google.com` hoặc `docs.google.com`; máy chủ tự tải nội dung, giới hạn 500 MB mỗi file và tổng 500 MB.\n- Phiên tải tạm hết hạn sau 1 giờ và file sẽ bị xóa sau khi kiểm tra xong hoặc khi phiên hết hạn.\n- Đây là nhập file để kiểm tra, không phải chức năng giải mã hoặc hợp nhất tài nguyên game.\n\n## Giới hạn về Liên Quân
+### Nhập ZIP từ Google Drive
+- Dán mỗi link chia sẻ Google Drive trên một dòng trong giao diện web. File phải bật quyền “Bất kỳ ai có đường liên kết”.
+- Chỉ nhận link `drive.google.com` hoặc `docs.google.com`; máy chủ tự tải nội dung, giới hạn 500 MB mỗi file và tổng 500 MB.
+- Phiên tải tạm hết hạn sau 1 giờ và file sẽ bị xóa sau khi kiểm tra xong hoặc khi phiên hết hạn.
+- Đây là nhập file để kiểm tra, không phải chức năng giải mã hoặc hợp nhất tài nguyên game.
+
+## Giới hạn về Liên Quân
 Phiên bản này chỉ ghép ZIP thông thường: giữ tệp trùng nội dung một lần và báo lỗi nếu cùng đường dẫn nhưng nội dung khác nhau. Nó **không** hợp nhất dữ liệu nhị phân độc quyền của Liên Quân như `BattleBank.bytes` hoặc `LobbyBank.bytes`. Chưa có thuật toán AOV skin merger được xác minh, vì vậy không xem ZIP kết quả là bản mod game đã hoàn thiện.
