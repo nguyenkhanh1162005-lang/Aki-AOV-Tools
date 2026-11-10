@@ -16,6 +16,7 @@ from telegram import FSInputFile
 
 from app.large_merger import merge_zip_files, MergeError
 from app.aov_inspector import inspect_archives, InspectError
+from app.url_downloader import download_zip_from_url, DownloadError
 
 MIB = 1024 * 1024
 LOCAL_API = bool(
@@ -50,7 +51,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Aki-AOV Bot đã sẵn sàng.\n"
         f"Chế độ nhận file: {mode}.\n\n"
-        "Gửi lần lượt các file ZIP, sau đó dùng /merge để ghép.\n"
+        "Gửi ZIP nhỏ trực tiếp hoặc gửi liên kết HTTPS tải ZIP trực tiếp (tối đa 500 MB), sau đó dùng /merge để ghép.\n"
         "/status xem giới hạn hiện tại\n"
         "/inspect kiểm tra cấu trúc ZIP đã gửi\n"
         "/clear xóa danh sách file"
@@ -124,6 +125,52 @@ async def receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
         destination.unlink(missing_ok=True)
         await status_message.edit_text(
             f"Tải file thất bại: {type(exc).__name__}. Thử gửi lại nhé."
+        )
+
+
+async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    url = (message.text or "").strip()
+    if not url.startswith("https://"):
+        await message.reply_text(
+            "Gửi một liên kết HTTPS tải trực tiếp tới file .zip. "
+            "Liên kết trang xem trước (không phải link tải trực tiếp) có thể không dùng được."
+        )
+        return
+
+    files = context.user_data.setdefault("zips", [])
+    if len(files) >= MAX_FILES:
+        await message.reply_text("Đã đủ 10 file. Dùng /merge hoặc /clear.")
+        return
+    current_total = sum(
+        Path(path).stat().st_size for _, path in files if Path(path).exists()
+    )
+    link_limit = 500 * MIB
+    if current_total >= link_limit:
+        await message.reply_text("Tổng dung lượng đã đạt 500 MB.")
+        return
+
+    folder = _workdir(context)
+    destination = folder / f"{len(files) + 1}_download.zip"
+    status_message = await message.reply_text(
+        "Đang tải ZIP từ liên kết HTTPS. Quá trình tải được ghi trực tiếp xuống ổ đĩa..."
+    )
+    try:
+        name, actual_size = await download_zip_from_url(
+            url, destination, max_bytes=link_limit - current_total
+        )
+        files.append((name, str(destination)))
+        await status_message.edit_text(
+            f"Đã tải và kiểm tra ZIP hợp lệ: {name} "
+            f"({actual_size / MIB:.1f} MB). Đã nhận {len(files)}/{MAX_FILES} file."
+        )
+    except DownloadError as exc:
+        destination.unlink(missing_ok=True)
+        await status_message.edit_text(f"Không tải được ZIP: {exc}")
+    except Exception as exc:
+        destination.unlink(missing_ok=True)
+        await status_message.edit_text(
+            f"Tải liên kết thất bại: {type(exc).__name__}. File nguồn không bị thay đổi."
         )
 
 
@@ -210,6 +257,7 @@ def main():
     app.add_handler(CommandHandler("merge", merge))
     app.add_handler(CommandHandler("inspect", inspect))
     app.add_handler(MessageHandler(filters.Document.ALL, receive))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_link))
     app.run_polling()
 
 
