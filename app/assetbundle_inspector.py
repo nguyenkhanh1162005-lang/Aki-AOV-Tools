@@ -617,8 +617,14 @@ def build_path_id_remap_plan(
     overlay_payload_hashes: dict[str, str],
     *,
     inventories_complete: bool = True,
+    allow_payload_deduplication: bool = False,
 ) -> dict[str, Any]:
-    """Plan append-only PathID handling for one matched CAB; never mutates assets."""
+    """Plan append-only PathID handling for one matched CAB; never mutates assets.
+
+    Payload equality alone does not prove PPtr equivalence: identical bytes can
+    resolve differently when external CAB tables or dependencies differ. Keep
+    deduplication disabled unless a caller has independently proven that context.
+    """
     if not inventories_complete:
         return {"ready": False, "reason": "Object inventory or payload hashes are incomplete.",
                 "remap": {}, "deduplicate": {}, "blocked_path_ids": []}
@@ -660,7 +666,13 @@ def build_path_id_remap_plan(
             blocked.append({"path_id": path_id, "reason": "Object payload hash missing"})
             continue
         if base_hash == overlay_hash:
-            deduplicate[key] = path_id
+            if allow_payload_deduplication:
+                deduplicate[key] = path_id
+                continue
+            blocked.append({
+                "path_id": path_id,
+                "reason": "Payload bytes match but PPtr/dependency equivalence is not proven",
+            })
             continue
         if next_id >= (1 << 63):
             blocked.append({"path_id": path_id, "reason": "No free signed 64-bit PathID remains"})
