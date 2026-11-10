@@ -1,0 +1,55 @@
+name: Aki free Drive AOV processor
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Nhập RUN để xác nhận chạy bằng link Drive đã lưu trong GitHub Secret AKI_DRIVE_LINKS"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aki-drive-aov-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: ${{ inputs.confirm == 'RUN' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout Aki
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Aki dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Confirm AoV-specific UnityPy parser exists
+        run: |
+          test -d app/vendor/UnityPy_AOV
+          test -f app/vendor/UnityPy_AOV/__init__.py
+
+      - name: Download Drive ZIPs and run the existing AOV merger
+        env:
+          AKI_DRIVE_LINKS: ${{ secrets.AKI_DRIVE_LINKS }}
+        run: |
+          test -n "$AKI_DRIVE_LINKS" || (echo "Thiếu GitHub Secret AKI_DRIVE_LINKS" && exit 1)
+          python tools/process_drive_aov.py
+
+      - name: Upload result for download on iPhone
+        uses: actions/upload-artifact@v4
+        with:
+          name: aki-aov-result-${{ github.run_id }}
+          path: Aki-AOV-10Skin-VanTamKiem.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
