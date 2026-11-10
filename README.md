@@ -7,7 +7,7 @@ Công cụ web và Telegram bot dùng chung bộ xử lý ZIP trên ổ đĩa, k
 - Web: chọn tối đa 10 ZIP để kiểm tra cấu trúc hoặc ghép ZIP thông thường.
 - Web API `/api/inspect`: liệt kê phần mở rộng, tên có dấu hiệu là tài nguyên game và đường dẫn trùng giữa các ZIP.
 - Telegram bot: dùng `/inspect` để tạo cùng loại báo cáo kiểm kê trước khi cân nhắc ghép.
-- Telegram bot: gửi ZIP, dùng `/merge` để ghép, `/clear` để xóa danh sách, `/status` để xem giới hạn.
+- Telegram bot: gửi ZIP nhỏ trực tiếp hoặc gửi link HTTPS tải ZIP trực tiếp, dùng `/merge` để ghép, `/clear` để xóa danh sách, `/status` để xem giới hạn.
 - Bot xử lý ZIP theo luồng trên ổ đĩa tạm, tránh giữ toàn bộ file lớn trong RAM.
 
 ## Chạy web
@@ -18,13 +18,15 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 Mở http://localhost:8000
 
 ## Chạy Telegram bot
-Thiết lập biến môi trường `BOT_TOKEN` trong phần Secrets của nền tảng triển khai. Không commit token vào GitHub.
+Thiết lập `BOT_TOKEN` và `ALLOWED_USER_IDS` trong phần Environment/Secrets của nền tảng triển khai. `ALLOWED_USER_IDS` là danh sách Telegram ID dạng số, phân cách bằng dấu phẩy; toàn bộ bot sẽ từ chối tài khoản nếu biến này để trống. Không commit token hoặc ID vào GitHub.
 ```bash
 python bot.py
 ```
 
 ### Giới hạn file Telegram
-- Nếu dùng Bot API mặc định: bot chỉ tải được file tối đa 20 MB; code sẽ báo rõ giới hạn này.
+- Nếu gửi tệp đính kèm qua Bot API mặc định: bot chỉ tải được file tối đa 20 MB; code sẽ báo rõ giới hạn này.
+- Phương án miễn phí tạm thời: gửi cho bot một **liên kết HTTPS tải trực tiếp tới file ZIP công khai**. Bot tải theo luồng xuống ổ đĩa tạm, kiểm tra ZIP và giới hạn tổng link là 500 MB. Link trang xem trước của Drive/Dropbox có thể không phải link tải trực tiếp và có thể bị từ chối.
+- Với Bot API mặc định, bot chỉ gửi ZIP kết quả tối đa 50 MB. Nếu kết quả lớn hơn, bot giữ file nguồn và báo cần Local Bot API hoặc một kho lưu trữ kết quả riêng. Vì vậy link intake chưa thay thế hoàn toàn Local Bot API.
 - Để nhận ZIP tới 500 MB và gửi ZIP kết quả lớn, cần tự chạy **Local Bot API Server** với cờ `--local`.
 - Khi đã có Local Bot API Server, thêm hai biến môi trường vào dịch vụ bot:
   - `TELEGRAM_API_BASE_URL=http://<host-noi-bo>:8081/bot`
