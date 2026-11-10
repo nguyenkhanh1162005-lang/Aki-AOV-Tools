@@ -8,6 +8,7 @@ MAGIC = b"MSES"
 HEADER_SIZE = 0x8C
 CHECKSUM_START = 0x60
 CHECKSUM_END = 0x80
+MAX_MSES_ROW_BYTES = 64 * 1024 * 1024
 
 
 class MSESError(ValueError):
@@ -45,7 +46,7 @@ def parse_mses(data: bytes, *, verify_checksum: bool = True) -> MSESTable:
         row_size = struct.unpack_from("<I", data, offset)[0]
         start = offset + 4
         end = start + row_size
-        if row_size < 4 or end > len(data):
+        if row_size < 4 or row_size > MAX_MSES_ROW_BYTES or end > len(data):
             raise MSESError(f"Độ dài bản ghi MSES thứ {index} không hợp lệ.")
         rows.append(data[start:end])
         offset = end
