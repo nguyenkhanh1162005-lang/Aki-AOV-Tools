@@ -30,7 +30,7 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
                 "container_entry_count": 3,
                 "external_reference_count": 1,
                 "object_type_counts": {"Texture2D": 5, "Mesh": 4},
-                "unresolved_external_paths": ["archive:/CAB-other.resS"],
+                "external_paths": ["archive:/CAB-other.resS"],
             }
             with patch("app.aov_inspector.inspect_assetbundle", return_value=report_data):
                 report = inspect_archives([path])
