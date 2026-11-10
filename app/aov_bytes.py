@@ -6,7 +6,7 @@ from .aov_zstd_dict import ZSTD_DICT
 
 MAGIC = b"\x28\xb5\x2f\xfd"
 HEADER = b"\x22\x4a\x00\xef"
-_ZSTD_DICT = pyzstd.ZstdDict(ZSTD_DICT, True)
+_ZSTD_DICT = pyzstd.ZstdDict(ZSTD_DICT, is_raw=True)
 
 
 class AOVBytesError(ValueError):
