@@ -135,11 +135,17 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
                 })
 
         remaining_id_slots = max(0, MAX_OBJECT_ID_INDEX_ENTRIES - indexed_object_ids)
-        object_ids = list(objects.keys())[:remaining_id_slots]
+        indexed_objects = list(objects.items())[:remaining_id_slots]
+        object_ids = [path_id for path_id, _ in indexed_objects]
+        object_types_by_path_id = {
+            str(path_id): _safe_text(getattr(getattr(obj, "type", None), "name", "Unknown"), 80)
+            for path_id, obj in indexed_objects
+        }
         indexed_object_ids += len(object_ids)
         serialized_summaries.append({
             "name": file_name,
             "object_path_ids": object_ids,
+            "object_types_by_path_id": object_types_by_path_id,
             "object_id_inventory_complete": len(object_ids) == len(objects),
             "unity_version": _safe_text(getattr(asset_file, "unity_version", "")),
             "target_platform": _safe_text(getattr(getattr(asset_file, "target_platform", None), "name", "")),
@@ -274,6 +280,42 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
         basename = Path(serialized["name"]).name.lower()
         base_cabs.setdefault(basename, []).append(serialized)
 
+    overlay_cabs: dict[str, list[dict[str, Any]]] = {}
+    for serialized in overlay["serialized_files"]:
+        basename = Path(serialized["name"]).name.lower()
+        overlay_cabs.setdefault(basename, []).append(serialized)
+
+    object_id_overlaps = []
+    object_id_inventory_incomplete = False
+    ambiguous_object_id_cabs = []
+    for basename in sorted(set(base_cabs) & set(overlay_cabs)):
+        base_matches = base_cabs[basename]
+        overlay_matches = overlay_cabs[basename]
+        if len(base_matches) != 1 or len(overlay_matches) != 1:
+            ambiguous_object_id_cabs.append(basename)
+            continue
+        base_item = base_matches[0]
+        overlay_item = overlay_matches[0]
+        if not base_item["object_id_inventory_complete"] or not overlay_item["object_id_inventory_complete"]:
+            object_id_inventory_incomplete = True
+            continue
+        base_ids = set(base_item["object_path_ids"])
+        overlay_ids = set(overlay_item["object_path_ids"])
+        shared_ids = base_ids & overlay_ids
+        type_conflicts = sorted(
+            path_id for path_id in shared_ids
+            if base_item["object_types_by_path_id"].get(str(path_id))
+            != overlay_item["object_types_by_path_id"].get(str(path_id))
+        )
+        object_id_overlaps.append({
+            "cab": basename,
+            "shared_path_id_count": len(shared_ids),
+            "base_only_path_id_count": len(base_ids - overlay_ids),
+            "overlay_only_path_id_count": len(overlay_ids - base_ids),
+            "type_conflict_count": len(type_conflicts),
+            "type_conflict_path_ids": type_conflicts[:MAX_REPORTED_REFERENCES],
+        })
+
     cross_bundle_references = {
         "resolved": [],
         "missing_path_ids": [],
@@ -319,6 +361,9 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
         "external_paths_added": sorted(
             set(overlay["external_paths"]) - set(base["external_paths"])
         )[:MAX_REPORTED_CONTAINERS],
+        "object_id_overlaps": object_id_overlaps,
+        "object_id_inventory_incomplete": object_id_inventory_incomplete,
+        "ambiguous_object_id_cabs": ambiguous_object_id_cabs[:MAX_REPORTED_REFERENCES],
         "cross_bundle_references": {
             "resolved_count": len(cross_bundle_references["resolved"]),
             "missing_path_id_count": len(cross_bundle_references["missing_path_ids"]),
