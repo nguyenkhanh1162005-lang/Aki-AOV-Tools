@@ -62,7 +62,7 @@ def build_mses(table: MSESTable, rows: list[bytes] | tuple[bytes, ...], *, field
         raise MSESError("Số trường MSES mới không hợp lệ.")
     body = bytearray()
     for row in rows:
-        if not isinstance(row, bytes) or len(row) < 4 or len(row) > 64 * 1024 * 1024:
+        if not isinstance(row, bytes) or len(row) < 4 or len(row) > MAX_MSES_ROW_BYTES:
             raise MSESError("Bản ghi MSES có kích thước không hợp lệ.")
         body.extend(struct.pack("<I", len(row)))
         body.extend(row)
