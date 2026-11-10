@@ -1,3 +1,4 @@
+import struct
 import tempfile
 import unittest
 import zipfile
@@ -46,15 +47,20 @@ class ResourceManifestTests(unittest.TestCase):
     def test_rejects_encrypted_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "encrypted.zip"
-            info = zipfile.ZipInfo("secret.bytes")
-            info.flag_bits |= 1
             with zipfile.ZipFile(path, "w") as archive:
-                archive.writestr(info, b"x")
-            with zipfile.ZipFile(path, "a") as archive:
-                # Ensure the manifest rejects the encrypted flag if preserved by ZIP writer.
-                pass
-            # Some ZIP writers clear encryption flags; this test only asserts safe handling
-            # through the ordinary traversal and size protections elsewhere.
+                archive.writestr("secret.bytes", b"x")
+            data = bytearray(path.read_bytes())
+            local = data.find(b"PK\\x03\\x04")
+            central = data.find(b"PK\\x01\\x02")
+            self.assertGreaterEqual(local, 0)
+            self.assertGreaterEqual(central, 0)
+            local_flags = struct.unpack_from("<H", data, local + 6)[0]
+            central_flags = struct.unpack_from("<H", data, central + 8)[0]
+            struct.pack_into("<H", data, local + 6, local_flags | 1)
+            struct.pack_into("<H", data, central + 8, central_flags | 1)
+            path.write_bytes(data)
+            with self.assertRaisesRegex(ResourceManifestError, "được mã hóa"):
+                build_resource_manifest([str(path)])
 
     @patch("app.resource_manifest.inspect_assetbundle")
     def test_extracts_unity_assetbundle_dependencies_read_only(self, inspect_bundle):
