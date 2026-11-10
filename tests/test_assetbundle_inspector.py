@@ -109,6 +109,38 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertFalse(report["structural_checks_pass"])
         self.assertFalse(report["merge_safe"])
 
+    def test_scans_local_and_external_object_references(self):
+        object_a = SimpleNamespace(
+            type=SimpleNamespace(name="GameObject"),
+            path_id=100,
+            read_typetree=lambda: {
+                "m_Component": [
+                    {"component": {"m_FileID": 0, "m_PathID": 200}},
+                    {"m_Script": {"m_FileID": 1, "m_PathID": 300}},
+                ]
+            },
+        )
+        serialized = SimpleNamespace(
+            name="CAB-main",
+            unity_version="2022.3.0f1",
+            target_platform=SimpleNamespace(name="iOS"),
+            objects={100: object_a},
+            externals=[SimpleNamespace(path="archive:/CAB-dependency.resS", name="CAB-dependency.resS")],
+        )
+        env = SimpleNamespace(assets=[serialized], container={}, files={"bundle": object()})
+        fake_unity = SimpleNamespace(load=lambda data: env)
+        with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
+            report = inspect_assetbundle(b"UnityFS\\x00fixture")
+        self.assertEqual(report["object_reference_count"], 2)
+        self.assertTrue(report["reference_scan_complete"])
+        self.assertEqual(report["object_references"][0]["target_file"], "CAB-dependency.resS")
+        self.assertEqual(report["object_references"][1]["target_file"], "local")
+
+    def test_real_unityfs_null_terminated_signature_is_required(self):
+        self.assertTrue(b"UnityFS\\x00fixture".startswith(b"UnityFS\\x00"))
+        with self.assertRaises(AssetBundleInspectError):
+            inspect_assetbundle(b"UnityFS\\\\x00fixture")
+
     def test_wraps_parser_errors_as_inspection_errors(self):
         fake_unity = SimpleNamespace(load=lambda data: (_ for _ in ()).throw(RuntimeError("bad bundle")))
         with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
