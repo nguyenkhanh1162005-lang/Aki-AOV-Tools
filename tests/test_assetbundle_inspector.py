@@ -7,6 +7,7 @@ from app.assetbundle_inspector import (
     build_path_id_remap_plan,
     build_external_file_id_remap_plan,
     build_pptr_remap_plan,
+    build_assetbundle_metadata_remap_plan,
     compare_assetbundle_overlays,
     inspect_assetbundle,
     verify_assetbundle_roundtrip,
@@ -60,6 +61,39 @@ class AssetBundleInspectorTests(unittest.TestCase):
         plan = build_external_file_id_remap_plan(["archive:/CAB-base"], [""])
         self.assertFalse(plan["ready"])
         self.assertEqual(plan["merged_externals"], [])
+
+
+    def test_assetbundle_metadata_plan_remaps_preload_container_and_main_asset(self):
+        metadata = {
+            "inspection_complete": True,
+            "preload_table_count": 1,
+            "preload_pointer_inventory": [{"file_id": 0, "path_id": 10}],
+            "container_record_inventory": [{
+                "path": "Assets/Test", "preload_index": 0, "preload_size": 1,
+                "asset": {"file_id": 2, "path_id": 20},
+            }],
+            "main_asset": {
+                "preload_index": 0, "preload_size": 1,
+                "asset": {"file_id": 0, "path_id": 10},
+            },
+        }
+        plan = build_assetbundle_metadata_remap_plan(
+            metadata, {"2": 3}, {"10": 11}, {},
+            local_target_path_ids={11},
+            external_target_path_ids={"3": {20}},
+        )
+        self.assertTrue(plan["ready"])
+        self.assertEqual(plan["rewritten"]["preload"], [{"file_id": 0, "path_id": 11}])
+        self.assertEqual(plan["rewritten"]["container"], [{"file_id": 3, "path_id": 20}])
+        self.assertEqual(plan["rewritten"]["main_asset"], {"file_id": 0, "path_id": 11})
+        self.assertTrue(plan["preload_ranges_preserved"])
+
+    def test_assetbundle_metadata_plan_rejects_incomplete_inventory(self):
+        plan = build_assetbundle_metadata_remap_plan(
+            {"inspection_complete": False}, {}, {}, {},
+            local_target_path_ids=set(), external_target_path_ids={},
+        )
+        self.assertFalse(plan["ready"])
 
     def test_pptr_remap_plan_resolves_local_and_external_targets(self):
         plan = build_pptr_remap_plan(
