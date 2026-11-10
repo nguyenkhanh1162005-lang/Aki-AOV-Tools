@@ -30,3 +30,13 @@ jobs:
         with:
           name: vtk-assetbundle-metadata
           path: vtk-assetbundle-metadata.json
+      - name: Prepare offline AoV parser environment
+        run: python -m pip download pyzstd pycryptodome sm4 tabulate numpy UnityPy -d /tmp/aov-wheels
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aov-runtime-wheels
+          path: /tmp/aov-wheels/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aov-unitypy-source
+          path: /tmp/AOV_UABE_2022/AssetbundleUtils/UnityPy_AOV/
