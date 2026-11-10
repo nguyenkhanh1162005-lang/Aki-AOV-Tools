@@ -33,7 +33,7 @@ class AssetBundleInspectorTests(unittest.TestCase):
         )
         fake_unity = SimpleNamespace(load=lambda data: env)
         with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
-            report = inspect_assetbundle(b"UnityFS\\x00fixture", "sample.assetbundle")
+            report = inspect_assetbundle(b"UnityFS\x00fixture", "sample.assetbundle")
 
         self.assertEqual(report["serialized_file_count"], 1)
         self.assertEqual(report["object_count"], 2)
@@ -71,8 +71,8 @@ class AssetBundleInspectorTests(unittest.TestCase):
         fake_unity = SimpleNamespace(load=lambda data: next(envs))
         with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
             report = compare_assetbundle_overlays(
-                b"UnityFS\\x00base",
-                b"UnityFS\\x00overlay",
+                b"UnityFS\x00base",
+                b"UnityFS\x00overlay",
             )
 
         self.assertTrue(report["unity_versions_match"])
@@ -102,7 +102,7 @@ class AssetBundleInspectorTests(unittest.TestCase):
         envs = iter([make_env("2022.3.0f1", "GameObject"), make_env("2021.3.0f1", "Texture2D")])
         fake_unity = SimpleNamespace(load=lambda data: next(envs))
         with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
-            report = compare_assetbundle_overlays(b"UnityFS\\x00base", b"UnityFS\\x00overlay")
+            report = compare_assetbundle_overlays(b"UnityFS\x00base", b"UnityFS\x00overlay")
 
         self.assertFalse(report["unity_versions_match"])
         self.assertEqual(report["container_type_conflicts"], ["assets/hero.prefab"])
@@ -113,7 +113,7 @@ class AssetBundleInspectorTests(unittest.TestCase):
         fake_unity = SimpleNamespace(load=lambda data: (_ for _ in ()).throw(RuntimeError("bad bundle")))
         with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
             with self.assertRaisesRegex(AssetBundleInspectError, "bad bundle"):
-                inspect_assetbundle(b"UnityFS\\x00fixture")
+                inspect_assetbundle(b"UnityFS\x00fixture")
 
 
 if __name__ == "__main__":
