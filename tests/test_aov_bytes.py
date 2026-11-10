@@ -13,7 +13,7 @@ class AOVBytesTests(unittest.TestCase):
     def test_decompresses_real_vtk_resource(self):
         decoded = decompress_aov_bytes(VTK_SAMPLE)
         self.assertEqual(len(decoded), 0x0D44)
-        self.assertTrue(decoded.startswith(b"0AF0A00F") or len(decoded) == 3396)
+        print("DECODED_RESOURCE_PREVIEW:", decoded.decode("utf-8", errors="replace"))
 
     def test_compress_decompress_round_trip(self):
         decoded = decompress_aov_bytes(VTK_SAMPLE)
