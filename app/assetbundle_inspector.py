@@ -44,12 +44,10 @@ def _safe_text(value: Any, limit: int = 240) -> str:
 def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
     """Inspect Unity AssetBundle preload/container metadata without resolving or editing pointers."""
     parsed = obj.read(return_typetree_on_error=False)
-    preload_table = list(getattr(parsed, "m_PreloadTable", []) or [])
+    preload_table = getattr(parsed, "m_PreloadTable", []) or []
     entries = getattr(parsed, "m_ContainerEntries", None)
     if entries is None:
         entries = list((getattr(parsed, "m_Container", {}) or {}).items())
-    else:
-        entries = list(entries)
 
     external_names = [
         _safe_text(getattr(external, "name", getattr(external, "path", "")))
@@ -61,30 +59,51 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
     missing_local_pointers = []
     external_pointers = []
     pointer_count = 0
+    inspection_complete = (
+        len(preload_table) <= MAX_REFERENCE_SCAN_OBJECTS
+        and len(entries) <= MAX_REFERENCE_SCAN_OBJECTS
+    )
 
     def inspect_pointer(pointer: Any, source: str) -> dict[str, Any]:
-        nonlocal pointer_count
+        nonlocal pointer_count, inspection_complete
         pointer_count += 1
         file_id = int(getattr(pointer, "file_id", 0))
         path_id = int(getattr(pointer, "path_id", 0))
         result = {"source": source, "file_id": file_id, "path_id": path_id}
         if file_id == 0:
-            if path_id not in local_objects:
+            if path_id not in local_objects and len(missing_local_pointers) < MAX_REPORTED_REFERENCES:
                 missing_local_pointers.append(result)
+            elif path_id not in local_objects:
+                inspection_complete = False
         elif 0 < file_id <= len(external_names):
             result["target_file"] = external_names[file_id - 1]
-            external_pointers.append(result)
+            if len(external_pointers) < MAX_REPORTED_REFERENCES:
+                external_pointers.append(result)
+            else:
+                inspection_complete = False
         else:
-            invalid_pointer_indices.append(result)
+            if len(invalid_pointer_indices) < MAX_REPORTED_REFERENCES:
+                invalid_pointer_indices.append(result)
+            else:
+                inspection_complete = False
         return result
 
-    preload_pointers = [
-        inspect_pointer(pointer, "preload")
-        for pointer in preload_table
-    ]
-    container_paths = [str(key) for key, _ in entries]
+    preload_pointers = []
+    for index, pointer in enumerate(preload_table):
+        if index >= MAX_REFERENCE_SCAN_OBJECTS:
+            inspection_complete = False
+            break
+        item = inspect_pointer(pointer, "preload")
+        if len(preload_pointers) < MAX_REPORTED_REFERENCES:
+            preload_pointers.append(item)
+
+    container_paths = []
     container_records = []
-    for key, asset_info in entries:
+    for index, (key, asset_info) in enumerate(entries):
+        if index >= MAX_REFERENCE_SCAN_OBJECTS:
+            inspection_complete = False
+            break
+        container_paths.append(str(key))
         preload_index = int(getattr(asset_info, "preload_index", -1))
         preload_size = int(getattr(asset_info, "preload_size", -1))
         if (
@@ -92,18 +111,22 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
             or preload_size < 0
             or preload_index + preload_size > len(preload_table)
         ):
-            invalid_preload_ranges.append({
+            if len(invalid_preload_ranges) < MAX_REPORTED_REFERENCES:
+                invalid_preload_ranges.append({
+                    "path": _safe_text(key),
+                    "preload_index": preload_index,
+                    "preload_size": preload_size,
+                })
+            else:
+                inspection_complete = False
+        pointer = inspect_pointer(getattr(asset_info, "asset", None), "container")
+        if len(container_records) < MAX_REPORTED_REFERENCES:
+            container_records.append({
                 "path": _safe_text(key),
                 "preload_index": preload_index,
                 "preload_size": preload_size,
+                "asset": pointer,
             })
-        pointer = inspect_pointer(getattr(asset_info, "asset", None), "container")
-        container_records.append({
-            "path": _safe_text(key),
-            "preload_index": preload_index,
-            "preload_size": preload_size,
-            "asset": pointer,
-        })
 
     main_asset = getattr(parsed, "m_MainAsset", None)
     main_info = None
@@ -123,28 +146,27 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
         }
 
     path_counts = Counter(container_paths)
+    dependencies = getattr(parsed, "m_Dependencies", []) or []
     return {
         "path_id": _safe_text(getattr(obj, "path_id", "")),
         "assetbundle_name": _safe_text(getattr(parsed, "m_AssetBundleName", "")),
-        "dependencies": [
-            _safe_text(item) for item in (getattr(parsed, "m_Dependencies", []) or [])
-        ][:MAX_REPORTED_REFERENCES],
+        "dependencies": [_safe_text(item) for item in dependencies[:MAX_REPORTED_REFERENCES]],
         "preload_table_count": len(preload_table),
         "container_entry_count": len(entries),
         "duplicate_container_path_count": sum(count - 1 for count in path_counts.values() if count > 1),
-        "invalid_preload_ranges": invalid_preload_ranges[:MAX_REPORTED_REFERENCES],
+        "invalid_preload_ranges": invalid_preload_ranges,
         "pointer_count": pointer_count,
-        "invalid_pointer_indices": invalid_pointer_indices[:MAX_REPORTED_REFERENCES],
-        "missing_local_pointers": missing_local_pointers[:MAX_REPORTED_REFERENCES],
-        "external_pointers": external_pointers[:MAX_REPORTED_REFERENCES],
-        "preload_pointers": preload_pointers[:MAX_REPORTED_REFERENCES],
-        "container_records": container_records[:MAX_REPORTED_REFERENCES],
+        "invalid_pointer_indices": invalid_pointer_indices,
+        "missing_local_pointers": missing_local_pointers,
+        "external_pointers": external_pointers,
+        "preload_pointers": preload_pointers,
+        "container_records": container_records,
         "main_asset": main_info,
+        "inspection_complete": inspection_complete,
         "is_streamed_scene_assetbundle": bool(
             getattr(parsed, "m_IsStreamedSceneAssetBundle", False)
         ),
     }
-
 
 def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, Any]:
     """Read-only inventory of Unity serialized files, object types and external references."""
@@ -403,7 +425,10 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
         "reference_integrity": reference_integrity,
         "assetbundle_metadata": assetbundle_metadata[:MAX_REPORTED_CONTAINERS],
         "assetbundle_metadata_count": len(assetbundle_metadata),
-        "assetbundle_metadata_complete": not assetbundle_metadata_errors,
+        "assetbundle_metadata_complete": (
+            not assetbundle_metadata_errors
+            and all(item["inspection_complete"] for item in assetbundle_metadata)
+        ),
         "assetbundle_metadata_errors": assetbundle_metadata_errors,
         "container_entries": container_items,
         "container_entry_count": len(container),
