@@ -1,6 +1,6 @@
 import unittest
 
-from app.aov_bytes import AOVBytesError, compress_aov_bytes, decompress_aov_bytes
+from app.aov_bytes import (AOVBytesError, compress_aov_bytes, decompress_aov_bytes,\n                           decrypt_aes_resource, encrypt_aes_resource)
 
 
 # Small real AoV resource from the Actor 595 package, used as a stable format fixture.
@@ -9,17 +9,17 @@ VTK_SAMPLE = bytes.fromhex(
 )
 
 
-class AOVBytesTests(unittest.TestCase):
+AES_SAMPLE = bytes.fromhex(\n    "224a6700cd0200008791646bd02a34c49fa5c166879dec16dc4de77e247574d27d9e6319c432b8faad1861c5a9f0d7bf09fba0bff12227640b76ac4990bbaac0a1b3b63b951728e06fe8a65d3ddc365932672f8b06f14ecd4fadc930e53653edede161b3506d26c85c27fbc232422703660a7c48df48261e0d1ceee130d3d2af26e3672621c96e197ba4c873f613c7c9fe2bcfab9e272beeac45097685002abf229754f9effb6122b8c94e40c2fc4b4e45870ec9827bea068ff97fc593ce6510b2af71d966a29ab0059632d5f1f72d7123d387576268ec859a39ae9d045af2588ae4489e5c15b68ccf4e0dde023ea30c2bdc457870286f8f1f327e7ccf0dd1a7728211f2128281f8817a4cd6c78a18b3e51dadf966567770ad0d029d625316ca695c832c47752d89fcb09e7798e1c336084288f85deefdc01b58798c042b44e8359ac66697f057746f4f1ece5eb91521a5892fb26a7fa199e2878cf624682c1bf39fe53751e0a2d3af3a8d889d59dff0c709ab0a34bd6ae9e52abccf093f60b55ac25b917d1ddac542268206e977c08be18a0353f7956a26c9f74d914e5538d5e00ecdd86de4dc12e4c3039d47543a8f005dae07880c24eef8cde91229bbde31b41f12202e08627310581dfc38c80793720f0e5b109d7b2573351f30fb95b15fff0efa1c6420b578d12e781c8277615a957cb52afa16454d0816d34a56bc04d6e00788c262a4a9acf0767b2363d21dbf39c4cdd157c479c22c4207bc89a904744bcba0fc5c4b9b210b56be3186fbab58044f0932a1fabc214461ad26f9b99e684ffde2518707936061e49712689779e0f95da15969b75ffbf27e6c02cadfd717ea1bac1dbfd6be59823c08b64993df57aef0b3240fe5b9a154a567e9559c048b67e0cc1a0b71e26294aa9552ee846c22efeff0ac613f9c5c607d05a8327d3d7468eacceb510d6dcf998601c2d358175440d9959a87abb3d065b0dbf442afba593a1cd4e722f2b0bb47d64f1e7823ff568d364fbc904efdfc"\n)\n\n\nclass AOVBytesTests(unittest.TestCase):
     def test_decompresses_real_vtk_resource(self):
         decoded = decompress_aov_bytes(VTK_SAMPLE)
         self.assertEqual(len(decoded), 0x0D44)
-        print("DECODED_RESOURCE_PREVIEW:", decoded.decode("utf-8", errors="replace"))
+        self.assertEqual(len(decoded), 3396)
 
     def test_compress_decompress_round_trip(self):
         decoded = decompress_aov_bytes(VTK_SAMPLE)
         self.assertEqual(decompress_aov_bytes(compress_aov_bytes(decoded)), decoded)
 
-    def test_rejects_unknown_header(self):
+    def test_decrypts_and_reencrypts_real_vtk_aes_resource(self):\n        decoded = decrypt_aes_resource(AES_SAMPLE, "ResSkinSeniorLabelCfg")\n        self.assertEqual(len(decoded), 717)\n        self.assertEqual(decrypt_aes_resource(encrypt_aes_resource(decoded, "ResSkinSeniorLabelCfg"), "ResSkinSeniorLabelCfg"), decoded)\n\n    def test_rejects_unknown_header(self):
         with self.assertRaises(AOVBytesError):
             decompress_aov_bytes(b"not-an-aov-resource")
 
