@@ -56,7 +56,11 @@ with tempfile.TemporaryDirectory(prefix="aki-vtk-audit-") as temp:
 
             if info.filename.lower().endswith(".assetbundle"):
                 try:
-                    import sys\n                    sys.path.insert(0, "/tmp/AOV_UABE_2022/AssetbundleUtils")\n                    import UnityPy_AOV\n                    env = UnityPy_AOV.load(payload)\n                    type_counts = Counter()
+                    import sys
+                    sys.path.insert(0, "/tmp/AOV_UABE_2022/AssetbundleUtils")
+                    import UnityPy_AOV
+                    env = UnityPy_AOV.load(payload)
+                    type_counts = Counter()
                     named = []
                     for obj in env.objects:
                         type_counts[obj.type.name] += 1
@@ -64,6 +68,14 @@ with tempfile.TemporaryDirectory(prefix="aki-vtk-audit-") as temp:
                             try:
                                 data = obj.read()
                                 obj_name = getattr(data, "name", "") or getattr(data, "m_Name", "")
+                                if obj.type.name == "AssetBundle":
+                                    tree = obj.read_typetree()
+                                    obj_name = tree.get("m_Name", obj_name)
+                                    record["assetbundle_catalog"] = {
+                                        "container_entries": len(tree.get("m_Container", [])),
+                                        "dependencies": list(tree.get("m_Dependencies", [])),
+                                        "container_sample": [str(x[0]) for x in tree.get("m_Container", [])[:80]],
+                                    }
                                 if obj_name:
                                     named.append({
                                         "type": obj.type.name,
