@@ -28,6 +28,39 @@ class ResourceManifestTests(unittest.TestCase):
             self.assertFalse(result["payloads_modified"])
             self.assertEqual(Path(source).read_bytes(), before)
 
+    def test_inspects_one_nested_resources_zip_layer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            nested_path = folder / "Resources.zip"
+            with zipfile.ZipFile(nested_path, "w") as nested:
+                nested.writestr(
+                    "Resources/1.64.1/Databin/BattleBank.bytes", b"opaque"
+                )
+                nested.writestr("Resources/1.64.1/Sound/Hero/595.bnk", b"BKHD" + b"data")
+            wrapper = folder / "skin-wrapper.zip"
+            with zipfile.ZipFile(wrapper, "w") as outer:
+                outer.write(nested_path, "mod/Resources.zip")
+                outer.writestr("mod/danhsachskin.txt", b"skin list")
+            result = build_resource_manifest([str(wrapper)])
+            nested_items = [
+                item for item in result["resources"]
+                if item.get("container_path") == "mod/Resources.zip"
+            ]
+            self.assertEqual(len(nested_items), 2)
+            by_path = {item["path"]: item for item in nested_items}
+            self.assertEqual(
+                by_path["Resources/1.64.1/Databin/BattleBank.bytes"]["format"],
+                "mses",
+            )
+            self.assertTrue(
+                by_path["Resources/1.64.1/Databin/BattleBank.bytes"]["is_aov_resource"]
+            )
+            self.assertEqual(
+                by_path["Resources/1.64.1/Sound/Hero/595.bnk"]["format"],
+                "wwise_bnk",
+            )
+            self.assertEqual(result["resource_count"], 4)
+
     def test_marks_aov_mses_as_unsupported_aov_resource(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = self._zip(Path(tmp), "aov.zip", {
