@@ -41,3 +41,9 @@ jobs:
         with:
           name: aov-unitypy-source
           path: /tmp/aov-unitypy/
+      - name: Download wheels for local AoV binary inspection
+        run: python -m pip download pyzstd pycryptodome -d /tmp/aov-wheels
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aov-runtime-wheels
+          path: /tmp/aov-wheels/
