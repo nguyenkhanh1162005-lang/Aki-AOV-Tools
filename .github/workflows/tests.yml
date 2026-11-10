@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Prepare temporary UnityPy wheels for local metadata inspection
-        run: python -m pip download UnityPy -d /tmp/unitypy-wheels
+        run: python -m pip download UnityPy sm4 -d /tmp/unitypy-wheels
       - uses: actions/upload-artifact@v4
         with:
           name: unitypy-wheels
