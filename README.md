@@ -6,6 +6,7 @@ Công cụ web và Telegram bot dùng chung bộ xử lý ZIP, kiểm kê cấu 
 - Web UI tiếng Việt, dùng được trên điện thoại.
 - Web: tải tối đa 10 ZIP theo khối 4 MB, kiểm tra cấu trúc, ghép ZIP thông thường hoặc ghép mod AOV chuyên sâu.
 - Web API `/api/inspect`: liệt kê phần mở rộng, tên có dấu hiệu là tài nguyên game và đường dẫn trùng giữa các ZIP.
+- Bộ kiểm tra `/inspect` và `/api/inspect` đọc chữ ký 32 byte đầu mỗi mục để phân loại sơ bộ AoV AES/Zstandard, Unity AssetBundle, ZIP lồng, Wwise, ảnh, XML/JSON và dữ liệu chưa nhận diện; chỉ đọc, không sửa tài nguyên.
 - Web API `/api/drive/import`: tải ZIP từ link Google Drive công khai trực tiếp về máy chủ, tối đa 10 link và tổng 500 MB.
 - Web API `/api/upload/{upload_id}/aov-merge`: chạy bộ ghép Vấn Tâm Kiếm chuyên sâu trên phiên upload.
 - Telegram: `/inspect`, `/merge`, `/aovmerge`, `/clear`, `/status`. Web và bot dùng chung engine AOV.
@@ -23,7 +24,7 @@ Engine thực hiện:
 - Cập nhật ResourcePackerInfoSet cho 10 AssetBundle Vấn Tâm Kiếm; cập nhật CrcXor trong ResourceVerificationInfoSet cho các file VTK thực sự được đưa vào kết quả và giữ giá trị 1.64.1.12 cho những file chỉ khác do lệch phiên bản.
 - Thêm AssetBundle và soundbank iOS của Vấn Tâm Kiếm; giữ `KernelLua.pkg.bytes` và `StableSystems_3.pkg.bytes` của bản nền 1.64.1.12 để tránh hạ phiên bản hệ thống dùng chung.
 
-Bộ ghép từ chối nếu phiên bản, số lượng AssetBundle, bảng chỉ mục hoặc dữ liệu dùng chung không khớp với cấu hình được hỗ trợ. Đây không phải bộ giải mã/hợp nhất tổng quát cho mọi bản mod Liên Quân.
+Bộ ghép từ chối nếu phiên bản, số lượng AssetBundle, bảng chỉ mục hoặc dữ liệu dùng chung không khớp với cấu hình được hỗ trợ. Bộ nhận diện định dạng chỉ giúp kiểm kê nhiều loại tài nguyên; nó không phải bộ giải mã/hợp nhất tổng quát cho mọi bản mod Liên Quân. Engine ghép vẫn chỉ hỗ trợ đúng cặp phiên bản nêu trên.
 
 ## Chạy web
 ```bash
