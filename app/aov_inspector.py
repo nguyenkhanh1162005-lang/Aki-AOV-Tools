@@ -4,6 +4,8 @@ import zipfile
 from collections import Counter
 from pathlib import Path, PurePosixPath
 
+from .aov_format_detector import detect_resource_format, summarize_formats
+
 
 MAX_FILES = 10
 MAX_ENTRIES = 20000
@@ -53,6 +55,7 @@ def inspect_archives(paths: list[str]) -> str:
     inventories: list[tuple[str, dict[str, tuple[int, int]], Counter[str], list[str]]] = []
     collisions: dict[str, list[str]] = {}
     bank_files: list[tuple[str, int, int]] = []
+    detected_formats: list[tuple[str, str]] = []
 
     for path in paths:
         try:
@@ -74,6 +77,13 @@ def inspect_archives(paths: list[str]) -> str:
                 if total_uncompressed > MAX_TOTAL_UNCOMPRESSED:
                     raise InspectError("Tổng dung lượng giải nén vượt quá 1 GB.")
                 name = _safe_name(info.filename)
+                try:
+                    with archive.open(info, "r") as resource_stream:
+                        header = resource_stream.read(32)
+                except (RuntimeError, zipfile.BadZipFile, OSError) as exc:
+                    raise InspectError(f"Không đọc được header tài nguyên: {name}") from exc
+                format_name, _ = detect_resource_format(name, header)
+                detected_formats.append((format_name, f"{Path(path).name} :: {name}"))
                 if info.flag_bits & 1:
                     important.append(f"ZIP mã hóa: {name}")
                 ext = Path(name).suffix.lower() or "[không đuôi]"
@@ -90,11 +100,18 @@ def inspect_archives(paths: list[str]) -> str:
 
         inventories.append((Path(path).name, files, extensions, important))
 
+    format_counts, format_examples = summarize_formats(detected_formats)
     lines = [
         "BÁO CÁO KIỂM TRA CẤU TRÚC ZIP AOV",
         "Chế độ kiểm tra nhanh chỉ lập danh mục ZIP; không giải nén toàn bộ BattleBank/LobbyBank.",
+        "Đã đọc tối đa 32 byte đầu mỗi mục để nhận diện chữ ký định dạng, không sửa dữ liệu.",
         "",
+        "NHẬN DIỆN ĐỊNH DẠNG THEO CHỮ KÝ",
     ]
+    for format_name, count in format_counts.most_common():
+        lines.append(f"- {format_name}: {count} mục")
+        lines.extend(f"  • {example}" for example in format_examples[format_name][:4])
+    lines.append("")
     for filename, files, extensions, important in inventories:
         lines.extend([
             f"[{filename}]",
