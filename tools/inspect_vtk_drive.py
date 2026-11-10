@@ -56,9 +56,7 @@ with tempfile.TemporaryDirectory(prefix="aki-vtk-audit-") as temp:
 
             if info.filename.lower().endswith(".assetbundle"):
                 try:
-                    import UnityPy
-                    env = UnityPy.load(payload)
-                    type_counts = Counter()
+                    import sys\n                    sys.path.insert(0, "/tmp/AOV_UABE_2022/AssetbundleUtils")\n                    import UnityPy_AOV\n                    env = UnityPy_AOV.load(payload)\n                    type_counts = Counter()
                     named = []
                     for obj in env.objects:
                         type_counts[obj.type.name] += 1
