@@ -608,6 +608,90 @@ def verify_assetbundle_roundtrip(data: bytes) -> dict[str, Any]:
         }
 
 
+def build_path_id_remap_plan(
+    base_path_ids: list[int],
+    overlay_path_ids: list[int],
+    base_types: dict[str, str],
+    overlay_types: dict[str, str],
+    base_payload_hashes: dict[str, str],
+    overlay_payload_hashes: dict[str, str],
+    *,
+    inventories_complete: bool = True,
+) -> dict[str, Any]:
+    """Plan append-only PathID handling for one matched CAB; never mutates assets."""
+    if not inventories_complete:
+        return {"ready": False, "reason": "Object inventory or payload hashes are incomplete.",
+                "remap": {}, "deduplicate": {}, "blocked_path_ids": []}
+
+    def valid_ids(values: list[int]) -> bool:
+        return (
+            isinstance(values, list)
+            and all(
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and -(1 << 63) <= value < (1 << 63)
+                for value in values
+            )
+            and len(values) == len(set(values))
+        )
+
+    if not valid_ids(base_path_ids) or not valid_ids(overlay_path_ids):
+        return {"ready": False, "reason": "PathID inventory is invalid or duplicated.",
+                "remap": {}, "deduplicate": {}, "blocked_path_ids": []}
+
+    base_ids = set(base_path_ids)
+    overlay_ids = set(overlay_path_ids)
+    collisions = sorted(base_ids & overlay_ids)
+    remap: dict[str, int] = {}
+    deduplicate: dict[str, int] = {}
+    blocked = []
+    next_id = max([0, *base_ids, *overlay_ids]) + 1
+
+    for path_id in collisions:
+        key = str(path_id)
+        base_type = base_types.get(key)
+        overlay_type = overlay_types.get(key)
+        base_hash = base_payload_hashes.get(key)
+        overlay_hash = overlay_payload_hashes.get(key)
+        if not base_type or base_type != overlay_type:
+            blocked.append({"path_id": path_id, "reason": "Object type missing or incompatible"})
+            continue
+        if not base_hash or not overlay_hash:
+            blocked.append({"path_id": path_id, "reason": "Object payload hash missing"})
+            continue
+        if base_hash == overlay_hash:
+            deduplicate[key] = path_id
+            continue
+        if next_id >= (1 << 63):
+            blocked.append({"path_id": path_id, "reason": "No free signed 64-bit PathID remains"})
+            continue
+        remap[key] = next_id
+        next_id += 1
+
+    if blocked:
+        return {
+            "ready": False,
+            "reason": "At least one PathID collision cannot be resolved safely.",
+            "remap": {},
+            "deduplicate": {},
+            "blocked_path_ids": blocked[:MAX_REPORTED_REFERENCES],
+            "collision_count": len(collisions),
+        }
+
+    return {
+        "ready": True,
+        "reason": "Append-only PathID plan prepared for one matched CAB; references are not rewritten.",
+        "remap": remap,
+        "deduplicate": deduplicate,
+        "blocked_path_ids": [],
+        "collision_count": len(collisions),
+        "new_object_count": len(remap),
+        "deduplicated_object_count": len(deduplicate),
+        "preserved_overlay_only_count": len(overlay_ids - base_ids),
+        "scope": "single CAB; all local, external, Container, preload and metadata pointers must be rewritten before applying",
+    }
+
+
 def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[str, Any]:
     """Compare two bundles conservatively; this never rewrites or certifies a merge."""
     base = inspect_assetbundle(base_data, "base")
@@ -683,8 +767,21 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
         else:
             payload_unknown_ids = list(shared_ids)
 
+        path_id_plan = build_path_id_remap_plan(
+            sorted(base_ids),
+            sorted(overlay_ids),
+            base_item["object_types_by_path_id"],
+            overlay_item["object_types_by_path_id"],
+            base_item["object_payload_hashes"],
+            overlay_item["object_payload_hashes"],
+            inventories_complete=(
+                base_item["object_payload_hashes_complete"]
+                and overlay_item["object_payload_hashes_complete"]
+            ),
+        )
         object_id_overlaps.append({
             "cab": basename,
+            "path_id_merge_plan": path_id_plan,
             "shared_path_id_count": len(shared_ids),
             "base_only_path_id_count": len(base_ids - overlay_ids),
             "overlay_only_path_id_count": len(overlay_ids - base_ids),
