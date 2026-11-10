@@ -39,6 +39,8 @@ jobs:
       - run: python -m compileall -q app bot.py
       - name: Check web JavaScript syntax
         run: python -c "import re,pathlib; h=pathlib.Path('web/index.html').read_text(); pathlib.Path('/tmp/aki-web.js').write_text('\\n'.join(re.findall(r'<script>(.*?)</script>',h,re.S)))" && node --check /tmp/aki-web.js
+      - name: Build deployment Docker image
+        run: docker build --pull -t aki-aov-tools:ci .
       - uses: actions/upload-artifact@v4
         with:
           name: ifix-parser-source
