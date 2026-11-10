@@ -40,7 +40,7 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertEqual(report["container_entry_count"], 1)
         self.assertEqual(report["external_reference_count"], 1)
         self.assertEqual(
-            report["unresolved_external_paths"],
+            report["external_paths"],
             ["archive:/CAB-dependency.resS"],
         )
         self.assertTrue(report["read_only"])
