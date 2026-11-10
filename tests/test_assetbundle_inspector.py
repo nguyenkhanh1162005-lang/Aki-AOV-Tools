@@ -117,7 +117,7 @@ class AssetBundleInspectorTests(unittest.TestCase):
         )
         fake_unity = SimpleNamespace(load=lambda data: env)
         with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
-            report = inspect_assetbundle(b"UnityFS\\x00fixture")
+            report = inspect_assetbundle(b"UnityFS\x00fixture")
         integrity = report["reference_integrity"]
         self.assertEqual(integrity["external_resolved"], 0)
         self.assertEqual(len(integrity["external_ambiguous_targets"]), 1)
