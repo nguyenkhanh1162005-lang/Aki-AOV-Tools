@@ -18,6 +18,7 @@ from .aov_inspector import inspect_archives, InspectError
 from .drive_import import download_drive_zip, DriveImportError
 from .aov_merger import merge_aov_archives, AOVMergeError
 from .assetbundle_inspector import verify_assetbundle_roundtrip, AssetBundleInspectError, MAX_ASSETBUNDLE_BYTES
+from .adapter_registry import get_adapter_capabilities
 
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -293,6 +294,12 @@ async def import_drive_links(payload: dict = Body(...)):
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "Aki AOV Tools"}
+
+
+@app.get("/api/capabilities")
+def adapter_capabilities():
+    """Expose exact merge/inspection support; never imply universal mod merging."""
+    return get_adapter_capabilities()
 
 
 @app.post("/api/assetbundle/roundtrip-check")
