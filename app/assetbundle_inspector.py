@@ -151,10 +151,10 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
     # Resolve PPtr targets only against serialized files already loaded in this
     # bundle. Missing external CABs are reported as dependencies, not assumed broken:
     # they may be supplied by another bundle or a sidecar resource.
-    serialized_by_name = {
-        Path(summary["name"]).name.lower(): asset_file
-        for summary, asset_file in zip(serialized_summaries, serialized_files)
-    }
+    serialized_by_name: dict[str, list[Any]] = {}
+    for summary, asset_file in zip(serialized_summaries, serialized_files):
+        basename = Path(summary["name"]).name.lower()
+        serialized_by_name.setdefault(basename, []).append(asset_file)
     serialized_by_exact_name = {
         _safe_text(getattr(asset_file, "name", "")): asset_file
         for asset_file in serialized_files
@@ -164,6 +164,7 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
         "local_missing": [],
         "external_resolved": 0,
         "external_dependencies": [],
+        "external_ambiguous_targets": [],
         "invalid_external_indices": [],
     }
     for reference in object_references:
@@ -187,8 +188,15 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
                 "path_id": path_id,
             })
         else:
-            target = serialized_by_name.get(Path(reference["target_file"]).name.lower())
-            if target is not None and path_id in (getattr(target, "objects", {}) or {}):
+            targets = serialized_by_name.get(Path(reference["target_file"]).name.lower(), [])
+            if len(targets) > 1:
+                reference_integrity["external_ambiguous_targets"].append({
+                    "from_file": reference["from_file"],
+                    "from_path_id": reference["from_path_id"],
+                    "target_file": reference["target_file"],
+                    "path_id": path_id,
+                })
+            elif targets and path_id in (getattr(targets[0], "objects", {}) or {}):
                 reference_integrity["external_resolved"] += 1
             else:
                 reference_integrity["external_dependencies"].append({
