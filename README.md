@@ -5,9 +5,11 @@ Công cụ web và Telegram bot dùng chung bộ xử lý ZIP trên ổ đĩa, k
 ## Tính năng
 - Web UI tiếng Việt, dùng được trên điện thoại.
 - Web: chọn tối đa 10 ZIP để kiểm tra cấu trúc hoặc ghép ZIP thông thường.
-- Web API `/api/inspect`: liệt kê phần mở rộng, tên có dấu hiệu là tài nguyên game và đường dẫn trùng giữa các ZIP.
-- Telegram bot: dùng `/inspect` để tạo cùng loại báo cáo kiểm kê trước khi cân nhắc ghép.
-- Telegram bot: gửi ZIP nhỏ trực tiếp hoặc gửi link HTTPS tải ZIP trực tiếp, dùng `/merge` để ghép, `/clear` để xóa danh sách, `/status` để xem giới hạn.
+- Web API `/api/inspect` và Telegram `/inspect`: quét ZIP ngoài, `Resources.zip` lồng bên trong và các `.pkg.bytes` có cấu trúc ZIP.
+- Nhận diện header AES AoV `22 4A 67 xx`, đọc header MSES v7 (version, số field, số record) theo tên tài nguyên.
+- Chuẩn hóa đường dẫn `Resources/<version>/` để đối chiếu xung đột giữa gói mod lồng và ZIP tài nguyên rời.
+- Telegram bot: gửi ZIP nhỏ trực tiếp hoặc link HTTPS tải ZIP trực tiếp; `/files` liệt kê file, `/merge` ghép ZIP thường, `/clear` xóa danh sách, `/status` xem giới hạn.
+- Web `/api/merge` và Telegram `/merge` đều chặn ghép ZIP thường khi phát hiện cấu trúc AOV lồng hoặc bảng MSES, tránh tạo gói sai do ghi đè/không xử lý phụ thuộc.
 - Bot xử lý ZIP theo luồng trên ổ đĩa tạm, tránh giữ toàn bộ file lớn trong RAM.
 
 ## Chạy web
@@ -42,4 +44,4 @@ python bot.py
 - Local Bot API Server: là dịch vụ riêng, cần Docker và ổ đĩa lưu trữ đủ lớn. Worker bot phải truy cập được server qua mạng nội bộ hoặc URL riêng an toàn.
 
 ## Giới hạn về Liên Quân
-Phiên bản này chỉ ghép ZIP thông thường: giữ tệp trùng nội dung một lần và báo lỗi nếu cùng đường dẫn nhưng nội dung khác nhau. Nó **không** hợp nhất dữ liệu nhị phân độc quyền của Liên Quân như `BattleBank.bytes` hoặc `LobbyBank.bytes`. Chưa có thuật toán AOV skin merger được xác minh, vì vậy không xem ZIP kết quả là bản mod game đã hoàn thiện.
+Phần ghép hiện tại chỉ hợp nhất ZIP thông thường: giữ tệp trùng nội dung một lần và báo lỗi nếu cùng đường dẫn nhưng nội dung khác nhau. Bộ kiểm tra có thể giải mã header AES và nhận diện MSES v7, nhưng **chưa** có bộ parser/serializer record MSES, bộ ghép IFix, CommonActions XML nén Zstandard, hoặc bộ cập nhật đồng bộ ResourcePacker/ResourceVerification cho mọi gói AOV. Vì vậy các gói AOV có tài nguyên lồng/MSES sẽ bị chặn khỏi đường ghép ZIP thường thay vì tạo ra file có nguy cơ mất skin, hiệu ứng hoặc âm thanh. Chưa xem bất kỳ ZIP nào là bản mod đã xác nhận chạy trong game.
