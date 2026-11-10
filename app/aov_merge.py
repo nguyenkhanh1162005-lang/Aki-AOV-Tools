@@ -71,6 +71,7 @@ def merge_aov_mses_resource(
         "overlay_encoding": overlay_mode,
         "output_encoding": verify_mode,
         "output_bytes": len(merged_resource),
-        "verified": True,\n        "base_checksum_repaired": base_checksum_repaired,
+        "verified": True,
+        "base_checksum_repaired": base_checksum_repaired,
     })
     return merged_resource, report
