@@ -108,8 +108,59 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
         "external_reference_count": len(external_references),
         "container_entries": container_items,
         "container_entry_count": len(container),
+        "container_inventory_complete": len(container) <= MAX_REPORTED_CONTAINERS,
         # External references may point to resource files as well as CAB files.
         # Do not label them unresolved until all bundle sidecar files are available.
         "external_paths": sorted({ref["to"] for ref in external_references}),
         "read_only": True,
+    }
+
+
+
+def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[str, Any]:
+    """Compare two bundles conservatively; this never rewrites or certifies a merge."""
+    base = inspect_assetbundle(base_data, "base")
+    overlay = inspect_assetbundle(overlay_data, "overlay")
+
+    base_versions = {item["unity_version"] for item in base["serialized_files"] if item["unity_version"]}
+    overlay_versions = {item["unity_version"] for item in overlay["serialized_files"] if item["unity_version"]}
+    base_platforms = {item["target_platform"] for item in base["serialized_files"] if item["target_platform"]}
+    overlay_platforms = {item["target_platform"] for item in overlay["serialized_files"] if item["target_platform"]}
+
+    base_container = {item["path"]: item["type"] for item in base["container_entries"]}
+    overlay_container = {item["path"]: item["type"] for item in overlay["container_entries"]}
+    shared_paths = set(base_container) & set(overlay_container)
+    type_conflicts = sorted(
+        path for path in shared_paths
+        if base_container[path] != overlay_container[path]
+    )
+
+    inventory_complete = (
+        base["container_inventory_complete"]
+        and overlay["container_inventory_complete"]
+    )
+    version_match = bool(base_versions and overlay_versions and base_versions == overlay_versions)
+    platform_match = bool(base_platforms and overlay_platforms and base_platforms == overlay_platforms)
+
+    return {
+        "unity_versions_match": version_match,
+        "base_unity_versions": sorted(base_versions),
+        "overlay_unity_versions": sorted(overlay_versions),
+        "platforms_match": platform_match,
+        "base_platforms": sorted(base_platforms),
+        "overlay_platforms": sorted(overlay_platforms),
+        "container_inventory_complete": inventory_complete,
+        "shared_container_paths": len(shared_paths),
+        "replacement_candidates": sorted(shared_paths - set(type_conflicts))[:MAX_REPORTED_CONTAINERS],
+        "new_container_paths": sorted(set(overlay_container) - set(base_container))[:MAX_REPORTED_CONTAINERS],
+        "container_type_conflicts": type_conflicts[:MAX_REPORTED_CONTAINERS],
+        "external_paths_added": sorted(
+            set(overlay["external_paths"]) - set(base["external_paths"])
+        )[:MAX_REPORTED_CONTAINERS],
+        "structural_checks_pass": (
+            version_match and platform_match and inventory_complete and not type_conflicts
+        ),
+        # Unity object references, preload tables, CAB remapping and bundle metadata
+        # still need a version-specific adapter before any actual merge is safe.
+        "merge_safe": False,
     }
