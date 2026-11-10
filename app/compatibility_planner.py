@@ -1,0 +1,138 @@
+"""Fail-closed compatibility planning for resource manifests.
+
+This module only evaluates supplied metadata. It does not parse archives, decrypt
+resources, rewrite payloads, or authorize the merge executor to bypass adapters.
+"""
+from __future__ import annotations
+
+import re
+from collections import defaultdict
+from pathlib import PurePosixPath
+from typing import Any
+
+
+_SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
+_ALLOWED_STATUSES = {"SAFE_MERGE", "IDENTICAL_DUPLICATE", "NEEDS_RULE", "UNSUPPORTED", "VERSION_CONFLICT"}
+
+
+class CompatibilityPlanError(ValueError):
+    pass
+
+
+def _clean_path(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise CompatibilityPlanError("Mỗi resource phải có path hợp lệ.")
+    normalized = value.replace("\\", "/")
+    path = PurePosixPath(normalized)
+    if path.is_absolute() or ".." in path.parts or "\x00" in normalized or (path.parts and path.parts[0].endswith(":")):
+        raise CompatibilityPlanError(f"Đường dẫn resource không an toàn: {value}")
+    return normalized
+
+
+def _validate_resource(item: Any, index: int) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise CompatibilityPlanError(f"Resource thứ {index + 1} không phải object.")
+    path = _clean_path(item.get("path"))
+    digest = item.get("sha256")
+    if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
+        raise CompatibilityPlanError(f"SHA-256 không hợp lệ cho resource: {path}")
+    fmt = item.get("format")
+    if not isinstance(fmt, str) or not fmt.strip():
+        raise CompatibilityPlanError(f"Thiếu format cho resource: {path}")
+    source = item.get("source", f"input-{index + 1}")
+    if not isinstance(source, str) or not source.strip():
+        raise CompatibilityPlanError(f"Source không hợp lệ cho resource: {path}")
+    dependencies = item.get("dependencies", [])
+    if not isinstance(dependencies, list) or any(not isinstance(dep, str) or not dep.strip() for dep in dependencies):
+        raise CompatibilityPlanError(f"Danh sách dependency không hợp lệ cho resource: {path}")
+    result = dict(item)
+    result.update({
+        "path": path,
+        "sha256": digest.lower(),
+        "format": fmt.strip().lower(),
+        "source": source,
+        "dependencies": [_clean_path(dep) for dep in dependencies],
+    })
+    return result
+
+
+def plan_resource_compatibility(resources: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return a conservative per-path plan; this result is advisory, not merge authorization."""
+    if not isinstance(resources, list) or not resources:
+        raise CompatibilityPlanError("Cần ít nhất một resource để lập kế hoạch.")
+    if len(resources) > 20000:
+        raise CompatibilityPlanError("Quá nhiều resource để lập kế hoạch (tối đa 20.000).")
+
+    validated = [_validate_resource(item, index) for index, item in enumerate(resources)]
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    all_paths = {item["path"] for item in validated}
+    for item in validated:
+        grouped[item["path"]].append(item)
+
+    results = []
+    for path, entries in sorted(grouped.items()):
+        versions = {str(item.get("game_version")) for item in entries if item.get("game_version") not in (None, "")}
+        platforms = {str(item.get("platform")).lower() for item in entries if item.get("platform") not in (None, "")}
+        actors = {str(item.get("actor_id")) for item in entries if item.get("actor_id") not in (None, "")}
+        skins = {str(item.get("skin_id")) for item in entries if item.get("skin_id") not in (None, "")}
+        hashes = {item["sha256"] for item in entries}
+        formats = {item["format"] for item in entries}
+        dependencies = sorted({dep for item in entries for dep in item["dependencies"]})
+        missing_dependencies = [dep for dep in dependencies if dep not in all_paths]
+
+        status = "NEEDS_RULE"
+        reasons: list[str] = []
+        if len(versions) > 1:
+            status = "VERSION_CONFLICT"
+            reasons.append("Các nguồn có game_version khác nhau.")
+        elif len(platforms) > 1:
+            status = "VERSION_CONFLICT"
+            reasons.append("Các nguồn khác platform.")
+        elif len(actors) > 1 or len(skins) > 1:
+            status = "NEEDS_RULE"
+            reasons.append("Actor ID hoặc Skin ID không đồng nhất; cần quy tắc remap riêng.")
+        elif missing_dependencies:
+            status = "NEEDS_RULE"
+            reasons.append("Thiếu dependency: " + ", ".join(missing_dependencies))
+        elif len(entries) > 1 and len(hashes) == 1:
+            status = "IDENTICAL_DUPLICATE"
+            reasons.append("Cùng đường dẫn và SHA-256; có thể giữ một bản byte-identical.")
+        elif len(entries) > 1:
+            status = "NEEDS_RULE"
+            reasons.append("Cùng đường dẫn nhưng payload khác nhau; mặc định không ghi đè.")
+        elif entries[0]["format"] == "generic_zip" and not entries[0].get("is_aov_resource", False):
+            status = "SAFE_MERGE"
+            reasons.append("Đường dẫn mới thuộc phạm vi ZIP thông thường, không được đánh dấu là tài nguyên AoV.")
+        elif entries[0].get("is_aov_resource", False):
+            status = "UNSUPPORTED"
+            reasons.append("Tài nguyên AoV cần adapter đúng định dạng, phiên bản và fixture; detector không cấp quyền ghép.")
+        else:
+            status = "NEEDS_RULE"
+            reasons.append("Chưa có quy tắc ghép đã xác minh cho format này.")
+
+        results.append({
+            "path": path,
+            "status": status,
+            "sources": sorted({item["source"] for item in entries}),
+            "formats": sorted(formats),
+            "sha256_count": len(hashes),
+            "game_versions": sorted(versions),
+            "platforms": sorted(platforms),
+            "actor_ids": sorted(actors),
+            "skin_ids": sorted(skins),
+            "dependencies": dependencies,
+            "missing_dependencies": missing_dependencies,
+            "reasons": reasons,
+        })
+
+    counts = {status: sum(item["status"] == status for item in results) for status in sorted(_ALLOWED_STATUSES)}
+    return {
+        "schema_version": 1,
+        "policy": "fail_closed",
+        "advisory_only": True,
+        "merge_authorized": False,
+        "resource_count": len(validated),
+        "path_count": len(results),
+        "summary": counts,
+        "resources": results,
+    }
