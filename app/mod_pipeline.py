@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -9,6 +10,10 @@ from typing import Any
 
 from .large_merger import MergeError, merge_zip_files
 from .aov_merger import AOVMergeError, merge_aov_archives
+
+MAX_PROFILE_ENTRIES = 20_000
+MAX_PROFILE_UNCOMPRESSED = 1024 * 1024 * 1024
+MAX_PROFILE_ENTRY = 512 * 1024 * 1024
 
 
 class ModPipelineError(ValueError):
@@ -39,18 +44,41 @@ def _sha256_file(path: str) -> str:
 def _archive_profile(path: str) -> dict[str, Any]:
     try:
         with zipfile.ZipFile(path, "r") as archive:
-            bad = archive.testzip()
-            if bad:
-                raise ModPipelineError(f"ZIP lỗi CRC tại {bad}: {Path(path).name}")
+            entries = archive.infolist()
+            if len(entries) > MAX_PROFILE_ENTRIES:
+                raise ModPipelineError(
+                    f"ZIP có quá nhiều mục (tối đa {MAX_PROFILE_ENTRIES}): {Path(path).name}"
+                )
+            total_uncompressed = sum(info.file_size for info in entries)
+            if total_uncompressed > MAX_PROFILE_UNCOMPRESSED:
+                raise ModPipelineError(
+                    f"ZIP vượt giới hạn giải nén 1 GiB: {Path(path).name}"
+                )
             names = []
-            for info in archive.infolist():
+            for info in entries:
                 if info.is_dir():
                     continue
                 normalized = info.filename.replace("\\", "/")
                 pure = PurePosixPath(normalized)
-                if pure.is_absolute() or ".." in pure.parts or "\x00" in normalized:
+                mode = (info.external_attr >> 16) & 0xFFFF
+                if (
+                    pure.is_absolute()
+                    or ".." in pure.parts
+                    or "\x00" in normalized
+                    or (pure.parts and pure.parts[0].endswith(":"))
+                    or stat.S_ISLNK(mode)
+                ):
                     raise ModPipelineError(f"Đường dẫn ZIP không an toàn: {info.filename}")
+                if info.flag_bits & 1:
+                    raise ModPipelineError(f"Không hỗ trợ ZIP mã hóa mật khẩu: {info.filename}")
+                if info.file_size > MAX_PROFILE_ENTRY:
+                    raise ModPipelineError(
+                        f"Mục ZIP vượt giới hạn 512 MiB: {info.filename}"
+                    )
                 names.append(normalized)
+            bad = archive.testzip()
+            if bad:
+                raise ModPipelineError(f"ZIP lỗi CRC tại {bad}: {Path(path).name}")
     except ModPipelineError:
         raise
     except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
