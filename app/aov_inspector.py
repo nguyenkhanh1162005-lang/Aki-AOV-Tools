@@ -206,10 +206,10 @@ def inspect_archives(paths: list[str]) -> str:
                         for key, value in list(result["object_type_counts"].items())[:8]
                     )
                     lines.append("  • Object types: " + types)
-                if result["unresolved_external_paths"]:
+                if result["external_paths"]:
                     lines.append(
                         "  • External paths cần đối chiếu: "
-                        + ", ".join(result["unresolved_external_paths"][:8])
+                        + ", ".join(result["external_paths"][:8])
                     )
     else:
         lines.append("- Không tìm thấy AssetBundle UnityFS/UnityRaw/UnityWeb phù hợp để phân tích sâu.")
