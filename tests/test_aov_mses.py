@@ -92,7 +92,7 @@ class MSESMergeTests(unittest.TestCase):
             incoming_wrapped,
             target_prefixes=("595",),
         )
-        self.assertTrue(merged_wrapped.startswith(b"\\x22\\x4a\\x67\\x00"))
+        self.assertTrue(merged_wrapped.startswith(bytes.fromhex("22 4a 67 00")))
         merged_plain = decode_aov_resource(resource_name, merged_wrapped)
         parsed = parse_mses(merged_plain)
         by_key = {struct.unpack_from("<I", r, 0)[0]: r for r in parsed.rows}
