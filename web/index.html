@@ -93,6 +93,7 @@ compatibilityBtn.addEventListener('click',async()=>{
     ];
     for(const item of (plan.resources||[]).slice(0,250)){
       lines.push('['+item.status+'] '+item.path+' | '+(item.formats||[]).join(', '));
+      if(item.container_path)lines.push('  Nằm trong ZIP lồng: '+item.container_path);
       if(item.game_versions?.length)lines.push('  Phiên bản: '+item.game_versions.join(', '));
       if(item.platforms?.length)lines.push('  Platform: '+item.platforms.join(', '));
       if(item.unity_dependencies?.length)lines.push('  Unity dependencies: '+item.unity_dependencies.join(', '));
