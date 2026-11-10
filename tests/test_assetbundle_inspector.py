@@ -80,6 +80,8 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertEqual(report["shared_container_paths"], 1)
         self.assertEqual(report["replacement_candidates"], ["assets/hero.prefab"])
         self.assertEqual(report["new_container_paths"], ["assets/new.png"])
+        self.assertEqual(report["object_id_overlaps"][0]["shared_path_id_count"], 2)
+        self.assertEqual(report["object_id_overlaps"][0]["type_conflict_count"], 0)
         self.assertTrue(report["structural_checks_pass"])
         self.assertFalse(report["merge_safe"])
 
@@ -192,6 +194,8 @@ class AssetBundleInspectorTests(unittest.TestCase):
 
         self.assertFalse(report["unity_versions_match"])
         self.assertEqual(report["container_type_conflicts"], ["assets/hero.prefab"])
+        self.assertEqual(report["object_id_overlaps"][0]["type_conflict_count"], 1)
+        self.assertEqual(report["object_id_overlaps"][0]["type_conflict_path_ids"], [1])
         self.assertFalse(report["structural_checks_pass"])
         self.assertFalse(report["merge_safe"])
 
