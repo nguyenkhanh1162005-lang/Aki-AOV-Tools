@@ -27,7 +27,7 @@ def merge_aov_mses_resource(
         overlay_decoded, overlay_mode = decode_aov_resource(overlay_resource, resource_name)
         base_checksum_repaired = False
         if allow_invalid_base_checksum:
-            if not resource_name.replace("\\\\", "/").endswith("/ResSkinSeniorLabelCfg.bytes"):
+            if not resource_name.replace("\\", "/").endswith("/ResSkinSeniorLabelCfg.bytes"):
                 raise MSESError("Chỉ cho phép sửa checksum nền cho ResSkinSeniorLabelCfg.")
             base_table = parse_mses(base_decoded, verify_checksum=False)
             if base_table.field_count != 69 or len(base_table.rows) != 53:
