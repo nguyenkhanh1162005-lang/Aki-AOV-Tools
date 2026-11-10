@@ -333,8 +333,9 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                 mses_reports = {}
                 for relative in (RES_SKIN_PATH, BATTLE_BANK_PATH, LOBBY_BANK_PATH, SKILL_COMBINE_PATH):
                     try:
+                        merge_options = {"allow_invalid_base_checksum": True} if relative == RES_SKIN_PATH else {}
                         replacements[relative], mses_reports[relative] = merge_aov_mses_resource(
-                            read_base(relative), read_vtk(relative), relative
+                            read_base(relative), read_vtk(relative), relative, **merge_options
                         )
                     except AOVResourceMergeError as exc:
                         raise AOVMergeError(str(exc)) from exc
