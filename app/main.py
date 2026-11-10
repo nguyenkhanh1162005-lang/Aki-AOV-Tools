@@ -25,6 +25,31 @@ CHUNK_SIZE = 1024 * 1024
 UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 UPLOAD_SESSIONS: dict[str, dict] = {}
 UPLOAD_TTL_SECONDS = 3600
+MAX_ACTIVE_UPLOAD_SESSIONS = 8
+
+
+def _cleanup_expired_upload_sessions(now: float | None = None) -> int:
+    """Remove abandoned upload directories so public web uploads cannot pile up forever."""
+    current = time.time() if now is None else now
+    expired = [
+        upload_id
+        for upload_id, session in UPLOAD_SESSIONS.items()
+        if current - session["created"] > UPLOAD_TTL_SECONDS
+    ]
+    for upload_id in expired:
+        session = UPLOAD_SESSIONS.pop(upload_id, None)
+        if session:
+            shutil.rmtree(session["workdir"], ignore_errors=True)
+    return len(expired)
+
+
+def _ensure_upload_capacity() -> None:
+    _cleanup_expired_upload_sessions()
+    if len(UPLOAD_SESSIONS) >= MAX_ACTIVE_UPLOAD_SESSIONS:
+        raise HTTPException(
+            429,
+            "Máy chủ đang có quá nhiều phiên tải file. Hãy thử lại sau ít phút.",
+        )
 
 
 def _get_upload_session(upload_id: str) -> dict:
@@ -39,15 +64,23 @@ def _get_upload_session(upload_id: str) -> dict:
 
 @app.post("/api/upload/start")
 async def start_chunked_upload(payload: dict = Body(...)):
+    _ensure_upload_capacity()
     files = payload.get("files")
     if not isinstance(files, list) or not files or len(files) > MAX_FILES:
         raise HTTPException(400, f"Chọn từ 1 đến {MAX_FILES} file ZIP.")
     total = 0
     clean_files = []
     for item in files:
+        if not isinstance(item, dict):
+            raise HTTPException(400, "Thông tin file ZIP không hợp lệ.")
         name = Path(str(item.get("name", ""))).name
         size = item.get("size")
-        if not name.lower().endswith(".zip") or not isinstance(size, int) or size < 0:
+        if (
+            not name.lower().endswith(".zip")
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or size <= 0
+        ):
             raise HTTPException(400, "Thông tin file ZIP không hợp lệ.")
         total += size
         clean_files.append({"name": name, "size": size, "received": 0})
@@ -65,6 +98,8 @@ async def start_chunked_upload(payload: dict = Body(...)):
 @app.put("/api/upload/{upload_id}/{file_index}")
 async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_offset: int = Header(..., alias="X-Chunk-Offset")):
     session = _get_upload_session(upload_id)
+    if chunk_offset < 0:
+        raise HTTPException(400, "Vị trí khối tải lên không hợp lệ.")
     if file_index < 0 or file_index >= len(session["files"]):
         raise HTTPException(404, "Không tìm thấy file trong phiên tải lên.")
     item = session["files"][file_index]
@@ -161,6 +196,8 @@ async def import_drive_links(payload: dict = Body(...)):
 
     existing_upload_id = payload.get("upload_id")
     is_new_session = not existing_upload_id
+    if is_new_session:
+        _ensure_upload_capacity()
     if existing_upload_id:
         upload_id = str(existing_upload_id)
         session = _get_upload_session(upload_id)
