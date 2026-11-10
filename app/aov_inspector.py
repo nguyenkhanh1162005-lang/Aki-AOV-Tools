@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import tempfile
 import zipfile
 from collections import Counter
 from pathlib import Path, PurePosixPath
