@@ -219,8 +219,16 @@ async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [path for _, path in files],
             str(output_path),
         )
+        output_size = output_path.stat().st_size
+        if not LOCAL_API and output_size > 48 * MIB:
+            await status_message.edit_text(
+                f"Đã ghép xong ({output_size / MIB:.1f} MB), nhưng Bot API mặc định "
+                "chỉ cho bot gửi file tối đa 50 MB. File nguồn vẫn được giữ lại; "
+                "cần Local Bot API hoặc cách lưu trữ kết quả bên ngoài để gửi file này."
+            )
+            return
         await status_message.edit_text(
-            f"Đã ghép xong ({output_path.stat().st_size / MIB:.1f} MB). Đang gửi file..."
+            f"Đã ghép xong ({output_size / MIB:.1f} MB). Đang gửi file..."
         )
         await update.effective_message.reply_document(
             document=FSInputFile(str(output_path), filename="aki-merged.zip"),
