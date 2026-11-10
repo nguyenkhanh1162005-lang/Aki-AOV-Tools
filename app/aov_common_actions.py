@@ -34,6 +34,8 @@ def _track_signature(track: ET.Element) -> str:
     clone = copy.deepcopy(track)
     clone.set("trackName", _normalized_track_name(clone))
     clone.attrib.pop("guid", None)
+    clone.attrib.pop("useRefParam", None)
+    clone.attrib.pop("refParamName", None)
     for node in clone.iter():
         for attr in list(node.attrib):
             if attr.lower() in {"guid", "m_guid"}:
@@ -138,6 +140,9 @@ def merge_action_xml(
                     existing_nodes[skin_id] = cloned
                     changed = True
 
+            for attr in ("useRefParam", "refParamName"):
+                if attr not in target.attrib and attr in source_track.attrib:
+                    target.attrib[attr] = source_track.attrib[attr]
             if changed:
                 if was_special:
                     merged_into_existing.append(name)
