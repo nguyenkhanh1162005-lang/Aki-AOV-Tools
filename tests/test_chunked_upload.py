@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -58,7 +59,7 @@ class ChunkedUploadEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.path.read_bytes(), b"zipdata!")
 
     async def test_oversized_chunk_is_rejected_while_streaming(self):
-        with unittest.mock.patch("app.main.UPLOAD_CHUNK_BYTES", 3):
+        with patch("app.main.UPLOAD_CHUNK_BYTES", 3):
             with self.assertRaises(HTTPException) as raised:
                 await main.upload_chunk(
                     self.upload_id, 0, make_request(b"four"), 0
