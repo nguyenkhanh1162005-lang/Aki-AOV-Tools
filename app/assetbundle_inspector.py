@@ -91,6 +91,7 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
         return result
 
     preload_pointers = []
+    preload_pointer_inventory = []
     for index, pointer in enumerate(preload_table):
         if index >= MAX_REFERENCE_SCAN_OBJECTS:
             inspection_complete = False
@@ -99,11 +100,13 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
         preload_digest.update(
             f"{item['file_id']}:{item['path_id']}\n".encode("ascii")
         )
+        preload_pointer_inventory.append(item)
         if len(preload_pointers) < MAX_REPORTED_REFERENCES:
             preload_pointers.append(item)
 
     container_paths = []
     container_records = []
+    container_record_inventory = []
     for index, (key, asset_info) in enumerate(entries):
         if index >= MAX_REFERENCE_SCAN_OBJECTS:
             inspection_complete = False
@@ -131,13 +134,15 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
                 f"{pointer['file_id']}\0{pointer['path_id']}\n"
             ).encode("utf-8", "replace")
         )
+        record = {
+            "path": _safe_text(key),
+            "preload_index": preload_index,
+            "preload_size": preload_size,
+            "asset": pointer,
+        }
+        container_record_inventory.append(record)
         if len(container_records) < MAX_REPORTED_REFERENCES:
-            container_records.append({
-                "path": _safe_text(key),
-                "preload_index": preload_index,
-                "preload_size": preload_size,
-                "asset": pointer,
-            })
+            container_records.append(record)
 
     main_asset = getattr(parsed, "m_MainAsset", None)
     main_info = None
@@ -195,13 +200,110 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
         "missing_local_pointers": missing_local_pointers,
         "external_pointers": external_pointers,
         "preload_pointers": preload_pointers,
+        "preload_pointer_inventory": preload_pointer_inventory,
         "container_records": container_records,
+        "container_record_inventory": container_record_inventory,
         "main_asset": main_info,
         "inspection_complete": inspection_complete,
         "is_streamed_scene_assetbundle": bool(
             getattr(parsed, "m_IsStreamedSceneAssetBundle", False)
         ),
     }
+
+
+def build_assetbundle_metadata_remap_plan(
+    metadata: dict[str, Any],
+    file_id_remap: dict[str, int],
+    local_path_id_remap: dict[str, int],
+    external_path_id_remaps: dict[str, dict[str, int]],
+    *,
+    local_target_path_ids: set[int],
+    external_target_path_ids: dict[str, set[int]],
+) -> dict[str, Any]:
+    """Plan pointer rewrites for complete AssetBundle metadata inventories.
+
+    Preload indices and sizes are preserved. No table is combined or serialized.
+    """
+    if not isinstance(metadata, dict) or not metadata.get("inspection_complete"):
+        return {"ready": False, "reason": "AssetBundle metadata inventory is incomplete.",
+                "rewritten": {}, "blocked_references": []}
+    preload = metadata.get("preload_pointer_inventory")
+    containers = metadata.get("container_record_inventory")
+    if not isinstance(preload, list) or not isinstance(containers, list):
+        return {"ready": False, "reason": "Complete preload/container pointer inventories are unavailable.",
+                "rewritten": {}, "blocked_references": []}
+    preload_count = metadata.get("preload_table_count")
+    if not isinstance(preload_count, int) or preload_count != len(preload):
+        return {"ready": False, "reason": "Preload pointer inventory count does not match metadata.",
+                "rewritten": {}, "blocked_references": []}
+
+    references = []
+    locations = []
+    for index, pointer in enumerate(preload):
+        if not isinstance(pointer, dict):
+            return {"ready": False, "reason": "Invalid preload pointer inventory entry.",
+                    "rewritten": {}, "blocked_references": []}
+        references.append({"file_id": pointer.get("file_id"), "path_id": pointer.get("path_id")})
+        locations.append(("preload", index))
+
+    for index, record in enumerate(containers):
+        if not isinstance(record, dict) or not isinstance(record.get("asset"), dict):
+            return {"ready": False, "reason": "Invalid Container pointer inventory entry.",
+                    "rewritten": {}, "blocked_references": []}
+        start = record.get("preload_index")
+        size = record.get("preload_size")
+        if (not isinstance(start, int) or not isinstance(size, int)
+                or start < 0 or size < 0 or start + size > preload_count):
+            return {"ready": False, "reason": "Container preload range is invalid.",
+                    "rewritten": {}, "blocked_references": []}
+        pointer = record["asset"]
+        references.append({"file_id": pointer.get("file_id"), "path_id": pointer.get("path_id")})
+        locations.append(("container", index))
+
+    main_asset = metadata.get("main_asset")
+    if main_asset is not None:
+        if not isinstance(main_asset, dict) or not isinstance(main_asset.get("asset"), dict):
+            return {"ready": False, "reason": "Invalid MainAsset pointer inventory entry.",
+                    "rewritten": {}, "blocked_references": []}
+        start = main_asset.get("preload_index")
+        size = main_asset.get("preload_size")
+        if (not isinstance(start, int) or not isinstance(size, int)
+                or start < 0 or size < 0 or start + size > preload_count):
+            return {"ready": False, "reason": "MainAsset preload range is invalid.",
+                    "rewritten": {}, "blocked_references": []}
+        pointer = main_asset["asset"]
+        references.append({"file_id": pointer.get("file_id"), "path_id": pointer.get("path_id")})
+        locations.append(("main_asset", 0))
+
+    plan = build_pptr_remap_plan(
+        references, file_id_remap, local_path_id_remap, external_path_id_remaps,
+        local_target_path_ids=local_target_path_ids,
+        external_target_path_ids=external_target_path_ids,
+    )
+    if not plan["ready"]:
+        return {"ready": False, "reason": plan["reason"], "rewritten": {},
+                "blocked_references": plan["blocked_references"]}
+
+    rewritten = {"preload": [], "container": [], "main_asset": None}
+    for (section, _index), pointer in zip(locations, plan["rewritten_references"]):
+        value = {"file_id": pointer["file_id"], "path_id": pointer["path_id"]}
+        if section == "preload":
+            rewritten["preload"].append(value)
+        elif section == "container":
+            rewritten["container"].append(value)
+        else:
+            rewritten["main_asset"] = value
+    return {
+        "ready": True,
+        "reason": "AssetBundle metadata pointers planned; preload ranges and indices are preserved.",
+        "rewritten": rewritten,
+        "preload_ranges_preserved": True,
+        "container_entry_count": len(containers),
+        "preload_pointer_count": len(preload),
+        "scope": "metadata pointer plan only; no table concatenation, dependency rewrite or serialization",
+    }
+
+
 
 def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, Any]:
     """Read-only inventory of Unity serialized files, object types and external references."""
