@@ -38,6 +38,36 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
             self.assertIn("Serialized files: 2 | Objects: 9 | Container entries: 3", report)
             self.assertIn("archive:/CAB-other.resS", report)
 
+    def test_compares_same_path_assetbundles_across_zip_inputs(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            first = self._zip(folder, "first.zip", {"Actor/hero.assetbundle": b"UnityFS\\x00one"})
+            second = self._zip(folder, "second.zip", {"Actor/hero.assetbundle": b"UnityFS\\x00two"})
+            comparison = {
+                "unity_versions_match": True,
+                "platforms_match": True,
+                "container_inventory_complete": True,
+                "shared_container_paths": 2,
+                "replacement_candidates": ["assets/hero.prefab"],
+                "new_container_paths": ["assets/new.prefab"],
+                "container_type_conflicts": [],
+                "structural_checks_pass": True,
+            }
+            with patch("app.aov_inspector.inspect_assetbundle", return_value={
+                "serialized_file_count": 1,
+                "object_count": 2,
+                "container_entry_count": 2,
+                "external_reference_count": 0,
+                "object_type_counts": {"GameObject": 2},
+                "external_paths": [],
+            }), patch("app.aov_inspector.compare_assetbundle_overlays", return_value=comparison):
+                report = inspect_archives([first, second])
+            self.assertIn("ĐỐI CHIẾU ASSETBUNDLE TRÙNG ĐƯỜNG DẪN", report)
+            self.assertIn("Actor/hero.assetbundle [first.zip vs second.zip]", report)
+            self.assertIn("Cho phép ghép tự động: False", report)
+
     def test_inspects_small_wwise_bnk_inside_zip(self):
         import struct
 
