@@ -87,3 +87,5 @@ docker compose -f docker-compose.local-bot-api.yml up -d --build
 API `POST /api/compatibility/plan` nhận manifest JSON dạng `{"resources":[...]}`. Mỗi mục cần `path`, `sha256` (64 ký tự hex) và `format`; có thể thêm `source`, `game_version`, `platform`, `actor_id`, `skin_id`, `is_aov_resource` và `dependencies`.
 
 API phân loại từng đường dẫn thành `SAFE_MERGE`, `IDENTICAL_DUPLICATE`, `NEEDS_RULE`, `UNSUPPORTED` hoặc `VERSION_CONFLICT`. Đây là báo cáo tư vấn từ metadata được gửi lên, không phải bộ phân tích ZIP tự động, không xác thực payload và tuyệt đối không cấp quyền cho bộ ghép bỏ qua adapter. Chỉ executor với adapter đã xác minh mới được tạo ZIP đầu ra.
+
+API `POST /api/compatibility/inspect` nhận nhiều ZIP qua multipart field `files`, tự lập manifest chỉ đọc (đường dẫn, định dạng chữ ký, SHA-256, kích thước, CRC32, nguồn) rồi chạy compatibility planner. Giới hạn hiện tại: tối đa 10 ZIP, 500 MB tổng đầu vào, 20.000 resource và 1 GiB tổng dữ liệu giải nén. API không giải mã AoV AES, không suy diễn dependency Unity/Wwise từ tên file và không sửa payload. Các resource AoV được đánh dấu cần adapter riêng; kết quả không phải quyền ghép.
