@@ -83,6 +83,52 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertTrue(report["structural_checks_pass"])
         self.assertFalse(report["merge_safe"])
 
+    def test_resolves_overlay_external_ptrs_against_base_cab_path_ids(self):
+        base_obj = SimpleNamespace(type=SimpleNamespace(name="Texture2D"), path_id=300)
+        base_file = SimpleNamespace(
+            name="CAB-base.assets",
+            unity_version="2022.3.0f1",
+            target_platform=SimpleNamespace(name="iOS"),
+            objects={300: base_obj},
+            externals=[],
+        )
+        overlay_obj = SimpleNamespace(
+            type=SimpleNamespace(name="GameObject"),
+            path_id=100,
+            read_typetree=lambda: {
+                "valid": {"m_FileID": 1, "m_PathID": 300},
+                "missing": {"m_FileID": 1, "m_PathID": 999},
+            },
+        )
+        overlay_file = SimpleNamespace(
+            name="CAB-overlay",
+            unity_version="2022.3.0f1",
+            target_platform=SimpleNamespace(name="iOS"),
+            objects={100: overlay_obj},
+            externals=[SimpleNamespace(
+                path="archive:/CAB-base.assets",
+                name="CAB-base.assets",
+            )],
+        )
+        envs = iter([
+            SimpleNamespace(assets=[base_file], container={}, files={"base": object()}),
+            SimpleNamespace(assets=[overlay_file], container={}, files={"overlay": object()}),
+        ])
+        fake_unity = SimpleNamespace(load=lambda data: next(envs))
+        with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
+            report = compare_assetbundle_overlays(
+                b"UnityFS\\x00base",
+                b"UnityFS\\x00overlay",
+            )
+
+        refs = report["cross_bundle_references"]
+        self.assertEqual(refs["resolved_count"], 1)
+        self.assertEqual(refs["missing_path_id_count"], 1)
+        self.assertEqual(refs["resolved"][0]["path_id"], 300)
+        self.assertEqual(refs["missing_path_ids"][0]["path_id"], 999)
+        self.assertFalse(refs["index_incomplete"])
+        self.assertFalse(report["merge_safe"])
+
     def test_detects_container_type_conflicts_and_version_drift(self):
         def make_env(version, kind):
             obj = SimpleNamespace(type=SimpleNamespace(name=kind), path_id=1)
