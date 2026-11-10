@@ -605,16 +605,20 @@ def build_assetbundle_merge_preflight(
     overlay_streams: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Combine CAB, metadata and sidecar dry-run checks into one fail-closed plan."""
+    if not isinstance(overlay_cabs, dict) or not overlay_cabs:
+        return {"ready": False, "stage": "cross_cab", "reason": "Overlay CAB inventory is empty."}
     cab_plan = build_cross_cab_reference_merge_plan(base_cabs, overlay_cabs)
     if not cab_plan.get("ready"):
         return {"ready": False, "stage": "cross_cab", "reason": cab_plan.get("reason")}
 
-    base_names = {
-        key.replace(chr(92), "/"): value for key, value in base_cabs.items()
-    }
-    overlay_names = {
-        key.replace(chr(92), "/"): value for key, value in overlay_cabs.items()
-    }
+    def normalize_identity(value: str) -> str:
+        path = value.strip().replace(chr(92), "/")
+        while "//" in path:
+            path = path.replace("//", "/")
+        return path
+
+    base_names = {normalize_identity(key): value for key, value in base_cabs.items()}
+    overlay_names = {normalize_identity(key): value for key, value in overlay_cabs.items()}
     metadata_plans = {}
     for key, descriptor in overlay_names.items():
         metadata = descriptor.get("assetbundle_metadata")
