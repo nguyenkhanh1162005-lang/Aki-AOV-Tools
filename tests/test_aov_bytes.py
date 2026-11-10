@@ -1,7 +1,14 @@
 import unittest
 
-from app.aov_bytes import (AOVBytesError, compress_aov_bytes, decompress_aov_bytes,
-                           decrypt_aes_resource, encrypt_aes_resource)
+from app.aov_bytes import (
+    AOVBytesError,
+    compress_aov_bytes,
+    decode_aov_resource,
+    decompress_aov_bytes,
+    decrypt_aes_resource,
+    encrypt_aes_resource,
+    encrypt_aes_zstd_resource,
+)
 
 
 # Small real AoV resource from the Actor 595 package, used as a stable format fixture.
@@ -18,7 +25,6 @@ AES_SAMPLE = bytes.fromhex(
 class AOVBytesTests(unittest.TestCase):
     def test_decompresses_real_vtk_resource(self):
         decoded = decompress_aov_bytes(VTK_SAMPLE)
-        self.assertEqual(len(decoded), 0x0D44)
         self.assertEqual(len(decoded), 3396)
 
     def test_compress_decompress_round_trip(self):
@@ -28,7 +34,17 @@ class AOVBytesTests(unittest.TestCase):
     def test_decrypts_and_reencrypts_real_vtk_aes_resource(self):
         decoded = decrypt_aes_resource(AES_SAMPLE, "ResSkinSeniorLabelCfg")
         self.assertEqual(len(decoded), 717)
-        self.assertEqual(decrypt_aes_resource(encrypt_aes_resource(decoded, "ResSkinSeniorLabelCfg"), "ResSkinSeniorLabelCfg"), decoded)
+        self.assertEqual(
+            decrypt_aes_resource(encrypt_aes_resource(decoded, "ResSkinSeniorLabelCfg"), "ResSkinSeniorLabelCfg"),
+            decoded,
+        )
+
+    def test_aes_zstd_round_trip(self):
+        original = (b"MSES\x07\x00\x00\x00" + b"test-resource-" * 200)
+        encoded = encrypt_aes_zstd_resource(original, "111_AssetRef")
+        decoded, mode = decode_aov_resource(encoded, "111_AssetRef.bytes")
+        self.assertEqual(mode, "aes-zstd")
+        self.assertEqual(decoded, original)
 
     def test_rejects_unknown_header(self):
         with self.assertRaises(AOVBytesError):
