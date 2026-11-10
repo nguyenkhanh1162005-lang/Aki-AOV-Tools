@@ -59,6 +59,8 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
     missing_local_pointers = []
     external_pointers = []
     pointer_count = 0
+    preload_digest = hashlib.sha256()
+    container_digest = hashlib.sha256()
     inspection_complete = (
         len(preload_table) <= MAX_REFERENCE_SCAN_OBJECTS
         and len(entries) <= MAX_REFERENCE_SCAN_OBJECTS
@@ -94,6 +96,9 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
             inspection_complete = False
             break
         item = inspect_pointer(pointer, "preload")
+        preload_digest.update(
+            f"{item['file_id']}:{item['path_id']}\n".encode("ascii")
+        )
         if len(preload_pointers) < MAX_REPORTED_REFERENCES:
             preload_pointers.append(item)
 
@@ -120,6 +125,12 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
             else:
                 inspection_complete = False
         pointer = inspect_pointer(getattr(asset_info, "asset", None), "container")
+        container_digest.update(
+            (
+                f"{key}\0{preload_index}\0{preload_size}\0"
+                f"{pointer['file_id']}\0{pointer['path_id']}\n"
+            ).encode("utf-8", "replace")
+        )
         if len(container_records) < MAX_REPORTED_REFERENCES:
             container_records.append({
                 "path": _safe_text(key),
@@ -154,6 +165,8 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
         "preload_table_count": len(preload_table),
         "container_entry_count": len(entries),
         "duplicate_container_path_count": sum(count - 1 for count in path_counts.values() if count > 1),
+        "preload_table_sha256": preload_digest.hexdigest(),
+        "container_metadata_sha256": container_digest.hexdigest(),
         "invalid_preload_ranges": invalid_preload_ranges,
         "pointer_count": pointer_count,
         "invalid_pointer_indices": invalid_pointer_indices,
@@ -535,6 +548,50 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
         and all(item["type_conflict_count"] == 0 for item in object_id_overlaps)
     )
 
+    base_assetbundle_names: dict[str, list[dict[str, Any]]] = {}
+    overlay_assetbundle_names: dict[str, list[dict[str, Any]]] = {}
+    for metadata in base.get("assetbundle_metadata", []):
+        name = metadata["assetbundle_name"].strip().lower()
+        if name:
+            base_assetbundle_names.setdefault(name, []).append(metadata)
+    for metadata in overlay.get("assetbundle_metadata", []):
+        name = metadata["assetbundle_name"].strip().lower()
+        if name:
+            overlay_assetbundle_names.setdefault(name, []).append(metadata)
+
+    assetbundle_metadata_comparisons = []
+    ambiguous_assetbundle_metadata_names = []
+    for name in sorted(set(base_assetbundle_names) | set(overlay_assetbundle_names)):
+        base_matches = base_assetbundle_names.get(name, [])
+        overlay_matches = overlay_assetbundle_names.get(name, [])
+        if len(base_matches) != 1 or len(overlay_matches) != 1:
+            ambiguous_assetbundle_metadata_names.append(name)
+            continue
+        base_meta = base_matches[0]
+        overlay_meta = overlay_matches[0]
+        assetbundle_metadata_comparisons.append({
+            "assetbundle_name": name,
+            "preload_count_match": (
+                base_meta["preload_table_count"] == overlay_meta["preload_table_count"]
+            ),
+            "preload_table_match": (
+                base_meta["preload_table_sha256"] == overlay_meta["preload_table_sha256"]
+            ),
+            "container_count_match": (
+                base_meta["container_entry_count"] == overlay_meta["container_entry_count"]
+            ),
+            "container_metadata_match": (
+                base_meta["container_metadata_sha256"] == overlay_meta["container_metadata_sha256"]
+            ),
+            "dependencies_match": base_meta["dependencies"] == overlay_meta["dependencies"],
+            "base_preload_count": base_meta["preload_table_count"],
+            "overlay_preload_count": overlay_meta["preload_table_count"],
+            "base_container_count": base_meta["container_entry_count"],
+            "overlay_container_count": overlay_meta["container_entry_count"],
+            "base_inspection_complete": base_meta["inspection_complete"],
+            "overlay_inspection_complete": overlay_meta["inspection_complete"],
+        })
+
     cross_bundle_references = {
         "resolved": [],
         "missing_path_ids": [],
@@ -584,6 +641,8 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
         "object_id_inventory_incomplete": object_id_inventory_incomplete,
         "ambiguous_object_id_cabs": ambiguous_object_id_cabs[:MAX_REPORTED_REFERENCES],
         "object_id_types_match": object_id_types_match,
+        "assetbundle_metadata_comparisons": assetbundle_metadata_comparisons,
+        "ambiguous_assetbundle_metadata_names": ambiguous_assetbundle_metadata_names,
         "cross_bundle_references": {
             "resolved_count": len(cross_bundle_references["resolved"]),
             "missing_path_id_count": len(cross_bundle_references["missing_path_ids"]),
