@@ -78,10 +78,10 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertFalse(plan["ready"])
         self.assertEqual(plan["stage"], "sidecar")
 
-    def test_combined_preflight_returns_dry_run_scope_for_empty_inventories(self):
+    def test_combined_preflight_rejects_empty_overlay_inventory(self):
         plan = build_assetbundle_merge_preflight({}, {})
-        self.assertTrue(plan["ready"])
-        self.assertIn("no serialized objects", plan["scope"])
+        self.assertFalse(plan["ready"])
+        self.assertEqual(plan["stage"], "cross_cab")
 
     def test_cross_cab_plan_resolves_local_and_external_pptrs(self):
         base = {
