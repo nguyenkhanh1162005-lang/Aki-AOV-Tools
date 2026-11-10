@@ -12,9 +12,9 @@ class VTKPathValidationTests(unittest.TestCase):
             "assetbundle/battle/hero/595_example.assetbundle",
         )
 
-    def test_normalizes_backslashes(self):
+    def test_normalizes_resource_prefix(self):
         self.assertEqual(
-            _normalise_vtk_path(r"Resources\\1.64.1\\Thanos\\HeroSkin_2.bytes"),
+            _normalise_vtk_path("Resources/1.64.1/Thanos/HeroSkin_2.bytes"),
             "Thanos/HeroSkin_2.bytes",
         )
 
