@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 MAX_FILES = 10
 MAX_INPUT_BYTES = 500 * 1024 * 1024
 MAX_OUTPUT_BYTES = 1024 * 1024 * 1024
+MAX_ENTRY_BYTES = 512 * 1024 * 1024
 MAX_ENTRIES = 20000
 CHUNK_SIZE = 1024 * 1024
 
@@ -21,7 +22,12 @@ class MergeError(ValueError):
 def _safe_name(name: str) -> str:
     name = name.replace("\\", "/")
     path = PurePosixPath(name)
-    if path.is_absolute() or ".." in path.parts or not path.parts:
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or not path.parts
+        or (path.parts and path.parts[0].endswith(":"))
+    ):
         raise MergeError("ZIP chứa đường dẫn không an toàn.")
     if "\x00" in name:
         raise MergeError("ZIP chứa tên tệp không hợp lệ.")
@@ -37,7 +43,7 @@ def _digest_entry(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> str:
                 if not chunk:
                     break
                 digest.update(chunk)
-    except (RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
+    except (RuntimeError, zipfile.BadZipFile, OSError, zlib.error, EOFError, NotImplementedError) as exc:
         raise MergeError(f"Không đọc được tệp: {info.filename}") from exc
     return digest.hexdigest()
 
@@ -47,7 +53,10 @@ def merge_zip_files(input_paths: list[str], output_path: str) -> int:
     if not input_paths or len(input_paths) > MAX_FILES:
         raise MergeError(f"Chọn từ 1 đến {MAX_FILES} file ZIP.")
 
-    total_input = sum(Path(path).stat().st_size for path in input_paths)
+    try:
+        total_input = sum(Path(path).stat().st_size for path in input_paths)
+    except OSError as exc:
+        raise MergeError("Không đọc được thông tin ZIP đầu vào.") from exc
     if total_input > MAX_INPUT_BYTES:
         raise MergeError("Tổng dung lượng ZIP vượt quá 500 MB.")
 
@@ -77,6 +86,8 @@ def merge_zip_files(input_paths: list[str], output_path: str) -> int:
                 mode = (info.external_attr >> 16) & 0o170000
                 if mode == 0o120000:
                     raise MergeError("Không hỗ trợ symbolic link trong ZIP.")
+                if info.file_size > MAX_ENTRY_BYTES:
+                    raise MergeError("Một tệp trong ZIP vượt quá giới hạn 512 MiB.")
 
                 total_uncompressed += info.file_size
                 if total_uncompressed > MAX_OUTPUT_BYTES:
@@ -109,7 +120,7 @@ def merge_zip_files(input_paths: list[str], output_path: str) -> int:
                 output.unlink(missing_ok=True)
                 raise MergeError("File ZIP kết quả vượt quá 1 GB.")
             return size
-        except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
+        except (OSError, zipfile.BadZipFile, RuntimeError, zlib.error, EOFError) as exc:
             output.unlink(missing_ok=True)
             raise MergeError("Không thể tạo file ZIP kết quả.") from exc
     finally:
