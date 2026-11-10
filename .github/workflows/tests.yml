@@ -47,3 +47,7 @@ jobs:
         with:
           name: aki-aov-app-source
           path: /tmp/aki-aov-app-source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aki-aov-app-source
+          path: app/
