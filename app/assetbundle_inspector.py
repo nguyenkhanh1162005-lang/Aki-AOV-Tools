@@ -776,6 +776,90 @@ def build_external_file_id_remap_plan(
     }
 
 
+
+def build_pptr_remap_plan(
+    references: list[dict[str, Any]],
+    file_id_remap: dict[str, int],
+    local_path_id_remap: dict[str, int],
+    external_path_id_remaps: dict[str, dict[str, int]],
+    *,
+    local_target_path_ids: set[int],
+    external_target_path_ids: dict[str, set[int]],
+) -> dict[str, Any]:
+    """Validate and plan PPtr rewrites without mutating any serialized object.
+
+    file_id_remap maps overlay 1-based external IDs to final 1-based IDs.
+    external_path_id_remaps is keyed by overlay external ID; each value maps
+    old PathIDs to final PathIDs for that external CAB.
+    """
+    if not isinstance(references, list) or not isinstance(file_id_remap, dict):
+        return {"ready": False, "reason": "Invalid PPtr reference inventory or file ID map.",
+                "rewritten_references": [], "blocked_references": []}
+
+    def valid_path_id(value: Any) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and -(1 << 63) <= value < (1 << 63)
+
+    rewritten = []
+    blocked = []
+    for index, reference in enumerate(references):
+        if not isinstance(reference, dict):
+            blocked.append({"index": index, "reason": "Reference entry is not an object"})
+            continue
+        file_id = reference.get("file_id")
+        path_id = reference.get("path_id")
+        if not isinstance(file_id, int) or isinstance(file_id, bool) or file_id < 0 or not valid_path_id(path_id):
+            blocked.append({"index": index, "reason": "PPtr file_id or PathID is invalid"})
+            continue
+
+        if file_id == 0:
+            target_file_id = 0
+            target_path_id = local_path_id_remap.get(str(path_id), path_id)
+            if not valid_path_id(target_path_id) or target_path_id not in local_target_path_ids:
+                blocked.append({"index": index, "file_id": file_id, "path_id": path_id,
+                                "reason": "Local PPtr target is absent from the final CAB inventory"})
+                continue
+            target_name = "local"
+        else:
+            target_file_id = file_id_remap.get(str(file_id))
+            if not isinstance(target_file_id, int) or isinstance(target_file_id, bool) or target_file_id <= 0:
+                blocked.append({"index": index, "file_id": file_id, "path_id": path_id,
+                                "reason": "External PPtr file_id has no valid final-table mapping"})
+                continue
+            target_path_id = external_path_id_remaps.get(str(file_id), {}).get(str(path_id), path_id)
+            target_name = str(target_file_id)
+            valid_targets = external_target_path_ids.get(target_name)
+            if valid_targets is None or not valid_path_id(target_path_id) or target_path_id not in valid_targets:
+                blocked.append({"index": index, "file_id": file_id, "path_id": path_id,
+                                "reason": "External PPtr target is absent or not indexed in the final CAB inventory"})
+                continue
+
+        rewritten.append({
+            "index": index,
+            "file_id": target_file_id,
+            "path_id": target_path_id,
+            "target": target_name,
+        })
+
+    if blocked:
+        return {
+            "ready": False,
+            "reason": "One or more PPtr targets cannot be resolved after remapping.",
+            "rewritten_references": [],
+            "blocked_references": blocked[:MAX_REPORTED_REFERENCES],
+            "reference_count": len(references),
+            "blocked_count": len(blocked),
+        }
+    return {
+        "ready": True,
+        "reason": "All supplied PPtrs resolve against the supplied final target inventories; no objects were changed.",
+        "rewritten_references": rewritten,
+        "blocked_references": [],
+        "reference_count": len(references),
+        "scope": "reference plan only; serialized typetrees, preload table, Container and bundle metadata remain untouched",
+    }
+
+
+
 def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[str, Any]:
     """Compare two bundles conservatively; this never rewrites or certifies a merge."""
     base = inspect_assetbundle(base_data, "base")
