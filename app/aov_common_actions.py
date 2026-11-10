@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import hashlib
 import io
 import re
 import uuid
@@ -28,12 +30,49 @@ def _normalized_track_name(track: ET.Element) -> str:
     return re.sub(r"^\d+_", "", track.attrib.get("trackName", ""))
 
 
+def _track_signature(track: ET.Element) -> str:
+    clone = copy.deepcopy(track)
+    clone.set("trackName", _normalized_track_name(clone))
+    clone.attrib.pop("guid", None)
+    for node in clone.iter():
+        for attr in list(node.attrib):
+            if attr.lower() in {"guid", "m_guid"}:
+                node.attrib.pop(attr, None)
+        for child in list(node):
+            if child.tag == "SkinOrAvatarList":
+                node.remove(child)
+        if node.attrib:
+            ordered = sorted(node.attrib.items())
+            node.attrib.clear()
+            node.attrib.update(ordered)
+    return hashlib.sha256(ET.tostring(clone, encoding="utf-8")).hexdigest()
+
+
+def _track_key(track: ET.Element) -> tuple[str, str, str]:
+    return (
+        _normalized_track_name(track),
+        track.attrib.get("eventType", ""),
+        _track_signature(track),
+    )
+
+
+def _unique_track_name(original: str, used: set[str], next_index: list[int]) -> str:
+    if original and original not in used:
+        return original
+    suffix = re.sub(r"^\d+_", "", original)
+    while True:
+        candidate = f"{next_index[0]}_{suffix or 'VTKTrack'}"
+        next_index[0] += 1
+        if candidate not in used:
+            return candidate
+
+
 def merge_action_xml(
     base_bytes: bytes,
     overlay_bytes: bytes,
     resource_name: str,
 ) -> tuple[bytes, dict]:
-    """Merge only overlay tracks explicitly gated to VTK skin IDs 59500/59501."""
+    """Merge VTK-gated tracks by full event signature without dropping same-name variants."""
     try:
         base_decoded, base_mode = decode_aov_resource(base_bytes, resource_name)
         overlay_decoded, overlay_mode = decode_aov_resource(overlay_bytes, resource_name)
@@ -49,87 +88,87 @@ def merge_action_xml(
 
     base_tracks = [node for node in list(base_action) if node.tag == "Track"]
     overlay_tracks = [node for node in list(overlay_action) if node.tag == "Track"]
-    index: dict[tuple[str, str], list[ET.Element]] = {}
+    index: dict[tuple[str, str, str], list[ET.Element]] = {}
     for track in base_tracks:
-        key = (_normalized_track_name(track), track.attrib.get("eventType", ""))
-        index.setdefault(key, []).append(track)
+        index.setdefault(_track_key(track), []).append(track)
+
+    used_names = {
+        track.attrib.get("trackName", "")
+        for track in base_tracks
+        if track.attrib.get("trackName")
+    }
+    numeric_prefixes = []
+    for track in base_tracks + overlay_tracks:
+        match = re.match(r"^(\d+)_", track.attrib.get("trackName", ""))
+        if match:
+            numeric_prefixes.append(int(match.group(1)))
+    next_index = [max(numeric_prefixes, default=-1) + 1]
 
     replaced = []
     appended = []
     already_present = []
     merged_into_existing = []
+
     for source_track in overlay_tracks:
         if not _is_595_track(source_track):
             continue
         name = _normalized_track_name(source_track)
-        event_type = source_track.attrib.get("eventType", "")
-        key = (name, event_type)
+        key = _track_key(source_track)
         candidates = index.get(key, [])
-        target = next((item for item in candidates if not _is_595_track(item)), None)
-        if target is not None:
-            replacement = ET.fromstring(ET.tostring(source_track, encoding="utf-8"))
-            replacement.attrib["trackName"] = name
-            for attr in ("guid", "useRefParam", "refParamName"):
-                if attr in target.attrib and attr not in replacement.attrib:
-                    replacement.attrib[attr] = target.attrib[attr]
-            target_position = list(base_action).index(target)
-            base_action.remove(target)
-            base_action.insert(target_position, replacement)
-            # The original node is gone; keep the index coherent for any repeated overlay name.
-            index[key] = [replacement if item is target else item for item in candidates]
-            replaced.append(name)
-        elif any(_is_595_track(item) for item in candidates):
-            target = next(item for item in candidates if _is_595_track(item))
-            existing_skin_nodes = {
+        if candidates:
+            target = candidates[0]
+            existing_nodes = {
                 node.attrib.get("id"): node
-                for node in target.iter()
-                if node.tag == "SkinOrAvatarList"
+                for node in target.findall("SkinOrAvatarList")
             }
-            for source_node in source_track:
-                if source_node.tag == "SkinOrAvatarList":
-                    skin_id = source_node.attrib.get("id")
-                    current = existing_skin_nodes.get(skin_id)
-                    cloned = ET.fromstring(ET.tostring(source_node, encoding="utf-8"))
-                    if current is None:
-                        target.append(cloned)
-                        existing_skin_nodes[skin_id] = cloned
-                    elif ET.tostring(current, encoding="utf-8") != ET.tostring(cloned, encoding="utf-8"):
-                        parent = next(
-                            (node for node in target.iter() if current in list(node)),
-                            target,
-                        )
-                        position = list(parent).index(current)
-                        parent.remove(current)
-                        parent.insert(position, cloned)
-                        existing_skin_nodes[skin_id] = cloned
-                else:
-                    encoded = ET.tostring(source_node, encoding="utf-8")
-                    if not any(ET.tostring(node, encoding="utf-8") == encoded for node in target):
-                        target.append(ET.fromstring(encoded))
-            merged_into_existing.append(name)
-            already_present.append(name)
-        else:
-            addition = ET.fromstring(ET.tostring(source_track, encoding="utf-8"))
-            addition.attrib["trackName"] = name
-            addition.attrib.setdefault(
-                "guid",
-                str(uuid.uuid5(_UUID_NAMESPACE, f"{resource_name}:{name}:{event_type}")),
-            )
-            addition.attrib.setdefault("useRefParam", "false")
-            addition.attrib.setdefault("refParamName", "")
-            base_action.append(addition)
-            index.setdefault(key, []).append(addition)
-            appended.append(name)
+            changed = False
+            for source_node in source_track.findall("SkinOrAvatarList"):
+                skin_id = source_node.attrib.get("id")
+                current = existing_nodes.get(skin_id)
+                cloned = copy.deepcopy(source_node)
+                if current is None:
+                    target.append(cloned)
+                    existing_nodes[skin_id] = cloned
+                    changed = True
+                elif current.attrib != cloned.attrib:
+                    position = list(target).index(current)
+                    target.remove(current)
+                    target.insert(position, cloned)
+                    existing_nodes[skin_id] = cloned
+                    changed = True
 
-    if not replaced and not appended and not already_present:
+            if changed:
+                if _is_595_track(target):
+                    merged_into_existing.append(name)
+                else:
+                    replaced.append(name)
+            else:
+                already_present.append(name)
+            continue
+
+        addition = copy.deepcopy(source_track)
+        original_name = addition.attrib.get("trackName", "")
+        addition.attrib["trackName"] = _unique_track_name(original_name, used_names, next_index)
+        addition.attrib.setdefault(
+            "guid",
+            str(uuid.uuid5(_UUID_NAMESPACE, f"{resource_name}:{key[2]}")),
+        )
+        addition.attrib.setdefault("useRefParam", "false")
+        addition.attrib.setdefault("refParamName", "")
+        base_action.append(addition)
+        used_names.add(addition.attrib["trackName"])
+        index.setdefault(key, []).append(addition)
+        appended.append(name)
+
+    if not replaced and not appended and not already_present and not merged_into_existing:
         raise CommonActionsMergeError(
             f"{resource_name}: overlay không có track tham chiếu SkinOrAvatarList 59500/59501."
         )
 
-    # Every VTK-gated skin ID in the overlay must remain represented after merging.
-    output_by_key: dict[tuple[str, str], set[str]] = {}
+    # Every source event variant and every special skin ID must remain represented.
+    output_by_key: dict[tuple[str, str, str], set[str]] = {}
     for track in base_action.iter("Track"):
-        key = (_normalized_track_name(track), track.attrib.get("eventType", ""))
+        key = _track_key(track)
         output_by_key.setdefault(key, set()).update(
             node.attrib.get("id")
             for node in track.iter("SkinOrAvatarList")
@@ -138,7 +177,7 @@ def merge_action_xml(
     for source_track in overlay_action.iter("Track"):
         if not _is_595_track(source_track):
             continue
-        key = (_normalized_track_name(source_track), source_track.attrib.get("eventType", ""))
+        key = _track_key(source_track)
         source_ids = {
             node.attrib.get("id")
             for node in source_track.iter("SkinOrAvatarList")
