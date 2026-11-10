@@ -12,6 +12,7 @@ MAX_REPORTED_CONTAINERS = 100
 MAX_REFERENCE_SCAN_OBJECTS = 10_000
 MAX_REFERENCE_SCAN_NODES = 500_000
 MAX_REPORTED_REFERENCES = 200
+MAX_OBJECT_ID_INDEX_ENTRIES = 100_000
 
 
 class AssetBundleInspectError(ValueError):
@@ -64,6 +65,7 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
     reference_scan_complete = True
     serialized_summaries: list[dict[str, Any]] = []
     total_objects = 0
+    indexed_object_ids = 0
 
     for asset_file in serialized_files:
         file_name = _safe_text(getattr(asset_file, "name", ""))
@@ -132,8 +134,13 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
                     "to": external_path,
                 })
 
+        remaining_id_slots = max(0, MAX_OBJECT_ID_INDEX_ENTRIES - indexed_object_ids)
+        object_ids = list(objects.keys())[:remaining_id_slots]
+        indexed_object_ids += len(object_ids)
         serialized_summaries.append({
             "name": file_name,
+            "object_path_ids": object_ids,
+            "object_id_inventory_complete": len(object_ids) == len(objects),
             "unity_version": _safe_text(getattr(asset_file, "unity_version", "")),
             "target_platform": _safe_text(getattr(getattr(asset_file, "target_platform", None), "name", "")),
             "object_count": len(objects),
@@ -252,6 +259,43 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
     version_match = bool(base_versions and overlay_versions and base_versions == overlay_versions)
     platform_match = bool(base_platforms and overlay_platforms and base_platforms == overlay_platforms)
 
+    # An external PPtr unresolved inside the overlay may be satisfied by a CAB
+    # shipped in the base bundle. Match by CAB basename, then verify the PathID.
+    base_cabs: dict[str, list[dict[str, Any]]] = {}
+    for serialized in base["serialized_files"]:
+        basename = Path(serialized["name"]).name.lower()
+        base_cabs.setdefault(basename, []).append(serialized)
+
+    cross_bundle_references = {
+        "resolved": [],
+        "missing_path_ids": [],
+        "ambiguous_cab_names": [],
+        "unknown_cabs": [],
+        "index_incomplete": False,
+    }
+    for dependency in overlay["reference_integrity"]["external_dependencies"]:
+        basename = Path(dependency["target_file"]).name.lower()
+        candidates = base_cabs.get(basename, [])
+        item = {
+            "from_file": dependency["from_file"],
+            "from_path_id": dependency["from_path_id"],
+            "target_file": dependency["target_file"],
+            "path_id": dependency["path_id"],
+        }
+        if not candidates:
+            cross_bundle_references["unknown_cabs"].append(item)
+        elif len(candidates) > 1:
+            cross_bundle_references["ambiguous_cab_names"].append(item)
+        else:
+            candidate = candidates[0]
+            if not candidate["object_id_inventory_complete"]:
+                cross_bundle_references["index_incomplete"] = True
+                cross_bundle_references["unknown_cabs"].append(item)
+            elif dependency["path_id"] in candidate["object_path_ids"]:
+                cross_bundle_references["resolved"].append(item)
+            else:
+                cross_bundle_references["missing_path_ids"].append(item)
+
     return {
         "unity_versions_match": version_match,
         "base_unity_versions": sorted(base_versions),
@@ -267,6 +311,17 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
         "external_paths_added": sorted(
             set(overlay["external_paths"]) - set(base["external_paths"])
         )[:MAX_REPORTED_CONTAINERS],
+        "cross_bundle_references": {
+            "resolved_count": len(cross_bundle_references["resolved"]),
+            "missing_path_id_count": len(cross_bundle_references["missing_path_ids"]),
+            "ambiguous_cab_count": len(cross_bundle_references["ambiguous_cab_names"]),
+            "unknown_cab_count": len(cross_bundle_references["unknown_cabs"]),
+            "index_incomplete": cross_bundle_references["index_incomplete"],
+            "resolved": cross_bundle_references["resolved"][:MAX_REPORTED_REFERENCES],
+            "missing_path_ids": cross_bundle_references["missing_path_ids"][:MAX_REPORTED_REFERENCES],
+            "ambiguous_cab_names": cross_bundle_references["ambiguous_cab_names"][:MAX_REPORTED_REFERENCES],
+            "unknown_cabs": cross_bundle_references["unknown_cabs"][:MAX_REPORTED_REFERENCES],
+        },
         "structural_checks_pass": (
             version_match and platform_match and inventory_complete and not type_conflicts
         ),
