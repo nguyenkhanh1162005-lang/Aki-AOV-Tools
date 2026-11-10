@@ -25,7 +25,21 @@ LOCAL_API = bool(
 )
 MAX_FILE_BYTES = 500 * MIB if LOCAL_API else 20 * MIB
 MAX_TOTAL_BYTES = 500 * MIB if LOCAL_API else 100 * MIB
+MAX_OUTPUT_BYTES = 1024 * MIB if LOCAL_API else 50 * MIB
 MAX_FILES = 10
+
+
+def _output_limit_message(output_path: Path) -> str | None:
+    size = output_path.stat().st_size
+    if size > MAX_OUTPUT_BYTES:
+        limit = MAX_OUTPUT_BYTES // MIB
+        mode = "Local Bot API" if LOCAL_API else "Bot API mặc định"
+        return (
+            f"ZIP đã xử lý xong ({size / MIB:.1f} MB) nhưng không thể gửi qua {mode}. "
+            f"Giới hạn gửi hiện tại là {limit} MB. File nguồn vẫn được giữ lại; "
+            "cần cấu hình Local Bot API để gửi file lớn."
+        )
+    return None
 
 
 def _workdir(context: ContextTypes.DEFAULT_TYPE) -> Path:
@@ -180,6 +194,10 @@ async def aovmerge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"AssetBundle: {report['assetbundles']}\n"
             "Chưa được xác nhận chạy trong Liên Quân iOS. Đang gửi ZIP..."
         )
+        limit_error = _output_limit_message(output_path)
+        if limit_error:
+            await status_message.edit_text(limit_error)
+            return
         await update.effective_message.reply_document(
             document=FSInputFile(str(output_path), filename="Aki-AOV-10Skin-VanTamKiem.zip"),
             read_timeout=1800,
@@ -224,6 +242,10 @@ async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_message.edit_text(
             f"Đã ghép xong ({output_path.stat().st_size / MIB:.1f} MB). Đang gửi file..."
         )
+        limit_error = _output_limit_message(output_path)
+        if limit_error:
+            await status_message.edit_text(limit_error)
+            return
         await update.effective_message.reply_document(
             document=FSInputFile(str(output_path), filename="aki-merged.zip"),
             read_timeout=1800,
