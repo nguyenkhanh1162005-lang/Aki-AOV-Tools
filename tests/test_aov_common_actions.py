@@ -84,6 +84,39 @@ class CommonActionsMergeTests(unittest.TestCase):
         self.assertEqual(ids, {"59500", "59501"})
         self.assertTrue(report["merged_into_existing_tracks"])
 
+    def test_keeps_same_name_tracks_with_different_event_flags(self):
+        name = "commonresource/HasteE1.xml"
+        base_root = ET.Element("Project")
+        base_action = ET.SubElement(base_root, "Action")
+        overlay_root = ET.Element("Project")
+        overlay_action = ET.SubElement(overlay_root, "Action")
+        for index, completed in enumerate(("false", "true")):
+            track = ET.SubElement(overlay_action, "Track", {
+                "trackName": f"{85 + index}_SetAnimationParamsTick0",
+                "eventType": "SetAnimationParamsTick",
+                "enabled": "true",
+                "execOnActionCompleted": completed,
+                "SkinAvatarFilterType": "9",
+            })
+            event = ET.SubElement(track, "Event", {
+                "eventName": "SetAnimationParamsTick",
+                "time": "0.000",
+                "isDuration": "false",
+            })
+            ET.SubElement(event, "String", {"name": "variant", "value": completed})
+            ET.SubElement(track, "SkinOrAvatarList", {"id": "59500"})
+        base = encode_aov_resource(ET.tostring(base_root), name, "zstd")
+        overlay = encode_aov_resource(ET.tostring(overlay_root), name, "zstd")
+        output, report = merge_action_xml(base, overlay, name)
+        decoded, _ = decode_aov_resource(output, name)
+        result = ET.fromstring(decoded).find("Action").findall("Track")
+        self.assertEqual(len(result), 2)
+        self.assertEqual(
+            {track.attrib["execOnActionCompleted"] for track in result},
+            {"false", "true"},
+        )
+        self.assertEqual(len(report["appended_tracks"]), 2)
+
     def test_package_merge_replaces_only_selected_xml(self):
         path = "commonresource/Back.xml"
         other = "commonresource/Unrelated.xml"
