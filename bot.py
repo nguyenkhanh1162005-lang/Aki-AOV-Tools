@@ -25,6 +25,7 @@ LOCAL_API = bool(
 )
 MAX_FILE_BYTES = 500 * MIB if LOCAL_API else 20 * MIB
 MAX_TOTAL_BYTES = 500 * MIB if LOCAL_API else 100 * MIB
+MAX_SEND_BYTES = 500 * MIB if LOCAL_API else 50 * MIB
 MAX_FILES = 10
 
 
@@ -67,6 +68,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Chế độ: {mode}\n"
         f"Giới hạn mỗi ZIP: {MAX_FILE_BYTES // MIB} MB\n"
         f"Tổng dung lượng nhận: {MAX_TOTAL_BYTES // MIB} MB\n"
+        f"Giới hạn gửi ZIP kết quả: {MAX_SEND_BYTES // MIB} MB\n"
         f"Đã nhận: {len(files)}/{MAX_FILES} file, {total / MIB:.1f} MB"
     )
 
@@ -171,6 +173,15 @@ async def aovmerge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [path for _, path in files],
             str(output_path),
         )
+        output_size = output_path.stat().st_size
+        if output_size > MAX_SEND_BYTES:
+            api_mode = "Local Bot API" if LOCAL_API else "Bot API mặc định"
+            await status_message.edit_text(
+                f"Đã ghép xong ({output_size / MIB:.1f} MB) nhưng vượt giới hạn gửi "
+                f"{MAX_SEND_BYTES // MIB} MB của {api_mode}. "
+                "File nguồn vẫn được giữ trong phiên này."
+            )
+            return
         await status_message.edit_text(
             "Đã ghép và kiểm tra cấu trúc nội bộ:\n"
             f"Mod 10 skin {report['base_version']} + mod Vấn Tâm Kiếm {report['vtk_version']}\n"
@@ -221,9 +232,18 @@ async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [path for _, path in files],
             str(output_path),
         )
+        output_size = output_path.stat().st_size
+        if output_size > MAX_SEND_BYTES:
+            api_mode = "Local Bot API" if LOCAL_API else "Bot API mặc định"
+            await status_message.edit_text(
+                f"Đã ghép xong ({output_size / MIB:.1f} MB) nhưng vượt giới hạn gửi "
+                f"{MAX_SEND_BYTES // MIB} MB của {api_mode}. "
+                "File nguồn vẫn được giữ trong phiên này."
+            )
+            return
         await status_message.edit_text(
             f"Đã ghép bằng adapter {report['adapter']} "
-            f"({output_path.stat().st_size / MIB:.1f} MB). "
+            f"({output_size / MIB:.1f} MB). "
             "Đã kiểm tra CRC ZIP, chưa xác nhận tương thích trong game. Đang gửi file..."
         )
         await update.effective_message.reply_document(
