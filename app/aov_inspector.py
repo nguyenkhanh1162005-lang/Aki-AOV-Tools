@@ -310,6 +310,13 @@ def inspect_archives(paths: list[str]) -> str:
                         f"  • PathID trùng trong CAB tương ứng: {overlap_total} | "
                         f"xung đột loại Object: {type_conflicts}"
                     )
+                    payload_changed = sum(item["payload_changed_count"] for item in object_overlaps)
+                    payload_identical = sum(item["payload_identical_count"] for item in object_overlaps)
+                    payload_unknown = sum(item["payload_unknown_count"] for item in object_overlaps)
+                    lines.append(
+                        f"  • Payload Object: {payload_identical} giống nhau | "
+                        f"{payload_changed} đã thay đổi | {payload_unknown} chưa đối chiếu được"
+                    )
                 if result["ambiguous_object_id_cabs"]:
                     lines.append(
                         "  • CAB trùng tên, không thể đối chiếu PathID chắc chắn: "
