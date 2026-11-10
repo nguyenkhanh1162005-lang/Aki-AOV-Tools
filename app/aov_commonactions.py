@@ -119,12 +119,16 @@ def merge_common_actions(
     incoming_archive, incoming_buffer = _read_package(incoming_package)
     try:
         base_infos = [info for info in base_archive.infolist() if not info.is_dir()]
-        incoming_infos = {
-            info.filename: info
-            for info in incoming_archive.infolist()
-            if not info.is_dir()
-        }
+        incoming_info_list = [
+            info for info in incoming_archive.infolist() if not info.is_dir()
+        ]
+        if len({info.filename for info in base_infos}) != len(base_infos):
+            raise CommonActionsMergeError("Base CommonActions PKG có đường dẫn lặp.")
+        if len({info.filename for info in incoming_info_list}) != len(incoming_info_list):
+            raise CommonActionsMergeError("PKG đầu vào có đường dẫn lặp.")
+        incoming_infos = {info.filename: info for info in incoming_info_list}
         base_payloads: dict[str, bytes] = {}
+        output_infos = list(base_infos)
         changed: list[str] = []
         skipped: list[str] = []
         total_tracks = 0
@@ -136,6 +140,8 @@ def merge_common_actions(
         for name, incoming_info in incoming_infos.items():
             _safe_member_name(name)
             if name not in base_payloads:
+                base_payloads[name] = incoming_archive.read(incoming_info)
+                output_infos.append(copy.copy(incoming_info))
                 continue
             base_payload = base_payloads[name]
             incoming_payload = incoming_archive.read(incoming_info)
@@ -159,7 +165,7 @@ def merge_common_actions(
         output_buffer = io.BytesIO()
         with zipfile.ZipFile(output_buffer, "w", allowZip64=True) as output:
             output.comment = base_archive.comment
-            for info in base_infos:
+            for info in output_infos:
                 output.writestr(copy.copy(info), base_payloads[info.filename])
 
         return output_buffer.getvalue(), CommonActionsMergeReport(
