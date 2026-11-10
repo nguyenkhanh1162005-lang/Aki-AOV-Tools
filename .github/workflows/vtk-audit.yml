@@ -13,7 +13,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -r requirements.txt
-      - run: python -m pip install UnityPy sm4==1.0.2
+      - run: python -m pip install UnityPy sm4==1.0.2 tabulate numpy
       - name: Fetch AoV-specific UnityPy parser
         run: git clone --depth 1 https://github.com/Alanshown/AOV_UABE_2022.git /tmp/AOV_UABE_2022
       - name: Download and inspect the shared 141 MB VTK archive
