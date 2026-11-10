@@ -353,6 +353,20 @@ def inspect_archives(paths: list[str]) -> str:
                         "  • Metadata AssetBundle trùng tên, không thể ghép cặp: "
                         + ", ".join(result["ambiguous_assetbundle_metadata_names"][:8])
                     )
+                if result["unmatched_base_assetbundle_names"]:
+                    lines.append(
+                        "  • Chỉ có trong bundle nền: "
+                        + ", ".join(result["unmatched_base_assetbundle_names"][:8])
+                    )
+                if result["unmatched_overlay_assetbundle_names"]:
+                    lines.append(
+                        "  • Chỉ có trong bundle mod: "
+                        + ", ".join(result["unmatched_overlay_assetbundle_names"][:8])
+                    )
+                lines.append(
+                    f"  • Kiểm tra preload/Container/PPtr nội bộ: "
+                    f"{result['assetbundle_metadata_integrity_pass']}"
+                )
                 cross_refs = result["cross_bundle_references"]
                 lines.append(
                     f"  • PPtr overlay → CAB base hợp lệ: {cross_refs['resolved_count']} | "
