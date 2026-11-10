@@ -31,6 +31,32 @@ class ModPipelineTests(unittest.TestCase):
             with self.assertRaisesRegex(ModPipelineError, "500 MB"):
                 _preflight_inputs([str(first), str(second)])
 
+    def test_aggregate_entry_limit_counts_directory_entries(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            first = self._zip(folder, "first.zip", {
+                "a/": b"", "b/": b"", "one.txt": b"1",
+            })
+            second = self._zip(folder, "second.zip", {
+                "c/": b"", "d/": b"", "two.txt": b"2",
+            })
+            with patch("app.mod_pipeline.MAX_PROFILE_ENTRIES", 3):
+                with self.assertRaisesRegex(ModPipelineError, "Tổng số mục"):
+                    merge_mod_archives(
+                        [first, second], str(folder / "merged.zip")
+                    )
+
+    def test_traversal_directory_entry_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            source = self._zip(folder, "bad-directory.zip", {
+                "../escape/": b"",
+            })
+            with self.assertRaisesRegex(ModPipelineError, "không an toàn"):
+                _archive_profile(source)
+
     def test_generic_archives_merge_new_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
