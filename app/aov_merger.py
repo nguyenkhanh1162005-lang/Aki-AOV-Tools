@@ -3,10 +3,11 @@ from __future__ import annotations
 import copy
 import io
 import shutil
+import stat
 import sys
 import tempfile
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .aov_bytes import AOVBytesError, decode_aov_resource, encode_aov_resource
@@ -64,8 +65,36 @@ def _load_unitypy_aov():
     return UnityPy_AOV
 
 
+def _validate_archive_paths(zf: zipfile.ZipFile, label: str) -> None:
+    for info in zf.infolist():
+        normalized = info.filename.replace("\\", "/")
+        path = PurePosixPath(normalized)
+        mode = (info.external_attr >> 16) & 0xFFFF
+        if (
+            not normalized
+            or path.is_absolute()
+            or ".." in path.parts
+            or "\x00" in normalized
+            or (path.parts and path.parts[0].endswith(":"))
+            or stat.S_ISLNK(mode)
+        ):
+            raise AOVMergeError(
+                f"ZIP {label} chứa đường dẫn hoặc mục không an toàn: {info.filename}"
+            )
+
+
 def _normalise_vtk_path(name: str) -> str:
-    name = name.replace("\\", "/").lstrip("/")
+    name = name.replace("\\", "/")
+    path = PurePosixPath(name)
+    if (
+        not name
+        or path.is_absolute()
+        or ".." in path.parts
+        or "\x00" in name
+        or (path.parts and path.parts[0].endswith(":"))
+    ):
+        raise AOVMergeError(f"Đường dẫn tài nguyên VTK không an toàn: {name}")
+    name = name.lstrip("/")
     if name.startswith("Resources/1.64.1/"):
         name = name[len("Resources/1.64.1/"):]
     elif name.startswith("Resources/"):
@@ -280,6 +309,7 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                 raise
             except Exception as exc:
                 raise AOVMergeError(f"File đầu vào không phải ZIP hợp lệ: {Path(path).name}") from exc
+            _validate_archive_paths(zf, Path(path).name)
             opened.append(zf)
             archives.append((path, zf))
 
@@ -347,6 +377,7 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                 _copy_stream(src, dst)
             base_inner = zipfile.ZipFile(base_inner_path)
             try:
+                _validate_archive_paths(base_inner, "Resources.zip bên trong gói mod")
                 base_names = set(base_inner.namelist())
                 required_base = [
                     BASE_PREFIX + HERO_SKIN_BASE_PATH,
