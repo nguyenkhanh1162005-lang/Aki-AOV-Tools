@@ -71,8 +71,9 @@ def merge_action_xml(
             for attr in ("guid", "useRefParam", "refParamName"):
                 if attr in target.attrib and attr not in replacement.attrib:
                     replacement.attrib[attr] = target.attrib[attr]
+            target_position = list(base_action).index(target)
             base_action.remove(target)
-            base_action.insert(list(base_action).index(target) if target in list(base_action) else len(base_action), replacement)
+            base_action.insert(target_position, replacement)
             # The original node is gone; keep the index coherent for any repeated overlay name.
             index[key] = [replacement if item is target else item for item in candidates]
             replaced.append(name)
