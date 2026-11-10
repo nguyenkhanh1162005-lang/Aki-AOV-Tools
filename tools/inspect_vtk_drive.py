@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.drive_import import download_drive_zip
 from app.aov_bytes import decode_aov_resource
+from tools.ifix_parse import PatchParser
 
 DRIVE_URL = "https://drive.google.com/file/d/1JpKeA82ha9CmCeGL1pmAEfBhQWr19Mxe/view?usp=drivesdk"
 report = {"download": {}, "archives": []}
@@ -53,6 +54,33 @@ with tempfile.TemporaryDirectory(prefix="aki-vtk-audit-") as temp:
 
             if info.filename.lower().endswith(".bytes"):
                 record.update(inspect_bytes(info.filename, payload))
+                if info.filename.endswith("/Thanos/HeroSkin_2.bytes"):
+                    decoded, mode = decode_aov_resource(payload, info.filename)
+                    patch_path = Path(temp) / "vtk-heroskin.dec"
+                    patch_path.write_bytes(decoded)
+                    patch = PatchParser(str(patch_path)).parse()
+                    record["ifix_patch"] = {
+                        "encoding": mode,
+                        "magic": f"0x{patch.magic:x}",
+                        "bridge": patch.bridge_name,
+                        "assembly": patch.assembly_string,
+                        "wrappers_manager": patch.wrappers_manager_name,
+                        "method_count": len(patch.methods),
+                        "extern_type_count": len(patch.extern_types),
+                        "extern_method_count": len(patch.extern_methods),
+                        "fixes": [
+                            {
+                                "class": patch.extern_types[item["type_id"]] if 0 <= item["type_id"] < len(patch.extern_types) else str(item["type_id"]),
+                                "method": item["name"],
+                                "patch_id": item["patch_id"],
+                            }
+                            for item in patch.fix_infos
+                        ],
+                        "relevant_strings": [
+                            value for value in patch.intern_strings
+                            if any(term in value.lower() for term in ("595", "lixin", "skin", "battle", "resource", "youtube", "sinon"))
+                        ][:100],
+                    }
 
             if info.filename.lower().endswith(".assetbundle"):
                 try:
