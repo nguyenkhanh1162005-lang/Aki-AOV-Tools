@@ -19,7 +19,7 @@ from .aov_zstd import AoVZstdError, WRAPPER_MAGIC, decode_aov_bytes, encode_aov_
 
 MAX_PACKAGE_BYTES = 64 * 1024 * 1024
 MAX_PACKAGE_ENTRIES = 10000
-SKIN_ID_PATTERN = re.compile(rb"(?<![0-9])(?:59500|59501)(?![0-9])")
+DEFAULT_HERO_PREFIXES = ("595",)
 
 
 class CommonActionsMergeError(ValueError):
@@ -53,7 +53,7 @@ def _read_package(data: bytes) -> tuple[zipfile.ZipFile, io.BytesIO]:
         raise CommonActionsMergeError("CommonActions.pkg.bytes không phải ZIP hợp lệ.") from exc
 
 
-def _merge_xml(base_payload: bytes, incoming_payload: bytes, member_name: str) -> tuple[bytes, int]:
+def _merge_xml(base_payload: bytes, incoming_payload: bytes, member_name: str, hero_prefixes: tuple[str, ...]) -> tuple[bytes, int]:
     if not base_payload.startswith(WRAPPER_MAGIC) or not incoming_payload.startswith(WRAPPER_MAGIC):
         raise CommonActionsMergeError(
             f"Không nhận diện được wrapper Zstandard của XML: {member_name}"
@@ -76,10 +76,16 @@ def _merge_xml(base_payload: bytes, incoming_payload: bytes, member_name: str) -
         for track in base_action.findall("Track")
         if track.attrib.get("trackName")
     }
+    pattern = re.compile(
+        rb"(?<![0-9])(?:" + b"|".join(
+            re.escape(prefix.encode("ascii")) + rb"\\d{2}"
+            for prefix in hero_prefixes
+        ) + rb")(?![0-9])"
+    )
     added = 0
     for incoming_track in incoming_action.findall("Track"):
         serialized_track = ET.tostring(incoming_track, encoding="utf-8")
-        if not SKIN_ID_PATTERN.search(serialized_track):
+        if not pattern.search(serialized_track):
             continue
         track_name = incoming_track.attrib.get("trackName")
         if not track_name or track_name in existing_names:
@@ -113,8 +119,13 @@ def _merge_xml(base_payload: bytes, incoming_payload: bytes, member_name: str) -
 def merge_common_actions(
     base_package: bytes,
     incoming_package: bytes,
+    *,
+    hero_prefixes: tuple[str, ...] | list[str] = DEFAULT_HERO_PREFIXES,
 ) -> tuple[bytes, CommonActionsMergeReport]:
-    """Append incoming tracks that explicitly reference skin IDs 59500/59501."""
+    """Append incoming tracks referencing skin IDs belonging to target hero prefixes."""
+    prefixes = tuple(sorted({str(p).strip() for p in hero_prefixes if str(p).strip()}))
+    if not prefixes or any(not p.isdigit() or len(p) < 3 for p in prefixes):
+        raise CommonActionsMergeError("Cần tiền tố ID tướng dạng số, tối thiểu 3 chữ số.")
     base_archive, base_buffer = _read_package(base_package)
     incoming_archive, incoming_buffer = _read_package(incoming_package)
     try:
@@ -156,7 +167,7 @@ def merge_common_actions(
             ):
                 skipped.append(name)
                 continue
-            merged_payload, added = _merge_xml(base_payload, incoming_payload, name)
+            merged_payload, added = _merge_xml(base_payload, incoming_payload, name, prefixes)
             if added:
                 base_payloads[name] = merged_payload
                 changed.append(name)
