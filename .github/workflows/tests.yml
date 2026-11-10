@@ -37,12 +37,14 @@ jobs:
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest discover -s tests -v
       - run: python -m compileall -q app bot.py
+      - name: Check web JavaScript syntax
+        run: python -c "import re,pathlib; h=pathlib.Path('web/index.html').read_text(); pathlib.Path('/tmp/aki-web.js').write_text('\\n'.join(re.findall(r'<script>(.*?)</script>',h,re.S)))" && node --check /tmp/aki-web.js
       - uses: actions/upload-artifact@v4
         with:
           name: ifix-parser-source
           path: tools/ifix_parse.py
       - name: Package app source for integration validation
-        run: zip -qr /tmp/aki-aov-app-source.zip app requirements.txt
+        run: zip -qr /tmp/aki-aov-app-source.zip app web bot.py requirements.txt
       - uses: actions/upload-artifact@v4
         with:
           name: aki-aov-app-source
