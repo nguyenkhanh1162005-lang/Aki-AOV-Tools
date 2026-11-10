@@ -73,6 +73,12 @@ class _Reader:
     def uint64(self) -> int:
         return struct.unpack("<Q", self.read(8))[0]
 
+    def count(self, label: str, *, maximum: int = 2_000_000) -> int:
+        count = self.int32()
+        if count < 0 or count > maximum:
+            raise IFixMergeError(f"Số lượng {label} trong IFix không hợp lệ.")
+        return count
+
     def string(self) -> str:
         length = 0
         shift = 0
@@ -84,13 +90,14 @@ class _Reader:
             shift += 7
             if shift > 35:
                 raise IFixMergeError("Độ dài chuỗi IFix không hợp lệ.")
-        return self.read(length).decode("utf-8") if length else ""
+        raw = self.read(length) if length else b""
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise IFixMergeError("Chuỗi IFix không phải UTF-8 hợp lệ.") from exc
 
     def int_array(self) -> list[int]:
-        count = self.int32()
-        if count < 0 or count > 2_000_000:
-            raise IFixMergeError("Số phần tử IFix không hợp lệ.")
-        return [self.int32() for _ in range(count)]
+        return [self.int32() for _ in range(self.count("phần tử"))]
 
     def tell(self) -> int:
         return self.stream.tell()
@@ -149,20 +156,20 @@ def parse_ifix_patch(data: bytes) -> dict[str, Any]:
         "fixes": [],
         "new_classes": [],
     }
-    patch["types"] = [reader.string() for _ in range(reader.int32())]
+    patch["types"] = [reader.string() for _ in range(reader.count("bản ghi"))]
 
-    for _ in range(reader.int32()):
+    for _ in range(reader.count("bản ghi")):
         instructions = [
             struct.unpack("<ii", reader.read(8))
-            for _ in range(reader.int32())
+            for _ in range(reader.count("bản ghi"))
         ]
         handlers = [
             struct.unpack("<iiiiii", reader.read(24))
-            for _ in range(reader.int32())
+            for _ in range(reader.count("bản ghi"))
         ]
         patch["methods"].append({"inst": instructions, "eh": handlers})
 
-    for _ in range(reader.int32()):
+    for _ in range(reader.count("bản ghi")):
         is_generic = reader.boolean()
         type_id = reader.int32()
         name = reader.string()
@@ -170,7 +177,7 @@ def parse_ifix_patch(data: bytes) -> dict[str, Any]:
         params: list[tuple[str, Any]] = []
         if is_generic:
             generic_args = reader.int_array()
-            for _ in range(reader.int32()):
+            for _ in range(reader.count("bản ghi")):
                 if reader.boolean():
                     params.append(("s", reader.string()))
                 else:
@@ -182,9 +189,9 @@ def parse_ifix_patch(data: bytes) -> dict[str, Any]:
             "g": generic_args, "params": params,
         })
 
-    patch["strings"] = [reader.string() for _ in range(reader.int32())]
+    patch["strings"] = [reader.string() for _ in range(reader.count("bản ghi"))]
 
-    for _ in range(reader.int32()):
+    for _ in range(reader.count("bản ghi")):
         is_new = reader.boolean()
         type_id = reader.int32()
         name = reader.string()
@@ -194,10 +201,10 @@ def parse_ifix_patch(data: bytes) -> dict[str, Any]:
         })
 
     patch["static_fields"] = [
-        (reader.int32(), reader.int32()) for _ in range(reader.int32())
+        (reader.int32(), reader.int32()) for _ in range(reader.count("bản ghi"))
     ]
 
-    for _ in range(reader.int32()):
+    for _ in range(reader.count("bản ghi")):
         patch["anon"].append({
             "fields": reader.int_array(),
             "ctor": reader.int32(),
@@ -209,7 +216,7 @@ def parse_ifix_patch(data: bytes) -> dict[str, Any]:
     patch["wrappers"] = reader.string()
     patch["assembly"] = reader.string()
 
-    for _ in range(reader.int32()):
+    for _ in range(reader.count("bản ghi")):
         is_generic = reader.boolean()
         type_id = reader.int32()
         name = reader.string()
@@ -217,7 +224,7 @@ def parse_ifix_patch(data: bytes) -> dict[str, Any]:
         params: list[tuple[str, Any]] = []
         if is_generic:
             generic_args = reader.int_array()
-            for _ in range(reader.int32()):
+            for _ in range(reader.count("bản ghi")):
                 if reader.boolean():
                     params.append(("s", reader.string()))
                 else:
@@ -229,7 +236,7 @@ def parse_ifix_patch(data: bytes) -> dict[str, Any]:
             "g": generic_args, "params": params, "patch": reader.int32(),
         })
 
-    patch["new_classes"] = [reader.string() for _ in range(reader.int32())]
+    patch["new_classes"] = [reader.string() for _ in range(reader.count("bản ghi"))]
     if reader.tell() != len(data):
         raise IFixMergeError("IFix patch có dữ liệu dư hoặc không tương thích.")
     return patch
