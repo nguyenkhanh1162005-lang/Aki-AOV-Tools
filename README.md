@@ -49,6 +49,18 @@ python bot.py
 - Trước khi chuyển bot từ Bot API chính thức sang Local Bot API Server, gọi `logOut` trên Bot API chính thức, dừng worker cũ, rồi mới đổi URL và khởi động worker mới.
 - Khi bật Local Bot API: tối đa 500 MB mỗi ZIP, tổng đầu vào 500 MB, tối đa 10 ZIP; ZIP đầu ra tối đa 1 GB. Máy chủ vẫn cần đủ RAM và dung lượng ổ đĩa tạm.
 
+## Triển khai web + Telegram với Local Bot API
+
+Để bot nhận ZIP lớn (như các phần VTK hơn 20 MB) và gửi ZIP kết quả lớn, có thể dùng Docker Compose trên VPS có Docker. Cấu hình mẫu chạy web, bot worker và Local Bot API trong cùng mạng riêng:
+
+```sh
+cp .env.example .env
+# Điền BOT_TOKEN, TELEGRAM_API_ID và TELEGRAM_API_HASH trong .env
+docker compose -f docker-compose.local-bot-api.yml up -d --build
+```
+
+Đọc [hướng dẫn triển khai Local Bot API](docs/telegram-local-api.md) trước khi chuyển bot từ máy chủ Telegram mặc định. Phải dừng worker cũ và gọi `logOut` đúng quy trình; không chạy hai polling worker cùng một bot. Không đưa file `.env` lên GitHub.
+
 ## Nhập ZIP từ Google Drive
 - Dán link ZIP nền và link Vấn Tâm Kiếm, mỗi link một dòng. Nếu VTK được chia thành nhiều phần, dán tất cả các link phần đó.
 - File phải bật quyền “Bất kỳ ai có đường liên kết”.
