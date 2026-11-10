@@ -5,6 +5,7 @@ from unittest.mock import patch
 from app.assetbundle_inspector import (
     AssetBundleInspectError,
     build_path_id_remap_plan,
+    build_external_file_id_remap_plan,
     compare_assetbundle_overlays,
     inspect_assetbundle,
     verify_assetbundle_roundtrip,
@@ -31,6 +32,33 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertEqual(proven["deduplicate"], {"10": 10})
         self.assertEqual(proven["remap"], {"20": 31})
         self.assertEqual(proven["preserved_overlay_only_count"], 1)
+
+    def test_external_file_id_plan_reuses_exact_paths_and_appends_new_paths(self):
+        plan = build_external_file_id_remap_plan(
+            ["archive:/CAB-base", "archive:/CAB-shared"],
+            ["archive:/CAB-shared", "archive:/CAB-overlay"],
+        )
+        self.assertTrue(plan["ready"])
+        self.assertEqual(plan["file_id_remap"], {"1": 2, "2": 3})
+        self.assertEqual(
+            plan["merged_externals"],
+            ["archive:/CAB-base", "archive:/CAB-shared", "archive:/CAB-overlay"],
+        )
+        self.assertEqual(plan["appended_count"], 1)
+
+    def test_external_file_id_plan_rejects_ambiguous_duplicate_paths(self):
+        plan = build_external_file_id_remap_plan(
+            ["archive:/CAB-dup", "archive:/CAB-dup"],
+            ["archive:/CAB-dup"],
+        )
+        self.assertFalse(plan["ready"])
+        self.assertEqual(plan["file_id_remap"], {})
+        self.assertIn("ambiguous", plan["reason"])
+
+    def test_external_file_id_plan_rejects_empty_paths(self):
+        plan = build_external_file_id_remap_plan(["archive:/CAB-base"], [""])
+        self.assertFalse(plan["ready"])
+        self.assertEqual(plan["merged_externals"], [])
 
     def test_path_id_plan_blocks_type_conflicts_and_unknown_payloads(self):
         plan = build_path_id_remap_plan(
