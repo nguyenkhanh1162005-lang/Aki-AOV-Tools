@@ -9,6 +9,7 @@ from app.assetbundle_inspector import (
     build_pptr_remap_plan,
     build_assetbundle_metadata_remap_plan,
     build_assetbundle_metadata_merge_plan,
+    build_streamed_resource_merge_plan,
     compare_assetbundle_overlays,
     inspect_assetbundle,
     verify_assetbundle_roundtrip,
@@ -64,6 +65,28 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertEqual(plan["merged_externals"], [])
 
 
+
+
+    def test_streamed_resource_plan_offsets_overlay_ranges_for_shared_sidecar(self):
+        plan = build_streamed_resource_merge_plan(
+            {"shared.resS": 100},
+            {"shared.resS": 50},
+            [{"path": "shared.resS", "offset": 10, "size": 20}],
+            [{"path": "shared.resS", "offset": 5, "size": 10}],
+        )
+        self.assertTrue(plan["ready"])
+        self.assertEqual(plan["merged_resource_lengths"]["shared.resS"], 150)
+        self.assertEqual(plan["overlay_streams"][0]["offset"], 105)
+
+    def test_streamed_resource_plan_rejects_out_of_bounds_and_traversal(self):
+        invalid_range = build_streamed_resource_merge_plan(
+            {"base.resS": 10}, {}, [{"path": "base.resS", "offset": 9, "size": 2}], []
+        )
+        self.assertFalse(invalid_range["ready"])
+        invalid_path = build_streamed_resource_merge_plan(
+            {"../escape.resS": 10}, {}, [], []
+        )
+        self.assertFalse(invalid_path["ready"])
 
     def test_assetbundle_metadata_merge_offsets_overlay_preload_ranges(self):
         base = {
