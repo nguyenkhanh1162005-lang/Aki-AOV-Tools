@@ -251,6 +251,19 @@ def inspect_archives(paths: list[str]) -> str:
                         f"  • PPtr {reference['from_file']}:{reference['from_path_id']} "
                         f"→ {reference['target_file']}:{reference['path_id']}"
                     )
+                integrity = result["reference_integrity"]
+                lines.append(
+                    f"  • PPtr nội bộ hợp lệ: {integrity['local_resolved']} | "
+                    f"thiếu Path ID nội bộ: {len(integrity['local_missing'])}"
+                )
+                lines.append(
+                    f"  • PPtr CAB đã tìm thấy: {integrity['external_resolved']} | "
+                    f"phụ thuộc CAB ngoài gói: {len(integrity['external_dependencies'])}"
+                )
+                if integrity["invalid_external_indices"]:
+                    lines.append(
+                        f"  • FileID ngoài phạm vi: {len(integrity['invalid_external_indices'])}"
+                    )
                 if result["object_type_counts"]:
                     types = ", ".join(
                         f"{key}={value}"
