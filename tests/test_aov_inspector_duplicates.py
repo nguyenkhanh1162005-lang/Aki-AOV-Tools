@@ -33,6 +33,13 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
                 "reference_scan_complete": True,
                 "reference_scan_errors": [],
                 "object_references": [],
+                "reference_integrity": {
+                    "local_resolved": 0,
+                    "local_missing": [],
+                    "external_resolved": 0,
+                    "external_dependencies": [],
+                    "invalid_external_indices": [],
+                },
                 "object_type_counts": {"Texture2D": 5, "Mesh": 4},
                 "external_paths": ["archive:/CAB-other.resS"],
             }
@@ -68,6 +75,13 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
                 "reference_scan_complete": True,
                 "reference_scan_errors": [],
                 "object_references": [],
+                "reference_integrity": {
+                    "local_resolved": 0,
+                    "local_missing": [],
+                    "external_resolved": 0,
+                    "external_dependencies": [],
+                    "invalid_external_indices": [],
+                },
                 "object_type_counts": {"GameObject": 2},
                 "external_paths": [],
             }), patch("app.aov_inspector.compare_assetbundle_overlays", return_value=comparison):
