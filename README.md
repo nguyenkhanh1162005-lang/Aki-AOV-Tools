@@ -20,7 +20,7 @@ Engine thực hiện:
 - Ghép IFix của `Thanos/HeroSkin_2.bytes` vào `HeroSkin_1.bytes`, remap chỉ số type/method/field/string và kiểm tra lại patch.
 - Ghép các bảng MSES `BattleBank.bytes`, `LobbyBank.bytes`, `skillcombine.bytes` và `ResSkinSeniorLabelCfg.bytes` theo khóa dòng; giữ schema nền mới hơn và chỉ thay/thêm các dòng Vấn Tâm Kiếm cần thiết. Riêng checksum MSES nền của `ResSkinSeniorLabelCfg` đang cũ, engine chỉ sửa lại sau khi xác minh đủ 53 dòng và cấu trúc bảng.
 - Ghép track CommonActions dành cho skin ID 59500/59501.
-- Cập nhật ResourcePackerInfoSet cho 10 AssetBundle Vấn Tâm Kiếm, giữ ResourceVerificationInfoSet của bản nền khi hai danh sách kiểm tra khớp.
+- Cập nhật ResourcePackerInfoSet cho 10 AssetBundle Vấn Tâm Kiếm; cập nhật CrcXor trong ResourceVerificationInfoSet cho các file VTK thực sự được đưa vào kết quả và giữ giá trị 1.64.1.12 cho những file chỉ khác do lệch phiên bản.
 - Thêm AssetBundle và soundbank iOS của Vấn Tâm Kiếm; giữ `KernelLua.pkg.bytes` và `StableSystems_3.pkg.bytes` của bản nền 1.64.1.12 để tránh hạ phiên bản hệ thống dùng chung.
 
 Bộ ghép từ chối nếu phiên bản, số lượng AssetBundle, bảng chỉ mục hoặc dữ liệu dùng chung không khớp với cấu hình được hỗ trợ. Đây không phải bộ giải mã/hợp nhất tổng quát cho mọi bản mod Liên Quân.
