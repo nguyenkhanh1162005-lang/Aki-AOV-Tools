@@ -9,6 +9,9 @@ from typing import Any
 MAX_ASSETBUNDLE_BYTES = 64 * 1024 * 1024
 MAX_REPORTED_OBJECT_TYPES = 32
 MAX_REPORTED_CONTAINERS = 100
+MAX_REFERENCE_SCAN_OBJECTS = 10_000
+MAX_REFERENCE_SCAN_NODES = 500_000
+MAX_REPORTED_REFERENCES = 200
 
 
 class AssetBundleInspectError(ValueError):
@@ -55,6 +58,10 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
 
     object_type_counts: Counter[str] = Counter()
     external_references: list[dict[str, str]] = []
+    object_references: list[dict[str, Any]] = []
+    reference_scan_errors: list[str] = []
+    reference_scan_nodes = 0
+    reference_scan_complete = True
     serialized_summaries: list[dict[str, Any]] = []
     total_objects = 0
 
@@ -70,6 +77,53 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
             object_type_counts[object_type] += 1
 
         externals = getattr(asset_file, "externals", []) or []
+        external_names = [ _safe_text(getattr(external, "name", getattr(external, "path", ""))) for external in externals ]
+
+        # Parse bounded typetrees to collect PPtr-shaped references without resolving
+        # or changing any object. A truncated scan is explicitly marked incomplete.
+        for obj in list(objects.values())[:MAX_REFERENCE_SCAN_OBJECTS]:
+            try:
+                tree = obj.read_typetree()
+            except Exception as exc:
+                reference_scan_complete = False
+                if len(reference_scan_errors) < 20:
+                    reference_scan_errors.append(
+                        f"{file_name}:{getattr(obj, 'path_id', '?')}:{type(exc).__name__}"
+                    )
+                continue
+            stack = [tree]
+            while stack:
+                node = stack.pop()
+                reference_scan_nodes += 1
+                if reference_scan_nodes > MAX_REFERENCE_SCAN_NODES:
+                    reference_scan_complete = False
+                    stack.clear()
+                    break
+                if isinstance(node, dict):
+                    if "m_FileID" in node and "m_PathID" in node:
+                        try:
+                            file_id = int(node["m_FileID"])
+                            path_id = int(node["m_PathID"])
+                            target = "local" if file_id == 0 else (
+                                external_names[file_id - 1]
+                                if 0 < file_id <= len(external_names)
+                                else "invalid-external-index"
+                            )
+                            object_references.append({
+                                "from_file": file_name,
+                                "from_path_id": _safe_text(getattr(obj, "path_id", "")),
+                                "file_id": file_id,
+                                "path_id": path_id,
+                                "target_file": target,
+                            })
+                        except (TypeError, ValueError, OverflowError):
+                            reference_scan_complete = False
+                    else:
+                        stack.extend(node.values())
+                elif isinstance(node, (list, tuple)):
+                    stack.extend(node)
+        if len(objects) > MAX_REFERENCE_SCAN_OBJECTS:
+            reference_scan_complete = False
         for external in externals:
             external_path = _safe_text(getattr(external, "path", ""))
             if external_path:
@@ -106,6 +160,11 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
         "object_type_counts": dict(object_type_counts.most_common(MAX_REPORTED_OBJECT_TYPES)),
         "external_references": external_references[:MAX_REPORTED_CONTAINERS],
         "external_reference_count": len(external_references),
+        "object_references": object_references[:MAX_REPORTED_REFERENCES],
+        "object_reference_count": len(object_references),
+        "reference_scan_complete": reference_scan_complete,
+        "reference_scan_nodes": min(reference_scan_nodes, MAX_REFERENCE_SCAN_NODES),
+        "reference_scan_errors": reference_scan_errors,
         "container_entries": container_items,
         "container_entry_count": len(container),
         "container_inventory_complete": len(container) <= MAX_REPORTED_CONTAINERS,
