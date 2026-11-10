@@ -132,7 +132,7 @@ class AssetBundleInspectorTests(unittest.TestCase):
         )
         fake_unity = SimpleNamespace(load=lambda data: env)
         with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
-            report = inspect_assetbundle(b"UnityFS\\x00fixture")
+            report = inspect_assetbundle(b"UnityFS\x00fixture")
 
         self.assertEqual(report["assetbundle_metadata_count"], 1)
         self.assertTrue(report["assetbundle_metadata_complete"])
@@ -171,8 +171,8 @@ class AssetBundleInspectorTests(unittest.TestCase):
         fake_unity = SimpleNamespace(load=lambda data: next(envs))
         with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
             report = compare_assetbundle_overlays(
-                b"UnityFS\\x00base",
-                b"UnityFS\\x00overlay",
+                b"UnityFS\x00base",
+                b"UnityFS\x00overlay",
             )
 
         overlap = report["object_id_overlaps"][0]
