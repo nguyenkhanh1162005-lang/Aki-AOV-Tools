@@ -85,6 +85,43 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertTrue(report["structural_checks_pass"])
         self.assertFalse(report["merge_safe"])
 
+    def test_reports_changed_object_payload_for_shared_path_id(self):
+        def make_env(payload):
+            obj = SimpleNamespace(
+                type=SimpleNamespace(name="Texture2D"),
+                path_id=42,
+                byte_size=len(payload),
+                get_raw_data=lambda: payload,
+            )
+            serialized = SimpleNamespace(
+                name="CAB-shared",
+                unity_version="2022.3.0f1",
+                target_platform=SimpleNamespace(name="iOS"),
+                objects={42: obj},
+                externals=[],
+            )
+            return SimpleNamespace(
+                assets=[serialized],
+                container={},
+                files={"bundle": object()},
+            )
+
+        envs = iter([make_env(b"base-texture"), make_env(b"mod-texture")])
+        fake_unity = SimpleNamespace(load=lambda data: next(envs))
+        with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
+            report = compare_assetbundle_overlays(
+                b"UnityFS\\x00base",
+                b"UnityFS\\x00overlay",
+            )
+
+        overlap = report["object_id_overlaps"][0]
+        self.assertEqual(overlap["shared_path_id_count"], 1)
+        self.assertEqual(overlap["payload_identical_count"], 0)
+        self.assertEqual(overlap["payload_changed_count"], 1)
+        self.assertEqual(overlap["payload_unknown_count"], 0)
+        self.assertEqual(overlap["payload_changed_path_ids"], [42])
+        self.assertFalse(report["merge_safe"])
+
     def test_marks_duplicate_cab_basenames_as_ambiguous(self):
         source_obj = SimpleNamespace(
             type=SimpleNamespace(name="GameObject"),
