@@ -73,8 +73,6 @@ def _archive_profile(path: str) -> dict[str, Any]:
                 )
             names = []
             for info in entries:
-                if info.is_dir():
-                    continue
                 normalized = info.filename.replace("\\", "/")
                 pure = PurePosixPath(normalized)
                 mode = (info.external_attr >> 16) & 0xFFFF
@@ -86,6 +84,8 @@ def _archive_profile(path: str) -> dict[str, Any]:
                     or stat.S_ISLNK(mode)
                 ):
                     raise ModPipelineError(f"Đường dẫn ZIP không an toàn: {info.filename}")
+                if info.is_dir():
+                    continue
                 if info.flag_bits & 1:
                     raise ModPipelineError(f"Không hỗ trợ ZIP mã hóa mật khẩu: {info.filename}")
                 if info.file_size > MAX_PROFILE_ENTRY:
@@ -136,7 +136,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
 
     return {
         "name": Path(path).name,
-        "entries": len(names),
+        "entries": len(entries),
         "uncompressed_bytes": total_uncompressed,
         "looks_like_aov": looks_like_aov,
         "source_role": source_role,
