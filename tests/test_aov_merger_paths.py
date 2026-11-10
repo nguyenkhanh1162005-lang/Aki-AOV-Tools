@@ -30,23 +30,24 @@ class AOVArchivePathTests(unittest.TestCase):
             _normalise_vtk_path("C:/outside/file.bytes")
 
     def test_duplicate_payloads_are_compared_by_sha256_not_only_crc_and_size(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            first_path = Path(tmp) / "first.zip"
-            second_path = Path(tmp) / "second.zip"
-            with zipfile.ZipFile(first_path, "w") as archive:
-                archive.writestr("same.bytes", b"AAAA")
-            with zipfile.ZipFile(second_path, "w") as archive:
-                archive.writestr("same.bytes", b"BBBB")
-            with zipfile.ZipFile(first_path) as first, zipfile.ZipFile(second_path) as second:
-                first_info = first.getinfo("same.bytes")
-                second_info = second.getinfo("same.bytes")
-                second_info.CRC = first_info.CRC
-                self.assertEqual(first_info.file_size, second_info.file_size)
-                self.assertEqual(first_info.CRC, second_info.CRC)
-                self.assertNotEqual(
-                    _zip_entry_sha256(first, first_info),
-                    _zip_entry_sha256(second, second_info),
-                )
+        import io
+        from types import SimpleNamespace
+
+        class FakeArchive:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def open(self, info, mode):
+                return io.BytesIO(self.payload)
+
+        first_info = SimpleNamespace(filename="same.bytes", CRC=1234, file_size=4)
+        second_info = SimpleNamespace(filename="same.bytes", CRC=1234, file_size=4)
+        self.assertEqual(first_info.CRC, second_info.CRC)
+        self.assertEqual(first_info.file_size, second_info.file_size)
+        self.assertNotEqual(
+            _zip_entry_sha256(FakeArchive(b"AAAA"), first_info),
+            _zip_entry_sha256(FakeArchive(b"BBBB"), second_info),
+        )
 
     def test_rejects_unsafe_archive_entry(self):
         with tempfile.TemporaryDirectory() as tmp:
