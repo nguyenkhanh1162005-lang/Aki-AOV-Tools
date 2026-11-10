@@ -62,6 +62,23 @@ docker compose -f docker-compose.local-bot-api.yml up -d --build
 
 Đọc [hướng dẫn triển khai Local Bot API](docs/telegram-local-api.md) trước khi chuyển bot từ máy chủ Telegram mặc định. Phải dừng worker cũ và gọi `logOut` đúng quy trình; không chạy hai polling worker cùng một bot. Không đưa file `.env` lên GitHub.
 
+
+## Chạy Telegram theo phiên, không cần 24/7
+
+Nếu không muốn để bot chạy liên tục, có thể bật Local Bot API và bot chỉ trong lúc chuẩn bị gửi mod, xử lý và nhận ZIP kết quả:
+
+```sh
+sh scripts/start-aki-session.sh
+```
+
+Sau khi bot gửi ZIP thành công và không cần thử lại:
+
+```sh
+sh scripts/stop-aki-session.sh
+```
+
+Cách này cần máy chủ Linux có Docker và vẫn phải bật dịch vụ trước khi gửi file. Khi đã tắt hoàn toàn, bot không thể nhận tin nhắn hoặc tự khởi động lại. Hướng dẫn chi tiết: [Chạy Telegram theo phiên](docs/on-demand-telegram-session.md).
+
 ## Nhập ZIP từ Google Drive
 - Dán link ZIP nền và link Vấn Tâm Kiếm, mỗi link một dòng. Nếu VTK được chia thành nhiều phần, dán tất cả các link phần đó.
 - File phải bật quyền “Bất kỳ ai có đường liên kết”.
