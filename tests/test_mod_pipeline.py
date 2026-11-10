@@ -3,7 +3,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from app.mod_pipeline import ModPipelineError, merge_mod_archives
+from app.mod_pipeline import ModPipelineError, _archive_profile, merge_mod_archives
 
 
 class ModPipelineTests(unittest.TestCase):
@@ -23,30 +23,21 @@ class ModPipelineTests(unittest.TestCase):
             result = merge_mod_archives([first, second], str(output))
             self.assertEqual(result["adapter"], "generic_zip")
             self.assertTrue(result["structurally_validated"])
+            self.assertFalse(result["official_game_package_used"])
             with zipfile.ZipFile(output) as archive:
                 self.assertEqual(set(archive.namelist()), {"readme.txt", "extra.txt"})
                 self.assertIsNone(archive.testzip())
 
-    def test_identical_duplicate_is_safe(self):
+    def test_mod_container_is_classified_as_user_mod_not_game_base(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
-            first = self._zip(folder, "one.zip", {"same.txt": b"same"})
-            second = self._zip(folder, "two.zip", {"same.txt": b"same"})
-            output = folder / "merged.zip"
-            result = merge_mod_archives([first, second], str(output))
-            self.assertEqual(result["adapter"], "generic_zip")
-            with zipfile.ZipFile(output) as archive:
-                self.assertEqual(archive.namelist(), ["same.txt"])
-
-    def test_conflicting_duplicate_preserves_no_output(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp)
-            first = self._zip(folder, "one.zip", {"same.txt": b"one"})
-            second = self._zip(folder, "two.zip", {"same.txt": b"two"})
-            output = folder / "merged.zip"
-            with self.assertRaises(ModPipelineError):
-                merge_mod_archives([first, second], str(output))
-            self.assertFalse(output.exists())
+            source = self._zip(folder, "10-skin-mod.zip", {
+                "Resources.zip": b"nested mod resources",
+                "DanhSachSkin.txt": b"skin mod list",
+            })
+            profile = _archive_profile(source)
+            self.assertEqual(profile["source_role"], "aov_skin_mod_container_candidate")
+            self.assertTrue(profile["has_mod_skin_container"])
 
     def test_unknown_aov_resource_pack_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -58,6 +49,27 @@ class ModPipelineTests(unittest.TestCase):
             with self.assertRaisesRegex(ModPipelineError, "chưa có adapter"):
                 merge_mod_archives([source], str(output))
             self.assertFalse(output.exists())
+
+    def test_conflicting_duplicate_preserves_no_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            first = self._zip(folder, "one.zip", {"same.txt": b"one"})
+            second = self._zip(folder, "two.zip", {"same.txt": b"two"})
+            output = folder / "merged.zip"
+            with self.assertRaises(ModPipelineError):
+                merge_mod_archives([first, second], str(output))
+            self.assertFalse(output.exists())
+
+    def test_identical_duplicate_is_safe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            first = self._zip(folder, "one.zip", {"same.txt": b"same"})
+            second = self._zip(folder, "two.zip", {"same.txt": b"same"})
+            output = folder / "merged.zip"
+            result = merge_mod_archives([first, second], str(output))
+            self.assertEqual(result["adapter"], "generic_zip")
+            with zipfile.ZipFile(output) as archive:
+                self.assertEqual(archive.namelist(), ["same.txt"])
 
     def test_traversal_is_rejected_before_merge(self):
         with tempfile.TemporaryDirectory() as tmp:
