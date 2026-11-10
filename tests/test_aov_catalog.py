@@ -56,7 +56,8 @@ class AOVCatalogTests(unittest.TestCase):
         base = {
             "m_Name": "ResourceVerificationInfoSetXML",
             "AllZipVerificationInfo": [
-                {"PathInIFS": "a.zip", "CrcXor": 1}
+                {"PathInIFS": "a.zip", "CrcXor": 1},
+                {"PathInIFS": "c.zip", "CrcXor": 5},
             ],
             "AllDatabinVerificationInfo": [
                 {"PathInIFS": "a.bytes", "CrcXor": 2}
@@ -67,6 +68,7 @@ class AOVCatalogTests(unittest.TestCase):
             "AllZipVerificationInfo": [
                 {"PathInIFS": "a.zip", "CrcXor": 99},
                 {"PathInIFS": "b.zip", "CrcXor": 3},
+                {"PathInIFS": "c.zip", "CrcXor": 55},
             ],
             "AllDatabinVerificationInfo": [
                 {"PathInIFS": "b.bytes", "CrcXor": 4}
