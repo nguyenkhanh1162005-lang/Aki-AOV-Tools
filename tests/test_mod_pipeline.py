@@ -4,7 +4,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from app.mod_pipeline import ModPipelineError, _archive_profile, _select_adapter, merge_mod_archives
+from app.mod_pipeline import ModPipelineError, _archive_profile, _preflight_inputs, _select_adapter, merge_mod_archives
 
 
 class ModPipelineTests(unittest.TestCase):
@@ -14,6 +14,20 @@ class ModPipelineTests(unittest.TestCase):
             for entry, payload in entries.items():
                 archive.writestr(entry, payload)
         return str(path)
+
+    def test_rejects_more_than_ten_inputs_before_opening_files(self):
+        with self.assertRaisesRegex(ModPipelineError, "tối đa 10"):
+            _preflight_inputs([f"missing-{index}.zip" for index in range(11)])
+
+    def test_rejects_total_input_over_500_mib(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            first = folder / "large-a.zip"
+            second = folder / "large-b.zip"
+            first.write_bytes(b"x" * (250 * 1024 * 1024))
+            second.write_bytes(b"x" * (250 * 1024 * 1024 + 1))
+            with self.assertRaisesRegex(ModPipelineError, "500 MB"):
+                _preflight_inputs([str(first), str(second)])
 
     def test_generic_archives_merge_new_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
