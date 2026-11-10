@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 from telegram import FSInputFile
 
-from app.large_merger import merge_zip_files, MergeError
+from app.mod_pipeline import merge_mod_archives, ModPipelineError
 from app.aov_inspector import inspect_archives, InspectError
 from app.aov_merger import merge_aov_archives, AOVMergeError
 
@@ -216,23 +216,25 @@ async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Đang kiểm tra và ghép ZIP. Đừng gửi /clear trong lúc xử lý nhé."
     )
     try:
-        await asyncio.to_thread(
-            merge_zip_files,
+        report = await asyncio.to_thread(
+            merge_mod_archives,
             [path for _, path in files],
             str(output_path),
         )
         await status_message.edit_text(
-            f"Đã ghép xong ({output_path.stat().st_size / MIB:.1f} MB). Đang gửi file..."
+            f"Đã ghép bằng adapter {report['adapter']} "
+            f"({output_path.stat().st_size / MIB:.1f} MB). "
+            "Đã kiểm tra CRC ZIP, chưa xác nhận tương thích trong game. Đang gửi file..."
         )
         await update.effective_message.reply_document(
-            document=FSInputFile(str(output_path), filename="aki-merged.zip"),
+            document=FSInputFile(str(output_path), filename="aki-mod-merged.zip"),
             read_timeout=1800,
             write_timeout=1800,
             connect_timeout=60,
             pool_timeout=60,
         )
         _cleanup(context)
-    except MergeError as exc:
+    except ModPipelineError as exc:
         await status_message.edit_text(f"Không ghép được: {exc}")
     except Exception as exc:
         await status_message.edit_text(
