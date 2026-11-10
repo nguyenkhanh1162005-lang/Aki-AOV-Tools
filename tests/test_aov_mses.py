@@ -52,6 +52,23 @@ class MSESTests(unittest.TestCase):
         self.assertEqual(parse_mses(output).rows[0][4:], b"overlay")
         self.assertEqual(report["replaced_keys"], ["0x00000001"])
 
+    def test_rejects_override_key_missing_from_one_table(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(4, [struct.pack("<I", 1) + b"overlay"])
+        with self.assertRaisesRegex(MSESError, "không tồn tại ở cả base và overlay"):
+            merge_mses_rows(base, overlay, override_keys={2})
+
+    def test_rejects_override_when_schemas_differ(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(3, [struct.pack("<I", 1) + b"base"])
+        with self.assertRaisesRegex(MSESError, "schema giữa base và overlay khác nhau"):
+            merge_mses_rows(
+                base,
+                overlay,
+                override_keys={1},
+                allow_schema_mismatch=True,
+            )
+
     def test_rejects_bad_checksum(self):
         original = bytearray(make_table(4, [struct.pack("<I", 1) + b"one"]))
         original[-1] ^= 1
