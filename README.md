@@ -95,3 +95,5 @@ Với mục AssetBundle UnityFS có kích thước không quá 64 MiB, manifest 
 Compatibility planner giữ riêng các trường `unity_dependencies`, `unity_external_paths` và `dependency_inventory_complete` trong báo cáo cho từng AssetBundle. Các tham chiếu Unity này không bị ép thành đường dẫn ZIP thông thường để tránh kết luận sai về dependency còn thiếu.
 
 Trong báo cáo tương thích, `SAFE_MERGE` chỉ dành cho tệp văn bản tài liệu không thuộc tài nguyên AoV (ví dụ `.txt`, `.md`, `.rst`, `.license`) và chỉ có nghĩa là có thể thêm đường dẫn ở cấp ZIP. Ảnh, âm thanh, JSON cấu hình, bundle và các tệp có thể được game sử dụng vẫn cần quy tắc riêng; không được hiểu `SAFE_MERGE` là bảo đảm chạy trong Liên Quân.
+
+Với ZIP dạng wrapper có chứa `Resources.zip`, manifest kiểm tra thêm đúng một tầng ZIP lồng nhau ở chế độ chỉ đọc. Báo cáo giữ `container_path` để phân biệt tệp trong ZIP ngoài và tài nguyên bên trong, đồng thời tính giới hạn số entry/dung lượng trên cả hai tầng. ZIP lồng sâu hơn không được tự động bung.
