@@ -23,7 +23,29 @@ with tempfile.TemporaryDirectory(prefix="aki-vtk-audit-") as temp:
             if info.is_dir():
                 continue
             record = {"name": info.filename, "bytes": info.file_size, "crc32": f"{info.CRC:08x}"}
-            if info.filename.lower().endswith(".zip"):
+            if info.filename.lower().endswith(".bytes"):
+                payload = outer.read(info)
+                record["header_hex"] = payload[:16].hex()
+                try:
+                    decoded, mode = decode_aov_resource(payload, info.filename)
+                    record["decode"] = {"ok": True, "mode": mode, "decoded_bytes": len(decoded), "decoded_prefix_hex": decoded[:24].hex()}
+                except Exception as exc:
+                    record["decode"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            if info.filename.lower().endswith(".assetbundle"):
+                try:
+                    import UnityPy
+                    env = UnityPy.load(outer.read(info))
+                    objects = []
+                    for obj in env.objects:
+                        try:
+                            data = obj.read()
+                            obj_name = getattr(data, "name", "") or getattr(data, "m_Name", "")
+                        except Exception:
+                            obj_name = ""
+                        objects.append({"type": obj.type.name, "path_id": obj.path_id, "name": str(obj_name)[:160]})
+                    record["unity_objects"] = objects
+                except Exception as exc:
+                    record["unity_parse"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
                 inner_path = Path(temp) / "vtk-inner.zip"
                 inner_path.write_bytes(outer.read(info))
                 with zipfile.ZipFile(inner_path) as inner:
