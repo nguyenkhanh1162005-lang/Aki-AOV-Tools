@@ -101,6 +101,31 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertEqual(refs[1]["file_id"], 1)
         self.assertEqual(refs[1]["path_id"], 3)
 
+
+    def test_cross_cab_plan_resolves_reference_to_base_only_cab(self):
+        base = {
+            "cab-a": {
+                "inventories_complete": True, "path_ids": [1], "types": {"1": "GameObject"},
+                "payload_hashes": {"1": "base-a"}, "externals": ["cab-c"], "references": [],
+            },
+            "cab-c": {
+                "inventories_complete": True, "path_ids": [9], "types": {"9": "Texture2D"},
+                "payload_hashes": {"9": "base-c"}, "externals": [], "references": [],
+            },
+        }
+        overlay = {
+            "cab-a": {
+                "inventories_complete": True, "path_ids": [2], "types": {"2": "GameObject"},
+                "payload_hashes": {"2": "overlay-a"}, "externals": ["cab-c"],
+                "references": [{"file_id": 1, "path_id": 9}],
+            },
+        }
+        plan = build_cross_cab_reference_merge_plan(base, overlay)
+        self.assertTrue(plan["ready"])
+        self.assertEqual(
+            plan["cabs"]["cab-a"]["pptr_plan"]["rewritten_references"][0]["path_id"], 9
+        )
+
     def test_cross_cab_plan_blocks_unknown_external_target(self):
         overlay = {
             "cab-a": {
