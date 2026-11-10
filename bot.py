@@ -17,6 +17,7 @@ from telegram import FSInputFile
 from app.large_merger import merge_zip_files, MergeError
 from app.aov_inspector import inspect_archives, InspectError
 from app.url_downloader import download_zip_from_url, DownloadError
+from app.access_control import is_allowed_user
 
 MIB = 1024 * 1024
 LOCAL_API = bool(
@@ -131,6 +132,13 @@ async def receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
+    user = update.effective_user
+    allowed_ids = os.environ.get("ALLOWED_USER_IDS", "")
+    if not user or not is_allowed_user(user.id, allowed_ids):
+        await message.reply_text(
+            "Chức năng tải ZIP qua liên kết hiện chưa được bật cho tài khoản này."
+        )
+        return
     url = (message.text or "").strip()
     if not url.startswith("https://"):
         await message.reply_text(
