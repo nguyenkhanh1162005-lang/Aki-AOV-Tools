@@ -237,6 +237,20 @@ def inspect_archives(paths: list[str]) -> str:
                 lines.append(
                     f"  • External references: {result['external_reference_count']}"
                 )
+                lines.append(
+                    f"  • Object references: {result['object_reference_count']} | "
+                    f"Quét đầy đủ: {result['reference_scan_complete']}"
+                )
+                if result["reference_scan_errors"]:
+                    lines.append(
+                        "  • Object không đọc được: "
+                        + ", ".join(result["reference_scan_errors"][:5])
+                    )
+                for reference in result["object_references"][:8]:
+                    lines.append(
+                        f"  • PPtr {reference['from_file']}:{reference['from_path_id']} "
+                        f"→ {reference['target_file']}:{reference['path_id']}"
+                    )
                 if result["object_type_counts"]:
                     types = ", ".join(
                         f"{key}={value}"
