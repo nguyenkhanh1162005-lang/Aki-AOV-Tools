@@ -48,7 +48,7 @@ class InspectError(ValueError):
 
 
 def _safe_name(name: str) -> str:
-    normalized = name.replace("\\\\", "/")
+    normalized = name.replace("\\", "/")
     path = PurePosixPath(normalized)
     if path.is_absolute() or ".." in path.parts or not path.parts or "\\x00" in normalized:
         raise InspectError("ZIP chứa đường dẫn không an toàn.")
