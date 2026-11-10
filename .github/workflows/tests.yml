@@ -22,3 +22,9 @@ jobs:
         with:
           name: aov-zstd-dict
           path: aov-zstd-dict.bin
+      - name: Prepare temporary UnityPy wheels for local metadata inspection
+        run: python -m pip download UnityPy -d /tmp/unitypy-wheels
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unitypy-wheels
+          path: /tmp/unitypy-wheels/
