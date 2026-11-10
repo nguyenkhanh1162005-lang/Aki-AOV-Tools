@@ -51,7 +51,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Aki-AOV Bot đã sẵn sàng.\n"
         f"Chế độ nhận file: {mode}.\n\n"
-        "Gửi ZIP nền 10 skin và ZIP Vấn Tâm Kiếm (có thể gồm nhiều phần), sau đó dùng /aovmerge để ghép mod.\n"
+        "Gửi gói MOD 10 skin và các ZIP phần của MOD Vấn Tâm Kiếm, sau đó dùng /aovmerge để ghép hai bộ mod.\n"
         "/merge ghép ZIP thông thường\n"
         "/status xem giới hạn hiện tại\n"
         "/inspect kiểm tra cấu trúc ZIP đã gửi\n"
@@ -156,7 +156,7 @@ async def aovmerge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     files = context.user_data.get("zips", [])
     if len(files) < 2:
         await update.effective_message.reply_text(
-            "Cần ZIP nền 10 skin và ít nhất một ZIP Vấn Tâm Kiếm trước khi dùng /aovmerge."
+            "Cần một gói MOD 10 skin và ít nhất một phần ZIP của MOD Vấn Tâm Kiếm trước khi dùng /aovmerge."
         )
         return
 
@@ -173,7 +173,7 @@ async def aovmerge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await status_message.edit_text(
             "Đã ghép và kiểm tra cấu trúc nội bộ:\n"
-            f"Base {report['base_version']} + VTK {report['vtk_version']}\n"
+            f"Mod 10 skin {report['base_version']} + mod Vấn Tâm Kiếm {report['vtk_version']}\n"
             f"IFix: {report['ifix_fixes']} FixInfo / {report['ifix_methods']} method\n"
             f"CommonActions: {report['common_actions_files']} file XML, "
             f"{report['common_actions_tracks']} track\n"
