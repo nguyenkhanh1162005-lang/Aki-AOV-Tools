@@ -57,6 +57,7 @@ def merge_action_xml(
     replaced = []
     appended = []
     already_present = []
+    merged_into_existing = []
     for source_track in overlay_tracks:
         if not _is_595_track(source_track):
             continue
@@ -78,6 +79,34 @@ def merge_action_xml(
             index[key] = [replacement if item is target else item for item in candidates]
             replaced.append(name)
         elif any(_is_595_track(item) for item in candidates):
+            target = next(item for item in candidates if _is_595_track(item))
+            existing_skin_nodes = {
+                node.attrib.get("id"): node
+                for node in target.iter()
+                if node.tag == "SkinOrAvatarList"
+            }
+            for source_node in source_track:
+                if source_node.tag == "SkinOrAvatarList":
+                    skin_id = source_node.attrib.get("id")
+                    current = existing_skin_nodes.get(skin_id)
+                    cloned = ET.fromstring(ET.tostring(source_node, encoding="utf-8"))
+                    if current is None:
+                        target.append(cloned)
+                        existing_skin_nodes[skin_id] = cloned
+                    elif ET.tostring(current, encoding="utf-8") != ET.tostring(cloned, encoding="utf-8"):
+                        parent = next(
+                            (node for node in target.iter() if current in list(node)),
+                            target,
+                        )
+                        position = list(parent).index(current)
+                        parent.remove(current)
+                        parent.insert(position, cloned)
+                        existing_skin_nodes[skin_id] = cloned
+                else:
+                    encoded = ET.tostring(source_node, encoding="utf-8")
+                    if not any(ET.tostring(node, encoding="utf-8") == encoded for node in target):
+                        target.append(ET.fromstring(encoded))
+            merged_into_existing.append(name)
             already_present.append(name)
         else:
             addition = ET.fromstring(ET.tostring(source_track, encoding="utf-8"))
@@ -97,6 +126,30 @@ def merge_action_xml(
             f"{resource_name}: overlay không có track tham chiếu SkinOrAvatarList 59500/59501."
         )
 
+    # Every VTK-gated skin ID in the overlay must remain represented after merging.
+    output_by_key: dict[tuple[str, str], set[str]] = {}
+    for track in base_action.iter("Track"):
+        key = (_normalized_track_name(track), track.attrib.get("eventType", ""))
+        output_by_key.setdefault(key, set()).update(
+            node.attrib.get("id")
+            for node in track.iter("SkinOrAvatarList")
+            if node.attrib.get("id") in SPECIAL_IDS
+        )
+    for source_track in overlay_action.iter("Track"):
+        if not _is_595_track(source_track):
+            continue
+        key = (_normalized_track_name(source_track), source_track.attrib.get("eventType", ""))
+        source_ids = {
+            node.attrib.get("id")
+            for node in source_track.iter("SkinOrAvatarList")
+            if node.attrib.get("id") in SPECIAL_IDS
+        }
+        if not source_ids.issubset(output_by_key.get(key, set())):
+            raise CommonActionsMergeError(
+                f"{resource_name}: thiếu skin IDs {sorted(source_ids - output_by_key.get(key, set()))} "
+                f"trong track {key[0]}."
+            )
+
     output_xml = ET.tostring(base_root, encoding="utf-8", xml_declaration=True)
     try:
         output = encode_aov_resource(output_xml, resource_name, base_mode)
@@ -112,6 +165,7 @@ def merge_action_xml(
         "replaced_tracks": replaced,
         "appended_tracks": appended,
         "already_present_tracks": already_present,
+        "merged_into_existing_tracks": merged_into_existing,
         "verified": True,
     }
 
