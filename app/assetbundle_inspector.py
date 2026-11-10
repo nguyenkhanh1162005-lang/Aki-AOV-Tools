@@ -57,11 +57,9 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
     external_references: list[dict[str, str]] = []
     serialized_summaries: list[dict[str, Any]] = []
     total_objects = 0
-    seen_cabs: set[str] = set()
 
     for asset_file in serialized_files:
         file_name = _safe_text(getattr(asset_file, "name", ""))
-        seen_cabs.add(file_name)
         objects = getattr(asset_file, "objects", {}) or {}
         total_objects += len(objects)
         local_counts: Counter[str] = Counter()
@@ -110,9 +108,8 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
         "external_reference_count": len(external_references),
         "container_entries": container_items,
         "container_entry_count": len(container),
-        "unresolved_external_paths": sorted({
-            ref["to"] for ref in external_references
-            if Path(ref["to"]).name.lower() not in {Path(name).name.lower() for name in seen_cabs}
-        }),
+        # External references may point to resource files as well as CAB files.
+        # Do not label them unresolved until all bundle sidecar files are available.
+        "external_paths": sorted({ref["to"] for ref in external_references}),
         "read_only": True,
     }
