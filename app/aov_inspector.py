@@ -258,7 +258,8 @@ def inspect_archives(paths: list[str]) -> str:
                 )
                 lines.append(
                     f"  • PPtr CAB đã tìm thấy: {integrity['external_resolved']} | "
-                    f"phụ thuộc CAB ngoài gói: {len(integrity['external_dependencies'])}"
+                    f"phụ thuộc CAB ngoài gói: {len(integrity['external_dependencies'])} | "
+                    f"tên CAB mơ hồ: {len(integrity['external_ambiguous_targets'])}"
                 )
                 if integrity["invalid_external_indices"]:
                     lines.append(
