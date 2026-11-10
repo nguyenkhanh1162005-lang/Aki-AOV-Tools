@@ -125,7 +125,7 @@ def compress_aov_bytes(data: bytes, level: int = 17) -> bytes:
 def decode_aov_resource(data: bytes, resource_name: str) -> tuple[bytes, str]:
     """Decode AoV Zstandard, AES, or AES+Zstandard resource bytes."""
     if data[:3] == b"\x22\x4a\x67":
-        mode = "aes-zstd" if data[3] == 0xEF else "aes"
+        mode = "aes+zstd" if data[3] == 0xEF else "aes"
         return decrypt_aes_resource(data, resource_name), mode
     if data[:2] == b"\x22\x4a" and data.find(ZSTD_MAGIC) >= 0:
         return decompress_aov_bytes(data), "zstd"
@@ -135,7 +135,7 @@ def decode_aov_resource(data: bytes, resource_name: str) -> tuple[bytes, str]:
 def encode_aov_resource(data: bytes, resource_name: str, mode: str) -> bytes:
     if mode == "aes":
         return encrypt_aes_resource(data, resource_name)
-    if mode == "aes-zstd":
+    if mode in ("aes-zstd", "aes+zstd"):
         return encrypt_aes_zstd_resource(data, resource_name)
     if mode == "zstd":
         return compress_aov_bytes(data)
