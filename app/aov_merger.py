@@ -127,29 +127,20 @@ def _find_mono_behaviour(env: Any, name: str):
 
 
 def _merge_packer_metadata(base_data: bytes, vtk_data: bytes,
-                           verification_base: bytes, verification_vtk: bytes,
-                           asset_paths: set[str]) -> tuple[bytes, int, int]:
+                           asset_paths: set[str]) -> tuple[bytes, int, int, int]:
     UnityPy_AOV = _load_unitypy_aov()
     try:
         base_env = UnityPy_AOV.load(base_data)
         vtk_env = UnityPy_AOV.load(vtk_data)
-        verify_base_env = UnityPy_AOV.load(verification_base)
-        verify_vtk_env = UnityPy_AOV.load(verification_vtk)
         base_obj, base_tree = _find_mono_behaviour(base_env, "ResourcePackerInfoSetXML")
         _, vtk_tree = _find_mono_behaviour(vtk_env, "ResourcePackerInfoSetXML")
-        _, base_verify = _find_mono_behaviour(verify_base_env, "ResourceVerificationInfoSetXML")
-        _, vtk_verify = _find_mono_behaviour(verify_vtk_env, "ResourceVerificationInfoSetXML")
     except AOVMergeError:
         raise
     except Exception as exc:
-        raise AOVMergeError(f"Không đọc được AssetBundle metadata: {type(exc).__name__}: {exc}") from exc
+        raise AOVMergeError(f"Không đọc được ResourcePackerInfoSetXML: {type(exc).__name__}: {exc}") from exc
 
     if base_tree.get("Version") != BASE_VERSION or vtk_tree.get("Version") != VTK_VERSION:
         raise AOVMergeError("Phiên bản ResourcePackerInfoSetXML không đúng cặp 1.64.1.12/1.64.1.11.")
-    if base_verify.get("AllZipVerificationInfo") != vtk_verify.get("AllZipVerificationInfo"):
-        raise AOVMergeError("Danh sách ZipVerification giữa hai phiên bản không khớp.")
-    if base_verify.get("AllDatabinVerificationInfo") != vtk_verify.get("AllDatabinVerificationInfo"):
-        raise AOVMergeError("Danh sách DatabinVerification giữa hai phiên bản không khớp.")
 
     base_entries = base_tree["AllResourcePackInfo"]
     base_count = len(base_entries)
@@ -195,7 +186,58 @@ def _merge_packer_metadata(base_data: bytes, vtk_data: bytes,
         raise AOVMergeError("PackerInfo sau ghép có số entry không đúng.")
     if len(check_tree["AllParentIdexToChild"]) != base_map_count + 7:
         raise AOVMergeError("PackerInfo sau ghép có số parent-child link không đúng.")
-    return merged, replaced, len(new_paths)
+    return merged, replaced, len(new_paths), len(check_tree["AllResourcePackInfo"])
+
+
+def _merge_verification_metadata(base_data: bytes, vtk_data: bytes,
+                                 included_paths: set[str]) -> tuple[bytes, list[str], list[str]]:
+    UnityPy_AOV = _load_unitypy_aov()
+    try:
+        base_env = UnityPy_AOV.load(base_data)
+        vtk_env = UnityPy_AOV.load(vtk_data)
+        base_obj, base_tree = _find_mono_behaviour(base_env, "ResourceVerificationInfoSetXML")
+        _, vtk_tree = _find_mono_behaviour(vtk_env, "ResourceVerificationInfoSetXML")
+    except AOVMergeError:
+        raise
+    except Exception as exc:
+        raise AOVMergeError(f"Không đọc được ResourceVerificationInfoSetXML: {type(exc).__name__}: {exc}") from exc
+
+    if base_tree.get("Version") != BASE_VERSION or vtk_tree.get("Version") != VTK_VERSION:
+        raise AOVMergeError("Phiên bản ResourceVerificationInfoSetXML không đúng cặp 1.64.1.12/1.64.1.11.")
+
+    updated_paths: set[str] = set()
+    retained_version_drift: set[str] = set()
+    for list_name in ("AllZipVerificationInfo", "AllDatabinVerificationInfo"):
+        base_records = base_tree[list_name]
+        vtk_records = vtk_tree[list_name]
+        base_index = {record["PathInIFS"]: i for i, record in enumerate(base_records)}
+        vtk_index = {record["PathInIFS"]: record for record in vtk_records}
+        if set(base_index) != set(vtk_index):
+            raise AOVMergeError(f"Danh sách {list_name} giữa hai phiên bản có đường dẫn khác nhau.")
+        for path, index in base_index.items():
+            if base_records[index]["CrcXor"] == vtk_index[path]["CrcXor"]:
+                continue
+            if path in included_paths:
+                base_records[index] = copy.deepcopy(vtk_index[path])
+                updated_paths.add(path)
+            else:
+                # Keep 1.64.1.12 values for unrelated files not shipped in the VTK overlay.
+                retained_version_drift.add(path)
+
+    try:
+        base_obj.save_typetree(base_tree)
+        bundle = next(iter(base_env.files.values()))
+        merged = bundle.save("original")
+        check_env = UnityPy_AOV.load(merged)
+        _, check_tree = _find_mono_behaviour(check_env, "ResourceVerificationInfoSetXML")
+    except Exception as exc:
+        raise AOVMergeError(f"Không ghi lại được ResourceVerificationInfoSetXML: {type(exc).__name__}: {exc}") from exc
+    if check_tree.get("Version") != BASE_VERSION:
+        raise AOVMergeError("ResourceVerificationInfoSetXML bị đổi phiên bản nền ngoài ý muốn.")
+    for list_name in ("AllZipVerificationInfo", "AllDatabinVerificationInfo"):
+        if len(check_tree[list_name]) != len(base_tree[list_name]):
+            raise AOVMergeError(f"{list_name} bị thay đổi số lượng ngoài ý muốn.")
+    return merged, sorted(updated_paths), sorted(retained_version_drift)
 
 
 def _copy_stream(source, destination) -> None:
