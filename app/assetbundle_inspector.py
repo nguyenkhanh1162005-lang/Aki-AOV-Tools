@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import hashlib
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,9 @@ MAX_REFERENCE_SCAN_OBJECTS = 10_000
 MAX_REFERENCE_SCAN_NODES = 500_000
 MAX_REPORTED_REFERENCES = 200
 MAX_OBJECT_ID_INDEX_ENTRIES = 100_000
+MAX_OBJECT_HASH_ENTRIES = 2_000
+MAX_OBJECT_HASH_BYTES = 16 * 1024 * 1024
+MAX_SINGLE_OBJECT_HASH_BYTES = 2 * 1024 * 1024
 
 
 class AssetBundleInspectError(ValueError):
@@ -66,6 +70,8 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
     serialized_summaries: list[dict[str, Any]] = []
     total_objects = 0
     indexed_object_ids = 0
+    indexed_object_hashes = 0
+    hashed_object_bytes = 0
 
     for asset_file in serialized_files:
         file_name = _safe_text(getattr(asset_file, "name", ""))
@@ -142,11 +148,54 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
             for path_id, obj in indexed_objects
         }
         indexed_object_ids += len(object_ids)
+
+        # Hash a bounded amount of raw Object payload. get_raw_data() restores
+        # the reader cursor and does not modify the serialized file.
+        object_payload_hashes: dict[str, str] = {}
+        object_payload_hashes_complete = len(objects) == 0
+        if indexed_object_hashes < MAX_OBJECT_HASH_ENTRIES and hashed_object_bytes < MAX_OBJECT_HASH_BYTES:
+            object_payload_hashes_complete = True
+            for path_id, obj in objects.items():
+                if indexed_object_hashes >= MAX_OBJECT_HASH_ENTRIES:
+                    object_payload_hashes_complete = False
+                    break
+                declared_size = getattr(obj, "byte_size", None)
+                if not isinstance(declared_size, int) or declared_size < 0 or declared_size > MAX_SINGLE_OBJECT_HASH_BYTES:
+                    object_payload_hashes_complete = False
+                    continue
+                if hashed_object_bytes + declared_size > MAX_OBJECT_HASH_BYTES:
+                    object_payload_hashes_complete = False
+                    break
+                try:
+                    raw_reader = getattr(obj, "get_raw_data", None)
+                    if callable(raw_reader):
+                        raw_data = raw_reader()
+                    elif getattr(obj, "data", None) is not None:
+                        raw_data = bytes(obj.data)
+                    else:
+                        object_payload_hashes_complete = False
+                        continue
+                    raw_data = bytes(raw_data)
+                    if len(raw_data) != declared_size:
+                        object_payload_hashes_complete = False
+                        continue
+                    object_payload_hashes[str(path_id)] = hashlib.sha256(raw_data).hexdigest()
+                    indexed_object_hashes += 1
+                    hashed_object_bytes += len(raw_data)
+                except Exception:
+                    object_payload_hashes_complete = False
+        else:
+            object_payload_hashes_complete = False
+        if len(object_payload_hashes) != len(objects):
+            object_payload_hashes_complete = False
+
         serialized_summaries.append({
             "name": file_name,
             "object_path_ids": object_ids,
             "object_types_by_path_id": object_types_by_path_id,
             "object_id_inventory_complete": len(object_ids) == len(objects),
+            "object_payload_hashes": object_payload_hashes,
+            "object_payload_hashes_complete": object_payload_hashes_complete,
             "unity_version": _safe_text(getattr(asset_file, "unity_version", "")),
             "target_platform": _safe_text(getattr(getattr(asset_file, "target_platform", None), "name", "")),
             "object_count": len(objects),
@@ -307,6 +356,22 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
             if base_item["object_types_by_path_id"].get(str(path_id))
             != overlay_item["object_types_by_path_id"].get(str(path_id))
         )
+        payload_identical_ids = []
+        payload_changed_ids = []
+        payload_unknown_ids = []
+        if base_item["object_payload_hashes_complete"] and overlay_item["object_payload_hashes_complete"]:
+            for path_id in shared_ids:
+                base_hash = base_item["object_payload_hashes"].get(str(path_id))
+                overlay_hash = overlay_item["object_payload_hashes"].get(str(path_id))
+                if base_hash is None or overlay_hash is None:
+                    payload_unknown_ids.append(path_id)
+                elif base_hash == overlay_hash:
+                    payload_identical_ids.append(path_id)
+                else:
+                    payload_changed_ids.append(path_id)
+        else:
+            payload_unknown_ids = list(shared_ids)
+
         object_id_overlaps.append({
             "cab": basename,
             "shared_path_id_count": len(shared_ids),
@@ -314,6 +379,10 @@ def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[
             "overlay_only_path_id_count": len(overlay_ids - base_ids),
             "type_conflict_count": len(object_type_conflict_ids),
             "type_conflict_path_ids": object_type_conflict_ids[:MAX_REPORTED_REFERENCES],
+            "payload_identical_count": len(payload_identical_ids),
+            "payload_changed_count": len(payload_changed_ids),
+            "payload_unknown_count": len(payload_unknown_ids),
+            "payload_changed_path_ids": sorted(payload_changed_ids)[:MAX_REPORTED_REFERENCES],
         })
 
     object_id_types_match = (
