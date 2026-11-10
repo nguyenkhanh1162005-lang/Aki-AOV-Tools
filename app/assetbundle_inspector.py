@@ -305,6 +305,136 @@ def build_assetbundle_metadata_remap_plan(
 
 
 
+
+def build_assetbundle_metadata_merge_plan(
+    base_metadata: dict[str, Any],
+    overlay_metadata: dict[str, Any],
+    overlay_rewritten: dict[str, Any],
+) -> dict[str, Any]:
+    """Plan concatenation of two compatible AssetBundle metadata inventories.
+
+    Overlay pointers must already have passed build_assetbundle_metadata_remap_plan.
+    Conflicting Container keys or two MainAsset records are rejected conservatively.
+    """
+    for label, metadata in (("base", base_metadata), ("overlay", overlay_metadata)):
+        if not isinstance(metadata, dict) or not metadata.get("inspection_complete"):
+            return {"ready": False, "reason": f"{label} metadata inventory is incomplete."}
+        if not isinstance(metadata.get("preload_pointer_inventory"), list):
+            return {"ready": False, "reason": f"{label} preload inventory is unavailable."}
+        if not isinstance(metadata.get("container_record_inventory"), list):
+            return {"ready": False, "reason": f"{label} Container inventory is unavailable."}
+        if metadata.get("preload_table_count") != len(metadata["preload_pointer_inventory"]):
+            return {"ready": False, "reason": f"{label} preload inventory count mismatch."}
+
+    if not isinstance(overlay_rewritten, dict) or not overlay_rewritten.get("ready"):
+        return {"ready": False, "reason": "Overlay metadata pointers have not passed remap validation."}
+    rewritten = overlay_rewritten.get("rewritten")
+    if not isinstance(rewritten, dict):
+        return {"ready": False, "reason": "Overlay rewritten metadata is missing."}
+
+    base_name = base_metadata.get("assetbundle_name", "")
+    overlay_name = overlay_metadata.get("assetbundle_name", "")
+    if base_name and overlay_name and base_name != overlay_name:
+        return {"ready": False, "reason": "AssetBundle names differ; metadata ownership is ambiguous."}
+
+    base_preload = base_metadata["preload_pointer_inventory"]
+    overlay_preload = rewritten.get("preload")
+    base_containers = base_metadata["container_record_inventory"]
+    overlay_containers = overlay_metadata["container_record_inventory"]
+    rewritten_containers = rewritten.get("container")
+    if not all(isinstance(value, list) for value in (overlay_preload, rewritten_containers)):
+        return {"ready": False, "reason": "Overlay preload or Container remap inventory is incomplete."}
+    if len(overlay_preload) != len(overlay_metadata["preload_pointer_inventory"]):
+        return {"ready": False, "reason": "Overlay preload remap count mismatch."}
+    if len(rewritten_containers) != len(overlay_containers):
+        return {"ready": False, "reason": "Overlay Container remap count mismatch."}
+
+    base_main = base_metadata.get("main_asset")
+    overlay_main = rewritten.get("main_asset")
+    if base_main is not None and overlay_main is not None:
+        return {"ready": False, "reason": "Both bundles define MainAsset; automatic selection is unsafe."}
+
+    base_keys = [record.get("path") for record in base_containers if isinstance(record, dict)]
+    overlay_keys = [record.get("path") for record in overlay_containers if isinstance(record, dict)]
+    if len(base_keys) != len(base_containers) or len(overlay_keys) != len(overlay_containers):
+        return {"ready": False, "reason": "Container inventory contains invalid records."}
+    if len(set(base_keys)) != len(base_keys) or len(set(overlay_keys)) != len(overlay_keys):
+        return {"ready": False, "reason": "Duplicate Container keys exist within an input bundle."}
+    collisions = sorted(set(base_keys) & set(overlay_keys))
+    if collisions:
+        return {"ready": False, "reason": "Container path collisions require an explicit replacement policy.",
+                "container_path_collisions": collisions[:MAX_REPORTED_REFERENCES]}
+
+    preload_offset = len(base_preload)
+    merged_preload = list(base_preload) + list(overlay_preload)
+    merged_containers = []
+    for record in base_containers:
+        merged_containers.append({
+            "path": record["path"],
+            "preload_index": record["preload_index"],
+            "preload_size": record["preload_size"],
+            "asset": dict(record["asset"]),
+        })
+    for record, pointer in zip(overlay_containers, rewritten_containers):
+        start = record.get("preload_index")
+        size = record.get("preload_size")
+        if (not isinstance(start, int) or not isinstance(size, int)
+                or start < 0 or size < 0 or start + size > len(overlay_preload)):
+            return {"ready": False, "reason": "Overlay Container preload range is invalid."}
+        merged_containers.append({
+            "path": record["path"],
+            "preload_index": start + preload_offset,
+            "preload_size": size,
+            "asset": dict(pointer),
+        })
+
+    merged_main = None
+    if base_main is not None:
+        merged_main = {
+            "preload_index": base_main["preload_index"],
+            "preload_size": base_main["preload_size"],
+            "asset": dict(base_main["asset"]),
+        }
+    elif overlay_main is not None:
+        overlay_main_record = overlay_metadata.get("main_asset")
+        if not isinstance(overlay_main_record, dict):
+            return {"ready": False, "reason": "Overlay MainAsset source metadata is missing."}
+        start = overlay_main_record.get("preload_index")
+        size = overlay_main_record.get("preload_size")
+        if (not isinstance(start, int) or not isinstance(size, int)
+                or start < 0 or size < 0 or start + size > len(overlay_preload)):
+            return {"ready": False, "reason": "Overlay MainAsset preload range is invalid."}
+        merged_main = {
+            "preload_index": start + preload_offset,
+            "preload_size": size,
+            "asset": dict(overlay_main),
+        }
+
+    dependencies = []
+    seen_dependencies = set()
+    for dependency in list(base_metadata.get("dependencies", [])) + list(overlay_metadata.get("dependencies", [])):
+        if not isinstance(dependency, str) or not dependency:
+            return {"ready": False, "reason": "Dependency inventory contains an invalid entry."}
+        if dependency not in seen_dependencies:
+            seen_dependencies.add(dependency)
+            dependencies.append(dependency)
+
+    return {
+        "ready": True,
+        "reason": "Metadata table concatenation planned; no AssetBundle bytes were changed.",
+        "assetbundle_name": base_name or overlay_name,
+        "preload_table": merged_preload,
+        "container_records": merged_containers,
+        "main_asset": merged_main,
+        "dependencies": dependencies,
+        "preload_offset": preload_offset,
+        "preload_count": len(merged_preload),
+        "container_count": len(merged_containers),
+        "scope": "metadata plan only; serialized AssetBundle object and CAB/resource files are not rewritten",
+    }
+
+
+
 def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, Any]:
     """Read-only inventory of Unity serialized files, object types and external references."""
     if not data:
