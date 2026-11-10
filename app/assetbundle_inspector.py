@@ -476,6 +476,138 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
 
 
 
+def _assetbundle_roundtrip_snapshot(report: dict[str, Any]) -> tuple[Any, ...] | None:
+    """Build a complete, deterministic snapshot or reject truncated inventories."""
+    if (
+        not report.get("reference_scan_complete")
+        or not report.get("container_inventory_complete")
+        or not report.get("assetbundle_metadata_complete")
+        or report.get("object_reference_count", 0) > MAX_REPORTED_REFERENCES
+        or report.get("external_reference_count", 0) > MAX_REPORTED_CONTAINERS
+        or report.get("container_entry_count", 0) > MAX_REPORTED_CONTAINERS
+        or report.get("assetbundle_metadata_count", 0) > MAX_REPORTED_CONTAINERS
+    ):
+        return None
+
+    serialized = []
+    for item in report.get("serialized_files", []):
+        if (
+            not item.get("object_id_inventory_complete")
+            or not item.get("object_payload_hashes_complete")
+        ):
+            return None
+        serialized.append((
+            item["name"],
+            item["unity_version"],
+            item["target_platform"],
+            item["object_count"],
+            item["external_count"],
+            tuple(sorted(item["object_path_ids"])),
+            tuple(sorted(item["object_types_by_path_id"].items())),
+            tuple(sorted(item["object_payload_hashes"].items())),
+        ))
+
+    metadata = []
+    for item in report.get("assetbundle_metadata", []):
+        if not item.get("inspection_complete") or not item.get("metadata_integrity_pass"):
+            return None
+        metadata.append((
+            item["path_id"],
+            item["assetbundle_name"],
+            item["preload_table_count"],
+            item["preload_table_sha256"],
+            item["container_entry_count"],
+            item["container_metadata_sha256"],
+            item["dependency_count"],
+            item["dependencies_sha256"],
+            item["main_asset_sha256"],
+        ))
+
+    references = tuple(sorted(
+        (
+            item["from_file"],
+            item["from_path_id"],
+            item["file_id"],
+            item["path_id"],
+            item["target_file"],
+        )
+        for item in report.get("object_references", [])
+    ))
+    external_references = tuple(sorted(
+        (item["from"], item["to"])
+        for item in report.get("external_references", [])
+    ))
+    container_entries = tuple(sorted(
+        (item["path"], item["type"], item["path_id"])
+        for item in report.get("container_entries", [])
+    ))
+    return (
+        report["serialized_file_count"],
+        report["object_count"],
+        tuple(sorted(serialized)),
+        tuple(sorted(metadata)),
+        references,
+        external_references,
+        container_entries,
+        tuple(sorted((key, repr(value)) for key, value in report["reference_integrity"].items())),
+    )
+
+
+def verify_assetbundle_roundtrip(data: bytes) -> dict[str, Any]:
+    """Save a UnityFS bundle unchanged, reopen it and compare complete semantic inventories."""
+    original_report = inspect_assetbundle(data, "roundtrip-original")
+    original_snapshot = _assetbundle_roundtrip_snapshot(original_report)
+    if original_snapshot is None:
+        return {
+            "verified": False,
+            "reason": "Dữ liệu gốc vượt giới hạn đối chiếu đầy đủ hoặc có inventory chưa hoàn chỉnh.",
+            "original_size": len(data),
+            "roundtrip_size": 0,
+        }
+
+    UnityPy_AOV = _load_unitypy_aov()
+    try:
+        env = UnityPy_AOV.load(data)
+        top_files = list((getattr(env, "files", {}) or {}).values())
+        if len(top_files) != 1:
+            raise ValueError("Chỉ hỗ trợ round-trip một UnityFS bundle độc lập.")
+        bundle = top_files[0]
+        if getattr(bundle, "signature", None) != "UnityFS":
+            raise ValueError("Bộ ghi hiện chỉ hỗ trợ UnityFS, không hỗ trợ UnityRaw/UnityWeb.")
+        save = getattr(bundle, "save", None)
+        if not callable(save):
+            raise ValueError("Bundle không có hàm ghi lại.")
+        roundtrip_data = bytes(save(packer="original"))
+        if not roundtrip_data or len(roundtrip_data) > MAX_ASSETBUNDLE_BYTES:
+            raise ValueError("Kích thước bundle sau khi ghi lại không hợp lệ hoặc vượt giới hạn.")
+        roundtrip_report = inspect_assetbundle(roundtrip_data, "roundtrip-saved")
+        roundtrip_snapshot = _assetbundle_roundtrip_snapshot(roundtrip_report)
+        if roundtrip_snapshot is None:
+            return {
+                "verified": False,
+                "reason": "Bản ghi lại có inventory không đầy đủ, không thể xác minh an toàn.",
+                "original_size": len(data),
+                "roundtrip_size": len(roundtrip_data),
+            }
+        return {
+            "verified": original_snapshot == roundtrip_snapshot,
+            "reason": (
+                "Inventory và payload Object khớp sau khi ghi lại."
+                if original_snapshot == roundtrip_snapshot
+                else "Phát hiện sai lệch cấu trúc hoặc payload sau khi ghi lại."
+            ),
+            "original_size": len(data),
+            "roundtrip_size": len(roundtrip_data),
+        }
+    except Exception as exc:
+        return {
+            "verified": False,
+            "reason": f"Round-trip thất bại: {type(exc).__name__}: {exc}",
+            "original_size": len(data),
+            "roundtrip_size": 0,
+        }
+
+
 def compare_assetbundle_overlays(base_data: bytes, overlay_data: bytes) -> dict[str, Any]:
     """Compare two bundles conservatively; this never rewrites or certifies a merge."""
     base = inspect_assetbundle(base_data, "base")
