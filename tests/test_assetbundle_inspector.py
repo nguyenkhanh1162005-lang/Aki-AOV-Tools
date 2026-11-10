@@ -272,8 +272,8 @@ class AssetBundleInspectorTests(unittest.TestCase):
         fake_unity = SimpleNamespace(load=lambda data: next(envs))
         with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
             report = compare_assetbundle_overlays(
-                b"UnityFS\\x00base",
-                b"UnityFS\\x00overlay",
+                b"UnityFS\x00base",
+                b"UnityFS\x00overlay",
             )
 
         self.assertFalse(report["assetbundle_metadata_integrity_pass"])
