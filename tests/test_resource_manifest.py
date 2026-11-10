@@ -50,8 +50,8 @@ class ResourceManifestTests(unittest.TestCase):
             with zipfile.ZipFile(path, "w") as archive:
                 archive.writestr("secret.bytes", b"x")
             data = bytearray(path.read_bytes())
-            local = data.find(b"PK\\x03\\x04")
-            central = data.find(b"PK\\x01\\x02")
+            local = data.find(b"PK\x03\x04")
+            central = data.find(b"PK\x01\x02")
             self.assertGreaterEqual(local, 0)
             self.assertGreaterEqual(central, 0)
             local_flags = struct.unpack_from("<H", data, local + 6)[0]
