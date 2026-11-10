@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from app.assetbundle_inspector import (
     AssetBundleInspectError,
+    compare_assetbundle_overlays,
     inspect_assetbundle,
 )
 
@@ -44,6 +45,69 @@ class AssetBundleInspectorTests(unittest.TestCase):
             ["archive:/CAB-dependency.resS"],
         )
         self.assertTrue(report["read_only"])
+
+    def test_compares_overlay_container_paths_without_claiming_merge_safety(self):
+        def make_env(entries):
+            objects = {
+                index: SimpleNamespace(type=SimpleNamespace(name=kind), path_id=index)
+                for index, (path, kind) in enumerate(entries.items(), start=1)
+            }
+            container = {
+                path: objects[index]
+                for index, path in enumerate(entries, start=1)
+            }
+            serialized = SimpleNamespace(
+                name="CAB-main",
+                unity_version="2022.3.0f1",
+                target_platform=SimpleNamespace(name="iOS"),
+                objects=objects,
+                externals=[],
+            )
+            return SimpleNamespace(assets=[serialized], container=container, files={"bundle": object()})
+
+        base_env = make_env({"assets/hero.prefab": "GameObject", "assets/old.png": "Texture2D"})
+        overlay_env = make_env({"assets/hero.prefab": "GameObject", "assets/new.png": "Texture2D"})
+        envs = iter([base_env, overlay_env])
+        fake_unity = SimpleNamespace(load=lambda data: next(envs))
+        with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
+            report = compare_assetbundle_overlays(
+                b"UnityFS\\x00base",
+                b"UnityFS\\x00overlay",
+            )
+
+        self.assertTrue(report["unity_versions_match"])
+        self.assertTrue(report["platforms_match"])
+        self.assertEqual(report["shared_container_paths"], 1)
+        self.assertEqual(report["replacement_candidates"], ["assets/hero.prefab"])
+        self.assertEqual(report["new_container_paths"], ["assets/new.png"])
+        self.assertTrue(report["structural_checks_pass"])
+        self.assertFalse(report["merge_safe"])
+
+    def test_detects_container_type_conflicts_and_version_drift(self):
+        def make_env(version, kind):
+            obj = SimpleNamespace(type=SimpleNamespace(name=kind), path_id=1)
+            serialized = SimpleNamespace(
+                name="CAB-main",
+                unity_version=version,
+                target_platform=SimpleNamespace(name="iOS"),
+                objects={1: obj},
+                externals=[],
+            )
+            return SimpleNamespace(
+                assets=[serialized],
+                container={"assets/hero.prefab": obj},
+                files={"bundle": object()},
+            )
+
+        envs = iter([make_env("2022.3.0f1", "GameObject"), make_env("2021.3.0f1", "Texture2D")])
+        fake_unity = SimpleNamespace(load=lambda data: next(envs))
+        with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
+            report = compare_assetbundle_overlays(b"UnityFS\\x00base", b"UnityFS\\x00overlay")
+
+        self.assertFalse(report["unity_versions_match"])
+        self.assertEqual(report["container_type_conflicts"], ["assets/hero.prefab"])
+        self.assertFalse(report["structural_checks_pass"])
+        self.assertFalse(report["merge_safe"])
 
     def test_wraps_parser_errors_as_inspection_errors(self):
         fake_unity = SimpleNamespace(load=lambda data: (_ for _ in ()).throw(RuntimeError("bad bundle")))
