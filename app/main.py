@@ -19,6 +19,7 @@ from .drive_import import download_drive_zip, DriveImportError
 from .aov_merger import merge_aov_archives, AOVMergeError
 from .assetbundle_inspector import verify_assetbundle_roundtrip, AssetBundleInspectError, MAX_ASSETBUNDLE_BYTES
 from .adapter_registry import get_adapter_capabilities
+from .compatibility_planner import CompatibilityPlanError, plan_resource_compatibility
 
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -399,6 +400,16 @@ async def inspect(files: list[UploadFile] = File(...)):
         return PlainTextResponse(report)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
+
+
+@app.post("/api/compatibility/plan")
+async def compatibility_plan(payload: dict = Body(...)):
+    """Build an advisory resource conflict plan; this endpoint never authorizes merging."""
+    resources = payload.get("resources")
+    try:
+        return plan_resource_compatibility(resources)
+    except CompatibilityPlanError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 if WEB.exists():
