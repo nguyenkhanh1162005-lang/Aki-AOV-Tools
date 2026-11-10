@@ -272,7 +272,13 @@ def main():
     api_base = os.environ.get("TELEGRAM_API_BASE_URL")
     file_base = os.environ.get("TELEGRAM_FILE_BASE_URL")
     if api_base and file_base:
-        builder = builder.base_url(api_base).base_file_url(file_base)
+        # Local Bot API may return absolute local file paths from getFile.
+        # PTB local_mode enables handling those paths for file downloads/uploads.
+        builder = (
+            builder.base_url(api_base)
+            .base_file_url(file_base)
+            .local_mode(True)
+        )
 
     app = builder.build()
     app.add_handler(CommandHandler("start", start))
