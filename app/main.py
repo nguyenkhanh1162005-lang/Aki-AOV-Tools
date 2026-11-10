@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import time
+import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Body
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
@@ -16,6 +18,79 @@ from .aov_inspector import inspect_archives, InspectError
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
 CHUNK_SIZE = 1024 * 1024
+UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024
+UPLOAD_SESSIONS: dict[str, dict] = {}
+UPLOAD_TTL_SECONDS = 3600
+
+
+def _get_upload_session(upload_id: str) -> dict:
+    session = UPLOAD_SESSIONS.get(upload_id)
+    if not session or time.time() - session["created"] > UPLOAD_TTL_SECONDS:
+        if session:
+            shutil.rmtree(session["workdir"], ignore_errors=True)
+            UPLOAD_SESSIONS.pop(upload_id, None)
+        raise HTTPException(404, "Phiên tải lên không tồn tại hoặc đã hết hạn. Hãy chọn file lại.")
+    return session
+
+
+@app.post("/api/upload/start")
+async def start_chunked_upload(payload: dict = Body(...)):
+    files = payload.get("files")
+    if not isinstance(files, list) or not files or len(files) > MAX_FILES:
+        raise HTTPException(400, f"Chọn từ 1 đến {MAX_FILES} file ZIP.")
+    total = 0
+    clean_files = []
+    for item in files:
+        name = Path(str(item.get("name", ""))).name
+        size = item.get("size")
+        if not name.lower().endswith(".zip") or not isinstance(size, int) or size < 0:
+            raise HTTPException(400, "Thông tin file ZIP không hợp lệ.")
+        total += size
+        clean_files.append({"name": name, "size": size, "received": 0})
+    if total > MAX_INPUT_BYTES:
+        raise HTTPException(413, "Tổng dung lượng ZIP vượt quá 500 MB.")
+    upload_id = uuid.uuid4().hex
+    workdir = Path(tempfile.mkdtemp(prefix="aki-aov-chunks-"))
+    UPLOAD_SESSIONS[upload_id] = {
+        "created": time.time(), "workdir": str(workdir), "files": clean_files,
+        "paths": [str(workdir / f"{i}_{item['name']}") for i, item in enumerate(clean_files, 1)]
+    }
+    return {"upload_id": upload_id, "chunk_size": UPLOAD_CHUNK_BYTES}
+
+
+@app.put("/api/upload/{upload_id}/{file_index}")
+async def upload_chunk(upload_id: str, file_index: int, request: Request):
+    session = _get_upload_session(upload_id)
+    if file_index < 0 or file_index >= len(session["files"]):
+        raise HTTPException(404, "Không tìm thấy file trong phiên tải lên.")
+    item = session["files"][file_index]
+    chunk = await request.body()
+    if not chunk or len(chunk) > UPLOAD_CHUNK_BYTES:
+        raise HTTPException(400, "Kích thước khối tải lên không hợp lệ.")
+    offset = item["received"]
+    if offset + len(chunk) > item["size"]:
+        raise HTTPException(400, "Khối tải lên vượt quá kích thước file.")
+    with open(session["paths"][file_index], "ab") as target:
+        target.write(chunk)
+    item["received"] += len(chunk)
+    session["created"] = time.time()
+    return {"received": item["received"], "size": item["size"]}
+
+
+@app.post("/api/upload/{upload_id}/inspect")
+async def inspect_chunked_upload(upload_id: str):
+    session = _get_upload_session(upload_id)
+    if any(item["received"] != item["size"] for item in session["files"]):
+        raise HTTPException(400, "File chưa tải lên đầy đủ.")
+    try:
+        report = await run_in_threadpool(inspect_archives, session["paths"])
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(report)
+    except InspectError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    finally:
+        shutil.rmtree(session["workdir"], ignore_errors=True)
+        UPLOAD_SESSIONS.pop(upload_id, None)
 
 
 @app.get("/health")
