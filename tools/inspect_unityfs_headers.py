@@ -74,4 +74,4 @@ for zpath in pathlib.Path("incoming").glob("*.zip"):
         for i in z.infolist():
             if targets.search(i.filename) and i.filename.endswith(".assetbundle") and i.file_size<25_000_000:
                 b=z.read(i)
-                if b[:8]==b"UnityFS\\0": parse_vtk_table(i.filename,b)
+                if b[:8]==b"UnityFS\0": parse_vtk_table(i.filename,b)
