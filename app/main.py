@@ -211,6 +211,15 @@ async def decode_chunked_aov_bytes(upload_id: str):
         headers={
             "X-AOV-Decoded-Resources": str(len(report["decoded"])),
             "X-AOV-Unsupported-Resources": str(len(report["unsupported"])),
+            "X-AOV-MSES-Tables": str(sum(
+                item.get("payload", {}).get("payload_type") == "mses_v7"
+                for item in report["decoded"]
+            )),
+            "X-AOV-IFix-Patches": str(sum(
+                item.get("payload", {}).get("payload_type") == "ifix_patch"
+                for item in report["decoded"]
+            )),
+            "X-AOV-Nested-Packages": str(report["nested_packages_expanded"]),
             "X-AOV-Game-Tested": "false",
         },
         background=BackgroundTask(shutil.rmtree, session["workdir"], ignore_errors=True),
