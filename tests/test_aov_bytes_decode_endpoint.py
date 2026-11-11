@@ -36,6 +36,9 @@ class AOVBytesDecodeEndpointTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.filename, "aki-aov-decoded-resources.zip")
                 self.assertEqual(response.headers["X-AOV-Decoded-Resources"], "1")
                 self.assertEqual(response.headers["X-AOV-Game-Tested"], "false")
+                self.assertEqual(response.headers["X-AOV-MSES-Tables"], "0")
+                self.assertEqual(response.headers["X-AOV-IFix-Patches"], "0")
+                self.assertEqual(response.headers["X-AOV-Nested-Packages"], "0")
                 with zipfile.ZipFile(response.path) as archive:
                     decoded_path = next(
                         name for name in archive.namelist()
