@@ -51,6 +51,45 @@ class ChunkedUploadEndpointTests(unittest.IsolatedAsyncioTestCase):
         main.UPLOAD_SESSIONS.pop(self.upload_id, None)
         self.temp.cleanup()
 
+
+    def test_persistent_upload_session_restores_after_restart(self):
+        storage = Path(self.temp.name) / "persistent"
+        storage.mkdir()
+        workdir = storage / ("a" * 32)
+        workdir.mkdir()
+        payload_path = workdir / "1_test.zip"
+        payload_path.write_bytes(b"part")
+        session = {
+            "created": 1000,
+            "workdir": str(workdir),
+            "files": [{"name": "test.zip", "size": 8, "received": 0}],
+            "paths": [str(payload_path)],
+        }
+        with patch.object(main, "UPLOAD_STORAGE_DIR", storage):
+            main._persist_upload_session("a" * 32, session)
+        with patch.object(main, "UPLOAD_TTL_SECONDS", 3600), patch("app.main.time.time", return_value=1100):
+            restored = main._load_persistent_upload_sessions(storage)
+        self.assertEqual(restored["a" * 32]["files"][0]["received"], 4)
+        self.assertEqual(Path(restored["a" * 32]["paths"][0]).read_bytes(), b"part")
+
+    def test_persistent_session_rejects_path_traversal_metadata(self):
+        storage = Path(self.temp.name) / "persistent"
+        storage.mkdir()
+        workdir = storage / ("b" * 32)
+        workdir.mkdir()
+        metadata = {
+            "schema_version": 1,
+            "upload_id": "b" * 32,
+            "created": 1000,
+            "files": [{"name": "test.zip", "size": 8, "received": 0}],
+            "paths": ["../outside.zip"],
+        }
+        (workdir / ".aki-upload-session.json").write_text(__import__("json").dumps(metadata))
+        with patch.object(main, "MAX_ACTIVE_UPLOAD_SESSIONS", 8), patch("app.main.time.time", return_value=1100):
+            restored = main._load_persistent_upload_sessions(storage)
+        self.assertNotIn("b" * 32, restored)
+        self.assertFalse(workdir.exists())
+
     async def test_chunk_is_written_and_offset_is_updated(self):
         result = await main.upload_chunk(
             self.upload_id, 0, make_request(b"zipdata!"), 0
