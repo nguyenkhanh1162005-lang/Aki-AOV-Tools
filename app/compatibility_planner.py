@@ -12,7 +12,7 @@ from typing import Any
 
 
 _SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
-_ALLOWED_STATUSES = {"SAFE_MERGE", "IDENTICAL_DUPLICATE", "NEEDS_RULE", "UNSUPPORTED", "VERSION_CONFLICT"}
+_ALLOWED_STATUSES = {"SAFE_MERGE", "IDENTICAL_DUPLICATE", "NEEDS_RULE", "UNSUPPORTED", "VERSION_CONFLICT", "IGNORED_METADATA"}
 
 
 class CompatibilityPlanError(ValueError):
@@ -91,7 +91,10 @@ def plan_resource_compatibility(resources: list[dict[str, Any]]) -> dict[str, An
 
         status = "NEEDS_RULE"
         reasons: list[str] = []
-        if len(versions) > 1:
+        if all(item.get("is_metadata_noise", False) for item in entries):
+            status = "IGNORED_METADATA"
+            reasons.append("Tệp phụ hệ điều hành (AppleDouble/macOS metadata), không phải tài nguyên game.")
+        elif len(versions) > 1:
             status = "VERSION_CONFLICT"
             reasons.append("Các nguồn có game_version khác nhau.")
         elif len(platforms) > 1:
