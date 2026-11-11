@@ -452,6 +452,54 @@ for relative in mses_paths:
     except Exception as exc:
         log(f"MSES_TABLE_ERROR {relative} {type(exc).__name__}: {exc}")
 
+log("\n=== VTK additions and metadata inventory ===")
+for name in sorted(vtk_entries):
+    full = PREFIX + name
+    if full not in base_names:
+        info = vtk_entries[name]
+        log(f"VTK_ADD {name}\t{info.file_size}")
+try:
+    from app.aov_merger import _load_unitypy_aov, _find_mono_behaviour, PACKER_PATH, VERIFICATION_PATH
+    parser = _load_unitypy_aov()
+    for rel, object_name in (
+        (PACKER_PATH, "ResourcePackerInfoSetXML"),
+        (VERIFICATION_PATH, "ResourceVerificationInfoSetXML"),
+    ):
+        benv = parser.load(base.read(PREFIX + rel))
+        venv = parser.load(vtk.read(vtk_entries[rel]))
+        _, bt = _find_mono_behaviour(benv, object_name)
+        _, vt = _find_mono_behaviour(venv, object_name)
+        if rel == PACKER_PATH:
+            bp = {row["PathInIFS"]:i for i,row in enumerate(bt["AllResourcePackInfo"])}
+            vp = {row["PathInIFS"]:i for i,row in enumerate(vt["AllResourcePackInfo"])}
+            new_paths = sorted(set(vp)-set(bp))
+            missing_base = sorted(set(bp)-set(vp))
+            log(f"PACKER base_rows={len(bp)} vtk_rows={len(vp)} base_edges={len(bt['AllParentIdexToChild'])} vtk_edges={len(vt['AllParentIdexToChild'])} vtk_only={new_paths} base_only_count={len(missing_base)}")
+            edges = vt["AllParentIdexToChild"]
+            relevant = set(new_paths)
+            for index,path in enumerate(vt["AllResourcePackInfo"]):
+                if path["PathInIFS"] in relevant:
+                    relevant.add(path["PathInIFS"])
+            for edge in edges:
+                p = vt["AllResourcePackInfo"][int(edge["parentIdx"])]["PathInIFS"]
+                ch = vt["AllResourcePackInfo"][int(edge["childIdx"])]["PathInIFS"]
+                if p in relevant or ch in relevant:
+                    log(f"PACKER_EDGE {p} -> {ch}")
+        else:
+            for list_name in ("AllZipVerificationInfo","AllDatabinVerificationInfo"):
+                br = {r["PathInIFS"]:r.get("CrcXor") for r in bt[list_name]}
+                vr = {r["PathInIFS"]:r.get("CrcXor") for r in vt[list_name]}
+                changed = sorted(p for p in (set(br)&set(vr)) if br[p] != vr[p])
+                newp = sorted(set(vr)-set(br))
+                log(f"VERIFY {list_name} base={len(br)} vtk={len(vr)} changed={len(changed)} new={len(newp)}")
+                for p in changed:
+                    if p in vtk_entries or p in ("Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes",):
+                        log(f"VERIFY_CHANGED {p}")
+                for p in newp[:30]:
+                    log(f"VERIFY_NEW {p}")
+except Exception as exc:
+    log(f"METADATA_ERROR {type(exc).__name__}: {exc}")
+
 log("\n=== KPM/VTK same path conflicts ===")
 v_by_full = {}
 for name, info in vtk_entries.items():
