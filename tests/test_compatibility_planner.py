@@ -47,6 +47,16 @@ class CompatibilityPlannerTests(unittest.TestCase):
         ])
         self.assertEqual(platform["resources"][0]["status"], "VERSION_CONFLICT")
 
+    def test_macos_metadata_is_ignored_not_treated_as_game_resource(self):
+        result = plan_resource_compatibility([
+            resource("__MACOSX/Resources/._BattleBank.bytes", "f",
+                     format="metadata_noise", is_metadata_noise=True,
+                     is_aov_resource=False)
+        ])
+        self.assertEqual(result["resources"][0]["status"], "IGNORED_METADATA")
+        self.assertEqual(result["summary"]["IGNORED_METADATA"], 1)
+        self.assertFalse(result["merge_authorized"])
+
     def test_aov_resource_is_never_marked_safe_from_extension_or_format_guess(self):
         result = plan_resource_compatibility([
             resource("Resources/BattleBank.bytes", "f", format="mses", is_aov_resource=True)
