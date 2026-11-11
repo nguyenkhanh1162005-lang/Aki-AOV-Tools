@@ -71,5 +71,36 @@ class ChunkedUploadEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+    async def test_incomplete_upload_is_rejected_before_inspection(self):
+        with self.assertRaises(HTTPException) as raised:
+            await main.inspect_chunked_upload(self.upload_id, keep_session=True)
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn(self.upload_id, main.UPLOAD_SESSIONS)
+        self.assertFalse(self.path.exists())
+
+    async def test_incomplete_upload_is_rejected_before_compatibility_analysis(self):
+        with self.assertRaises(HTTPException) as raised:
+            await main.inspect_chunked_compatibility(self.upload_id)
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn(self.upload_id, main.UPLOAD_SESSIONS)
+
+    async def test_incomplete_upload_is_rejected_before_generic_merge(self):
+        with self.assertRaises(HTTPException) as raised:
+            await main.merge_chunked_upload(self.upload_id)
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn(self.upload_id, main.UPLOAD_SESSIONS)
+
+    async def test_chunk_beyond_declared_file_size_is_rejected(self):
+        with self.assertRaises(HTTPException) as raised:
+            await main.upload_chunk(
+                self.upload_id, 0, make_request(b"123456789"), 0
+            )
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertFalse(self.path.exists())
+        self.assertEqual(
+            main.UPLOAD_SESSIONS[self.upload_id]["files"][0]["received"], 0
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
