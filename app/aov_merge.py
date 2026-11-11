@@ -8,6 +8,14 @@ class AOVResourceMergeError(ValueError):
     pass
 
 
+_SUPPORTED_MSES_TABLES = {
+    "Databin/Client/Sound/BattleBank.bytes",
+    "Databin/Client/Sound/LobbyBank.bytes",
+    "Databin/Client/Skill/skillcombine.bytes",
+    "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes",
+}
+
+
 def merge_aov_mses_resource(
     base_resource: bytes,
     overlay_resource: bytes,
@@ -22,6 +30,12 @@ def merge_aov_mses_resource(
     appended only after the MSES merger confirms that every shared row is
     byte-identical.
     """
+    normalized_name = resource_name.replace("\\", "/").lstrip("/")
+    if normalized_name not in _SUPPORTED_MSES_TABLES:
+        raise AOVResourceMergeError(
+            f"{resource_name}: không có adapter MSES theo bảng đã xác minh."
+        )
+
     try:
         base_decoded, base_mode = decode_aov_resource(base_resource, resource_name)
         overlay_decoded, overlay_mode = decode_aov_resource(overlay_resource, resource_name)
@@ -57,7 +71,8 @@ def merge_aov_mses_resource(
             overlay_decoded,
             override_keys=override_keys,
             allow_schema_mismatch=True,
-            verify_base_checksum=not resource_name.replace("\\", "/").endswith("/ResSkinSeniorLabelCfg.bytes"),
+            allow_new_rows_across_schema_mismatch=True,
+            verify_base_checksum=not normalized_name.endswith("/ResSkinSeniorLabelCfg.bytes"),
         )
         merged_resource = encode_aov_resource(merged_decoded, resource_name, base_mode)
         # Decode and parse once more so a successful return means the wrapper,
