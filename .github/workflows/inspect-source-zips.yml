@@ -1,0 +1,65 @@
+name: Inspect KPM and VTK ZIP structures
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download originals
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p originals
+          gh release download aov-upload-01 --repo "${GITHUB_REPOSITORY}" --dir originals --pattern 'Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip'
+          gh release download aov-upload-01 --repo "${GITHUB_REPOSITORY}" --dir originals --pattern 'VTK.IOS.VIP.zip'
+      - name: Inspect ZIPs and compare paths
+        run: |
+          python3 - <<'PY'
+          import zipfile, json, hashlib, os, collections
+          names = {
+            "KPM": "originals/Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip",
+            "VTK": "originals/VTK.IOS.VIP.zip",
+          }
+          inventories = {}
+          report = {}
+          for label, path in names.items():
+            inv = {}
+            with zipfile.ZipFile(path) as z:
+              bad = z.testzip()
+              for i in z.infolist():
+                if not i.is_dir():
+                  inv[i.filename] = {"size": i.file_size, "compressed": i.compress_size, "method": i.compress_type}
+              report[label] = {
+                "zip_bytes": os.path.getsize(path),
+                "sha256": hashlib.sha256(open(path,"rb").read()).hexdigest(),
+                "entries": len(z.infolist()),
+                "files": len(inv),
+                "bad_member": bad,
+                "top_level": dict(collections.Counter(p.split("/")[0] for p in inv)),
+                "sample_paths": list(inv)[:80],
+              }
+            inventories[label] = inv
+          a,b = inventories["KPM"], inventories["VTK"]
+          common = set(a)&set(b)
+          report["comparison"] = {
+            "kpm_only": len(set(a)-set(b)),
+            "vtk_only": len(set(b)-set(a)),
+            "common_paths": len(common),
+            "same_size_common": sum(a[p]["size"]==b[p]["size"] for p in common),
+            "different_size_common": sum(a[p]["size"]!=b[p]["size"] for p in common),
+            "largest_conflicts": sorted(
+              [{"path":p,"kpm_size":a[p]["size"],"vtk_size":b[p]["size"]} for p in common],
+              key=lambda x:max(x["kpm_size"],x["vtk_size"]), reverse=True
+            )[:100],
+          }
+          with open("zip-structure-report.json","w") as f: json.dump(report,f,indent=2,ensure_ascii=False)
+          print(json.dumps(report,indent=2,ensure_ascii=False))
+          PY
+      - name: Upload inspection report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zip-structure-report
+          path: zip-structure-report.json
+          retention-days: 7
