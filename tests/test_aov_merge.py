@@ -61,6 +61,31 @@ class AOVResourceMergeTests(unittest.TestCase):
         with self.assertRaisesRegex(AOVResourceMergeError, "không có adapter MSES"):
             merge_aov_mses_resource(base, overlay, "Databin/Client/Unknown.bytes")
 
+    def test_sound_bank_rejects_unrelated_overlay_only_rows(self):
+        name = "Databin/Client/Sound/BattleBank.bytes"
+        base_rows = [struct.pack("<I", 1) + b"base"]
+        overlay_rows = [
+            base_rows[0],
+            struct.pack("<I", 2) + b"Hero_LiXin_Skin_C_SFX",
+            struct.pack("<I", 3) + b"unrelated-new-sound-row",
+        ]
+        base = encode_aov_resource(table(3, base_rows), name, "aes")
+        overlay = encode_aov_resource(table(2, overlay_rows), name, "aes")
+        with self.assertRaisesRegex(AOVResourceMergeError, "ngoài allowlist theo bảng"):
+            merge_aov_mses_resource(base, overlay, name)
+
+    def test_skillcombine_rejects_unverified_new_row_keys(self):
+        name = "Databin/Client/Skill/skillcombine.bytes"
+        base_rows = [struct.pack("<I", 1) + b"base"]
+        overlay_rows = [
+            base_rows[0],
+            struct.pack("<I", 595001) + b"unverified-skill-row",
+        ]
+        base = encode_aov_resource(table(4, base_rows), name, "aes")
+        overlay = encode_aov_resource(table(3, overlay_rows), name, "aes")
+        with self.assertRaisesRegex(AOVResourceMergeError, "ngoài allowlist theo bảng"):
+            merge_aov_mses_resource(base, overlay, name)
+
     def test_sound_bank_requires_vtk_lixin_skin_row(self):
         name = "Databin/Client/Sound/LobbyBank.bytes"
         base = encode_aov_resource(table(3, [struct.pack("<I", 1) + b"base"]), name, "aes")
