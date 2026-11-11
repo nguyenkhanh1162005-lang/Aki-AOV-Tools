@@ -231,53 +231,72 @@ for row in mapping_rows:
         vtk_data = vtk.read(info) if info else b""
     else:
         vtk_data = b""
-    payload_zip = inner_zip(payload, f"KPM_MOD {payload_name}")
-    member_details = []
-    base_member_equal = False
-    if payload_zip:
-        pmembers = [i for i in payload_zip.infolist() if not i.is_dir()]
-        for pi in pmembers:
-            pdata = payload_zip.read(pi)
-            member_details.append(f"{pi.filename}:{len(pdata)}:{pdata[:12].hex()}")
-            if row["role"] == "skill" and ACTION_PKG.split("/")[-1] in base_pkg_zips:
-                bz = base_pkg_zips[ACTION_PKG.split("/")[-1]]
-                bmap = {i.filename.lower(): i for i in bz.infolist() if not i.is_dir()}
-                bi = bmap.get(("595_LiXin/skill/" + entry_name).lower())
-                if bi and sha(pdata) == sha(bz.read(bi)):
-                    base_member_equal = True
-    # KPM_MOD files have PK local headers but may use a private container layout.
-    # Record exact local-header offsets and central-directory signatures without guessing.
+    # KPM_MOD is a one-member ZIP with intentionally zero CRC fields.
+    # Read its member bytes from the local header, then decode the AoV wrapper.
+    member_name = ""
+    member_data = b""
     if payload[:4] == bytes.fromhex("504b0304") and len(payload) >= 30:
-        flags = int.from_bytes(payload[6:8], "little")
-        method = int.from_bytes(payload[8:10], "little")
-        crc = int.from_bytes(payload[14:18], "little")
-        csize = int.from_bytes(payload[18:22], "little")
-        usize = int.from_bytes(payload[22:26], "little")
         nlen = int.from_bytes(payload[26:28], "little")
         elen = int.from_bytes(payload[28:30], "little")
+        member_name = payload[30:30+nlen].decode("utf-8", errors="replace")
         data_at = 30 + nlen + elen
-        sig_counts = {label: payload.count(bytes.fromhex(code)) for label, code in {"local":"504b0304","central":"504b0102","eocd":"504b0506","descriptor":"504b0708"}.items()}
-        ziplist = payload_zip.namelist() if payload_zip else None
-        zip_start = getattr(payload_zip, "start_dir", None) if payload_zip else None
-        log(f"KPM_CONTAINER {payload_name} flags={flags:04x} method={method} crc={crc:08x} csize={csize} usize={usize} nlen={nlen} elen={elen} data_at={data_at} data_head={payload[data_at:data_at+40].hex()} tail={payload[-64:].hex()} sigs={sig_counts} ziplist={ziplist} zip_start={zip_start}")
-    decoded = []
-    if decode_aov_resource:
-        for candidate in (entry_name, payload_name, "595_LiXin/skill/" + entry_name):
+        csize = int.from_bytes(payload[18:22], "little")
+        if data_at + csize <= len(payload):
+            member_data = payload[data_at:data_at+csize]
+    decoded_base = None
+    decoded_vtk = None
+    base_mode = None
+    vtk_mode = None
+    decode_errors = []
+    if not member_data:
+        decode_errors.append("KPM_MOD local payload missing")
+    else:
+        try:
+            decoded_base, base_mode = decode_aov_resource(member_data, entry_name)
+        except Exception as exc:
+            decode_errors.append(f"KPM decode: {type(exc).__name__}: {exc}")
+    if row["role"] in ("skill", "assetref"):
+        if vtk_data:
+            vtk_name = entry_name if row["role"] == "skill" else "595_AssetRef.bytes"
             try:
-                raw, mode = decode_aov_resource(payload, candidate)
-                decoded.append((candidate, mode, raw))
-            except Exception:
-                pass
-    detail = ""
-    if decoded:
-        detail = " DECODED=" + ",".join(f"{nm}:{mode}:{len(raw)}:{raw[:10]!r}" for nm,mode,raw in decoded)
+                decoded_vtk, vtk_mode = decode_aov_resource(vtk_data, vtk_name)
+            except Exception as exc:
+                decode_errors.append(f"VTK decode: {type(exc).__name__}: {exc}")
+    elif row["role"] == "actorinfo" and vtk_data:
+        decoded_vtk = vtk_data
+    parse_base = parse_vtk = "n/a"
+    if row["role"] == "skill":
+        import xml.etree.ElementTree as ET
+        for label, raw in (("base", decoded_base), ("vtk", decoded_vtk)):
+            if raw is not None:
+                try:
+                    ET.fromstring(raw)
+                    if label == "base": parse_base = "XML_OK"
+                    else: parse_vtk = "XML_OK"
+                except Exception as exc:
+                    if label == "base": parse_base = f"XML_ERROR:{type(exc).__name__}"
+                    else: parse_vtk = f"XML_ERROR:{type(exc).__name__}"
+    base_pkg_match = False
+    base_pkg_size = None
+    if row["role"] == "skill" and decoded_base is not None:
+        bz = base_pkg_zips.get(ACTION_PKG.split("/")[-1])
+        if bz:
+            bmap = {i.filename.lower():i for i in bz.infolist() if not i.is_dir()}
+            bi = bmap.get(("595_LiXin/skill/" + entry_name).lower())
+            if bi:
+                base_pkg_size = bi.file_size
+                base_pkg_match = sha(decoded_base) == sha(bz.read(bi))
     log(
         f"PAYLOAD {payload_name} role={row['role']} entry={entry_name} "
-        f"bytes={len(payload)} head={payload[:24].hex()} members={member_details} "
-        f"matches_base_member={base_member_equal} "
-        f"vtk_bytes={len(vtk_data)} vtk_head={vtk_data[:24].hex()} "
-        f"same={bool(vtk_data) and sha(payload)==sha(vtk_data)}{detail}"
+        f"wrapper_member={member_name} wrapped_bytes={len(member_data)} "
+        f"base_mode={base_mode} base_decoded={len(decoded_base) if decoded_base is not None else None} "
+        f"vtk_mode={vtk_mode} vtk_decoded={len(decoded_vtk) if decoded_vtk is not None else None} "
+        f"base_xml={parse_base} vtk_xml={parse_vtk} base_pkg_size={base_pkg_size} "
+        f"base_payload_equals_base_package={base_pkg_match} "
+        f"decoded_same={decoded_base is not None and decoded_vtk is not None and sha(decoded_base)==sha(decoded_vtk)} "
+        f"errors={decode_errors}"
     )
+
 
 log("\n=== Selective package diffs ===")
 for pkg in PACKAGE_NAMES:
