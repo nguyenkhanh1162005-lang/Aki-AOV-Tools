@@ -21,51 +21,24 @@ jobs:
         run: |
           mkdir -p incoming
           gh release download aov-upload-01 --repo "$GITHUB_REPOSITORY" --dir incoming
+      - name: Install Unity asset parser
+        run: python -m pip install --disable-pip-version-check UnityPy
       - name: Inspect ZIP structure and target assets
-        run: |
-          python - <<'PY'
-          import zipfile, pathlib, re, json, hashlib, binascii
-          out=[]
-          terms=re.compile(r'(actor.?595|595|commercial|notify|kill|button|skill|assetref|resource|battle|ui|lixin|l[ií]xin)', re.I)
-          for zp in sorted(pathlib.Path('incoming').glob('*.zip')):
-              data=zp.read_bytes()
-              out.append(f"\n=== ARCHIVE {zp.name} size={len(data)} sha256={hashlib.sha256(data).hexdigest()} ===")
-              with zipfile.ZipFile(zp) as z:
-                  infos=z.infolist()
-                  out.append(f"entries={len(infos)}")
-                  for i in infos:
-                      if terms.search(i.filename):
-                          out.append(f"FILE {i.filename} | size={i.file_size} | csize={i.compress_size} | crc={i.CRC:08x}")
-                          if i.file_size <= 2_000_000:
-                              b=z.read(i)
-                              out.append(f"  head={b[:24].hex()} sha256={hashlib.sha256(b).hexdigest()}")
-                              if b[:2] == b'PK':
-                                  import io
-                                  try:
-                                      with zipfile.ZipFile(io.BytesIO(b)) as nz:
-                                          out.append(f"  NESTED entries={len(nz.infolist())}")
-                                          for ni in nz.infolist():
-                                              if terms.search(ni.filename):
-                                                  out.append(f"    NESTED_FILE {ni.filename} | size={ni.file_size} | crc={ni.CRC:08x}")
-                                  except Exception as e:
-                                      out.append(f"  nested_zip_error={e}")
-          pathlib.Path('aov-archive-report.txt').write_text('\n'.join(out), encoding='utf-8')
-          print('\n'.join(out[:80]))
-          PY
+        run: python tools/deep_inspect_aov.py
       - name: Publish text report on a separate branch
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch --orphan archive-report-20261111
+          git switch --orphan deep-inspect-report-20261111
           git rm -rf . >/dev/null 2>&1 || true
-          git add aov-archive-report.txt
-          git commit -m "Publish AOV archive inspection report"
-          git push origin HEAD:archive-report-20261111
+          git add aov-deep-inspection.txt
+          git commit -m "Publish AOV deep inspection report"
+          git push origin HEAD:deep-inspect-report-20261111
       - name: Upload inspection report
         uses: actions/upload-artifact@v4
         with:
-          name: aov-archive-inspection
-          path: aov-archive-report.txt
+          name: aov-deep-inspection
+          path: aov-deep-inspection.txt
           retention-days: 7
