@@ -72,27 +72,40 @@ def _archive_profile(path: str) -> dict[str, Any]:
                     f"ZIP vượt giới hạn giải nén 1 GiB: {Path(path).name}"
                 )
             names = []
+            seen_entry_paths: set[str] = set()
             for info in entries:
                 normalized = info.filename.replace("\\", "/")
-                pure = PurePosixPath(normalized)
+                # ZIP directory records conventionally end in one slash. Strip
+                # that marker before validating segments, but reject ambiguous
+                # separators and dot segments for both files and directories.
+                candidate = normalized.rstrip("/") if info.is_dir() else normalized
+                pure = PurePosixPath(candidate)
+                raw_parts = candidate.split("/")
                 mode = (info.external_attr >> 16) & 0xFFFF
                 if (
-                    pure.is_absolute()
-                    or ".." in pure.parts
+                    not candidate
+                    or pure.is_absolute()
+                    or any(part in {"", ".", ".."} for part in raw_parts)
                     or "\x00" in normalized
                     or (pure.parts and pure.parts[0].endswith(":"))
                     or stat.S_ISLNK(mode)
                 ):
-                    raise ModPipelineError(f"Đường dẫn ZIP không an toàn: {info.filename}")
+                    raise ModPipelineError(f"Đường dẫn ZIP không an toàn hoặc không chuẩn hóa: {info.filename}")
+                canonical_name = pure.as_posix()
+                if canonical_name in seen_entry_paths:
+                    raise ModPipelineError(
+                        f"ZIP chứa đường dẫn trùng lặp hoặc không phân biệt được: {canonical_name}"
+                    )
+                seen_entry_paths.add(canonical_name)
                 if info.is_dir():
                     continue
                 if info.flag_bits & 1:
                     raise ModPipelineError(f"Không hỗ trợ ZIP mã hóa mật khẩu: {info.filename}")
                 if info.file_size > MAX_PROFILE_ENTRY:
                     raise ModPipelineError(
-                        f"Mục ZIP vượt giới hạn 512 MiB: {info.filename}"
+                        f"ZIP vượt giới hạn giải nén 512 MiB: {info.filename}"
                     )
-                names.append(normalized)
+                names.append(canonical_name)
             bad = archive.testzip()
             if bad:
                 raise ModPipelineError(f"ZIP lỗi CRC tại {bad}: {Path(path).name}")
