@@ -111,6 +111,31 @@ class CompatibilityPlannerTests(unittest.TestCase):
                 with self.assertRaises(CompatibilityPlanError):
                     plan_resource_compatibility([resource("asset.bytes", "a", **metadata)])
 
+    def test_detects_cross_archive_version_conflicts_on_different_paths(self):
+        result = plan_resource_compatibility([
+            resource("hero-a.bytes", "a", source="pack-1.64.1.12-ios.zip",
+                     game_version="1.64.1.12", platform="ios", is_aov_resource=True),
+            resource("hero-b.bytes", "b", source="pack-1.65.1.1-ios.zip",
+                     game_version="1.65.1.1", platform="ios", is_aov_resource=True),
+        ])
+        compatibility = result["source_compatibility"]
+        self.assertEqual(compatibility["status"], "VERSION_CONFLICT")
+        self.assertEqual(
+            compatibility["game_versions"], ["1.64.1.12", "1.65.1.1"]
+        )
+        self.assertEqual(len(compatibility["reasons"]), 1)
+
+    def test_detects_cross_archive_platform_conflicts_on_different_paths(self):
+        result = plan_resource_compatibility([
+            resource("hero-ios.bytes", "a", source="pack-ios.zip",
+                     platform="ios", is_aov_resource=True),
+            resource("hero-android.bytes", "b", source="pack-android.zip",
+                     platform="android", is_aov_resource=True),
+        ])
+        compatibility = result["source_compatibility"]
+        self.assertEqual(compatibility["status"], "VERSION_CONFLICT")
+        self.assertEqual(compatibility["platforms"], ["android", "ios"])
+
     def test_empty_plan_rejected(self):
         with self.assertRaises(CompatibilityPlanError):
             plan_resource_compatibility([])
