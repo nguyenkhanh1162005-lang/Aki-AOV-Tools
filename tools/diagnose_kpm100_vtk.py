@@ -256,7 +256,10 @@ for row in mapping_rows:
         nlen = int.from_bytes(payload[26:28], "little")
         elen = int.from_bytes(payload[28:30], "little")
         data_at = 30 + nlen + elen
-        log(f"KPM_CONTAINER {payload_name} flags={flags:04x} method={method} crc={crc:08x} csize={csize} usize={usize} nlen={nlen} elen={elen} data_at={data_at} data_head={payload[data_at:data_at+40].hex()} tail={payload[-64:].hex()} sigs={{"local":payload.count(bytes.fromhex("504b0304")),"central":payload.count(bytes.fromhex("504b0102")),"eocd":payload.count(bytes.fromhex("504b0506")),"descriptor":payload.count(bytes.fromhex("504b0708"))}} ziplist={payload_zip.namelist() if payload_zip else None} zip_start={getattr(payload_zip,"start_dir",None) if payload_zip else None}")
+        sig_counts = {label: payload.count(bytes.fromhex(code)) for label, code in {"local":"504b0304","central":"504b0102","eocd":"504b0506","descriptor":"504b0708"}.items()}
+        ziplist = payload_zip.namelist() if payload_zip else None
+        zip_start = getattr(payload_zip, "start_dir", None) if payload_zip else None
+        log(f"KPM_CONTAINER {payload_name} flags={flags:04x} method={method} crc={crc:08x} csize={csize} usize={usize} nlen={nlen} elen={elen} data_at={data_at} data_head={payload[data_at:data_at+40].hex()} tail={payload[-64:].hex()} sigs={sig_counts} ziplist={ziplist} zip_start={zip_start}")
     decoded = []
     if decode_aov_resource:
         for candidate in (entry_name, payload_name, "595_LiXin/skill/" + entry_name):
