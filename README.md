@@ -114,3 +114,14 @@ Với ZIP dạng wrapper có chứa `Resources.zip`, manifest kiểm tra thêm �
 Manifest cũng suy luận phiên bản game/nền tảng từ tên ZIP khi đường dẫn tài nguyên bên trong không chứa metadata đó. Compatibility planner tổng hợp phiên bản và nền tảng trên toàn bộ từng ZIP đầu vào, không chỉ các đường dẫn bị trùng; vì vậy hai ZIP có phiên bản iOS khác nhau vẫn được cảnh báo dù chúng chứa các đường dẫn tài nguyên riêng biệt. Đây là cảnh báo dựa trên tên archive/đường dẫn, không phải xác thực phiên bản nhị phân; nếu không tìm thấy metadata thì báo cáo ghi không xác định và không tự kết luận tương thích.
 
 Bộ kiểm tra Wwise BNK đọc tối đa 40 SoundBank mỗi lượt, mỗi file không quá 64 MiB. Ngoài so sánh các file trùng đường dẫn, báo cáo còn nhóm theo `BKHD Bank ID` để phát hiện các bản sao cùng identity dù tên file khác nhau; nếu cùng Bank ID nhưng payload khác, công cụ đối chiếu SHA-256 của media `DIDX/DATA` và HIRC object payload để đánh dấu `NEEDS_RULE`. Đây chỉ là inventory/xung đột identity: chưa giải mã HIRC reference graph, Event/Action semantics hoặc tạo SoundBank mới, và không cấp quyền ghép.
+
+
+### Persistent upload sessions (optional)
+
+By default, upload sessions and temporary ZIP files live in the instance's temporary filesystem and in-memory session registry. To restore interrupted uploads after an application restart, set `AOV_UPLOAD_STORAGE_DIR` to a writable persistent mount path. The application writes each upload session's metadata atomically beside its uploaded ZIP chunks and validates the files before restoring a session.
+
+For a Render service using a persistent disk, a typical configuration is:
+- Disk mount path: `/var/data`
+- Environment variable: `AOV_UPLOAD_STORAGE_DIR=/var/data/aki-aov-uploads`
+
+Render persistent disks require a paid service and restrict the service to one instance; they also disable zero-downtime deploys. Leave the variable unset to retain the existing ephemeral-storage behavior. A persistent disk does not provide shared storage for multiple service instances. See the [Render persistent disk documentation](https://render.com/docs/disks).
