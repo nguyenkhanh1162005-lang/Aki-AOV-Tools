@@ -91,6 +91,26 @@ class CompatibilityPlannerTests(unittest.TestCase):
         self.assertTrue(item["dependency_inventory_complete"])
         self.assertEqual(item["status"], "UNSUPPORTED")
 
+    def test_rejects_ambiguous_path_segments(self):
+        for path in ("folder//asset.bytes", "folder/./asset.bytes", "folder/"):
+            with self.subTest(path=path):
+                with self.assertRaises(CompatibilityPlanError):
+                    plan_resource_compatibility([resource(path, "a")])
+
+    def test_rejects_invalid_optional_metadata_types(self):
+        invalid_metadata = (
+            {"game_version": 1641},
+            {"platform": ["ios"]},
+            {"actor_id": True},
+            {"skin_id": -1},
+            {"is_aov_resource": "false"},
+            {"is_metadata_noise": 1},
+        )
+        for metadata in invalid_metadata:
+            with self.subTest(metadata=metadata):
+                with self.assertRaises(CompatibilityPlanError):
+                    plan_resource_compatibility([resource("asset.bytes", "a", **metadata)])
+
     def test_empty_plan_rejected(self):
         with self.assertRaises(CompatibilityPlanError):
             plan_resource_compatibility([])
