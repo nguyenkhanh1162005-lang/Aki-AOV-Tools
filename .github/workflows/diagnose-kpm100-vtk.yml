@@ -1,0 +1,35 @@
+name: Diagnose KPM100 and VTK relationship
+
+on:
+  push:
+    branches: [experiment/kpm100-vtk-diagnostic]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download original release ZIPs
+        env:
+          GH_TOKEN: \${{ github.token }}
+        run: |
+          mkdir -p incoming
+          gh release download aov-upload-01 --repo "$GITHUB_REPOSITORY" --dir incoming \
+            --pattern 'Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip' \
+            --pattern 'VTK.IOS.VIP.zip'
+      - name: Verify original SHA-256
+        run: |
+          echo "944d01f6a4e31dbaa7ea31c14d292b799818843a4e3533860b2e16ff4bb77aa0  incoming/Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip" | sha256sum -c -
+          echo "b78976a7d9c0d7ce2420fdd631cdf47136bc9b0f313fbfcbbb6cb9af3a582249  incoming/VTK.IOS.VIP.zip" | sha256sum -c -
+      - name: Run structural and payload mapping analysis
+        run: python tools/diagnose_kpm100_vtk.py | tee diagnostic-report.txt
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: kpm100-vtk-diagnostic
+          path: diagnostic-report.txt
+          retention-days: 7
