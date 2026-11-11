@@ -90,7 +90,6 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
                 or not isinstance(upload_id, str)
                 or len(upload_id) != 32
                 or any(ch not in "0123456789abcdef" for ch in upload_id)
-                or workdir.name != upload_id
                 or isinstance(created, bool)
                 or not isinstance(created, (int, float))
                 or not isinstance(files, list)
@@ -304,6 +303,7 @@ async def inspect_chunked_upload(upload_id: str, keep_session: bool = Query(Fals
         raise HTTPException(400, str(exc)) from exc
     finally:
         if not keep_session:
+            _remove_upload_session_metadata(session)
             shutil.rmtree(session["workdir"], ignore_errors=True)
             UPLOAD_SESSIONS.pop(upload_id, None)
 
@@ -342,7 +342,6 @@ async def decode_chunked_aov_bytes(upload_id: str):
     except AOVBytesArchiveError as exc:
         raise HTTPException(400, str(exc)) from exc
     _remove_upload_session_metadata(session)
-    _remove_upload_session_metadata(session)
     UPLOAD_SESSIONS.pop(upload_id, None)
     return FileResponse(
         path=output_path,
@@ -376,6 +375,7 @@ async def merge_chunked_upload(upload_id: str):
         await run_in_threadpool(merge_mod_archives, session["paths"], str(output_path))
     except ModPipelineError as exc:
         raise HTTPException(400, str(exc)) from exc
+    _remove_upload_session_metadata(session)
     UPLOAD_SESSIONS.pop(upload_id, None)
     return FileResponse(
         path=output_path,
