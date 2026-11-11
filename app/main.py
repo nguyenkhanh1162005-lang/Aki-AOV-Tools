@@ -395,7 +395,9 @@ async def verify_chunked_upload(upload_id: str):
             with zipfile.ZipFile(path, "r") as archive:
                 infos = archive.infolist()
                 archive_info["entries"] = len(infos)
-                archive.testzip()
+                bad_member = archive.testzip()
+                if bad_member:
+                    archive_info["crc_warning"] = f"CRC không khớp tại entry: {bad_member}"
                 archive_info["zip_directory_valid"] = True
         except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
             archive_info["crc_warning"] = str(exc)[:240]
