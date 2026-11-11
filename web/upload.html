@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101522"><title>Aki Upload · Tải ZIP lớn</title>
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;padding:20px;background:#101522;color:#eef2ff;font:16px system-ui,sans-serif;display:grid;place-items:center}.card{width:min(100%,680px);padding:24px;background:#1a2334;border:1px solid #34435d;border-radius:22px;box-shadow:0 18px 60px #0006}h1{margin:0 0 8px;font-size:27px}.muted{color:#aab7cc;line-height:1.55}.pick{display:block;margin:20px 0;padding:30px 16px;text-align:center;border:2px dashed #60789e;border-radius:16px;cursor:pointer}.pick input{display:none}button{width:100%;margin-top:10px;padding:14px;border:0;border-radius:12px;background:#7c9cff;color:#101522;font-weight:800;font-size:16px}button:disabled{opacity:.45}#files{white-space:pre-wrap;overflow-wrap:anywhere;color:#dbe5f5;font-size:14px}#status{min-height:26px;margin-top:16px;color:#dbe5f5;overflow-wrap:anywhere}.track{height:10px;margin:12px 0;background:#0e1522;border-radius:20px;overflow:hidden}.bar{height:100%;width:0;background:#7c9cff;transition:width .15s}.result{display:none;margin-top:18px;padding:14px;background:#122a27;border:1px solid #347866;border-radius:14px;overflow-wrap:anywhere}.result a{color:#9ed8c5}.hash{font:12px ui-monospace,monospace;word-break:break-all}.note{margin-top:18px;padding:12px;border-radius:12px;background:#342b1b;color:#f4d9a2;font-size:13px;line-height:1.5}
+</style></head>
+<body><main class="card">
+<h1>☁️ Aki Upload</h1>
+<p class="muted">Tải ZIP dung lượng lớn theo từng khối 1 MB. Nếu mạng ngắt, chọn lại đúng file để tiếp tục phần còn thiếu.</p>
+<label class="pick"><strong>📦 Chọn file ZIP từ iPhone</strong><p class="muted">Tối đa 10 file, tổng dung lượng 500 MB</p><input id="files" type="file" accept=".zip,application/zip" multiple></label>
+<div id="fileList">Chưa chọn file.</div>
+<div class="track"><div class="bar" id="bar"></div></div>
+<button id="upload" disabled>Tải lên và xác minh file</button>
+<div id="status" role="status"></div>
+<section id="result" class="result">
+<strong>✓ Đã nhận và xác minh file</strong>
+<p class="muted" style="margin:8px 0">Đường dẫn riêng của file. Giữ kín link này.</p>
+<div id="links"></div>
+</section>
+<div class="note">Lưu ý: máy chủ kiểm tra SHA-256 từng khối khi nhận, tính SHA-256 toàn file và đọc cấu trúc ZIP. Phiên tải tồn tại tối đa 1 giờ; nếu dịch vụ Render khởi động lại mà chưa có ổ lưu trữ bền vững, phiên có thể mất. Đây là kiểm tra tính toàn vẹn truyền tải, không phải xác nhận nội dung mod chạy trong game.</div>
+</main>
+<script>
+const CHUNK=1024*1024,MAX=500*1024*1024,KEY='aki-upload-verified-v1';
+const input=document.querySelector('#files'),button=document.querySelector('#upload'),status=document.querySelector('#status'),fileList=document.querySelector('#fileList'),bar=document.querySelector('#bar'),result=document.querySelector('#result'),links=document.querySelector('#links');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function hex(buf){return [...new Uint8Array(buf)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+async function request(url,options={},tries=4){
+ let last;
+ for(let i=0;i<tries;i++){
+  try{
+   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),60000);
+   let response;
+   try{response=await fetch(url,{...options,signal:controller.signal});}finally{clearTimeout(timer);}
+   if(response.ok)return response;
+   const body=await response.text();const error=new Error(body.slice(0,400)||('HTTP '+response.status));error.status=response.status;
+   if(![408,429,500,502,503,504].includes(response.status)||i===tries-1)throw error;
+   last=error;
+  }catch(e){last=e;if(e.status!==undefined||i===tries-1)throw e;}
+  status.textContent='Kết nối gián đoạn, đang thử lại '+(i+1)+'/'+(tries-1)+'...';
+  await sleep(800*(i+1));
+ }
+ throw last;
+}
+async function fingerprint(files){
+ const all=[];
+ for(const file of files){
+  const hashes=[];
+  for(let offset=0;offset<file.size;offset+=CHUNK){
+   const data=await file.slice(offset,Math.min(file.size,offset+CHUNK)).arrayBuffer();
+   hashes.push(hex(await crypto.subtle.digest('SHA-256',data)));
+   status.textContent='Đang tạo mã kiểm tra '+file.name+': '+Math.min(offset+data.byteLength,file.size)+' / '+file.size+' byte';
+  }
+  all.push({name:file.name,size:file.size,lastModified:file.lastModified||0,chunk_sha256:hashes});
+ }
+ return JSON.stringify(all);
+}
+function setProgress(done,total){bar.style.width=(total?Math.min(100,done/total*100):0)+'%';}
+input.addEventListener('change',()=>{
+ const files=[...input.files],total=files.reduce((n,f)=>n+f.size,0);
+ fileList.textContent=files.length?files.map(f=>f.name+' · '+(f.size/1048576).toFixed(2)+' MB').join('\n'):'Chưa chọn file.';
+ button.disabled=!files.length||files.length>10||total>MAX||files.some(f=>!f.name.toLowerCase().endsWith('.zip'));
+ result.style.display='none';status.textContent=files.length>10?'Tối đa 10 file.':total>MAX?'Tổng dung lượng vượt 500 MB.':'';
+ setProgress(0,total);
+});
+button.addEventListener('click',async()=>{
+ const files=[...input.files];if(!files.length)return;
+ button.disabled=true;result.style.display='none';links.replaceChildren();
+ try{
+  if(!window.crypto?.subtle)throw Error('Trình duyệt cần HTTPS để tạo SHA-256.');
+  const fingerprintText=await fingerprint(files),fingerprints=JSON.parse(fingerprintText);
+  let saved=null;try{saved=JSON.parse(localStorage.getItem(KEY)||'null')}catch{}
+  let uploadId=null,offsets=[];
+  if(saved?.fingerprint===fingerprintText&&saved.upload_id){
+   try{
+    const state=await request('/api/upload/'+encodeURIComponent(saved.upload_id)+'/status',{method:'GET'},2);
+    const data=await state.json();
+    if(data.files?.length===files.length&&data.files.every((x,i)=>x.name===files[i].name&&x.size===files[i].size)){
+     uploadId=saved.upload_id;offsets=data.files.map(x=>x.received);
+     status.textContent='Đã tìm thấy phiên tải trước, đang tiếp tục...';
+    }
+   }catch(e){if(e.status!==404)throw e;}
+  }
+  if(!uploadId){
+   const start=await request('/api/upload/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:fingerprints.map(x=>({name:x.name,size:x.size,chunk_sha256:x.chunk_sha256}))})});
+   const data=await start.json();uploadId=data.upload_id;offsets=files.map(()=>0);
+   localStorage.setItem(KEY,JSON.stringify({fingerprint:fingerprintText,upload_id:uploadId}));
+  }
+  const total=files.reduce((n,f)=>n+f.size,0);let sent=offsets.reduce((n,x)=>n+x,0);
+  for(let i=0;i<files.length;i++){
+   const file=files[i];
+   for(let offset=offsets[i];offset<file.size;offset+=CHUNK){
+    const part=file.slice(offset,Math.min(file.size,offset+CHUNK));
+    const response=await request('/api/upload/'+uploadId+'/'+i,{method:'PUT',headers:{'Content-Type':'application/octet-stream','X-Chunk-Offset':String(offset)},body:part});
+    const ack=await response.json(),expected=Math.min(offset+part.size,file.size);
+    if(ack.received!==expected)throw Error('Máy chủ xác nhận sai vị trí khối.');
+    sent+=part.size;setProgress(sent,total);
+    status.textContent='Đang tải '+file.name+' · '+(sent/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB';
+   }
+  }
+  status.textContent='Đang xác minh SHA-256 và cấu trúc ZIP trên máy chủ...';
+  const verified=await request('/api/upload/'+uploadId+'/verify',{method:'POST'});
+  const report=await verified.json();
+  if(!report.verified||report.files?.length!==files.length)throw Error('Máy chủ chưa xác minh đủ các file.');
+  links.replaceChildren();
+  for(const item of report.files){
+   const box=document.createElement('div');box.style.margin='14px 0';
+   const name=document.createElement('strong');name.textContent=item.name;
+   const hash=document.createElement('div');hash.className='hash';hash.textContent='SHA-256: '+item.sha256;
+   const detail=document.createElement('div');detail.className='muted';detail.textContent='Dung lượng: '+item.size+' byte · ZIP entries: '+item.entries+' · CRC: '+(item.crc_warning?'có cảnh báo trong nội dung ZIP':'không phát hiện lỗi');
+   const link=document.createElement('a');link.href=item.download_url;link.textContent='Mở / tải file gốc';link.target='_blank';link.rel='noopener';
+   box.append(name,hash,detail,link);links.append(box);
+  }
+  result.style.display='block';status.textContent='Hoàn tất. File đã được kiểm tra SHA-256 theo từng khối và có thể tải xuống bằng link riêng.';
+ }catch(e){status.textContent='Lỗi: '+e.message+' Nếu mạng bị ngắt, chọn lại đúng file để tiếp tục.';}
+ finally{button.disabled=!input.files.length||input.files.length>10||[...input.files].reduce((n,f)=>n+f.size,0)>MAX;}
+});
+</script></body></html>
