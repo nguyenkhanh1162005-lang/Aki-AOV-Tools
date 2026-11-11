@@ -340,6 +340,19 @@ def _assert_archive_inventory(
         raise AOVMergeError(f"Không thể xác minh cấu trúc {label}.") from exc
 
 
+def _publish_staged_archive(
+    staged_path: Path,
+    output_path: Path,
+    expected_names: set[str],
+) -> None:
+    """Validate a completed archive before atomically replacing the destination."""
+    if staged_path.stat().st_size > MAX_TOTAL_OUTPUT_BYTES:
+        raise AOVMergeError("ZIP kết quả vượt quá giới hạn 1 GiB.")
+    with zipfile.ZipFile(staged_path) as archive:
+        _assert_archive_inventory(archive, expected_names, "ZIP ngoài sau ghép")
+    os.replace(staged_path, output_path)
+
+
 def _copy_stream(source, destination) -> None:
     shutil.copyfileobj(source, destination, length=1024 * 1024)
 
@@ -614,24 +627,14 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                                 ) as dst:
                                     _copy_stream(src, dst)
 
-                    if staged_output.stat().st_size > MAX_TOTAL_OUTPUT_BYTES:
-                        raise AOVMergeError("ZIP kết quả vượt quá giới hạn 1 GiB.")
-                    with zipfile.ZipFile(staged_output) as check_outer:
-                        bad_outer = check_outer.testzip()
-                        if bad_outer:
-                            raise AOVMergeError(
-                                f"ZIP ngoài sau ghép lỗi CRC tại {bad_outer}"
-                            )
-                        _assert_archive_inventory(
-                            check_outer,
-                            {info.filename for info in base_outer.infolist()},
-                            "ZIP ngoài sau ghép",
-                        )
-
                     # Validate the serialized packer metadata before publishing.
                     packer_env = _load_unitypy_aov().load(replacements[PACKER_PATH])
                     _, packer_tree = _find_mono_behaviour(packer_env, "ResourcePackerInfoSetXML")
-                    os.replace(staged_output, output_path_obj)
+                    _publish_staged_archive(
+                        staged_output,
+                        output_path_obj,
+                        {info.filename for info in base_outer.infolist()},
+                    )
                 finally:
                     staged_output.unlink(missing_ok=True)
                 return {
