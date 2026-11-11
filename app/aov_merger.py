@@ -103,7 +103,7 @@ def _validate_archive_paths(zf: zipfile.ZipFile, label: str) -> None:
         canonical_path = path.as_posix()
         if canonical_path in seen_paths:
             raise AOVMergeError(
-                f"ZIP {label} có đường dẫn trùng lặp hoặc không phân biệt được: {canonical_path}"
+                f"ZIP {label} có đường dẫn tệp bị lặp hoặc không phân biệt được: {canonical_path}"
             )
         seen_paths.add(canonical_path)
 
