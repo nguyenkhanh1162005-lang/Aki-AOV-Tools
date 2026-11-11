@@ -61,6 +61,15 @@ class WwiseBNKInspectorTests(unittest.TestCase):
         self.assertEqual(report["media"]["new_overlay_ids"], [3])
         self.assertFalse(report["merge_authorized"])
 
+
+    def test_detects_bank_id_mismatch(self):
+        base = make_bank()
+        overlay = chunk("BKHD", struct.pack("<II", 134, 54321))
+        report = compare_wwise_bnk(base, overlay)
+        self.assertEqual(report["status"], "BANK_ID_CONFLICT")
+        self.assertFalse(report["bank_id_match"])
+        self.assertFalse(report["merge_authorized"])
+
     def test_rejects_chunk_length_past_end(self):
         malformed = b"BKHD" + struct.pack("<I", 99) + b"short"
         with self.assertRaisesRegex(WwiseBNKError, "vượt quá cuối file"):
