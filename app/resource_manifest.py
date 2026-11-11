@@ -27,10 +27,13 @@ class ResourceManifestError(ValueError):
 def _safe_path(name: str) -> str:
     normalized = name.replace("\\", "/")
     path = PurePosixPath(normalized)
-    if (not normalized or path.is_absolute() or ".." in path.parts
-            or "\x00" in normalized or (path.parts and path.parts[0].endswith(":"))):
-        raise ResourceManifestError(f"ZIP chứa đường dẫn không an toàn: {name}")
-    return normalized
+    raw_parts = normalized.split("/")
+    if (not normalized or path.is_absolute()
+            or any(part in {"", ".", ".."} for part in raw_parts)
+            or "\x00" in normalized
+            or (path.parts and path.parts[0].endswith(":"))):
+        raise ResourceManifestError(f"ZIP chứa đường dẫn không an toàn hoặc không chuẩn hóa: {name}")
+    return path.as_posix()
 
 
 def _hash_entry(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> str:
