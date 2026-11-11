@@ -1035,6 +1035,42 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertFalse(result["ready"])
         self.assertIn("Overlay Container", result["reason"])
 
+        malformed_overlay_pointer = metadata("overlay")
+        malformed_overlay_pointer["container_record_inventory"][0]["asset"]["path_id"] = True
+        result = build_assetbundle_metadata_merge_plan(base, malformed_overlay_pointer, rewritten)
+        self.assertFalse(result["ready"])
+        self.assertIn("Overlay Container", result["reason"])
+
+        malformed_remap = {
+            "ready": True,
+            "rewritten": {
+                "preload": [{"file_id": 0, "path_id": 1 << 63}],
+                "container": [{"file_id": 0, "path_id": 20}],
+                "main_asset": None,
+            },
+        }
+        result = build_assetbundle_metadata_merge_plan(base, overlay, malformed_remap)
+        self.assertFalse(result["ready"])
+        self.assertIn("remapped metadata", result["reason"])
+
+        overlay_with_main = metadata("overlay")
+        overlay_with_main["main_asset"] = {
+            "preload_index": 0,
+            "preload_size": 1,
+            "asset": {"file_id": 0, "path_id": 10},
+        }
+        invalid_main_remap = {
+            "ready": True,
+            "rewritten": {
+                "preload": [{"file_id": 0, "path_id": 20}],
+                "container": [{"file_id": 0, "path_id": 20}],
+                "main_asset": {"file_id": 0, "path_id": 1 << 63},
+            },
+        }
+        result = build_assetbundle_metadata_merge_plan(base, overlay_with_main, invalid_main_remap)
+        self.assertFalse(result["ready"])
+        self.assertIn("MainAsset", result["reason"])
+
         result = build_assetbundle_metadata_merge_plan(base, overlay, rewritten)
         self.assertTrue(result["ready"])
         self.assertEqual(result["preload_table"], [
