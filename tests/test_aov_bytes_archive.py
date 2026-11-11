@@ -60,6 +60,41 @@ class AOVBytesArchiveTests(unittest.TestCase):
                     archive.read(report["decoded"][0]["output_path"]), original
                 )
 
+    def test_expands_zip_inside_decoded_pkg_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            inner_payload = b"inner-aov-resource" * 25
+            inner_encoded = encrypt_aes_zstd_resource(
+                inner_payload, "InnerAsset.bytes"
+            )
+            package_path = folder / "CommonActions.zip"
+            with zipfile.ZipFile(package_path, "w") as package:
+                package.writestr("Actions/InnerAsset.bytes", inner_encoded)
+            package_bytes = package_path.read_bytes()
+            package_encoded = encrypt_aes_zstd_resource(
+                package_bytes, "CommonActions.pkg.bytes"
+            )
+            source = self._archive(folder / "wrapper.zip", {
+                "Resources.zip": self._archive(
+                    folder / "resources.zip",
+                    {"CommonActions.pkg.bytes": package_encoded},
+                ) and (folder / "resources.zip").read_bytes(),
+            })
+            output = folder / "decoded.zip"
+
+            report = decode_archive_resources([source], str(output))
+
+            self.assertEqual(report["nested_packages_expanded"], 1)
+            self.assertEqual(len(report["decoded"]), 2)
+            nested_record = next(
+                item for item in report["decoded"]
+                if item["path"] == "Actions/InnerAsset.bytes"
+            )
+            with zipfile.ZipFile(output) as archive:
+                self.assertEqual(
+                    archive.read(nested_record["output_path"]), inner_payload
+                )
+
     def test_reports_unrecognized_bytes_without_claiming_decode(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
