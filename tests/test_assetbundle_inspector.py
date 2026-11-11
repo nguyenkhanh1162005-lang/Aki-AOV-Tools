@@ -1101,5 +1101,68 @@ class AssetBundleInspectorTests(unittest.TestCase):
         ])
 
 
+    def test_metadata_merge_fails_closed_on_non_boolean_status_and_count_mismatch(self):
+        def metadata(prefix):
+            return {
+                "inspection_complete": True,
+                "assetbundle_name": "shared",
+                "preload_table_count": 1,
+                "container_entry_count": 1,
+                "preload_pointer_inventory": [
+                    {"file_id": 0, "path_id": 10, "source": "preload"}
+                ],
+                "container_record_inventory": [{
+                    "path": f"assets/{prefix}",
+                    "preload_index": 0,
+                    "preload_size": 1,
+                    "asset": {"file_id": 0, "path_id": 10},
+                }],
+                "main_asset": None,
+                "dependencies": [],
+            }
+
+        base = metadata("base")
+        overlay = metadata("overlay")
+        rewritten = {
+            "ready": True,
+            "rewritten": {
+                "preload": [{"file_id": 0, "path_id": 20}],
+                "container": [{"file_id": 0, "path_id": 20}],
+                "main_asset": None,
+            },
+        }
+
+        for bad_status in (1, "true", "yes"):
+            malformed = metadata("base")
+            malformed["inspection_complete"] = bad_status
+            result = build_assetbundle_metadata_merge_plan(malformed, overlay, rewritten)
+            self.assertFalse(result["ready"])
+            self.assertIn("incomplete", result["reason"])
+
+        malformed = metadata("base")
+        malformed["container_entry_count"] = 2
+        result = build_assetbundle_metadata_merge_plan(malformed, overlay, rewritten)
+        self.assertFalse(result["ready"])
+        self.assertIn("Container inventory count mismatch", result["reason"])
+
+        malformed = metadata("overlay")
+        malformed["container_entry_count"] = True
+        result = build_assetbundle_metadata_merge_plan(base, malformed, rewritten)
+        self.assertFalse(result["ready"])
+        self.assertIn("Container inventory count mismatch", result["reason"])
+
+        malformed = dict(rewritten)
+        malformed["ready"] = "true"
+        result = build_assetbundle_metadata_merge_plan(base, overlay, malformed)
+        self.assertFalse(result["ready"])
+        self.assertIn("remap validation", result["reason"])
+
+        malformed = metadata("overlay")
+        malformed["assetbundle_name"] = ["shared"]
+        result = build_assetbundle_metadata_merge_plan(base, malformed, rewritten)
+        self.assertFalse(result["ready"])
+        self.assertIn("name metadata", result["reason"])
+
+
 if __name__ == "__main__":
     unittest.main()
