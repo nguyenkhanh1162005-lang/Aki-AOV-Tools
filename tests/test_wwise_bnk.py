@@ -46,7 +46,7 @@ class WwiseBNKInspectorTests(unittest.TestCase):
     def test_uses_one_byte_hirc_type_from_version_49_onward(self):
         object_body = struct.pack("<I", 9003) + b"modern"
         modern_object = (
-            b"\\x02"
+            bytes([2])
             + struct.pack("<I", len(object_body))
             + object_body
         )
