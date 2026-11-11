@@ -21,6 +21,7 @@ from .assetbundle_inspector import verify_assetbundle_roundtrip, AssetBundleInsp
 from .adapter_registry import get_adapter_capabilities
 from .compatibility_planner import CompatibilityPlanError, plan_resource_compatibility
 from .resource_manifest import ResourceManifestError, build_resource_manifest
+from .aov_bytes_archive import AOVBytesArchiveError, decode_archive_resources
 
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -187,6 +188,33 @@ async def inspect_chunked_compatibility(upload_id: str):
         }
     except (ResourceManifestError, CompatibilityPlanError) as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/upload/{upload_id}/decode-bytes")
+async def decode_chunked_aov_bytes(upload_id: str):
+    """Extract supported decoded AoV .bytes resources without modifying source ZIPs."""
+    session = _get_upload_session(upload_id)
+    if any(item["received"] != item["size"] for item in session["files"]):
+        raise HTTPException(400, "File chưa tải lên đầy đủ.")
+    output_path = Path(session["workdir"]) / "aki-aov-decoded-resources.zip"
+    try:
+        report = await run_in_threadpool(
+            decode_archive_resources, session["paths"], str(output_path)
+        )
+    except AOVBytesArchiveError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    UPLOAD_SESSIONS.pop(upload_id, None)
+    return FileResponse(
+        path=output_path,
+        media_type="application/zip",
+        filename="aki-aov-decoded-resources.zip",
+        headers={
+            "X-AOV-Decoded-Resources": str(len(report["decoded"])),
+            "X-AOV-Unsupported-Resources": str(len(report["unsupported"])),
+            "X-AOV-Game-Tested": "false",
+        },
+        background=BackgroundTask(shutil.rmtree, session["workdir"], ignore_errors=True),
+    )
 
 
 @app.post("/api/upload/{upload_id}/merge")
