@@ -17,7 +17,7 @@ Công cụ web và Telegram bot dùng chung bộ xử lý ZIP, kiểm kê cấu 
 
 Chọn ZIP rồi bấm **Giải mã tài nguyên .bytes đã hỗ trợ**. Web gọi bộ giải mã AES-CBC/Zstandard hiện có, nhận diện theo header và tên tài nguyên, giải nén các mục `.bytes` hỗ trợ ra một ZIP riêng. Có thể đọc ZIP `Resources.zip` lồng nhau và tiếp tục bung các package `.pkg.bytes` sau giải mã nếu payload bên trong là ZIP, tối đa hai tầng lồng. ZIP nguồn không bị thay đổi; báo cáo `decode-report.json` ghi chế độ giải mã, kích thước, file chưa hỗ trợ và đường dẫn đầu ra. Payload MSES được phân tích thêm version, số field, số row và trạng thái checksum; `HeroSkin_1/2.bytes` được thử parse IFix để báo số FixInfo/method/type/string/field; payload `.pkg.bytes` dạng ZIP được bung tiếp và ghi số entry.
 
-Bộ lõi MSES v7 có parser, serializer, kiểm tra checksum và ghép theo khóa. Khi schema khác nhau, nó từ chối thêm row mới dạng opaque nếu chưa có adapter riêng chứng minh layout tương thích; chỉ giữ/ghi đè row đã xác định rõ. Đây là chốt an toàn, không phải cam kết ghép mọi bảng MSES.
+Bộ lõi MSES v7 có parser, serializer, kiểm tra checksum và ghép theo khóa. Mọi khóa row mới đều phải nằm trong allowlist cụ thể của bảng; schema khác nhau còn cần bật rõ quyền thêm row cho adapter đó. Soundbank chỉ nhận row có marker `Hero_LiXin_Skin_C`, `ResSkinSeniorLabelCfg` chỉ nhận key 59500, còn `skillcombine` hiện chưa có allowlist row mới đã xác minh nên sẽ từ chối nếu overlay thêm key. Đây là chốt an toàn, đồng nghĩa bộ ghép Vấn Tâm Kiếm có thể dừng ở bước MSES cho tới khi xác minh được schema/khóa skillcombine thực tế.
 
 Giới hạn: tối đa 20.000 entry, 1 GiB dữ liệu giải nén, 256 MiB mỗi entry và 256 MiB kích thước giải mã khai báo cho mỗi tài nguyên. Chức năng này chỉ trích xuất payload đã giải mã để kiểm tra/phân tích; không sửa MSES/IFix, không giải mã Unity AssetBundle hoặc Wwise BNK, không ghép skin và không tạo ZIP có thể cài vào game.
 
@@ -31,7 +31,7 @@ Bản hiện tại khóa theo đúng cặp tài nguyên đã kiểm tra:
 
 Engine thực hiện:
 - Ghép IFix của `Thanos/HeroSkin_2.bytes` vào `HeroSkin_1.bytes`, remap chỉ số type/method/field/string và kiểm tra lại patch.
-- Ghép các bảng MSES `BattleBank.bytes`, `LobbyBank.bytes`, `skillcombine.bytes` và `ResSkinSeniorLabelCfg.bytes` theo khóa dòng; giữ schema nền mới hơn và chỉ thay/thêm các dòng Vấn Tâm Kiếm cần thiết. Riêng checksum MSES nền của `ResSkinSeniorLabelCfg` đang cũ, engine chỉ sửa lại sau khi xác minh đủ 53 dòng và cấu trúc bảng.
+- Xử lý các bảng MSES `BattleBank.bytes`, `LobbyBank.bytes`, `skillcombine.bytes` và `ResSkinSeniorLabelCfg.bytes` theo khóa dòng với allowlist khóa mới riêng từng bảng. Soundbank chỉ thay/thêm row có marker skin LiXin; `ResSkinSeniorLabelCfg` chỉ nhận key 59500 và chỉ sửa checksum nền cũ sau khi xác minh đủ 53 dòng cùng cấu trúc bảng; `skillcombine` từ chối row mới cho tới khi có dữ liệu/fixture chứng minh khóa và layout hợp lệ.
 - Ghép track CommonActions dành cho skin ID 59500/59501.
 - Cập nhật ResourcePackerInfoSet cho 10 AssetBundle Vấn Tâm Kiếm; cập nhật CrcXor trong ResourceVerificationInfoSet cho các file VTK thực sự được đưa vào kết quả và giữ giá trị 1.64.1.12 cho những file chỉ khác do lệch phiên bản.
 - Thêm AssetBundle và soundbank iOS của Vấn Tâm Kiếm; giữ `KernelLua.pkg.bytes` và `StableSystems_3.pkg.bytes` của bản nền 1.64.1.12 để tránh hạ phiên bản hệ thống dùng chung.
