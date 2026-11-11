@@ -371,6 +371,23 @@ first_frame_at = first_member.find(bytes.fromhex("28b52ffd"))
 first_frame = first_member[first_frame_at:] if first_frame_at >= 0 else b""
 log(f"REPO_ZSTD_DICT bytes={len(REPO_ZSTD_DICT)} sha256={sha(REPO_ZSTD_DICT)} head={REPO_ZSTD_DICT[:16].hex()}")
 log(f"FIRST_KPM_FRAME offset={first_frame_at} member_bytes={len(first_member)} head={first_member[:40].hex()} frame_head={first_frame[:40].hex()} frame_bytes={len(first_frame)} expected={int.from_bytes(first_member[4:8], 'little') if len(first_member)>=8 else None}")
+import zstandard as zstd
+for dict_type_name, dict_type in (
+    ("auto", zstd.DICT_TYPE_AUTO),
+    ("raw", zstd.DICT_TYPE_RAWCONTENT),
+):
+    try:
+        zd = zstd.ZstdCompressionDict(REPO_ZSTD_DICT, dict_type=dict_type)
+        raw = zstd.ZstdDecompressor(dict_data=zd).decompress(first_frame)
+        log(f"ZSTANDARD_REFERENCE {dict_type_name}=SUCCESS:{len(raw)}")
+    except Exception as exc:
+        log(f"ZSTANDARD_REFERENCE {dict_type_name}={type(exc).__name__}:{str(exc)[:160]}")
+try:
+    params = zstd.get_frame_parameters(first_frame)
+    log(f"ZSTANDARD_FRAME_PARAMS content_size={params.content_size} dict_id={params.dict_id} checksum={params.has_checksum} window_size={params.window_size}")
+except Exception as exc:
+    log(f"ZSTANDARD_FRAME_PARAMS_ERROR {type(exc).__name__}:{str(exc)[:160]}")
+
 dict_resources = {}
 for candidate_path, resource_name in (
     (PREFIX + "Config/bytesDict.bytes", "bytesDict.bytes"),
