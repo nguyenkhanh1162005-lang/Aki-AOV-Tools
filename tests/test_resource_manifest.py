@@ -61,6 +61,17 @@ class ResourceManifestTests(unittest.TestCase):
             )
             self.assertEqual(result["resource_count"], 4)
 
+    def test_infers_version_and_platform_from_archive_filename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._zip(
+                Path(tmp),
+                "mod-pack-1.64.1.12-ios.zip",
+                {"skin/hero.bytes": b"opaque"},
+            )
+            item = build_resource_manifest([source])["resources"][0]
+            self.assertEqual(item["game_version"], "1.64.1.12")
+            self.assertEqual(item["platform"], "ios")
+
     def test_marks_macos_appledouble_files_as_metadata_noise(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = self._zip(Path(tmp), "mac-pack.zip", {
