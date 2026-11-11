@@ -86,6 +86,38 @@ class AOVResourceMergeTests(unittest.TestCase):
         with self.assertRaisesRegex(AOVResourceMergeError, "ngoài allowlist theo bảng"):
             merge_aov_mses_resource(base, overlay, name)
 
+    def test_res_skin_rejects_unrelated_overlay_only_key(self):
+        name = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
+        base_rows = [struct.pack("<I", key) + f"row-{key}".encode() for key in range(1, 54)]
+        overlay_rows = [
+            base_rows[0],
+            struct.pack("<I", 59500) + b"VTK-skin-row",
+            struct.pack("<I", 59501) + b"unrelated-row",
+        ]
+        base = encode_aov_resource(table(69, base_rows), name, "aes")
+        overlay = encode_aov_resource(table(63, overlay_rows), name, "aes")
+        with self.assertRaisesRegex(AOVResourceMergeError, "ngoài allowlist theo bảng"):
+            merge_aov_mses_resource(
+                base, overlay, name, allow_invalid_base_checksum=True
+            )
+
+    def test_res_skin_rejects_unverified_conflict_for_existing_59500(self):
+        name = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
+        base_rows = [
+            struct.pack("<I", key) + f"row-{key}".encode()
+            for key in range(1, 53)
+        ] + [struct.pack("<I", 59500) + b"base-skin-row"]
+        overlay_rows = [
+            struct.pack("<I", 1) + b"row-1",
+            struct.pack("<I", 59500) + b"overlay-skin-row",
+        ]
+        base = encode_aov_resource(table(69, base_rows), name, "aes")
+        overlay = encode_aov_resource(table(63, overlay_rows), name, "aes")
+        with self.assertRaisesRegex(AOVResourceMergeError, "chưa có quy tắc ghi đè an toàn"):
+            merge_aov_mses_resource(
+                base, overlay, name, allow_invalid_base_checksum=True
+            )
+
     def test_sound_bank_requires_vtk_lixin_skin_row(self):
         name = "Databin/Client/Sound/LobbyBank.bytes"
         base = encode_aov_resource(table(3, [struct.pack("<I", 1) + b"base"]), name, "aes")
