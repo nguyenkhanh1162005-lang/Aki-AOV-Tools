@@ -568,9 +568,7 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                         added_files.append(destination)
 
                 with zipfile.ZipFile(inner_output_path) as check_inner:
-                    expected_inner_names = base_names | {
-                        BASE_PREFIX + name for name in added_files
-                    }
+                    expected_inner_names = base_names | set(added_files)
                     _assert_archive_inventory(
                         check_inner, expected_inner_names, "Resources.zip sau ghép"
                     )
