@@ -47,9 +47,22 @@ def _hash_entry(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> str:
     return digest.hexdigest()
 
 
+def _is_metadata_noise(path: str) -> bool:
+    normalized = path.replace("\\\\", "/")
+    leaf = PurePosixPath(normalized).name
+    return (
+        normalized.startswith("__MACOSX/")
+        or "/__MACOSX/" in normalized
+        or leaf == ".DS_Store"
+        or leaf.startswith("._")
+    )
+
+
 def _classify(path: str, detected: str) -> tuple[str, bool]:
     lower = path.lower()
     name = PurePosixPath(lower).name
+    if _is_metadata_noise(path):
+        return "metadata_noise", False
     is_aov = (
         "resources/" in lower
         or lower.endswith((".bytes", ".assetbundle", ".bnk", ".wem"))
@@ -113,6 +126,7 @@ def _build_manifest_item(
         "size": info.file_size,
         "crc32": f"{info.CRC:08x}",
         "is_aov_resource": is_aov,
+        "is_metadata_noise": fmt == "metadata_noise",
         "archive_depth": archive_depth,
     }
     if container_path:
