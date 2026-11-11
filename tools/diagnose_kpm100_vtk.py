@@ -249,15 +249,16 @@ for row in mapping_rows:
         import pyzstd
         from app.aov_zstd_dict import ZSTD_DICT
         frame = member_data[member_data.find(bytes.fromhex("28b52ffd")):]
-        variants = [
-            ("repo_raw_dict", pyzstd.ZstdDict(ZSTD_DICT, is_raw=True)),
-            ("repo_full_dict", pyzstd.ZstdDict(ZSTD_DICT, is_raw=False)),
-            ("tail_raw_dict", pyzstd.ZstdDict(ZSTD_DICT[8:], is_raw=True)),
-            ("tail_full_dict", pyzstd.ZstdDict(ZSTD_DICT[8:], is_raw=False)),
+        variant_inputs = [
+            ("repo_raw_full", ZSTD_DICT),
+            ("repo_raw_tail8", ZSTD_DICT[8:]),
+            ("repo_raw_tail4", ZSTD_DICT[4:]),
+            ("repo_raw_tail12", ZSTD_DICT[12:]),
         ]
         variant_results = []
-        for variant_name, dictionary in variants:
+        for variant_name, raw_dictionary in variant_inputs:
             try:
+                dictionary = pyzstd.ZstdDict(raw_dictionary, is_raw=True)
                 raw_test = pyzstd.decompress(frame, dictionary)
                 variant_results.append(f"{variant_name}=OK:{len(raw_test)}")
             except Exception as exc:
