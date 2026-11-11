@@ -103,6 +103,55 @@ def plan_resource_compatibility(resources: list[dict[str, Any]]) -> dict[str, An
     for item in validated:
         grouped[item["path"]].append(item)
 
+    # Compare version/platform metadata across whole input archives as well as
+    # per-path. Different archives can conflict even when their resource paths do
+    # not overlap, so a path-only comparison would miss this case.
+    source_profiles: dict[str, dict[str, set[str]]] = {}
+    for item in validated:
+        profile = source_profiles.setdefault(
+            item["source"], {"game_versions": set(), "platforms": set()}
+        )
+        if item.get("game_version") not in (None, ""):
+            profile["game_versions"].add(str(item["game_version"]))
+        if item.get("platform") not in (None, ""):
+            profile["platforms"].add(str(item["platform"]).lower())
+
+    all_versions = {
+        value for profile in source_profiles.values() for value in profile["game_versions"]
+    }
+    all_platforms = {
+        value for profile in source_profiles.values() for value in profile["platforms"]
+    }
+    mixed_sources = [
+        source for source, profile in sorted(source_profiles.items())
+        if len(profile["game_versions"]) > 1 or len(profile["platforms"]) > 1
+    ]
+    source_conflicts = []
+    if len(all_versions) > 1:
+        source_conflicts.append("Các ZIP đầu vào có metadata phiên bản game khác nhau.")
+    if len(all_platforms) > 1:
+        source_conflicts.append("Các ZIP đầu vào có metadata nền tảng khác nhau.")
+    if mixed_sources:
+        source_conflicts.append(
+            "Một hoặc nhiều ZIP chứa resource được gắn nhiều phiên bản/nền tảng: "
+            + ", ".join(mixed_sources)
+        )
+    source_compatibility = {
+        "status": "VERSION_CONFLICT" if source_conflicts else "NO_CONFLICT_DETECTED",
+        "game_versions": sorted(all_versions),
+        "platforms": sorted(all_platforms),
+        "mixed_sources": mixed_sources,
+        "sources": [
+            {
+                "source": source,
+                "game_versions": sorted(profile["game_versions"]),
+                "platforms": sorted(profile["platforms"]),
+            }
+            for source, profile in sorted(source_profiles.items())
+        ],
+        "reasons": source_conflicts,
+    }
+
     results = []
     for path, entries in sorted(grouped.items()):
         versions = {str(item.get("game_version")) for item in entries if item.get("game_version") not in (None, "")}
@@ -189,5 +238,6 @@ def plan_resource_compatibility(resources: list[dict[str, Any]]) -> dict[str, An
         "resource_count": len(validated),
         "path_count": len(results),
         "summary": counts,
+        "source_compatibility": source_compatibility,
         "resources": results,
     }
