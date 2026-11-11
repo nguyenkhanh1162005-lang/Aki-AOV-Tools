@@ -57,6 +57,25 @@ class ModPipelineTests(unittest.TestCase):
             with self.assertRaisesRegex(ModPipelineError, "không an toàn"):
                 _archive_profile(source)
 
+    def test_rejects_ambiguous_and_duplicate_archive_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            for unsafe_name in ("folder/./asset.bytes", "folder//asset.bytes"):
+                with self.subTest(path=unsafe_name):
+                    source = self._zip(folder, "ambiguous.zip", {
+                        unsafe_name: b"payload",
+                    })
+                    with self.assertRaisesRegex(ModPipelineError, "không an toàn"):
+                        _archive_profile(source)
+                    Path(source).unlink()
+
+            duplicate = folder / "duplicate.zip"
+            with zipfile.ZipFile(duplicate, "w") as archive:
+                archive.writestr("same.bytes", b"first")
+                archive.writestr("same.bytes", b"second")
+            with self.assertRaisesRegex(ModPipelineError, "trùng lặp"):
+                _archive_profile(str(duplicate))
+
     def test_generic_archives_merge_new_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
