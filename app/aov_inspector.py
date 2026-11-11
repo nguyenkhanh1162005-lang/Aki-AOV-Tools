@@ -7,7 +7,7 @@ from collections import Counter
 from pathlib import Path, PurePosixPath
 
 from .aov_format_detector import detect_resource_format, summarize_formats
-from .wwise_bnk import WwiseBNKError, inspect_wwise_bnk
+from .wwise_bnk import WwiseBNKError, compare_wwise_bnk, inspect_wwise_bnk
 from .assetbundle_inspector import (
     AssetBundleInspectError,
     compare_assetbundle_overlays,
@@ -76,6 +76,7 @@ def inspect_archives(paths: list[str]) -> str:
     bank_files: list[tuple[str, int, int]] = []
     detected_formats: list[tuple[str, str]] = []
     wwise_reports: list[tuple[str, dict | str]] = []
+    wwise_comparisons: list[tuple[str, dict | str]] = []
     assetbundle_reports: list[tuple[str, dict | str]] = []
     assetbundle_comparisons: list[tuple[str, dict | str]] = []
 
@@ -143,6 +144,34 @@ def inspect_archives(paths: list[str]) -> str:
                 )
 
         inventories.append((Path(path).name, files, extensions, important))
+
+    # Compare a small number of same-path Wwise banks across input ZIPs.
+    compared_banks = 0
+    for name, sources in collisions.items():
+        if compared_banks >= 10 or Path(name).suffix.lower() != ".bnk":
+            continue
+        unique_sources = []
+        seen_archives = set()
+        for filename, source_path, size, crc, info in sources:
+            if source_path not in seen_archives:
+                unique_sources.append((filename, source_path, size, info))
+                seen_archives.add(source_path)
+        if len(unique_sources) < 2:
+            continue
+        left, right = unique_sources[:2]
+        label = f"{name} [{left[0]} vs {right[0]}]"
+        if left[2] > MAX_BNK_INSPECT_BYTES or right[2] > MAX_BNK_INSPECT_BYTES:
+            wwise_comparisons.append((label, "Bỏ qua so sánh sâu: ít nhất một BNK vượt quá 64 MiB."))
+            compared_banks += 1
+            continue
+        try:
+            with zipfile.ZipFile(left[1], "r") as left_zip, zipfile.ZipFile(right[1], "r") as right_zip:
+                left_data = left_zip.read(left[3])
+                right_data = right_zip.read(right[3])
+            wwise_comparisons.append((label, compare_wwise_bnk(left_data, right_data)))
+        except (WwiseBNKError, RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
+            wwise_comparisons.append((label, f"Không thể so sánh an toàn: {exc}"))
+        compared_banks += 1
 
     # Compare only a small number of same-path AssetBundles across input ZIPs.
     # This is a structural report, not an authorization to merge their objects.
@@ -221,6 +250,31 @@ def inspect_archives(paths: list[str]) -> str:
     else:
         lines.append("- Không tìm thấy Wwise BNK có chữ ký BKHD để phân tích.")
     lines.append("- Chỉ kiểm tra cấu trúc và chỉ mục; chưa chỉnh sửa hoặc hợp nhất SoundBank.")
+    lines.extend(["", "ĐỐI CHIẾU WWISE BNK TRÙNG ĐƯỜNG DẪN"])
+    if wwise_comparisons:
+        for name, result in wwise_comparisons:
+            lines.append(f"- {name}")
+            if isinstance(result, str):
+                lines.append(f"  • {result}")
+            else:
+                lines.append(
+                    f"  • Trạng thái: {result['status']} | "
+                    f"Version khớp: {result['bank_versions_match']}"
+                )
+                lines.append(
+                    f"  • Media ID trùng: {len(result['media']['shared_ids'])} | "
+                    f"payload đổi: {len(result['media']['changed_payload_ids'])} | "
+                    f"ID mới: {len(result['media']['new_overlay_ids'])}"
+                )
+                lines.append(
+                    f"  • HIRC ID trùng: {len(result['hirc']['shared_ids'])} | "
+                    f"payload đổi: {len(result['hirc']['changed_payload_ids'])} | "
+                    f"ID mới: {len(result['hirc']['new_overlay_ids'])}"
+                )
+                lines.append("  • " + result["scope"])
+    else:
+        lines.append("- Không có cặp BNK trùng đường dẫn giữa các ZIP để đối chiếu.")
+    lines.append("- Đối chiếu chỉ mang tính tư vấn; không giải mã HIRC reference graph hoặc cấp quyền ghép BNK.")
 
     lines.extend(["", "KIỂM TRA CẤU TRÚC VÀ PHỤ THUỘC ASSETBUNDLE"])
     if assetbundle_reports:
