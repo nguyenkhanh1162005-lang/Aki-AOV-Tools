@@ -57,10 +57,18 @@ class WwiseBNKInspectorTests(unittest.TestCase):
             return make_bank(didx, data, hirc)
 
         report = compare_wwise_bnk(bank(1, b"a", 2), bank(3, b"b", 2))
-        self.assertEqual(report["status"], "INSPECTED_ONLY")
+        self.assertEqual(report["status"], "NEEDS_RULE")
         self.assertEqual(report["media"]["new_overlay_ids"], [3])
+        self.assertFalse(report["bank_payload_identical"])
         self.assertFalse(report["merge_authorized"])
 
+
+    def test_identical_bank_bytes_are_reported_as_exact_duplicate(self):
+        bank = make_bank()
+        report = compare_wwise_bnk(bank, bank)
+        self.assertEqual(report["status"], "IDENTICAL_BANK_PAYLOAD")
+        self.assertTrue(report["bank_payload_identical"])
+        self.assertTrue(report["bank_id_match"])
 
     def test_detects_bank_id_mismatch(self):
         base = make_bank()
