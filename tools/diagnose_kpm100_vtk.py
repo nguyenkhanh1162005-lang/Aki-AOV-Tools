@@ -324,6 +324,7 @@ for row in mapping_rows:
         f"PAYLOAD {payload_name} role={row['role']} entry={entry_name} "
         f"wrapper_member={member_name} wrapped_bytes={len(member_data)} "
         f"base_mode={base_mode} base_decoded={len(decoded_base) if decoded_base is not None else None} "
+        f"base_head={decoded_base[:96].hex() if decoded_base is not None else None} "
         f"vtk_mode={vtk_mode} vtk_decoded={len(decoded_vtk) if decoded_vtk is not None else None} "
         f"base_xml={parse_base} vtk_xml={parse_vtk} base_pkg_size={base_pkg_size} "
         f"base_payload_equals_base_package={base_pkg_match} "
