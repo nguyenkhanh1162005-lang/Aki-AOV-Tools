@@ -28,6 +28,7 @@ class MSESTests(unittest.TestCase):
         output, report = merge_mses_rows(
             base, overlay, allow_schema_mismatch=True,
             allow_new_rows_across_schema_mismatch=True,
+            allowed_new_keys={3},
         )
         parsed = parse_mses(output)
         self.assertEqual(parsed.field_count, 4)
@@ -50,6 +51,21 @@ class MSESTests(unittest.TestCase):
         ])
         with self.assertRaisesRegex(MSESError, "bản ghi mới chưa được chứng minh tương thích"):
             merge_mses_rows(base, overlay, allow_schema_mismatch=True)
+
+    def test_rejects_new_key_outside_explicit_allowlist(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(3, [
+            struct.pack("<I", 1) + b"base",
+            struct.pack("<I", 2) + b"approved-looking",
+            struct.pack("<I", 3) + b"unrelated",
+        ])
+        with self.assertRaisesRegex(MSESError, "ngoài allowlist theo bảng"):
+            merge_mses_rows(
+                base, overlay,
+                allow_schema_mismatch=True,
+                allow_new_rows_across_schema_mismatch=True,
+                allowed_new_keys={2},
+            )
 
     def test_rejects_non_uint32_override_keys(self):
         base = make_table(4, [struct.pack("<I", 1) + b"base"])
