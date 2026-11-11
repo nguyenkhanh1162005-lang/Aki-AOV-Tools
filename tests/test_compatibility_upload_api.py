@@ -59,6 +59,40 @@ class CompatibilityUploadAPITests(unittest.TestCase):
             self.assertEqual(archive_path.read_bytes(), original_bytes)
             self.assertIn(upload_id, main.UPLOAD_SESSIONS)
 
+    def test_api_reports_archive_wide_version_conflict_from_zip_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            paths = []
+            for name, resource_name in (
+                ("skin-1.64.1.12-ios.zip", "skin-a.bytes"),
+                ("skin-1.65.1.1-ios.zip", "skin-b.bytes"),
+            ):
+                archive_path = folder / name
+                with zipfile.ZipFile(archive_path, "w") as archive:
+                    archive.writestr(resource_name, b"opaque")
+                paths.append(archive_path)
+
+            upload_id = "compatibility-api-multi-source"
+            main.UPLOAD_SESSIONS[upload_id] = {
+                "created": time.time(),
+                "workdir": str(folder),
+                "files": [
+                    {"name": path.name, "size": path.stat().st_size,
+                     "received": path.stat().st_size}
+                    for path in paths
+                ],
+                "paths": [str(path) for path in paths],
+            }
+
+            result = asyncio.run(main.inspect_chunked_compatibility(upload_id))
+
+            compatibility = result["compatibility_plan"]["source_compatibility"]
+            self.assertEqual(compatibility["status"], "VERSION_CONFLICT")
+            self.assertEqual(
+                compatibility["game_versions"], ["1.64.1.12", "1.65.1.1"]
+            )
+            self.assertIn(upload_id, main.UPLOAD_SESSIONS)
+
     def test_incomplete_upload_is_rejected_before_inspection(self):
         with tempfile.TemporaryDirectory() as tmp:
             archive_path = Path(tmp) / "partial.zip"
