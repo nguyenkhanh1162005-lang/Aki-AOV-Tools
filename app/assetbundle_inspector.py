@@ -975,6 +975,10 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
         source_file = serialized_by_exact_name.get(reference["from_file"])
         file_id = reference["file_id"]
         path_id = reference["path_id"]
+        # A null PPtr is intentionally unresolved and must not count as a
+        # missing local object or an external dependency.
+        if path_id == 0:
+            continue
         if file_id == 0:
             if source_file is not None and path_id in (getattr(source_file, "objects", {}) or {}):
                 reference_integrity["local_resolved"] += 1
