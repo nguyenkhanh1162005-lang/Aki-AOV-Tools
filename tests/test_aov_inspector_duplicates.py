@@ -170,6 +170,48 @@ class AOVInspectorDuplicateTests(unittest.TestCase):
             self.assertIn("payload đổi: 1", report)
             self.assertIn("không giải mã HIRC reference graph", report)
 
+
+    def test_groups_identical_wwise_banks_by_bank_id_across_different_paths(self):
+        import struct
+
+        def chunk(name, payload):
+            return name.encode("ascii") + struct.pack("<I", len(payload)) + payload
+
+        bank = chunk("BKHD", struct.pack("<II", 134, 12345))
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            path = self._zip(folder, "aliases.zip", {
+                "Sound/iOS/Hero_LiXin_Show.bnk": bank,
+                "Sound/iOS/Hero_Sinon_Show.bnk": bank,
+            })
+            report = inspect_archives([path])
+            self.assertIn("ĐỐI CHIẾU WWISE THEO BANK ID", report)
+            self.assertIn("Bank ID 12345", report)
+            self.assertIn("2 đường dẫn, chỉ 1 payload SHA-256 duy nhất", report)
+
+    def test_reports_changed_payloads_for_same_wwise_bank_id_across_paths(self):
+        import struct
+
+        def chunk(name, payload):
+            return name.encode("ascii") + struct.pack("<I", len(payload)) + payload
+
+        def bank(audio):
+            header = chunk("BKHD", struct.pack("<II", 134, 12345))
+            didx = chunk("DIDX", struct.pack("<III", 77, 0, len(audio)))
+            data = chunk("DATA", audio)
+            return header + didx + data
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            path = self._zip(folder, "conflicts.zip", {
+                "Sound/iOS/Hero_LiXin_Show.bnk": bank(b"audio-a"),
+                "Sound/iOS/Hero_Sinon_Show.bnk": bank(b"audio-b"),
+            })
+            report = inspect_archives([path])
+            self.assertIn("Bank ID 12345", report)
+            self.assertIn("Trạng thái: NEEDS_RULE", report)
+            self.assertIn("Media payload đổi: 1", report)
+
     def test_reports_identical_duplicate_by_sha256(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
