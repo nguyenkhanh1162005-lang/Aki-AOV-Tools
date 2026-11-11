@@ -33,8 +33,11 @@ import lzma
 
 def parse_vtk_table(name, b):
     try:
-        # Header ends after flags; format 8 / Unity 2022 aligns to 16 bytes.
-        pos=49
+        # Parse the variable-length UnityFS strings before reading the fixed header.
+        pos=8
+        _version=struct.unpack_from(">I",b,pos)[0]; pos+=4
+        _player,pos=cstr(b,pos)
+        _engine,pos=cstr(b,pos)
         size=struct.unpack_from(">Q",b,pos)[0]; pos+=8
         csize,usize,flags=struct.unpack_from(">III",b,pos); pos+=12
         pos=(pos+15)&~15
