@@ -125,6 +125,52 @@ class HTTPUploadMergeFlowTests(unittest.TestCase):
 
             self.assertNotIn(upload_id, main.UPLOAD_SESSIONS)
 
+    def test_http_upload_resume_uses_server_offset_and_accepts_identical_retry(self):
+        payload = _zip_bytes("docs/resume.txt", b"resumable upload")
+        split = len(payload) // 2
+        first_chunk, second_chunk = payload[:split], payload[split:]
+        with TestClient(main.app) as client:
+            started = client.post("/api/upload/start", json={
+                "files": [{"name": "resume.zip", "size": len(payload)}]
+            })
+            self.assertEqual(started.status_code, 200)
+            upload_id = started.json()["upload_id"]
+
+            first = client.put(
+                f"/api/upload/{upload_id}/0",
+                content=first_chunk,
+                headers={"X-Chunk-Offset": "0"},
+            )
+            self.assertEqual(first.status_code, 200)
+            self.assertEqual(first.json()["received"], split)
+
+            status = client.get(f"/api/upload/{upload_id}/status")
+            self.assertEqual(status.status_code, 200)
+            self.assertEqual(status.json()["files"][0]["received"], split)
+
+            retry = client.put(
+                f"/api/upload/{upload_id}/0",
+                content=first_chunk,
+                headers={"X-Chunk-Offset": "0"},
+            )
+            self.assertEqual(retry.status_code, 200)
+            self.assertEqual(retry.json()["received"], split)
+
+            resumed = client.put(
+                f"/api/upload/{upload_id}/0",
+                content=second_chunk,
+                headers={"X-Chunk-Offset": str(split)},
+            )
+            self.assertEqual(resumed.status_code, 200)
+            self.assertEqual(resumed.json()["received"], len(payload))
+
+            merged = client.post(f"/api/upload/{upload_id}/merge")
+            self.assertEqual(merged.status_code, 200)
+            with zipfile.ZipFile(io.BytesIO(merged.content)) as archive:
+                self.assertEqual(archive.read("docs/resume.txt"), b"resumable upload")
+                self.assertIsNone(archive.testzip())
+            self.assertNotIn(upload_id, main.UPLOAD_SESSIONS)
+
     def test_http_merge_rejects_incomplete_upload_without_discarding_session(self):
         payload = _zip_bytes("docs/readme.txt", b"hello")
         with TestClient(main.app) as client:
