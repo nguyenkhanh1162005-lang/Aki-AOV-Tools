@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import io
+import os
 import shutil
 import stat
 import sys
@@ -580,41 +581,59 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                         if BASE_PREFIX + asset_path not in final_names:
                             raise AOVMergeError(f"ZIP kết quả thiếu assetbundle: {asset_path}")
 
-                # Rebuild the original wrapper, retaining its folder layout and skin list.
+                # Write to a sibling temporary file and publish atomically only
+                # after every structural check succeeds. A failed merge must not
+                # leave a truncated ZIP at the caller's requested output path.
                 output_path_obj = Path(output_path)
                 output_path_obj.parent.mkdir(parents=True, exist_ok=True)
-                with zipfile.ZipFile(output_path_obj, "w") as out_outer:
-                    for info in base_outer.infolist():
-                        if info.is_dir():
-                            out_outer.writestr(info, b"")
-                        elif info.filename == resources_info.filename:
-                            with open(inner_output_path, "rb") as src, out_outer.open(
-                                info, "w", force_zip64=True
-                            ) as dst:
-                                _copy_stream(src, dst)
-                        elif info.filename == skin_info.filename:
-                            original = base_outer.read(info.filename).decode("utf-8-sig", errors="replace").rstrip()
-                            if "Vấn Tâm Kiếm" not in original:
-                                original += "\nLý Tín - Vấn Tâm Kiếm (Actor 595)"
-                            out_outer.writestr(info, (original + "\n").encode("utf-8"))
-                        else:
-                            with base_outer.open(info, "r") as src, out_outer.open(
-                                info, "w", force_zip64=True
-                            ) as dst:
-                                _copy_stream(src, dst)
+                fd, staged_name = tempfile.mkstemp(
+                    prefix=f".{output_path_obj.name}.",
+                    suffix=".tmp",
+                    dir=str(output_path_obj.parent),
+                )
+                os.close(fd)
+                staged_output = Path(staged_name)
+                try:
+                    with zipfile.ZipFile(staged_output, "w") as out_outer:
+                        for info in base_outer.infolist():
+                            if info.is_dir():
+                                out_outer.writestr(info, b"")
+                            elif info.filename == resources_info.filename:
+                                with open(inner_output_path, "rb") as src, out_outer.open(
+                                    info, "w", force_zip64=True
+                                ) as dst:
+                                    _copy_stream(src, dst)
+                            elif info.filename == skin_info.filename:
+                                original = base_outer.read(info.filename).decode("utf-8-sig", errors="replace").rstrip()
+                                if "Vấn Tâm Kiếm" not in original:
+                                    original += "\nLý Tín - Vấn Tâm Kiếm (Actor 595)"
+                                out_outer.writestr(info, (original + "\n").encode("utf-8"))
+                            else:
+                                with base_outer.open(info, "r") as src, out_outer.open(
+                                    info, "w", force_zip64=True
+                                ) as dst:
+                                    _copy_stream(src, dst)
 
-                if output_path_obj.stat().st_size > MAX_TOTAL_OUTPUT_BYTES:
-                    output_path_obj.unlink(missing_ok=True)
-                    raise AOVMergeError("ZIP kết quả vượt quá giới hạn 1 GiB.")
-                with zipfile.ZipFile(output_path_obj) as check_outer:
-                    _assert_archive_inventory(
-                        check_outer,
-                        {info.filename for info in base_outer.infolist()},
-                        "ZIP ngoài sau ghép",
-                    )
+                    if staged_output.stat().st_size > MAX_TOTAL_OUTPUT_BYTES:
+                        raise AOVMergeError("ZIP kết quả vượt quá giới hạn 1 GiB.")
+                    with zipfile.ZipFile(staged_output) as check_outer:
+                        bad_outer = check_outer.testzip()
+                        if bad_outer:
+                            raise AOVMergeError(
+                                f"ZIP ngoài sau ghép lỗi CRC tại {bad_outer}"
+                            )
+                        _assert_archive_inventory(
+                            check_outer,
+                            {info.filename for info in base_outer.infolist()},
+                            "ZIP ngoài sau ghép",
+                        )
 
-                packer_env = _load_unitypy_aov().load(replacements[PACKER_PATH])
-                _, packer_tree = _find_mono_behaviour(packer_env, "ResourcePackerInfoSetXML")
+                    # Validate the serialized packer metadata before publishing.
+                    packer_env = _load_unitypy_aov().load(replacements[PACKER_PATH])
+                    _, packer_tree = _find_mono_behaviour(packer_env, "ResourcePackerInfoSetXML")
+                    os.replace(staged_output, output_path_obj)
+                finally:
+                    staged_output.unlink(missing_ok=True)
                 return {
                     "output": str(output_path_obj),
                     "base_version": BASE_VERSION,
