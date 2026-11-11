@@ -27,3 +27,51 @@ for zpath in pathlib.Path("incoming").glob("*.zip"):
         for i in z.infolist():
             if targets.search(i.filename) and i.file_size<25_000_000:
                 print("\n".join(inspect(i.filename,z.read(i))))
+
+# Deep-decode VTK UnityFS block tables (standard, non-encrypted candidates)
+import lzma
+
+def parse_vtk_table(name, b):
+    try:
+        # Header ends after flags; format 8 / Unity 2022 aligns to 16 bytes.
+        pos=49
+        size=struct.unpack_from(">Q",b,pos)[0]; pos+=8
+        csize,usize,flags=struct.unpack_from(">III",b,pos); pos+=12
+        pos=(pos+15)&~15
+        if flags & 0x80:
+            info=b[len(b)-csize:]
+        else:
+            info=b[pos:pos+csize]
+        mode=flags&0x3f
+        if mode==1:
+            props=info[:5]
+            prop=props[0]; lc=prop%9; rest=prop//9; lp=rest%5; pb=rest//5
+            dsize=struct.unpack_from("<I",props,1)[0]
+            raw=lzma.decompress(info[5:],format=lzma.FORMAT_RAW,filters=[{"id":lzma.FILTER_LZMA1,"dict_size":dsize,"lc":lc,"lp":lp,"pb":pb}])
+        elif mode==0: raw=info
+        else:
+            import lz4.block
+            raw=lz4.block.decompress(info,uncompressed_size=usize)
+        if len(raw)!=usize: raise ValueError(f"table size {len(raw)} != {usize}")
+        q=16
+        n=struct.unpack_from(">I",raw,q)[0]; q+=4
+        blocks=[]
+        for _ in range(n):
+            us,cs,bf=struct.unpack_from(">IIH",raw,q); q+=10; blocks.append((us,cs,bf))
+        nn=struct.unpack_from(">I",raw,q)[0]; q+=4
+        nodes=[]
+        for _ in range(nn):
+            off,sz,nf=struct.unpack_from(">QQI",raw,q); q+=20
+            end=raw.find(b"\\0",q)
+            path=raw[q:end].decode("utf-8","replace"); q=end+1
+            nodes.append((off,sz,nf,path))
+        print(f"\\n[DECODED TABLE] {name} flags=0x{flags:x} info_at={pos if not flags&0x80 else len(b)-csize} blocks={blocks} nodes={len(nodes)}")
+        for x in nodes[:120]: print("  NODE",x)
+    except Exception as e: print(f"\\n[TABLE DECODE ERROR] {name}: {type(e).__name__}: {e}")
+
+for zpath in pathlib.Path("incoming").glob("*.zip"):
+    with zipfile.ZipFile(zpath) as z:
+        for i in z.infolist():
+            if targets.search(i.filename) and i.filename.endswith(".assetbundle") and i.file_size<25_000_000:
+                b=z.read(i)
+                if b[:8]==b"UnityFS\\0": parse_vtk_table(i.filename,b)
