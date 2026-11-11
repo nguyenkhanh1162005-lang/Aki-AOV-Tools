@@ -1386,6 +1386,25 @@ def build_external_file_id_remap_plan(
         normalized = value.strip().replace(chr(92), "/")
         while "//" in normalized:
             normalized = normalized.replace("//", "/")
+        # Unity external paths commonly use the archive:/ scheme. Preserve
+        # that prefix, but reject traversal, absolute paths and malformed
+        # scheme/path combinations before assigning file IDs.
+        if ":/" in normalized:
+            scheme, relative = normalized.split(":/", 1)
+            if (
+                not scheme
+                or not all(char.isalnum() or char in "._-" for char in scheme)
+                or not relative
+                or relative.startswith("/")
+            ):
+                return None
+            parts = relative.split("/")
+        else:
+            if normalized.startswith("/") or ":" in normalized:
+                return None
+            parts = normalized.split("/")
+        if any(part in ("", ".", "..") for part in parts):
+            return None
         return normalized
 
     base_paths = [normalize(value) for value in base_externals]
