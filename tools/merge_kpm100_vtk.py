@@ -456,19 +456,30 @@ def build(args: argparse.Namespace) -> dict:
 
         replacements[PACKER_PATH], packer_report = merge_actor_packer(read_base(PACKER_PATH), read_vtk(PACKER_PATH))
 
-        # Replace every Lixin/595-specific assetbundle already in KPM, and add
-        # any VTK actor/dependency bundle that is absent from the KPM archive.
+        # Replace every Lixin/595-specific assetbundle for which VTK ships
+        # physical bytes. Some packer rows intentionally reuse shared KPM files;
+        # those rows stay pointed at the preserved KPM payload.
         actor_assets = set(packer_report["actor_assets_from_vtk"])
-        appended_actor_paths = set(packer_report["appended_paths"])
+        appended_actor_paths = set()
         for name in sorted(actor_assets):
+            in_base = PREFIX + name in base_map
             if name not in vtk_map:
-                raise ValueError(f"VTK ZIP thiếu Actor595 AssetBundle: {name}")
-            if PREFIX + name in base_map:
+                if in_base:
+                    continue
+                raise ValueError(f"Actor595 asset thiếu ở cả KPM và VTK: {name}")
+            if in_base:
                 replacements[name] = read_vtk(name)
             else:
-                # Packer rows can exist in the KPM index even when their physical
-                # assetbundle is absent from the KPM ZIP. Import that VTK file.
                 appended_actor_paths.add(name)
+
+        # The packer function may append rows that are not physically shipped by
+        # VTK. Add only paths absent from KPM when the actual VTK bytes exist.
+        for name in packer_report["appended_paths"]:
+            if PREFIX + name in base_map:
+                continue
+            if name not in vtk_map:
+                raise ValueError(f"Dependency mới thiếu file vật lý trong VTK: {name}")
+            appended_actor_paths.add(name)
 
         additions = appended_actor_paths | IOS_SOUNDS
         for name in additions:
