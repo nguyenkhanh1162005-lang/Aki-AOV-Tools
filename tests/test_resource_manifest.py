@@ -1,5 +1,7 @@
+import io
 import struct
 import tempfile
+import warnings
 import unittest
 import zipfile
 from pathlib import Path
@@ -94,6 +96,31 @@ class ResourceManifestTests(unittest.TestCase):
             item = result["resources"][0]
             self.assertEqual(item["format"], "mses")
             self.assertTrue(item["is_aov_resource"])
+
+    def test_rejects_duplicate_and_canonical_alias_paths_in_outer_zip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "duplicate.zip"
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                with zipfile.ZipFile(path, "w") as archive:
+                    archive.writestr("Resources/Hero.bytes", b"first")
+                    archive.writestr("Resources\\\\Hero.bytes", b"second")
+            with self.assertRaisesRegex(ResourceManifestError, "trùng đường dẫn"):
+                build_resource_manifest([str(path)])
+
+    def test_rejects_duplicate_paths_inside_nested_zip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            nested_buffer = io.BytesIO()
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                with zipfile.ZipFile(nested_buffer, "w") as nested:
+                    nested.writestr("Resources/Hero.bytes", b"first")
+                    nested.writestr("Resources/Hero.bytes", b"second")
+            wrapper = Path(tmp) / "wrapper.zip"
+            with zipfile.ZipFile(wrapper, "w") as outer:
+                outer.writestr("mod/Resources.zip", nested_buffer.getvalue())
+            with self.assertRaisesRegex(ResourceManifestError, "trùng đường dẫn"):
+                build_resource_manifest([str(wrapper)])
 
     def test_rejects_path_traversal(self):
         with tempfile.TemporaryDirectory() as tmp:
