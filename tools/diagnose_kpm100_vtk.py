@@ -572,6 +572,21 @@ for rel in ("AssetRefs/Hero/595_AssetRef.bytes",):
     except Exception as exc:
         log(f"DIRECT_ASSETREF_ERROR {type(exc).__name__}: {exc}")
 
+log("\n=== Test Thanos HeroSkin IFix merge ===")
+try:
+    from app.aov_merger import _decode, _merge_ifix
+    from app.ifix_merger import parse_ifix_patch, serialize_ifix_patch, merge_ifix_patches
+    base_h1 = base.read(PREFIX + "Thanos/HeroSkin_1.bytes")
+    vtk_h2 = vtk.read(vtk_entries["Thanos/HeroSkin_2.bytes"])
+    raw_h1, mode_h1 = decode_aov_resource(base_h1, "HeroSkin_1")
+    raw_h2, mode_h2 = decode_aov_resource(vtk_h2, "HeroSkin_2")
+    p1 = parse_ifix_patch(raw_h1)
+    p2 = parse_ifix_patch(raw_h2)
+    pm = merge_ifix_patches(p1,p2)
+    log(f"IFIX base_mode={mode_h1} overlay_mode={mode_h2} base_fixes={len(p1['fixes'])} base_methods={len(p1['methods'])} overlay_fixes={len(p2['fixes'])} overlay_methods={len(p2['methods'])} merged_fixes={len(pm['fixes'])} merged_methods={len(pm['methods'])} roundtrip_base={serialize_ifix_patch(p1)==raw_h1} roundtrip_overlay={serialize_ifix_patch(p2)==raw_h2}")
+except Exception as exc:
+    log(f"IFIX_ERROR {type(exc).__name__}: {exc}")
+
 log("\n=== KPM/VTK same path conflicts ===")
 v_by_full = {}
 for name, info in vtk_entries.items():
