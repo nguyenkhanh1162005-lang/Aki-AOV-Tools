@@ -506,6 +506,42 @@ try:
 except Exception as exc:
     log(f"METADATA_ERROR {type(exc).__name__}: {exc}")
 
+log("\n=== Actor595 focused Packer and Verification dependencies ===")
+actor_targets = {
+    "assetbundle/battle/hero/595_lixin_battle_base.assetbundle",
+    "assetbundle/battle/hero/595_lixin_battle_base_raw_h.assetbundle",
+    "assetbundle/battle/hero/595_lixin_battle_base_raw_mat.assetbundle",
+    "assetbundle/commercializenotify/battle/commercializenotify_blue_595.assetbundle",
+    "assetbundle/commercializenotify/battle/commercializenotify_red_595.assetbundle",
+    "assetbundle/icon/hero/595_305950_default59500_bust.assetbundle",
+    "assetbundle/show/hero/595_lixin_show_base.assetbundle",
+}
+try:
+    sys.path.insert(0, os.path.join(os.getcwd(), "app", "vendor"))
+    import UnityPy_AOV as parser
+    from app.aov_merger import _find_mono_behaviour, PACKER_PATH, VERIFICATION_PATH
+    benv = parser.load(base.read(PREFIX + PACKER_PATH))
+    venv = parser.load(vtk.read(vtk_entries[PACKER_PATH]))
+    _, bt = _find_mono_behaviour(benv, "ResourcePackerInfoSetXML")
+    _, vt = _find_mono_behaviour(venv, "ResourcePackerInfoSetXML")
+    bp = {r["PathInIFS"]:i for i,r in enumerate(bt["AllResourcePackInfo"])}
+    vp = {r["PathInIFS"]:i for i,r in enumerate(vt["AllResourcePackInfo"])}
+    for path in sorted(actor_targets):
+        vi = vp.get(path)
+        bi = bp.get(path)
+        log(f"ACTOR_PACKER_PATH {path} vtk_present={vi is not None} base_present={bi is not None}")
+        if vi is not None:
+            row = vt["AllResourcePackInfo"][vi]
+            log(f"ACTOR_PACKER_ROW {path} pkgType={row.get('pkgType')} tag={row.get('Tag')} flags={row.get('Flags')} resources={len(row.get('ResourceInfos',[]))} crc={row.get('CrcXor')}")
+    edges = vt["AllParentIdexToChild"]
+    for e in edges:
+        parent = vt["AllResourcePackInfo"][int(e["parentIdx"])]["PathInIFS"]
+        child = vt["AllResourcePackInfo"][int(e["childIdx"])]["PathInIFS"]
+        if parent in actor_targets or child in actor_targets:
+            log(f"ACTOR_EDGE {parent} -> {child} base_has_parent={parent in bp} base_has_child={child in bp}")
+except Exception as exc:
+    log(f"ACTOR_METADATA_ERROR {type(exc).__name__}: {exc}")
+
 log("\n=== KPM/VTK same path conflicts ===")
 v_by_full = {}
 for name, info in vtk_entries.items():
