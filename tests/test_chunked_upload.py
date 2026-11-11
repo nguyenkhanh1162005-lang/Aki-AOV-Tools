@@ -63,7 +63,7 @@ class ChunkedUploadEndpointTests(unittest.IsolatedAsyncioTestCase):
         session = {
             "created": 1000,
             "workdir": str(workdir),
-            "files": [{"name": "test.zip", "size": 8, "received": 0}],
+            "files": [{"name": "test.zip", "size": 8, "received": 6}],
             "paths": [str(payload_path)],
         }
         with patch.object(main, "UPLOAD_STORAGE_DIR", storage):
@@ -120,6 +120,17 @@ class ChunkedUploadEndpointTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(retry["received"], 4)
         self.assertEqual(main.UPLOAD_SESSIONS[self.upload_id]["created"], 200)
+
+    async def test_identical_retry_truncates_uncommitted_tail(self):
+        await main.upload_chunk(
+            self.upload_id, 0, make_request(b"part"), 0
+        )
+        with self.path.open("ab") as target:
+            target.write(b"uncommitted")
+        await main.upload_chunk(
+            self.upload_id, 0, make_request(b"part"), 0
+        )
+        self.assertEqual(self.path.read_bytes(), b"part")
 
     async def test_repeated_different_chunk_is_rejected_for_resume(self):
         await main.upload_chunk(
