@@ -18,7 +18,7 @@ MAX_ARCHIVE_ENTRIES = 20000
 MAX_ARCHIVE_UNCOMPRESSED = 1024 * 1024 * 1024
 MAX_ENTRY_UNCOMPRESSED = 256 * 1024 * 1024
 MAX_DECODED_RESOURCE = 256 * 1024 * 1024
-MAX_NESTED_ZIP_DEPTH = 1
+MAX_NESTED_ZIP_DEPTH = 2
 
 
 class AOVBytesArchiveError(ValueError):
@@ -55,6 +55,8 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
         "ignored_files": 0,
         "total_entries": 0,
         "decoded_bytes": 0,
+        "nested_packages_expanded": 0,
+        "nested_packages_not_expanded": [],
         "advisory_only": True,
         "merge_authorized": False,
         "game_tested": False,
@@ -138,6 +140,33 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
                 "decoded_size": len(decoded),
             })
             report["decoded_bytes"] += len(decoded)
+
+            # AoV package resources such as CommonActions.pkg.bytes can contain
+            # another ZIP after their outer AES/Zstandard wrapper is removed.
+            # Keep the decoded package itself and inspect its members as well.
+            if path.lower().endswith(".pkg.bytes"):
+                package_stream = io.BytesIO(decoded)
+                if zipfile.is_zipfile(package_stream):
+                    if depth >= MAX_NESTED_ZIP_DEPTH:
+                        report["nested_packages_not_expanded"].append({
+                            "source": prefix,
+                            "path": path,
+                            "reason": "Đã đạt giới hạn độ sâu ZIP lồng.",
+                        })
+                    else:
+                        package_stream.seek(0)
+                        try:
+                            with zipfile.ZipFile(package_stream, "r") as nested_package:
+                                process_archive(
+                                    nested_package,
+                                    f"{prefix}/{path}::decoded",
+                                    depth + 1,
+                                )
+                            report["nested_packages_expanded"] += 1
+                        except zipfile.BadZipFile as exc:
+                            raise AOVBytesArchiveError(
+                                f"Package sau giải mã có cấu trúc ZIP lỗi: {path}"
+                            ) from exc
 
     try:
         if output.exists():
