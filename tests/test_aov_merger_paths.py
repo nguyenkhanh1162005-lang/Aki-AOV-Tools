@@ -7,6 +7,7 @@ from app.aov_merger import (
     AOVMergeError,
     _assert_archive_inventory,
     _normalise_vtk_path,
+    _publish_staged_archive,
     _validate_archive_paths,
     _zip_entry_sha256,
 )
@@ -116,6 +117,44 @@ class AOVArchivePathTests(unittest.TestCase):
                     _assert_archive_inventory(
                         archive, {"base.bytes"}, "result.zip"
                     )
+
+    def test_atomic_publish_replaces_destination_only_after_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            staged = folder / "staged.zip"
+            output = folder / "result.zip"
+            output.write_bytes(b"previous-good-output")
+            with zipfile.ZipFile(staged, "w") as archive:
+                archive.writestr("base.bytes", b"base")
+                archive.writestr("new.bytes", b"new")
+
+            _publish_staged_archive(
+                staged, output, {"base.bytes", "new.bytes"}
+            )
+
+            with zipfile.ZipFile(output) as archive:
+                self.assertEqual(
+                    set(archive.namelist()), {"base.bytes", "new.bytes"}
+                )
+            self.assertFalse(staged.exists())
+
+    def test_atomic_publish_keeps_previous_output_when_validation_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            staged = folder / "staged.zip"
+            output = folder / "result.zip"
+            previous = b"previous-good-output"
+            output.write_bytes(previous)
+            with zipfile.ZipFile(staged, "w") as archive:
+                archive.writestr("only.bytes", b"partial")
+
+            with self.assertRaisesRegex(AOVMergeError, "không giữ nguyên"):
+                _publish_staged_archive(
+                    staged, output, {"required.bytes"}
+                )
+
+            self.assertEqual(output.read_bytes(), previous)
+            self.assertTrue(staged.exists())
 
     def test_rejects_unsafe_archive_entry(self):
         with tempfile.TemporaryDirectory() as tmp:
