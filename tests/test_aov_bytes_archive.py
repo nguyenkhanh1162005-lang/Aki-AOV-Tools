@@ -194,7 +194,7 @@ class AOVBytesArchiveTests(unittest.TestCase):
     def test_rejects_total_decoded_output_over_limit(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
-            header = b"\\x22\\x4a\\x00\\x00" + (1).to_bytes(4, "little") + b"payload"
+            header = b"\x22\x4a\x00\x00" + (1).to_bytes(4, "little") + b"payload"
             source = self._archive(folder / "many-bytes.zip", {
                 "first.bytes": header,
                 "second.bytes": header,
