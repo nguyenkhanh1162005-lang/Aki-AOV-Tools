@@ -25,7 +25,10 @@ class MSESTests(unittest.TestCase):
     def test_merge_appends_new_and_preserves_base_conflict(self):
         base = make_table(4, [struct.pack("<I", 1) + b"base", struct.pack("<I", 2) + b"same"])
         overlay = make_table(3, [struct.pack("<I", 1) + b"base", struct.pack("<I", 2) + b"same", struct.pack("<I", 3) + b"new"])
-        output, report = merge_mses_rows(base, overlay, allow_schema_mismatch=True)
+        output, report = merge_mses_rows(
+            base, overlay, allow_schema_mismatch=True,
+            allow_new_rows_across_schema_mismatch=True,
+        )
         parsed = parse_mses(output)
         self.assertEqual(parsed.field_count, 4)
         self.assertEqual([row[4:] for row in parsed.rows], [b"base", b"same", b"new"])
