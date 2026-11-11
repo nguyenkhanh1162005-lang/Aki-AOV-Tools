@@ -14,17 +14,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Download original release ZIPs
-        env:
-          GH_TOKEN: \${{ github.token }}
         run: |
           mkdir -p incoming
-          gh release download aov-upload-01 --repo "$GITHUB_REPOSITORY" --dir incoming \
-            --pattern 'Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip' \
-            --pattern 'VTK.IOS.VIP.zip'
+          curl -fL --retry 3 --retry-delay 2 'https://github.com/nguyenkhanh1162005-lang/Aki-AOV-Tools/releases/download/aov-upload-01/Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip' -o 'incoming/Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip'
+          curl -fL --retry 3 --retry-delay 2 'https://github.com/nguyenkhanh1162005-lang/Aki-AOV-Tools/releases/download/aov-upload-01/VTK.IOS.VIP.zip' -o 'incoming/VTK.IOS.VIP.zip'
       - name: Verify original SHA-256
         run: |
-          echo "944d01f6a4e31dbaa7ea31c14d292b799818843a4e3533860b2e16ff4bb77aa0  incoming/Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip" | sha256sum -c -
-          echo "b78976a7d9c0d7ce2420fdd631cdf47136bc9b0f313fbfcbbb6cb9af3a582249  incoming/VTK.IOS.VIP.zip" | sha256sum -c -
+          echo '944d01f6a4e31dbaa7ea31c14d292b799818843a4e3533860b2e16ff4bb77aa0  incoming/Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip' | sha256sum -c -
+          echo 'b78976a7d9c0d7ce2420fdd631cdf47136bc9b0f313fbfcbbb6cb9af3a582249  incoming/VTK.IOS.VIP.zip' | sha256sum -c -
       - name: Run structural and payload mapping analysis
         run: python tools/diagnose_kpm100_vtk.py | tee diagnostic-report.txt
       - name: Upload report
