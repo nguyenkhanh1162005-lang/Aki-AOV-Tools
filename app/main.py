@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import zipfile
 import shutil
 import tempfile
 import time
 import uuid
+import zlib
 from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Body, Header, Query
@@ -28,7 +31,7 @@ from .aov_bytes_archive import AOVBytesArchiveError, decode_archive_resources
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
 CHUNK_SIZE = 1024 * 1024
-UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 1 * 1024 * 1024
 UPLOAD_SESSIONS: dict[str, dict] = {}
 UPLOAD_TTL_SECONDS = 3600
 MAX_ACTIVE_UPLOAD_SESSIONS = 8
@@ -157,7 +160,25 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
                     # The file itself can be recreated by the browser retry.
                     received = 0
                 total += size
-                clean_files.append({"name": name, "size": size, "received": received})
+                chunk_hashes = item.get("chunk_sha256", [])
+                expected_chunks = (size + UPLOAD_CHUNK_BYTES - 1) // UPLOAD_CHUNK_BYTES
+                if (
+                    not isinstance(chunk_hashes, list)
+                    or (chunk_hashes and (
+                        len(chunk_hashes) != expected_chunks
+                        or not all(
+                            isinstance(value, str)
+                            and len(value) == 64
+                            and all(ch in "0123456789abcdef" for ch in value)
+                            for value in chunk_hashes
+                        )
+                    ))
+                ):
+                    raise ValueError("invalid chunk hashes")
+                clean_files.append({
+                    "name": name, "size": size, "received": received,
+                    "chunk_sha256": chunk_hashes,
+                })
                 safe_paths.append(str(file_path))
             if total > MAX_INPUT_BYTES or upload_id in restored:
                 raise ValueError("invalid upload session size or id")
@@ -240,7 +261,26 @@ async def start_chunked_upload(payload: dict = Body(...)):
         ):
             raise HTTPException(400, "Thông tin file ZIP không hợp lệ.")
         total += size
-        clean_files.append({"name": name, "size": size, "received": 0})
+        chunk_hashes = item.get("chunk_sha256")
+        expected_chunks = (size + UPLOAD_CHUNK_BYTES - 1) // UPLOAD_CHUNK_BYTES
+        # Keep older API clients working; the dedicated upload page always sends hashes.
+        if chunk_hashes is None:
+            chunk_hashes = []
+        elif (
+            not isinstance(chunk_hashes, list)
+            or len(chunk_hashes) != expected_chunks
+            or not all(
+                isinstance(value, str)
+                and len(value) == 64
+                and all(ch in "0123456789abcdef" for ch in value)
+                for value in chunk_hashes
+            )
+        ):
+            raise HTTPException(400, "SHA-256 từng khối không hợp lệ.")
+        clean_files.append({
+            "name": name, "size": size, "received": 0,
+            "chunk_sha256": chunk_hashes,
+        })
     if total > MAX_INPUT_BYTES:
         raise HTTPException(413, "Tổng dung lượng ZIP vượt quá 500 MB.")
     upload_id = uuid.uuid4().hex
@@ -287,11 +327,24 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
     async for part in request.stream():
         chunk_buffer.extend(part)
         if len(chunk_buffer) > UPLOAD_CHUNK_BYTES:
-            raise HTTPException(413, "Mỗi khối tải lên không được vượt quá 4 MB.")
+            raise HTTPException(413, "Mỗi khối tải lên không được vượt quá 1 MB.")
     chunk = bytes(chunk_buffer)
     if not chunk:
         raise HTTPException(400, "Kích thước khối tải lên không hợp lệ.")
     offset = item["received"]
+    chunk_hashes = item.get("chunk_sha256", [])
+    if chunk_hashes:
+        if chunk_offset % UPLOAD_CHUNK_BYTES != 0:
+            raise HTTPException(400, "Vị trí khối không đúng ranh giới SHA-256.")
+        chunk_index = chunk_offset // UPLOAD_CHUNK_BYTES
+        if chunk_index >= len(chunk_hashes):
+            raise HTTPException(400, "Không tìm thấy SHA-256 của khối.")
+        expected_length = min(UPLOAD_CHUNK_BYTES, item["size"] - chunk_offset)
+        if len(chunk) != expected_length:
+            raise HTTPException(400, "Kích thước khối không đúng.")
+        if hashlib.sha256(chunk).hexdigest() != chunk_hashes[chunk_index]:
+            raise HTTPException(422, "SHA-256 khối tải lên không khớp; hãy gửi lại khối.")
+
     if chunk_offset < offset:
         # Idempotent retry: accept an already-written identical chunk.
         if chunk_offset + len(chunk) > offset:
@@ -323,6 +376,72 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
     session["created"] = time.time()
     _persist_upload_session(upload_id, session)
     return {"received": item["received"], "size": item["size"]}
+
+
+@app.post("/api/upload/{upload_id}/verify")
+async def verify_chunked_upload(upload_id: str):
+    """Verify all uploaded bytes against client chunk hashes and inspect ZIP directory."""
+    session = _get_upload_session(upload_id)
+    if any(item["received"] != item["size"] for item in session["files"]):
+        raise HTTPException(400, "File chưa tải lên đầy đủ.")
+    results = []
+    for index, item in enumerate(session["files"]):
+        path = session["paths"][index]
+        digest = hashlib.sha256()
+        with open(path, "rb") as source:
+            while True:
+                block = source.read(1024 * 1024)
+                if not block:
+                    break
+                digest.update(block)
+        archive_info = {"zip_directory_valid": False, "entries": 0, "crc_warning": None}
+        try:
+            with zipfile.ZipFile(path, "r") as archive:
+                infos = archive.infolist()
+                archive_info["entries"] = len(infos)
+                expanded_bytes = sum(info.file_size for info in infos)
+                if expanded_bytes <= 1024 * 1024 * 1024:
+                    bad_member = archive.testzip()
+                    if bad_member:
+                        archive_info["crc_warning"] = f"CRC không khớp tại entry: {bad_member}"
+                else:
+                    archive_info["crc_warning"] = "Bỏ qua kiểm tra CRC giải nén vì tổng kích thước khai báo vượt 1 GiB."
+                archive_info["zip_directory_valid"] = True
+        except (OSError, zipfile.BadZipFile, RuntimeError, EOFError, zlib.error) as exc:
+            archive_info["crc_warning"] = str(exc)[:240]
+            # The transfer hash remains authoritative for byte-for-byte integrity.
+            try:
+                with zipfile.ZipFile(path, "r") as archive:
+                    archive_info["entries"] = len(archive.infolist())
+                    archive_info["zip_directory_valid"] = True
+            except (OSError, zipfile.BadZipFile, RuntimeError, EOFError, zlib.error):
+                raise HTTPException(422, f"ZIP {item['name']} không đọc được cấu trúc thư mục.")
+        results.append({
+            "name": item["name"],
+            "size": item["size"],
+            "sha256": digest.hexdigest(),
+            **archive_info,
+            "download_url": f"/api/upload/{upload_id}/download/{index}",
+        })
+    session["created"] = time.time()
+    _persist_upload_session(upload_id, session)
+    return {"verified": True, "files": results, "expires_in_seconds": UPLOAD_TTL_SECONDS}
+
+
+@app.get("/api/upload/{upload_id}/download/{file_index}")
+async def download_uploaded_file(upload_id: str, file_index: int):
+    session = _get_upload_session(upload_id)
+    if file_index < 0 or file_index >= len(session["files"]):
+        raise HTTPException(404, "Không tìm thấy file trong phiên tải lên.")
+    item = session["files"][file_index]
+    if item["received"] != item["size"]:
+        raise HTTPException(409, "File chưa tải lên đầy đủ.")
+    return FileResponse(
+        path=session["paths"][file_index],
+        media_type="application/zip",
+        filename=item["name"],
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.post("/api/upload/{upload_id}/inspect")
