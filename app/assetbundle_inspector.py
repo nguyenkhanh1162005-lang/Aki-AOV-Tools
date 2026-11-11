@@ -555,7 +555,28 @@ def build_assetbundle_metadata_merge_plan(
     ):
         return {"ready": False, "reason": "Dependency inventory is invalid."}
 
+    overlay_main_record = overlay_metadata.get("main_asset")
     overlay_main = rewritten.get("main_asset")
+    if overlay_main_record is not None:
+        if (
+            not isinstance(overlay_main_record, dict)
+            or not valid_pointer(overlay_main_record.get("asset"))
+        ):
+            return {"ready": False, "reason": "Overlay MainAsset source metadata contains an invalid PPtr."}
+        source_start = overlay_main_record.get("preload_index")
+        source_size = overlay_main_record.get("preload_size")
+        if (
+            not isinstance(source_start, int) or isinstance(source_start, bool)
+            or not isinstance(source_size, int) or isinstance(source_size, bool)
+            or source_start < 0 or source_size < 0
+            or source_start + source_size > len(overlay_metadata["preload_pointer_inventory"])
+        ):
+            return {"ready": False, "reason": "Overlay MainAsset source preload range is invalid."}
+        if overlay_main is None:
+            return {"ready": False, "reason": "Overlay MainAsset pointer remap is missing."}
+    elif overlay_main is not None:
+        return {"ready": False, "reason": "Overlay MainAsset remap has no source metadata."}
+
     if base_main is not None and overlay_main is not None:
         return {"ready": False, "reason": "Both bundles define MainAsset; automatic selection is unsafe."}
     if base_main is not None:
@@ -616,9 +637,6 @@ def build_assetbundle_metadata_merge_plan(
             "asset": dict(base_main["asset"]),
         }
     elif overlay_main is not None:
-        overlay_main_record = overlay_metadata.get("main_asset")
-        if not isinstance(overlay_main_record, dict):
-            return {"ready": False, "reason": "Overlay MainAsset source metadata is missing."}
         start = overlay_main_record.get("preload_index")
         size = overlay_main_record.get("preload_size")
         if (not isinstance(start, int) or not isinstance(size, int)
