@@ -20,17 +20,15 @@ const UPLOAD_STATE_KEY='aki-aov-upload-session-v1';
 async function uploadFingerprint(files){
   const fingerprints=[];
   for(const file of files){
-    // Hash the first and last 64 KiB so a different file with identical
-    // name/size/mtime is less likely to resume into the wrong server session.
-    const sampleSize=Math.min(64*1024,Math.ceil(file.size/2));
-    const first=await file.slice(0,sampleSize).arrayBuffer();
-    const last=await file.slice(Math.max(sampleSize,file.size-sampleSize),file.size).arrayBuffer();
-    const sample=new Uint8Array(first.byteLength+last.byteLength);
-    sample.set(new Uint8Array(first),0);
-    sample.set(new Uint8Array(last),first.byteLength);
-    const digest=await crypto.subtle.digest('SHA-256',sample);
-    const hash=[...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,'0')).join('');
-    fingerprints.push({name:file.name,size:file.size,lastModified:file.lastModified||0,content_sample_sha256:hash});
+    // Hash every byte in bounded chunks, avoiding a full-file ArrayBuffer on iOS.
+    const chunkHashes=[];
+    for(let offset=0;offset<file.size;offset+=CHUNK_BYTES){
+      const part=await file.slice(offset,Math.min(offset+CHUNK_BYTES,file.size)).arrayBuffer();
+      const digest=await crypto.subtle.digest('SHA-256',part);
+      chunkHashes.push([...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,'0')).join(''));
+      status.textContent='Đang xác minh nội dung '+file.name+': '+Math.min(offset+part.byteLength,file.size)+' / '+file.size+' byte';
+    }
+    fingerprints.push({name:file.name,size:file.size,lastModified:file.lastModified||0,content_chunk_sha256:chunkHashes});
   }
   return JSON.stringify(fingerprints);
 }
