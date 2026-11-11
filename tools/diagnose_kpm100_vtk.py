@@ -356,6 +356,43 @@ log(f"ZSTD named candidates={named[:100]}")
 log(f"ZSTD dictionary magic hits={magic_hits[:100]}")
 log(f"ZSTD dictionary ID hits={id_hits[:100]}")
 
+log("\n=== Test in-archive byte dictionary candidates ===")
+import pyzstd
+first_mapping = mapping_rows[0]
+first_payload_path = PREFIX + "Mod_by_Youtube_KHAM-PHA-MOBILE/" + first_mapping["payload_file"]
+first_payload = base.read(first_payload_path)
+first_nlen = int.from_bytes(first_payload[26:28], "little")
+first_elen = int.from_bytes(first_payload[28:30], "little")
+first_at = 30 + first_nlen + first_elen
+first_csize = int.from_bytes(first_payload[18:22], "little")
+first_member = first_payload[first_at:first_at+first_csize]
+first_frame_at = first_member.find(bytes.fromhex("28b52ffd"))
+first_frame = first_member[first_frame_at:] if first_frame_at >= 0 else b""
+for candidate_path in (
+    PREFIX + "Config/bytesDict.bytes",
+    PREFIX + "Config/StateSyncDict.bytes",
+):
+    try:
+        candidate_data = base.read(candidate_path)
+    except KeyError:
+        log(f"DICT_CANDIDATE_MISSING {candidate_path}")
+        continue
+    log(f"DICT_CANDIDATE {candidate_path} bytes={len(candidate_data)} head={candidate_data[:96].hex()} has_dict_magic={candidate_data.find(bytes.fromhex('37a430ec'))} has_dict_id={candidate_data.find(bytes.fromhex('e755430b'))}")
+    variants = [
+        ("full", candidate_data),
+        ("skip8", candidate_data[8:]),
+        ("skip4", candidate_data[4:]),
+        ("skip16", candidate_data[16:]),
+        ("tail64k", candidate_data[-65536:]),
+    ]
+    for variant_name, candidate_bytes in variants:
+        try:
+            zd = pyzstd.ZstdDict(candidate_bytes, is_raw=True)
+            raw = pyzstd.decompress(first_frame, zd)
+            log(f"DICT_TEST {candidate_path} {variant_name}=SUCCESS:{len(raw)}")
+        except Exception as exc:
+            log(f"DICT_TEST {candidate_path} {variant_name}={type(exc).__name__}:{str(exc)[:120]}")
+
 log("\n=== KPM/VTK same path conflicts ===")
 v_by_full = {}
 for name, info in vtk_entries.items():
