@@ -936,7 +936,7 @@ class AssetBundleInspectorTests(unittest.TestCase):
         env = SimpleNamespace(assets=[serialized], container={}, files={"bundle": object()})
         fake_unity = SimpleNamespace(load=lambda data: env)
         with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
-            report = inspect_assetbundle(b"UnityFS\\x00fixture")
+            report = inspect_assetbundle(b"UnityFS\x00fixture")
         self.assertEqual(report["object_reference_count"], 1)
         self.assertEqual(report["object_references"][0]["target_file"], "null")
         self.assertEqual(report["reference_integrity"]["local_resolved"], 0)
