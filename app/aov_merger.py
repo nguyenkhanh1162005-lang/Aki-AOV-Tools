@@ -78,41 +78,44 @@ def _validate_archive_paths(zf: zipfile.ZipFile, label: str) -> None:
     total_uncompressed = sum(info.file_size for info in entries)
     if total_uncompressed > MAX_TOTAL_UNCOMPRESSED:
         raise AOVMergeError(f"ZIP {label} vượt quá giới hạn giải nén 1 GiB.")
-    seen_files: set[str] = set()
+    seen_paths: set[str] = set()
     for info in entries:
         if info.file_size > MAX_SINGLE_ENTRY:
             raise AOVMergeError(
                 f"ZIP {label} có mục vượt quá 512 MiB: {info.filename}"
             )
         normalized = info.filename.replace("\\", "/")
-        path = PurePosixPath(normalized)
+        candidate = normalized[:-1] if info.is_dir() and normalized.endswith("/") else normalized
+        path = PurePosixPath(candidate)
+        raw_parts = candidate.split("/")
         mode = (info.external_attr >> 16) & 0xFFFF
         if (
-            not normalized
+            not candidate
             or path.is_absolute()
-            or ".." in path.parts
+            or any(part in {"", ".", ".."} for part in raw_parts)
             or "\x00" in normalized
             or (path.parts and path.parts[0].endswith(":"))
             or stat.S_ISLNK(mode)
         ):
             raise AOVMergeError(
-                f"ZIP {label} chứa đường dẫn hoặc mục không an toàn: {info.filename}"
+                f"ZIP {label} chứa đường dẫn hoặc mục không an toàn/không chuẩn hóa: {info.filename}"
             )
-        if not info.is_dir():
-            if normalized in seen_files:
-                raise AOVMergeError(
-                    f"ZIP {label} có đường dẫn tệp bị lặp, không rõ dữ liệu nào được ưu tiên: {normalized}"
-                )
-            seen_files.add(normalized)
+        canonical_path = path.as_posix()
+        if canonical_path in seen_paths:
+            raise AOVMergeError(
+                f"ZIP {label} có đường dẫn trùng lặp hoặc không phân biệt được: {canonical_path}"
+            )
+        seen_paths.add(canonical_path)
 
 
 def _normalise_vtk_path(name: str) -> str:
     name = name.replace("\\", "/")
     path = PurePosixPath(name)
+    raw_parts = name.split("/")
     if (
         not name
         or path.is_absolute()
-        or ".." in path.parts
+        or any(part in {"", ".", ".."} for part in raw_parts)
         or "\x00" in name
         or (path.parts and path.parts[0].endswith(":"))
     ):
