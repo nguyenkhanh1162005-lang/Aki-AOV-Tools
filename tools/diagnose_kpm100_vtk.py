@@ -370,6 +370,7 @@ first_member = first_payload[first_at:first_at+first_csize]
 first_frame_at = first_member.find(bytes.fromhex("28b52ffd"))
 first_frame = first_member[first_frame_at:] if first_frame_at >= 0 else b""
 log(f"REPO_ZSTD_DICT bytes={len(REPO_ZSTD_DICT)} sha256={sha(REPO_ZSTD_DICT)} head={REPO_ZSTD_DICT[:16].hex()}")
+log(f"FIRST_KPM_FRAME offset={first_frame_at} member_bytes={len(first_member)} head={first_member[:40].hex()} frame_head={first_frame[:40].hex()} frame_bytes={len(first_frame)} expected={int.from_bytes(first_member[4:8], 'little') if len(first_member)>=8 else None}")
 dict_resources = {}
 for candidate_path, resource_name in (
     (PREFIX + "Config/bytesDict.bytes", "bytesDict.bytes"),
