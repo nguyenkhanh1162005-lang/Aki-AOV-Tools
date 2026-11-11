@@ -57,14 +57,14 @@ def parse_vtk_table(name, b):
             raw=lz4.block.decompress(info,uncompressed_size=usize)
         if len(raw)!=usize: raise ValueError(f"table size {len(raw)} != {usize}")
         q=16
-        n=struct.unpack_from(">I",raw,q)[0]; q+=4
+        n=struct.unpack_from("<I",raw,q)[0]; q+=4
         blocks=[]
         for _ in range(n):
-            us,cs,bf=struct.unpack_from(">IIH",raw,q); q+=10; blocks.append((us,cs,bf))
+            us,cs,bf=struct.unpack_from("<IIH",raw,q); q+=10; blocks.append((us,cs,bf))
         nn=struct.unpack_from(">I",raw,q)[0]; q+=4
         nodes=[]
         for _ in range(nn):
-            off,sz,nf=struct.unpack_from(">QQI",raw,q); q+=20
+            off,sz,nf=struct.unpack_from("<QQI",raw,q); q+=20
             end=raw.find(b"\0",q)
             path=raw[q:end].decode("utf-8","replace"); q=end+1
             nodes.append((off,sz,nf,path))
@@ -77,4 +77,4 @@ for zpath in pathlib.Path("incoming").glob("*.zip"):
         for i in z.infolist():
             if targets.search(i.filename) and i.filename.endswith(".assetbundle") and i.file_size<25_000_000:
                 b=z.read(i)
-                if b[:8]==b"UnityFS\0": parse_vtk_table(i.filename,b)
+                if b[:8]==b"UnityFS\0": parse_vtk_table(zpath.name+" :: "+i.filename,b)
