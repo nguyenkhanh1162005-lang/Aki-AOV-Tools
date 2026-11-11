@@ -918,6 +918,30 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertEqual(report["object_references"][0]["target_file"], "CAB-dependency.resS")
         self.assertEqual(report["object_references"][1]["target_file"], "local")
 
+    def test_scans_null_object_reference_without_marking_it_local(self):
+        source_obj = SimpleNamespace(
+            type=SimpleNamespace(name="GameObject"),
+            path_id=100,
+            read_typetree=lambda: {
+                "null": {"m_FileID": 0, "m_PathID": 0},
+            },
+        )
+        serialized = SimpleNamespace(
+            name="CAB-main",
+            unity_version="2022.3.0f1",
+            target_platform=SimpleNamespace(name="iOS"),
+            objects={100: source_obj},
+            externals=[],
+        )
+        env = SimpleNamespace(assets=[serialized], container={}, files={"bundle": object()})
+        fake_unity = SimpleNamespace(load=lambda data: env)
+        with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
+            report = inspect_assetbundle(b"UnityFS\\x00fixture")
+        self.assertEqual(report["object_reference_count"], 1)
+        self.assertEqual(report["object_references"][0]["target_file"], "null")
+        self.assertEqual(report["reference_integrity"]["local_resolved"], 0)
+        self.assertEqual(report["reference_integrity"]["local_missing"], [])
+
     def test_resolves_local_and_loaded_external_cab_targets(self):
         source_obj = SimpleNamespace(
             type=SimpleNamespace(name="GameObject"),
