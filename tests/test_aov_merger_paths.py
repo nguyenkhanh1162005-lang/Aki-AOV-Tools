@@ -3,7 +3,13 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from app.aov_merger import AOVMergeError, _normalise_vtk_path, _validate_archive_paths, _zip_entry_sha256
+from app.aov_merger import (
+    AOVMergeError,
+    _assert_archive_inventory,
+    _normalise_vtk_path,
+    _validate_archive_paths,
+    _zip_entry_sha256,
+)
 
 
 class AOVArchivePathTests(unittest.TestCase):
@@ -76,6 +82,40 @@ class AOVArchivePathTests(unittest.TestCase):
             _zip_entry_sha256(FakeArchive(b"AAAA"), first_info),
             _zip_entry_sha256(FakeArchive(b"BBBB"), second_info),
         )
+
+    def test_exact_inventory_check_accepts_preserved_and_added_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "result.zip"
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("base.bytes", b"base")
+                archive.writestr("added.bytes", b"added")
+            with zipfile.ZipFile(path) as archive:
+                _assert_archive_inventory(
+                    archive, {"base.bytes", "added.bytes"}, "result.zip"
+                )
+
+    def test_exact_inventory_check_rejects_missing_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "result.zip"
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("base.bytes", b"base")
+            with zipfile.ZipFile(path) as archive:
+                with self.assertRaisesRegex(AOVMergeError, "không giữ nguyên"):
+                    _assert_archive_inventory(
+                        archive, {"base.bytes", "required.bytes"}, "result.zip"
+                    )
+
+    def test_exact_inventory_check_rejects_unexpected_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "result.zip"
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("base.bytes", b"base")
+                archive.writestr("unexpected.bytes", b"extra")
+            with zipfile.ZipFile(path) as archive:
+                with self.assertRaisesRegex(AOVMergeError, "không giữ nguyên"):
+                    _assert_archive_inventory(
+                        archive, {"base.bytes"}, "result.zip"
+                    )
 
     def test_rejects_unsafe_archive_entry(self):
         with tempfile.TemporaryDirectory() as tmp:
