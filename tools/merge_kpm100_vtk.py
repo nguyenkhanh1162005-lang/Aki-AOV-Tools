@@ -465,8 +465,10 @@ def build(args: argparse.Namespace) -> dict:
                 raise ValueError(f"VTK ZIP thiếu Actor595 AssetBundle: {name}")
             if PREFIX + name in base_map:
                 replacements[name] = read_vtk(name)
-            elif name not in appended_actor_paths:
-                raise ValueError(f"Actor595 asset chưa nằm trong KPM hoặc danh sách additions: {name}")
+            else:
+                # Packer rows can exist in the KPM index even when their physical
+                # assetbundle is absent from the KPM ZIP. Import that VTK file.
+                appended_actor_paths.add(name)
 
         additions = appended_actor_paths | IOS_SOUNDS
         for name in additions:
