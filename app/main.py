@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import tempfile
 import time
@@ -30,6 +32,134 @@ UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 UPLOAD_SESSIONS: dict[str, dict] = {}
 UPLOAD_TTL_SECONDS = 3600
 MAX_ACTIVE_UPLOAD_SESSIONS = 8
+UPLOAD_STORAGE_DIR = (
+    Path(os.environ["AOV_UPLOAD_STORAGE_DIR"]).expanduser()
+    if os.environ.get("AOV_UPLOAD_STORAGE_DIR")
+    else None
+)
+if UPLOAD_STORAGE_DIR is not None:
+    UPLOAD_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _new_upload_workdir(prefix: str) -> Path:
+    """Create upload workdirs on the configured persistent volume when enabled."""
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=str(UPLOAD_STORAGE_DIR) if UPLOAD_STORAGE_DIR else None))
+
+
+def _persist_upload_session(upload_id: str, session: dict) -> None:
+    if UPLOAD_STORAGE_DIR is None:
+        return
+    workdir = Path(session["workdir"])
+    payload = {
+        "schema_version": 1,
+        "upload_id": upload_id,
+        "created": session["created"],
+        "files": session["files"],
+        "paths": [Path(path).name for path in session["paths"]],
+    }
+    metadata = workdir / ".aki-upload-session.json"
+    temporary = workdir / ".aki-upload-session.json.tmp"
+    temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+    os.replace(temporary, metadata)
+
+
+def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
+    """Restore only well-formed sessions whose files remain inside the storage root."""
+    restored: dict[str, dict] = {}
+    root = storage_dir.resolve()
+    if not storage_dir.exists():
+        return restored
+    for workdir in storage_dir.iterdir():
+        if len(restored) >= MAX_ACTIVE_UPLOAD_SESSIONS:
+            break
+        if workdir.is_symlink() or not workdir.is_dir():
+            continue
+        try:
+            if workdir.resolve().parent != root:
+                continue
+            metadata = workdir / ".aki-upload-session.json"
+            if metadata.is_symlink() or not metadata.is_file():
+                continue
+            payload = json.loads(metadata.read_text(encoding="utf-8"))
+            upload_id = payload["upload_id"]
+            created = payload["created"]
+            files = payload["files"]
+            path_names = payload["paths"]
+            if (
+                payload.get("schema_version") != 1
+                or not isinstance(upload_id, str)
+                or len(upload_id) != 32
+                or any(ch not in "0123456789abcdef" for ch in upload_id)
+                or workdir.name != upload_id
+                or isinstance(created, bool)
+                or not isinstance(created, (int, float))
+                or not isinstance(files, list)
+                or not 1 <= len(files) <= MAX_FILES
+                or not isinstance(path_names, list)
+                or len(path_names) != len(files)
+            ):
+                raise ValueError("invalid upload session metadata")
+            if time.time() - created > UPLOAD_TTL_SECONDS:
+                shutil.rmtree(workdir, ignore_errors=True)
+                continue
+            total = 0
+            safe_paths = []
+            clean_files = []
+            for index, (item, path_name) in enumerate(zip(files, path_names), 1):
+                if not isinstance(item, dict):
+                    raise ValueError("invalid file metadata")
+                name, size, received = item.get("name"), item.get("size"), item.get("received")
+                if (
+                    not isinstance(name, str)
+                    or Path(name).name != name
+                    or not name.lower().endswith(".zip")
+                    or isinstance(size, bool)
+                    or not isinstance(size, int)
+                    or size <= 0
+                    or isinstance(received, bool)
+                    or not isinstance(received, int)
+                    or not 0 <= received <= size
+                    or not isinstance(path_name, str)
+                    or Path(path_name).name != path_name
+                    or path_name in {"", ".", ".."}
+                ):
+                    raise ValueError("invalid file entry")
+                file_path = workdir / path_name
+                if file_path.is_symlink():
+                    raise ValueError("upload file cannot be a symlink")
+                if file_path.exists():
+                    actual_size = file_path.stat().st_size
+                    if actual_size < received or actual_size > size:
+                        raise ValueError("upload file size does not match session")
+                    received = actual_size
+                elif received:
+                    raise ValueError("upload file is missing")
+                total += size
+                clean_files.append({"name": name, "size": size, "received": received})
+                safe_paths.append(str(file_path))
+            if total > MAX_INPUT_BYTES or upload_id in restored:
+                raise ValueError("invalid upload session size or id")
+            session = {
+                "created": created,
+                "workdir": str(workdir),
+                "files": clean_files,
+                "paths": safe_paths,
+            }
+            restored[upload_id] = session
+            _persist_upload_session(upload_id, session)
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            shutil.rmtree(workdir, ignore_errors=True)
+    return restored
+
+
+def _remove_upload_session_metadata(session: dict) -> None:
+    if UPLOAD_STORAGE_DIR is not None:
+        (Path(session["workdir"]) / ".aki-upload-session.json").unlink(missing_ok=True)
+        (Path(session["workdir"]) / ".aki-upload-session.json.tmp").unlink(missing_ok=True)
+
+
+if UPLOAD_STORAGE_DIR is not None:
+    UPLOAD_SESSIONS.update(_load_persistent_upload_sessions(UPLOAD_STORAGE_DIR))
 
 
 def _cleanup_expired_upload_sessions(now: float | None = None) -> int:
@@ -60,6 +190,7 @@ def _get_upload_session(upload_id: str) -> dict:
     session = UPLOAD_SESSIONS.get(upload_id)
     if not session or time.time() - session["created"] > UPLOAD_TTL_SECONDS:
         if session:
+            _remove_upload_session_metadata(session)
             shutil.rmtree(session["workdir"], ignore_errors=True)
             UPLOAD_SESSIONS.pop(upload_id, None)
         raise HTTPException(404, "Phiên tải lên không tồn tại hoặc đã hết hạn. Hãy chọn file lại.")
@@ -91,11 +222,12 @@ async def start_chunked_upload(payload: dict = Body(...)):
     if total > MAX_INPUT_BYTES:
         raise HTTPException(413, "Tổng dung lượng ZIP vượt quá 500 MB.")
     upload_id = uuid.uuid4().hex
-    workdir = Path(tempfile.mkdtemp(prefix="aki-aov-chunks-"))
+    workdir = _new_upload_workdir("aki-aov-chunks-")
     UPLOAD_SESSIONS[upload_id] = {
         "created": time.time(), "workdir": str(workdir), "files": clean_files,
         "paths": [str(workdir / f"{i}_{item['name']}") for i, item in enumerate(clean_files, 1)]
     }
+    _persist_upload_session(upload_id, UPLOAD_SESSIONS[upload_id])
     return {"upload_id": upload_id, "chunk_size": UPLOAD_CHUNK_BYTES}
 
 
@@ -104,6 +236,7 @@ async def chunked_upload_status(upload_id: str):
     """Return received offsets so a browser can resume an interrupted upload."""
     session = _get_upload_session(upload_id)
     session["created"] = time.time()
+    _persist_upload_session(upload_id, session)
     return {
         "upload_id": upload_id,
         "chunk_size": UPLOAD_CHUNK_BYTES,
@@ -141,6 +274,7 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
             if existing.read(len(chunk)) != chunk:
                 raise HTTPException(409, "Khối gửi lại khác dữ liệu đã nhận.")
         session["created"] = time.time()
+        _persist_upload_session(upload_id, session)
         return {"received": offset, "size": item["size"]}
     if chunk_offset != offset:
         raise HTTPException(409, "Sai vị trí khối tải lên, hãy thử lại.")
@@ -150,6 +284,7 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
         target.write(chunk)
     item["received"] += len(chunk)
     session["created"] = time.time()
+    _persist_upload_session(upload_id, session)
     return {"received": item["received"], "size": item["size"]}
 
 
@@ -163,6 +298,7 @@ async def inspect_chunked_upload(upload_id: str, keep_session: bool = Query(Fals
         from fastapi.responses import PlainTextResponse
         if keep_session:
             session["created"] = time.time()
+            _persist_upload_session(upload_id, session)
         return PlainTextResponse(report)
     except InspectError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -182,6 +318,7 @@ async def inspect_chunked_compatibility(upload_id: str):
         manifest = await run_in_threadpool(build_resource_manifest, session["paths"])
         plan = await run_in_threadpool(plan_resource_compatibility, manifest["resources"])
         session["created"] = time.time()
+        _persist_upload_session(upload_id, session)
         return {
             "manifest": manifest,
             "compatibility_plan": plan,
@@ -204,6 +341,8 @@ async def decode_chunked_aov_bytes(upload_id: str):
         )
     except AOVBytesArchiveError as exc:
         raise HTTPException(400, str(exc)) from exc
+    _remove_upload_session_metadata(session)
+    _remove_upload_session_metadata(session)
     UPLOAD_SESSIONS.pop(upload_id, None)
     return FileResponse(
         path=output_path,
@@ -256,6 +395,7 @@ async def merge_aov_chunked_upload(upload_id: str):
         report = await run_in_threadpool(merge_aov_archives, session["paths"], str(output_path))
     except AOVMergeError as exc:
         raise HTTPException(400, str(exc)) from exc
+    _remove_upload_session_metadata(session)
     UPLOAD_SESSIONS.pop(upload_id, None)
     result_headers = {
         "X-AOV-Validation": "passed" if report.get("validation") else "incomplete",
@@ -302,7 +442,7 @@ async def import_drive_links(payload: dict = Body(...)):
             raise HTTPException(400, f"Tổng số ZIP không được vượt quá {MAX_FILES}.")
     else:
         upload_id = uuid.uuid4().hex
-        workdir = Path(tempfile.mkdtemp(prefix="aki-aov-drive-"))
+        workdir = _new_upload_workdir("aki-aov-drive-")
         files = []
         paths = []
         original_count = 0
@@ -333,8 +473,10 @@ async def import_drive_links(payload: dict = Body(...)):
                 "files": files,
                 "paths": paths,
             }
+            _persist_upload_session(upload_id, UPLOAD_SESSIONS[upload_id])
         else:
             session["created"] = time.time()
+            _persist_upload_session(upload_id, session)
         return {
             "upload_id": upload_id,
             "files": [{"name": item["name"], "size": item["size"]} for item in files],
