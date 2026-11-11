@@ -43,6 +43,19 @@ class WwiseBNKInspectorTests(unittest.TestCase):
         self.assertEqual(report["hirc_objects"][0]["type"], 2)
         self.assertEqual(report["hirc_objects"][0]["id"], 9002)
 
+    def test_uses_one_byte_hirc_type_from_version_49_onward(self):
+        object_body = struct.pack("<I", 9003) + b"modern"
+        modern_object = (
+            b"\\x02"
+            + struct.pack("<I", len(object_body))
+            + object_body
+        )
+        hirc = chunk("HIRC", struct.pack("<I", 1) + modern_object)
+        report = inspect_wwise_bnk(make_bank(hirc, version=49))
+        self.assertEqual(report["version"], 49)
+        self.assertEqual(report["hirc_objects"][0]["type"], 2)
+        self.assertEqual(report["hirc_objects"][0]["id"], 9003)
+
     def test_compares_media_and_hirc_payloads_without_authorizing_merge(self):
         def bank(media_id, media_payload, object_id, object_payload=b"opaque"):
             didx = chunk("DIDX", struct.pack("<III", media_id, 0, len(media_payload)))
