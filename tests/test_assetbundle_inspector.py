@@ -995,5 +995,53 @@ class AssetBundleInspectorTests(unittest.TestCase):
                 inspect_assetbundle(b"UnityFS\x00fixture")
 
 
+    def test_metadata_merge_rejects_malformed_base_and_overlay_inventory(self):
+        def metadata(prefix):
+            return {
+                "inspection_complete": True,
+                "assetbundle_name": "shared",
+                "preload_table_count": 1,
+                "preload_pointer_inventory": [{"file_id": 0, "path_id": 10, "source": "preload"}],
+                "container_record_inventory": [{
+                    "path": f"assets/{prefix}",
+                    "preload_index": 0,
+                    "preload_size": 1,
+                    "asset": {"file_id": 0, "path_id": 10},
+                }],
+                "main_asset": None,
+                "dependencies": [],
+            }
+
+        base = metadata("base")
+        overlay = metadata("overlay")
+        rewritten = {
+            "ready": True,
+            "rewritten": {
+                "preload": [{"file_id": 0, "path_id": 20}],
+                "container": [{"file_id": 0, "path_id": 20}],
+                "main_asset": None,
+            },
+        }
+
+        malformed_base = metadata("base")
+        malformed_base["preload_pointer_inventory"][0]["file_id"] = True
+        result = build_assetbundle_metadata_merge_plan(malformed_base, overlay, rewritten)
+        self.assertFalse(result["ready"])
+        self.assertIn("Base preload", result["reason"])
+
+        malformed_overlay = metadata("overlay")
+        malformed_overlay["container_record_inventory"][0]["path"] = ["not", "a", "path"]
+        result = build_assetbundle_metadata_merge_plan(base, malformed_overlay, rewritten)
+        self.assertFalse(result["ready"])
+        self.assertIn("Overlay Container", result["reason"])
+
+        result = build_assetbundle_metadata_merge_plan(base, overlay, rewritten)
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["preload_table"], [
+            {"file_id": 0, "path_id": 10},
+            {"file_id": 0, "path_id": 20},
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()
