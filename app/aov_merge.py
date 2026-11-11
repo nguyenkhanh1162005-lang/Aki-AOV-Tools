@@ -25,10 +25,11 @@ def merge_aov_mses_resource(
 ) -> tuple[bytes, dict]:
     """Merge the known MSES v7 AoV tables while retaining the base package's schema.
 
-    The sound-bank tables receive VTK's Hero_LiXin_Skin_C rows by key. Other
-    overlay-only rows (the 595 skill-combine rows and senior-label row) are
-    appended only after the MSES merger confirms that every shared row is
-    byte-identical.
+    New opaque rows are admitted only by an exact table-specific key allowlist.
+    Sound banks admit only rows carrying the VTK Hero_LiXin_Skin_C marker;
+    ResSkinSeniorLabelCfg admits only the observed 59500 row. skillcombine
+    currently has no verified new-row key allowlist and therefore fails closed
+    if the overlay introduces any new key.
     """
     normalized_name = resource_name.replace("\\", "/").lstrip("/")
     if normalized_name not in _SUPPORTED_MSES_TABLES:
@@ -56,14 +57,32 @@ def merge_aov_mses_resource(
         raise AOVResourceMergeError(f"{resource_name}: {exc}") from exc
 
     override_keys: set[int] = set()
-    if resource_name.replace("\\", "/").endswith(("/BattleBank.bytes", "/LobbyBank.bytes")):
-        for row in overlay_table.rows:
-            if b"Hero_LiXin_Skin_C" in row:
-                override_keys.add(int.from_bytes(row[:4], "little"))
-        if not override_keys:
+    allowed_new_keys: set[int] = set()
+    is_sound_bank = normalized_name in {
+        "Databin/Client/Sound/BattleBank.bytes",
+        "Databin/Client/Sound/LobbyBank.bytes",
+    }
+    if is_sound_bank:
+        marker_rows = [
+            row for row in overlay_table.rows
+            if b"Hero_LiXin_Skin_C" in row
+        ]
+        if not marker_rows:
             raise AOVResourceMergeError(
                 f"{resource_name}: overlay không có bản ghi Hero_LiXin_Skin_C để ghép."
             )
+        override_keys = {int.from_bytes(row[:4], "little") for row in marker_rows}
+        allowed_new_keys = override_keys
+    elif normalized_name == "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes":
+        allowed_new_keys = {59500}
+        overlay_keys = {int.from_bytes(row[:4], "little") for row in overlay_table.rows}
+        if 59500 not in overlay_keys:
+            raise AOVResourceMergeError(
+                f"{resource_name}: overlay thiếu bản ghi skin 59500 đã xác minh."
+            )
+    # skillcombine has no proven row-key allowlist yet. Shared identical rows
+    # can be retained, but every overlay-only key is rejected by the generic
+    # MSES merger rather than guessed from the first four opaque bytes.
 
     try:
         merged_decoded, report = merge_mses_rows(
@@ -71,8 +90,9 @@ def merge_aov_mses_resource(
             overlay_decoded,
             override_keys=override_keys,
             allow_schema_mismatch=True,
-            allow_new_rows_across_schema_mismatch=True,
-            verify_base_checksum=not normalized_name.endswith("/ResSkinSeniorLabelCfg.bytes"),
+            allow_new_rows_across_schema_mismatch=bool(allowed_new_keys),
+            allowed_new_keys=allowed_new_keys,
+            verify_base_checksum=True,
         )
         merged_resource = encode_aov_resource(merged_decoded, resource_name, base_mode)
         # Decode and parse once more so a successful return means the wrapper,
