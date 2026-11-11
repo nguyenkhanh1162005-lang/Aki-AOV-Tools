@@ -524,6 +524,7 @@ try:
     venv = parser.load(vtk.read(vtk_entries[PACKER_PATH]))
     _, bt = _find_mono_behaviour(benv, "ResourcePackerInfoSetXML")
     _, vt = _find_mono_behaviour(venv, "ResourcePackerInfoSetXML")
+    log(f"PACKER_VERSIONS base={bt.get('Version')!r} vtk={vt.get('Version')!r} base_name={bt.get('m_Name')!r} vtk_name={vt.get('m_Name')!r}")
     bp = {r["PathInIFS"]:i for i,r in enumerate(bt["AllResourcePackInfo"])}
     vp = {r["PathInIFS"]:i for i,r in enumerate(vt["AllResourcePackInfo"])}
     for path in sorted(actor_targets):
