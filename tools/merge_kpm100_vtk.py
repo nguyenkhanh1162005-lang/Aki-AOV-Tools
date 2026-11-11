@@ -300,54 +300,42 @@ def build(args: argparse.Namespace) -> dict:
         raise ValueError("SHA-256 KPM100 gốc không khớp; dừng.")
     if digest_file(vtk_path) != "b78976a7d9c0d7ce2420fdd631cdf47136bc9b0f313fbfcbbb6cb9af3a582249":
         raise ValueError("SHA-256 VTK gốc không khớp; dừng.")
-    base_outer = zipfile.ZipFile(base_path, "r")
+    base_zip = zipfile.ZipFile(base_path, "r")
     vtk_outer = zipfile.ZipFile(vtk_path, "r")
-    validate_archive(base_outer, "KPM100 ngoài")
+    validate_archive(base_zip, "KPM100 trực tiếp")
     validate_archive(vtk_outer, "VTK ngoài")
-    base_outer_map = unique_file_map(base_outer, "KPM100 ngoài")
-    vtk_outer_map = unique_file_map(vtk_outer, "VTK ngoài")
-    resource_candidates = [n for n in base_outer_map if PurePosixPath(n).name == "Resources.zip"]
-    skin_candidates = [n for n in base_outer_map if PurePosixPath(n).name.lower() == "danhsachskin.txt"]
-    if len(resource_candidates) != 1 or len(skin_candidates) != 1:
-        raise ValueError("Không xác định được Resources.zip/danhsachskin.txt của KPM100.")
-    resources_name = resource_candidates[0]
-    skins_name = skin_candidates[0]
-
+    base_map = unique_file_map(base_zip, "KPM100")
     report: dict = {
         "base_sha256": digest_file(base_path),
         "vtk_sha256": digest_file(vtk_path),
         "base_version": BASE_VERSION,
         "vtk_version": VTK_VERSION,
+        "container_structure": "KPM100 direct ZIP tree under Resources/1.64.1/",
         "game_tested": False,
-        "modified": [],
-        "added": [],
         "warnings": [
             "IFix HeroSkin_1 không được hợp nhất vì parser gặp opcode 89 chưa hỗ trợ; các tệp Thanos/HeroSkin được giữ nguyên KPM100.",
-            "Không thay ba UI assetbundle dùng chung từ VTK; giữ phiên bản KPM100 để bảo toàn giao diện và 100 skin."
+            "Không thay ba UI assetbundle dùng chung từ VTK; giữ phiên bản KPM100 để bảo toàn giao diện và 100 skin.",
+            "KPM100 không chứa Resources.zip hoặc danhsachskin.txt wrapper; cấu trúc ZIP gốc được giữ nguyên."
         ],
     }
-
-    with tempfile.TemporaryDirectory(prefix="kpm100-vtk-") as temp:
-        temp = Path(temp)
-        base_resources_path = temp / "base-Resources.zip"
-        with base_outer.open(resources_name, "r") as src, base_resources_path.open("wb") as dst:
-            shutil.copyfileobj(src, dst, 1024 * 1024)
-        base_inner = zipfile.ZipFile(base_resources_path, "r")
-        validate_archive(base_inner, "Resources.zip KPM100")
-        base_inner_map = unique_file_map(base_inner, "Resources.zip KPM100")
-        vtk_map = {}
+    with tempfile.TemporaryDirectory(prefix="kpm100-vtk-") as temp_dir:
+        vtk_map: dict[str, zipfile.ZipInfo] = {}
         for info in vtk_outer.infolist():
             if info.is_dir():
                 continue
-            rel = normalise_vtk_path(info.filename)
-            if rel in vtk_map:
-                raise ValueError(f"VTK ngoài có đường dẫn trùng sau chuẩn hóa: {rel}")
-            vtk_map[rel] = info
+            relative = normalise_vtk_path(info.filename)
+            if relative in vtk_map:
+                raise ValueError(f"VTK có đường dẫn trùng sau chuẩn hóa: {relative}")
+            vtk_map[relative] = info
+        if not any(name.startswith(PREFIX) for name in base_map):
+            raise ValueError("KPM100 không có cây Resources/1.64.1 như đã xác minh.")
+        if any(name.endswith("/Resources.zip") or name == "Resources.zip" for name in base_map):
+            raise ValueError("KPM100 có cấu trúc wrapper khác dự kiến; dừng để tránh sửa nhầm lớp ZIP.")
 
         def read_base(relative: str) -> bytes:
             name = PREFIX + relative
             try:
-                return base_inner.read(name)
+                return base_zip.read(name)
             except KeyError as exc:
                 raise ValueError(f"KPM100 thiếu tài nguyên cần ghép: {relative}") from exc
 
@@ -357,18 +345,16 @@ def build(args: argparse.Namespace) -> dict:
             except KeyError as exc:
                 raise ValueError(f"VTK thiếu tài nguyên cần ghép: {relative}") from exc
 
-        # Nested VTK packages are authoritative for Actor595 assets.
         actions_zip = zipfile.ZipFile(io.BytesIO(read_vtk(ACTIONS_PATH)), "r")
         validate_archive(actions_zip, "VTK Actor595 Actions.pkg.bytes")
         action_entries = {i.filename.casefold(): i for i in actions_zip.infolist() if not i.is_dir()}
         actor_info_zip = zipfile.ZipFile(io.BytesIO(read_vtk(ACTOR_INFO_PATH)), "r")
         validate_archive(actor_info_zip, "VTK Actor595 Infos.pkg.bytes")
         actor_info_entries = {i.filename.casefold(): i for i in actor_info_zip.infolist() if not i.is_dir()}
-        info_member = next((i for n, i in actor_info_entries.items() if n.endswith("595_lixin_actorinfo.bytes")), None)
+        info_member = next((i for name, i in actor_info_entries.items() if name.endswith("595_lixin_actorinfo.bytes")), None)
         if info_member is None:
             raise ValueError("VTK Actor595 Infos.pkg.bytes thiếu member actorinfo.")
 
-        # Build the 70 hashed KPM payloads from exact VTK source resources.
         mapping_path = Path(__file__).with_name("kpm100_actor595_payload_map.csv")
         with mapping_path.open("r", encoding="utf-8", newline="") as f:
             mappings = list(csv.DictReader(f))
@@ -377,22 +363,21 @@ def build(args: argparse.Namespace) -> dict:
         mod_replacements: dict[str, bytes] = {}
         decoded_actor_info = decode_aov_resource(actor_info_zip.read(info_member), "595_lixin_actorinfo.bytes")[0]
         decoded_asset_ref = decode_aov_resource(read_vtk(ASSETREF_PATH), "595_AssetRef.bytes")[0]
-        validation_raw: dict[str, bytes] = {}
         role_counts = {"skill": 0, "assetref": 0, "actorinfo": 0}
         for row in mappings:
             payload_file = row["payload_file"]
             entry_name = row["entry_name"]
             role = row["role"]
-            old_outer_path = MOD_DIR + payload_file
-            original_container = read_base(old_outer_path)
-            original_member = custom_mod_payload(original_container, entry_name)
+            old_relative_path = "Mod_by_Youtube_KHAM-PHA-MOBILE/" + payload_file
+            old_archive_path = PREFIX + old_relative_path
+            original_container = read_base(old_relative_path)
+            custom_mod_payload(original_container, entry_name)
             if role == "skill":
                 source_key = ("595_LiXin/skill/" + entry_name).casefold()
                 source_info = action_entries.get(source_key)
                 if source_info is None:
                     raise ValueError(f"VTK Actions thiếu skill {entry_name}.")
-                source_wrapped = actions_zip.read(source_info)
-                raw = decode_aov_resource(source_wrapped, entry_name)[0]
+                raw = decode_aov_resource(actions_zip.read(source_info), entry_name)[0]
                 ET.fromstring(raw)
             elif role == "assetref":
                 raw = decoded_asset_ref
@@ -402,19 +387,16 @@ def build(args: argparse.Namespace) -> dict:
                 raise ValueError(f"Role trong mapping không hỗ trợ: {role}")
             wrapped_kpm = encode_aov_resource(raw, entry_name, "zstd")
             rebuilt = make_custom_mod_payload(entry_name, wrapped_kpm, original_container)
-            verify_member = custom_mod_payload(rebuilt, entry_name)
-            verify_raw = decode_aov_resource(verify_member, entry_name)[0]
+            verify_raw = decode_aov_resource(custom_mod_payload(rebuilt, entry_name), entry_name)[0]
             if verify_raw != raw:
                 raise ValueError(f"KPM_MOD round-trip sai: {payload_file}")
             if role == "skill":
                 ET.fromstring(verify_raw)
-            mod_replacements[old_outer_path[len(PREFIX):]] = rebuilt
-            validation_raw[payload_file] = raw
+            mod_replacements[old_relative_path] = rebuilt
             role_counts[role] += 1
         if role_counts != {"skill": 68, "assetref": 1, "actorinfo": 1}:
             raise ValueError(f"Số lượng payload Actor595 sai: {role_counts}")
 
-        # Selective direct resources.
         replacements: dict[str, bytes] = dict(mod_replacements)
         replacements[ACTIONS_PATH] = read_vtk(ACTIONS_PATH)
         replacements[COMMON_PATH], common_report = merge_common_actions_pkg(read_base(COMMON_PATH), read_vtk(COMMON_PATH))
@@ -426,39 +408,30 @@ def build(args: argparse.Namespace) -> dict:
             replacements[relative] = merged
             mses_reports[relative] = table_report
 
-        packer_output, packer_report = merge_actor_packer(read_base(PACKER_PATH), read_vtk(PACKER_PATH))
-        replacements[PACKER_PATH] = packer_output
-        verification_output, verification_report = merge_actor_verification(
-            read_base(VERIFY_PATH),
-            read_vtk(VERIFY_PATH),
-            VERIFICATION_INCLUDE,
+        replacements[PACKER_PATH], packer_report = merge_actor_packer(read_base(PACKER_PATH), read_vtk(PACKER_PATH))
+        replacements[VERIFY_PATH], verification_report = merge_actor_verification(
+            read_base(VERIFY_PATH), read_vtk(VERIFY_PATH), VERIFICATION_INCLUDE
         )
-        replacements[VERIFY_PATH] = verification_output
 
-        # Only these VTK-only root resources belong to the iOS Lý Tín mod.
         additions = ACTOR_ASSETS | IOS_SOUNDS
         for name in additions:
             if name not in vtk_map:
                 raise ValueError(f"VTK ZIP thiếu file iOS Actor595: {name}")
-            if PREFIX + name in base_inner_map:
+            if PREFIX + name in base_map:
                 raise ValueError(f"File VTK iOS trùng với KPM ngoài danh sách cho phép: {name}")
-        if any(name.startswith("Sound/Android/") for name in vtk_map):
-            report["android_sound_skipped"] = True
-        if any(name.startswith("Sound/iOS/Hero_Sinon_") for name in vtk_map):
-            report["sinon_sound_skipped"] = True
 
-        # Write Resources.zip. Existing KPM members keep their original ZipInfo and bytes.
-        inner_output_path = temp / "Resources-merged.zip"
-        with zipfile.ZipFile(inner_output_path, "w", allowZip64=True) as out_inner:
-            for info in base_inner.infolist():
+        out_path = Path(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(out_path, "w", allowZip64=True) as out_zip:
+            for info in base_zip.infolist():
                 if info.is_dir():
-                    out_inner.writestr(info, b"")
+                    out_zip.writestr(info, b"")
                     continue
                 relative = info.filename[len(PREFIX):] if info.filename.startswith(PREFIX) else None
                 if relative in replacements:
-                    out_inner.writestr(info, replacements[relative])
+                    out_zip.writestr(info, replacements[relative])
                 else:
-                    with base_inner.open(info, "r") as src, out_inner.open(info, "w", force_zip64=True) as dst:
+                    with base_zip.open(info, "r") as src, out_zip.open(info, "w", force_zip64=True) as dst:
                         shutil.copyfileobj(src, dst, 1024 * 1024)
             for name in sorted(additions):
                 destination = PREFIX + name
@@ -467,57 +440,30 @@ def build(args: argparse.Namespace) -> dict:
                 info.external_attr = vtk_map[name].external_attr
                 info.create_system = vtk_map[name].create_system
                 info.file_size = vtk_map[name].file_size
-                with vtk_outer.open(vtk_map[name], "r") as src, out_inner.open(info, "w", force_zip64=True) as dst:
+                with vtk_outer.open(vtk_map[name], "r") as src, out_zip.open(info, "w", force_zip64=True) as dst:
                     shutil.copyfileobj(src, dst, 1024 * 1024)
-        with zipfile.ZipFile(inner_output_path, "r") as check_inner:
-            validate_archive(check_inner, "Resources.zip sau ghép")
-            out_names = set(check_inner.namelist())
+
+        with zipfile.ZipFile(out_path, "r") as check_zip:
+            validate_archive(check_zip, "KPM100 + VTK đầu ra")
+            output_map = unique_file_map(check_zip, "KPM100 + VTK đầu ra")
+            missing_base = set(base_map) - set(output_map)
+            if missing_base:
+                raise ValueError(f"ZIP đầu ra làm mất {len(missing_base)} mục gốc, ví dụ {sorted(missing_base)[:10]}")
             for relative in replacements:
-                if PREFIX + relative not in out_names:
+                if PREFIX + relative not in output_map:
                     raise ValueError(f"ZIP đầu ra thiếu file đã thay: {relative}")
             for name in additions:
-                if PREFIX + name not in out_names:
+                if PREFIX + name not in output_map:
                     raise ValueError(f"ZIP đầu ra thiếu file mới: {name}")
-            lost = set(base_inner_map) - out_names
-            if lost:
-                raise ValueError(f"ZIP đầu ra làm mất {len(lost)} file nền, ví dụ {sorted(lost)[:10]}")
-
-        # Rebuild the original outer KPM wrapper without changing its skin list or other files.
-        out_path = Path(args.output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(out_path, "w", allowZip64=True) as out_outer:
-            for info in base_outer.infolist():
-                if info.is_dir():
-                    out_outer.writestr(info, b"")
-                elif info.filename == resources_name:
-                    new_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
-                    new_info.compress_type = zipfile.ZIP_STORED
-                    new_info.external_attr = info.external_attr
-                    new_info.create_system = info.create_system
-                    with inner_output_path.open("rb") as src, out_outer.open(new_info, "w", force_zip64=True) as dst:
-                        shutil.copyfileobj(src, dst, 1024 * 1024)
-                elif info.filename == skins_name:
-                    original = base_outer.read(info.filename).decode("utf-8-sig", errors="replace").rstrip()
-                    if "Vấn Tâm Kiếm" not in original:
-                        original += "\nLý Tín - Vấn Tâm Kiếm (Actor 595)"
-                    out_outer.writestr(info, (original + "\n").encode("utf-8"))
-                else:
-                    with base_outer.open(info, "r") as src, out_outer.open(info, "w", force_zip64=True) as dst:
-                        shutil.copyfileobj(src, dst, 1024 * 1024)
-
-        with zipfile.ZipFile(out_path, "r") as check_outer:
-            validate_archive(check_outer, "ZIP ngoài sau ghép")
-            if len(check_outer.infolist()) != len(base_outer.infolist()):
-                raise ValueError("Số mục ZIP ngoài bị thay đổi.")
-            if resources_name not in {i.filename for i in check_outer.infolist()}:
-                raise ValueError("ZIP ngoài thiếu Resources.zip.")
+            if len(output_map) != len(base_map) + len(additions):
+                raise ValueError(f"Số lượng file đầu ra sai: {len(output_map)} != {len(base_map)+len(additions)}")
 
         report.update({
             "output": str(out_path),
             "output_size": out_path.stat().st_size,
             "output_sha256": digest_file(out_path),
-            "base_inner_entries": len(base_inner.infolist()),
-            "output_inner_entries": len(out_names),
+            "base_entries": len(base_map),
+            "output_entries": len(output_map),
             "added_resources": sorted(additions),
             "replaced_resources": sorted(replacements),
             "kpm_mod_payloads": role_counts,
@@ -527,8 +473,7 @@ def build(args: argparse.Namespace) -> dict:
             "verification": verification_report,
             "validation": {
                 "outer_zip_crc": "passed",
-                "inner_resources_zip_crc": "passed",
-                "preserved_all_base_inner_paths": True,
+                "preserved_all_base_paths": True,
                 "custom_kpm_mod_roundtrip": "70/70 passed",
                 "skill_xml_parse": "68/68 passed",
                 "actor_actions_package": "129 entries, CRC passed",
@@ -536,12 +481,13 @@ def build(args: argparse.Namespace) -> dict:
                 "game_tested": False,
             },
         })
-        (Path(args.report)).parent.mkdir(parents=True, exist_ok=True)
-        Path(args.report).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        report_path = Path(args.report)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         actions_zip.close()
         actor_info_zip.close()
-        base_inner.close()
-    base_outer.close()
+
+    base_zip.close()
     vtk_outer.close()
     return report
 
