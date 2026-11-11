@@ -61,6 +61,19 @@ class ResourceManifestTests(unittest.TestCase):
             )
             self.assertEqual(result["resource_count"], 4)
 
+    def test_marks_macos_appledouble_files_as_metadata_noise(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._zip(Path(tmp), "mac-pack.zip", {
+                "__MACOSX/Resources/._BattleBank.bytes": b"AppleDouble",
+                "Resources/1.64.1/._HeroSkin_2.bytes": b"AppleDouble",
+                ".DS_Store": b"metadata",
+            })
+            result = build_resource_manifest([source])
+            self.assertEqual(result["resource_count"], 3)
+            self.assertTrue(all(item["is_metadata_noise"] for item in result["resources"]))
+            self.assertTrue(all(item["format"] == "metadata_noise" for item in result["resources"]))
+            self.assertTrue(all(not item["is_aov_resource"] for item in result["resources"]))
+
     def test_marks_aov_mses_as_unsupported_aov_resource(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = self._zip(Path(tmp), "aov.zip", {
