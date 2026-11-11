@@ -22,7 +22,7 @@ from app.aov_bytes import decode_aov_resource, encode_aov_resource
 from app.aov_common_actions import merge_common_actions_pkg
 from app.aov_merge import merge_aov_mses_resource
 
-BASE_VERSION = "1.64.1.12"
+BASE_VERSION = "1.64.1.12_KPM"
 VTK_VERSION = "1.64.1.11"
 PREFIX = "Resources/1.64.1/"
 MOD_DIR = PREFIX + "Mod_by_Youtube_KHAM-PHA-MOBILE/"
