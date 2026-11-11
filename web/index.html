@@ -125,10 +125,11 @@ compatibilityBtn.addEventListener('click',async()=>{
     const lines=[
       'BÁO CÁO TƯƠNG THÍCH TÀI NGUYÊN',
       'ZIP: '+manifest.archive_count+' | Resource: '+manifest.resource_count,
-      'TƯƠNG THÍCH TOÀN BỘ ZIP: '+(sourceCompatibility.status||'không rõ'),
+      'KIỂM TRA METADATA TOÀN BỘ ZIP: '+(sourceCompatibility.status||'không rõ'),
       'Phiên bản phát hiện: '+((sourceCompatibility.game_versions||[]).join(', ')||'không xác định'),
       'Nền tảng phát hiện: '+((sourceCompatibility.platforms||[]).join(', ')||'không xác định'),
       ...(sourceCompatibility.reasons||[]).map(reason=>'CẢNH BÁO: '+reason),
+      ...(sourceCompatibility.status==='NO_CONFLICT_DETECTED'?['LƯU Ý: Chỉ chưa phát hiện xung đột từ metadata tên ZIP/đường dẫn; không xác nhận nội dung nhị phân hoặc khả năng chạy trong game.']:[]),
       'SAFE_MERGE: '+(summary.SAFE_MERGE||0),
       'IDENTICAL_DUPLICATE: '+(summary.IDENTICAL_DUPLICATE||0),
       'NEEDS_RULE: '+(summary.NEEDS_RULE||0),
@@ -138,7 +139,8 @@ compatibilityBtn.addEventListener('click',async()=>{
       'CHI TIẾT (tối đa 250 đường dẫn đầu tiên):'
     ];
     for(const item of (plan.resources||[]).slice(0,250)){
-      lines.push('['+item.status+'] '+item.path+' | '+(item.formats||[]).join(', '));
+      const statusLabel=item.status==='SAFE_MERGE'?'SAFE_MERGE (chỉ thêm tệp văn bản vào ZIP)':item.status;
+      lines.push('['+statusLabel+'] '+item.path+' | '+(item.formats||[]).join(', '));
       if(item.container_path)lines.push('  Nằm trong ZIP lồng: '+item.container_path);
       if(item.game_versions?.length)lines.push('  Phiên bản: '+item.game_versions.join(', '));
       if(item.platforms?.length)lines.push('  Platform: '+item.platforms.join(', '));
