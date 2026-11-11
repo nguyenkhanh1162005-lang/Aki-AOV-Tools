@@ -90,6 +90,14 @@ class ResourceManifestTests(unittest.TestCase):
             with self.assertRaises(ResourceManifestError):
                 build_resource_manifest([source])
 
+    def test_rejects_ambiguous_dot_segments_and_repeated_separators(self):
+        for unsafe_path in ("folder/./asset.bytes", "folder//asset.bytes"):
+            with self.subTest(path=unsafe_path):
+                with tempfile.TemporaryDirectory() as tmp:
+                    source = self._zip(Path(tmp), "ambiguous.zip", {unsafe_path: b"x"})
+                    with self.assertRaises(ResourceManifestError):
+                        build_resource_manifest([source])
+
     def test_rejects_encrypted_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "encrypted.zip"
