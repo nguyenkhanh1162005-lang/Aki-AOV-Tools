@@ -131,8 +131,17 @@ def merge_mses_rows(
     ):
         raise MSESError("Danh sách khóa MSES mới cho phép phải là uint32 hợp lệ.")
     if new_keys:
-        if allowed_new_keys is None or not new_keys.issubset(allowed_new_keys):
-            unexpected = sorted(new_keys - (allowed_new_keys or set()))
+        if allowed_new_keys is None:
+            if base.field_count != overlay.field_count:
+                raise MSESError(
+                    "Schema MSES khác nhau và overlay có bản ghi mới chưa được "
+                    "chứng minh tương thích; cần adapter theo từng bảng."
+                )
+            raise MSESError(
+                "Overlay có khóa mới nhưng chưa có allowlist theo bảng."
+            )
+        if not new_keys.issubset(allowed_new_keys):
+            unexpected = sorted(new_keys - allowed_new_keys)
             formatted = ", ".join(f"0x{key:08x}" for key in unexpected)
             raise MSESError(
                 "Overlay có khóa mới ngoài allowlist theo bảng: " + formatted + "."
