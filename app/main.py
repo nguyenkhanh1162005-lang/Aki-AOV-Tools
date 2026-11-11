@@ -140,6 +140,7 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
             existing.seek(chunk_offset)
             if existing.read(len(chunk)) != chunk:
                 raise HTTPException(409, "Khối gửi lại khác dữ liệu đã nhận.")
+        session["created"] = time.time()
         return {"received": offset, "size": item["size"]}
     if chunk_offset != offset:
         raise HTTPException(409, "Sai vị trí khối tải lên, hãy thử lại.")
