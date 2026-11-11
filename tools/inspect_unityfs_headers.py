@@ -61,7 +61,7 @@ def parse_vtk_table(name, b):
         if "VTK.IOS.VIP.zip" in name and ("commercializenotify" in name or "595_lixin_battle_base.assetbundle" in name or "resourcepackerinfosetall" in name):
             print(f"[TABLE RAW] {name} len={len(raw)} n={n} hex={raw[:min(110,len(raw))].hex()}")
         blocks=[]
-        has_offsets = (_version >= 9) or _engine.startswith("2022.3")
+        has_offsets = (_version >= 9)
         for _ in range(n):
             us,cs,bf=struct.unpack_from(">IIH",raw,q); q+=10
             block_offset=None
