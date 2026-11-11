@@ -163,15 +163,6 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
             output.parent.mkdir(parents=True, exist_ok=True)
             with zipfile.ZipFile(output, "a", compression=zipfile.ZIP_DEFLATED) as target:
                 target.writestr(output_name, decoded)
-            report["decoded"].append({
-                "source": prefix,
-                "path": path,
-                "output_path": output_name,
-                "mode": mode_name,
-                "original_size": len(raw),
-                "decoded_size": len(decoded),
-                "payload": payload_details,
-            })
             payload_details = _inspect_decoded_payload(decoded)
             if path.lower().endswith(("heroskin_1.bytes", "heroskin_2.bytes")):
                 try:
@@ -190,6 +181,15 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
                         "reason": str(exc),
                     }
             report["decoded_bytes"] += len(decoded)
+            report["decoded"].append({
+                "source": prefix,
+                "path": path,
+                "output_path": output_name,
+                "mode": mode_name,
+                "original_size": len(raw),
+                "decoded_size": len(decoded),
+                "payload": payload_details,
+            })
 
             # AoV package resources such as CommonActions.pkg.bytes can contain
             # another ZIP after their outer AES/Zstandard wrapper is removed.
