@@ -79,10 +79,13 @@ decodeBytesBtn.addEventListener('click',async()=>{
     const response=await fetchWithRetry('/api/upload/'+encodeURIComponent(uploadId)+'/decode-bytes',{method:'POST'});
     const decodedCount=response.headers.get('X-AOV-Decoded-Resources')||'?';
     const unsupportedCount=response.headers.get('X-AOV-Unsupported-Resources')||'0';
+    const msesCount=response.headers.get('X-AOV-MSES-Tables')||'0';
+    const ifixCount=response.headers.get('X-AOV-IFix-Patches')||'0';
+    const packageCount=response.headers.get('X-AOV-Nested-Packages')||'0';
     const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
     a.href=url;a.download='aki-aov-decoded-resources.zip';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
     localAovUploadId=null;clearUploadState();
-    status.textContent='Đã giải mã '+decodedCount+' tài nguyên .bytes. Chưa hỗ trợ: '+unsupportedCount+'. ZIP tải xuống có decode-report.json. Đây là dữ liệu đã giải mã để kiểm tra, chưa phải ZIP mod có thể chép vào game.';
+    status.textContent='Đã giải mã '+decodedCount+' tài nguyên .bytes. MSES: '+msesCount+', IFix: '+ifixCount+', package ZIP đã bung: '+packageCount+'. Chưa hỗ trợ: '+unsupportedCount+'. ZIP có decode-report.json. Đây là dữ liệu phân tích, chưa phải ZIP mod cài vào game.';
   }catch(e){status.textContent='Lỗi giải mã: '+e.message+' Phiên tải vẫn được giữ nếu máy chủ chưa xử lý xong.';}
   finally{
     decodeBytesBtn.disabled=!input.files.length||input.files.length>10;
