@@ -859,10 +859,12 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
                         try:
                             file_id = int(node["m_FileID"])
                             path_id = int(node["m_PathID"])
-                            target = "local" if file_id == 0 else (
-                                external_names[file_id - 1]
-                                if 0 < file_id <= len(external_names)
-                                else "invalid-external-index"
+                            target = "null" if path_id == 0 else (
+                                "local" if file_id == 0 else (
+                                    external_names[file_id - 1]
+                                    if 0 < file_id <= len(external_names)
+                                    else "invalid-external-index"
+                                )
                             )
                             object_references.append({
                                 "from_file": file_name,
