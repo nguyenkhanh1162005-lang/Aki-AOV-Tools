@@ -75,10 +75,26 @@ def merge_aov_mses_resource(
         allowed_new_keys = override_keys
     elif normalized_name == "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes":
         allowed_new_keys = {59500}
-        overlay_keys = {int.from_bytes(row[:4], "little") for row in overlay_table.rows}
-        if 59500 not in overlay_keys:
+        base_rows_by_key = {
+            int.from_bytes(row[:4], "little"): row for row in base_table.rows
+        }
+        overlay_rows_by_key = {
+            int.from_bytes(row[:4], "little"): row for row in overlay_table.rows
+        }
+        if 59500 not in overlay_rows_by_key:
             raise AOVResourceMergeError(
                 f"{resource_name}: overlay thiếu bản ghi skin 59500 đã xác minh."
+            )
+        # This adapter has evidence for adding this key, not replacing an
+        # existing opaque row. Never report success while silently retaining
+        # a conflicting base record for the target skin.
+        if (
+            59500 in base_rows_by_key
+            and base_rows_by_key[59500] != overlay_rows_by_key[59500]
+        ):
+            raise AOVResourceMergeError(
+                f"{resource_name}: key 59500 đã tồn tại nhưng payload khác; "
+                "chưa có quy tắc ghi đè an toàn."
             )
     # skillcombine has no proven row-key allowlist yet. Shared identical rows
     # can be retained, but every overlay-only key is rejected by the generic
