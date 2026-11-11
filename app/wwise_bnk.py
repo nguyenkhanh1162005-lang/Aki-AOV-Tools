@@ -126,12 +126,19 @@ def inspect_wwise_bnk(data: bytes) -> dict[str, Any]:
         cursor = hirc.offset + 4
         end = hirc.offset + hirc.size
         seen_objects: set[int] = set()
+        # Wwise bank versions <= 48 encode HIRC object type as u32;
+        # newer versions use u8. The size field and body follow that type.
+        object_type_width = 4 if version <= 48 else 1
+        object_header_size = object_type_width + 4
         for index in range(count):
-            if cursor + 5 > end:
+            if cursor + object_header_size > end:
                 raise WwiseBNKError(f"HIRC object {index} bị cắt cụt.")
-            object_type = data[cursor]
-            object_size = _u32(data, cursor + 1)
-            body_start = cursor + 5
+            if object_type_width == 4:
+                object_type = _u32(data, cursor)
+            else:
+                object_type = data[cursor]
+            object_size = _u32(data, cursor + object_type_width)
+            body_start = cursor + object_header_size
             body_end = body_start + object_size
             if object_size < 4 or body_end > end:
                 raise WwiseBNKError(f"Kích thước HIRC object {index} không hợp lệ.")
