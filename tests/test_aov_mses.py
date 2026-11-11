@@ -39,6 +39,23 @@ class MSESTests(unittest.TestCase):
         self.assertEqual(parse_mses(output).rows[0][4:], b"base")
         self.assertEqual(report["retained_base_conflicts"], ["0x00000001"])
 
+    def test_rejects_new_opaque_row_across_schema_mismatch(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(3, [
+            struct.pack("<I", 1) + b"base",
+            struct.pack("<I", 2) + b"new-row-with-unknown-schema",
+        ])
+        with self.assertRaisesRegex(MSESError, "bản ghi mới chưa được chứng minh tương thích"):
+            merge_mses_rows(base, overlay, allow_schema_mismatch=True)
+
+    def test_rejects_non_uint32_override_keys(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(4, [struct.pack("<I", 1) + b"overlay"])
+        for key in (-1, 0x1_0000_0000, True):
+            with self.subTest(key=key):
+                with self.assertRaisesRegex(MSESError, "uint32"):
+                    merge_mses_rows(base, overlay, override_keys={key})
+
     def test_rejects_schema_mismatch_with_changed_shared_row(self):
         base = make_table(4, [struct.pack("<I", 1) + b"base"])
         overlay = make_table(3, [struct.pack("<I", 1) + b"overlay"])
