@@ -14,6 +14,10 @@ import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from app.aov_bytes import decode_aov_resource, encode_aov_resource
 from app.aov_common_actions import merge_common_actions_pkg
 from app.aov_merge import merge_aov_mses_resource
