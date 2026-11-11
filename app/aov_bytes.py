@@ -131,22 +131,20 @@ def encrypt_aes_zstd_resource(data: bytes, resource_name: str, level: int = 17) 
 
 
 def decompress_aov_bytes(data: bytes) -> bytes:
-    """Decode an AoV Zstandard-wrapped resource (22 4A 00 EF)."""
-    if len(data) < 8 or data[:2] != b"\x22\x4a":
-        raise AOVBytesError("Không nhận diện được header tài nguyên AoV.")
-    frame_offset = data.find(ZSTD_MAGIC)
-    if frame_offset < 0:
-        raise AOVBytesError("Tệp không chứa khung Zstandard AoV đã nhận diện.")
+    """Decode the exact AoV Zstandard wrapper (22 4A 00 EF + size + frame)."""
+    if len(data) < 12 or data[:4] != ZSTD_HEADER:
+        raise AOVBytesError("Không nhận diện được header AoV Zstandard 22 4A 00 EF.")
+    if data[8:12] != ZSTD_MAGIC:
+        raise AOVBytesError("Khung Zstandard không nằm đúng vị trí trong wrapper AoV.")
     expected_size = int.from_bytes(data[4:8], "little")
     if expected_size > MAX_DECODED_RESOURCE:
         raise AOVBytesError("Kích thước khai báo sau giải nén vượt giới hạn 256 MiB.")
-    decoded = _decompress_frame(data[frame_offset:])
-    if expected_size and len(decoded) != expected_size:
+    decoded = _decompress_frame(data[8:])
+    if len(decoded) != expected_size:
         raise AOVBytesError(
             f"Kích thước Zstandard sau giải nén không khớp header: {len(decoded)} != {expected_size}."
         )
     return decoded
-
 
 def compress_aov_bytes(data: bytes, level: int = 17) -> bytes:
     """Encode a decoded payload using the AoV Zstandard wrapper."""
