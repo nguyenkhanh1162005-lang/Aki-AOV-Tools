@@ -226,9 +226,16 @@ def build_resource_manifest(paths: list[str]) -> dict[str, Any]:
 
         source_count = 0
         with archive:
+            seen_paths: set[str] = set()
             for info in archive.infolist():
                 if info.is_dir():
                     continue
+                canonical_path = _safe_path(info.filename)
+                if canonical_path in seen_paths:
+                    raise ResourceManifestError(
+                        f"ZIP chứa nhiều entry trùng đường dẫn sau chuẩn hóa: {canonical_path} ({source})"
+                    )
+                seen_paths.add(canonical_path)
                 account_entry(info)
                 item = _build_manifest_item(archive, info, source)
                 resources.append(item)
@@ -246,9 +253,17 @@ def build_resource_manifest(paths: list[str]) -> dict[str, Any]:
                     try:
                         nested_bytes = archive.read(info)
                         with zipfile.ZipFile(io.BytesIO(nested_bytes), "r") as nested:
+                            nested_seen_paths: set[str] = set()
                             for nested_info in nested.infolist():
                                 if nested_info.is_dir():
                                     continue
+                                nested_canonical_path = _safe_path(nested_info.filename)
+                                if nested_canonical_path in nested_seen_paths:
+                                    raise ResourceManifestError(
+                                        "ZIP lồng chứa nhiều entry trùng đường dẫn sau chuẩn hóa: "
+                                        f"{nested_canonical_path} ({item['path']})"
+                                    )
+                                nested_seen_paths.add(nested_canonical_path)
                                 account_entry(nested_info)
                                 nested_item = _build_manifest_item(
                                     nested,
