@@ -587,6 +587,34 @@ try:
 except Exception as exc:
     log(f"IFIX_ERROR {type(exc).__name__}: {exc}")
 
+log("\n=== Test actual selective MSES and CommonActions merge helpers ===")
+from app.aov_merge import merge_aov_mses_resource
+from app.aov_common_actions import merge_common_actions_pkg
+for relative in (
+    "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes",
+    "Databin/Client/Huanhua/ResBillboardCfg.bytes",
+    "Databin/Client/Huanhua/ResBillboardSkinCfg.bytes",
+    "Databin/Client/Huanhua/ResKillBillboardCfg.bytes",
+    "Databin/Client/Skill/skillcombine.bytes",
+    "Databin/Client/Sound/BattleBank.bytes",
+    "Databin/Client/Sound/LobbyBank.bytes",
+):
+    full = PREFIX + relative
+    info = vtk_entries.get(relative)
+    try:
+        merged, report = merge_aov_mses_resource(base.read(full), vtk.read(info), relative)
+        log(f"MSES_MERGE_OK {relative} output={len(merged)} appended={report.get('appended_keys')} replaced={report.get('replaced_keys')}")
+    except Exception as exc:
+        log(f"MSES_MERGE_FAIL {relative} {type(exc).__name__}: {exc}")
+try:
+    merged, report = merge_common_actions_pkg(
+        base.read(PREFIX + "Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes"),
+        vtk.read(vtk_entries["Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes"])
+    )
+    log(f"COMMON_ACTIONS_MERGE_OK output={len(merged)} merged_files={list(report['merged_files'])} verified={report['verified']}")
+except Exception as exc:
+    log(f"COMMON_ACTIONS_MERGE_FAIL {type(exc).__name__}: {exc}")
+
 log("\n=== KPM/VTK same path conflicts ===")
 v_by_full = {}
 for name, info in vtk_entries.items():
