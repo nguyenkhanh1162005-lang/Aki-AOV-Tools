@@ -53,6 +53,15 @@ class CompatibilityPlannerTests(unittest.TestCase):
         self.assertEqual(result["resources"][0]["status"], "NEEDS_RULE")
         self.assertEqual(result["resources"][0]["duplicate_sources"], ["one.zip"])
 
+    def test_same_path_in_distinct_nested_archives_is_cross_archive_duplicate(self):
+        result = plan_resource_compatibility([
+            resource("same.txt", "b", source="wrapper.zip", container_path="A.zip"),
+            resource("same.txt", "b", source="wrapper.zip", container_path="B.zip"),
+        ])
+        item = result["resources"][0]
+        self.assertEqual(item["status"], "IDENTICAL_DUPLICATE")
+        self.assertEqual(item["duplicate_sources"], [])
+
     def test_version_and_platform_conflicts_fail_closed(self):
         version = plan_resource_compatibility([
             resource("asset.bin", "e", game_version="1.0"),
