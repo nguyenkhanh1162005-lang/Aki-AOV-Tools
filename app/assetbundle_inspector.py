@@ -356,7 +356,7 @@ def build_assetbundle_metadata_remap_plan(
 
     Preload indices and sizes are preserved. No table is combined or serialized.
     """
-    if not isinstance(metadata, dict) or not metadata.get("inspection_complete"):
+    if not isinstance(metadata, dict) or metadata.get("inspection_complete") is not True:
         return {"ready": False, "reason": "AssetBundle metadata inventory is incomplete.",
                 "rewritten": {}, "blocked_references": []}
     preload = metadata.get("preload_pointer_inventory")
@@ -457,8 +457,16 @@ def build_assetbundle_metadata_merge_plan(
             return {"ready": False, "reason": f"{label} Container inventory is unavailable."}
         if metadata.get("preload_table_count") != len(metadata["preload_pointer_inventory"]):
             return {"ready": False, "reason": f"{label} preload inventory count mismatch."}
+        container_count = metadata.get("container_entry_count")
+        if container_count is not None and (
+            not isinstance(container_count, int)
+            or isinstance(container_count, bool)
+            or container_count < 0
+            or container_count != len(metadata["container_record_inventory"])
+        ):
+            return {"ready": False, "reason": f"{label} Container inventory count mismatch."}
 
-    if not isinstance(overlay_rewritten, dict) or not overlay_rewritten.get("ready"):
+    if not isinstance(overlay_rewritten, dict) or overlay_rewritten.get("ready") is not True:
         return {"ready": False, "reason": "Overlay metadata pointers have not passed remap validation."}
     rewritten = overlay_rewritten.get("rewritten")
     if not isinstance(rewritten, dict):
@@ -466,6 +474,8 @@ def build_assetbundle_metadata_merge_plan(
 
     base_name = base_metadata.get("assetbundle_name", "")
     overlay_name = overlay_metadata.get("assetbundle_name", "")
+    if not isinstance(base_name, str) or not isinstance(overlay_name, str):
+        return {"ready": False, "reason": "AssetBundle name metadata must be text."}
     if base_name and overlay_name and base_name != overlay_name:
         return {"ready": False, "reason": "AssetBundle names differ; metadata ownership is ambiguous."}
 
