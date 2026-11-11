@@ -200,9 +200,13 @@ def compare_wwise_bnk(base_data: bytes, overlay_data: bytes) -> dict[str, Any]:
     ]
 
     version_match = base["version"] == overlay["version"]
+    bank_id_match = base["bank_id"] == overlay["bank_id"]
     if not version_match:
         status = "VERSION_CONFLICT"
         reasons = ["Wwise SoundBank có version khác nhau."]
+    elif not bank_id_match:
+        status = "BANK_ID_CONFLICT"
+        reasons = ["Bank ID khác nhau; đây là hai SoundBank identity khác nhau, không được xem là cùng bank để thay thế trực tiếp."]
     elif changed_media or changed_objects or object_type_conflicts:
         status = "NEEDS_RULE"
         reasons = ["Có media ID hoặc HIRC object ID trùng nhưng payload khác nhau; cần remap và kiểm tra tham chiếu."]
@@ -214,6 +218,7 @@ def compare_wwise_bnk(base_data: bytes, overlay_data: bytes) -> dict[str, Any]:
         "format": "Wwise BNK comparison",
         "status": status,
         "bank_versions_match": version_match,
+        "bank_id_match": bank_id_match,
         "bank_ids": {"base": base["bank_id"], "overlay": overlay["bank_id"]},
         "base_chunk_ids": [item["id"] for item in base["chunks"]],
         "overlay_chunk_ids": [item["id"] for item in overlay["chunks"]],
