@@ -23,7 +23,7 @@ jobs:
           echo '944d01f6a4e31dbaa7ea31c14d292b799818843a4e3533860b2e16ff4bb77aa0  incoming/Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip' | sha256sum -c -
           echo 'b78976a7d9c0d7ce2420fdd631cdf47136bc9b0f313fbfcbbb6cb9af3a582249  incoming/VTK.IOS.VIP.zip' | sha256sum -c -
       - name: Install AoV resource codec dependencies
-        run: python -m pip install --disable-pip-version-check pyzstd pycryptodome
+        run: python -m pip install --disable-pip-version-check pyzstd pycryptodome zstandard
       - name: Run structural and payload mapping analysis
         run: set -o pipefail; python tools/diagnose_kpm100_vtk.py | tee diagnostic-report.txt
       - name: Upload report
