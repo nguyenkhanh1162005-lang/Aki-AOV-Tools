@@ -29,6 +29,34 @@ class AOVArchivePathTests(unittest.TestCase):
         with self.assertRaises(AOVMergeError):
             _normalise_vtk_path("C:/outside/file.bytes")
 
+    def test_rejects_dot_segments_and_repeated_separators_in_overlay_paths(self):
+        for name in (
+            "Resources/1.64.1/Thanos/./HeroSkin_2.bytes",
+            "Resources/1.64.1//Thanos/HeroSkin_2.bytes",
+        ):
+            with self.subTest(name=name):
+                with self.assertRaises(AOVMergeError):
+                    _normalise_vtk_path(name)
+
+    def test_rejects_ambiguous_and_duplicate_archive_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            for unsafe_name in ("folder/./asset.bytes", "folder//asset.bytes"):
+                path = folder / "ambiguous.zip"
+                with zipfile.ZipFile(path, "w") as archive:
+                    archive.writestr(unsafe_name, b"payload")
+                with zipfile.ZipFile(path) as archive:
+                    with self.assertRaisesRegex(AOVMergeError, "không an toàn"):
+                        _validate_archive_paths(archive, "ambiguous.zip")
+
+            path = folder / "duplicate.zip"
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("same.bytes", b"first")
+                archive.writestr("same.bytes", b"second")
+            with zipfile.ZipFile(path) as archive:
+                with self.assertRaisesRegex(AOVMergeError, "trùng lặp"):
+                    _validate_archive_paths(archive, "duplicate.zip")
+
     def test_duplicate_payloads_are_compared_by_sha256_not_only_crc_and_size(self):
         import io
         from types import SimpleNamespace
