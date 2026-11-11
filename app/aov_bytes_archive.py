@@ -20,6 +20,7 @@ MAX_ARCHIVE_ENTRIES = 20000
 MAX_ARCHIVE_UNCOMPRESSED = 1024 * 1024 * 1024
 MAX_ENTRY_UNCOMPRESSED = 256 * 1024 * 1024
 MAX_DECODED_RESOURCE = 256 * 1024 * 1024
+MAX_TOTAL_DECODED_BYTES = 1024 * 1024 * 1024
 MAX_NESTED_ZIP_DEPTH = 2
 
 
@@ -189,6 +190,10 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
                     "reason": str(exc),
                 })
                 continue
+            if report["decoded_bytes"] + len(decoded) > MAX_TOTAL_DECODED_BYTES:
+                raise AOVBytesArchiveError(
+                    "Tổng dữ liệu sau giải mã vượt giới hạn 1 GiB."
+                )
             output_name = f"decoded/{prefix}/{path}"
             if output_name in seen_output_paths:
                 raise AOVBytesArchiveError(f"Đường dẫn đầu ra bị trùng: {output_name}")
