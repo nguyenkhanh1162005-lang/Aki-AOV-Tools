@@ -66,6 +66,32 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertFalse(plan["ready"])
         self.assertEqual(plan["merged_externals"], [])
 
+    def test_external_file_id_plan_rejects_traversal_and_absolute_paths(self):
+        for unsafe in (
+            "../CAB-overlay",
+            "/CAB-overlay",
+            "archive:/../CAB-overlay",
+            "archive:/folder/../../CAB-overlay",
+            "archive:CAB-overlay",
+            "C:/CAB-overlay",
+        ):
+            with self.subTest(path=unsafe):
+                plan = build_external_file_id_remap_plan(
+                    ["archive:/CAB-base"], [unsafe]
+                )
+                self.assertFalse(plan["ready"])
+                self.assertEqual(plan["file_id_remap"], {})
+
+    def test_external_file_id_plan_preserves_valid_archive_scheme(self):
+        plan = build_external_file_id_remap_plan(
+            ["archive:/CAB-base"], ["archive:/CAB-overlay"]
+        )
+        self.assertTrue(plan["ready"])
+        self.assertEqual(
+            plan["merged_externals"],
+            ["archive:/CAB-base", "archive:/CAB-overlay"],
+        )
+
 
 
 
