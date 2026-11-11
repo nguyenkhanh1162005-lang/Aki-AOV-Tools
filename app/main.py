@@ -96,6 +96,8 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
                 or not 1 <= len(files) <= MAX_FILES
                 or not isinstance(path_names, list)
                 or len(path_names) != len(files)
+                or not all(isinstance(path_name, str) for path_name in path_names)
+                or len(set(path_names)) != len(path_names)
             ):
                 raise ValueError("invalid upload session metadata")
             if time.time() - created > UPLOAD_TTL_SECONDS:
@@ -111,6 +113,8 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
                 if (
                     not isinstance(name, str)
                     or Path(name).name != name
+                    or "/" in name
+                    or "\\" in name
                     or not name.lower().endswith(".zip")
                     or isinstance(size, bool)
                     or not isinstance(size, int)
@@ -120,6 +124,8 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
                     or not 0 <= received <= size
                     or not isinstance(path_name, str)
                     or Path(path_name).name != path_name
+                    or "/" in path_name
+                    or "\\" in path_name
                     or path_name in {"", ".", ".."}
                 ):
                     raise ValueError("invalid file entry")
@@ -226,7 +232,12 @@ async def start_chunked_upload(payload: dict = Body(...)):
         "created": time.time(), "workdir": str(workdir), "files": clean_files,
         "paths": [str(workdir / f"{i}_{item['name']}") for i, item in enumerate(clean_files, 1)]
     }
-    _persist_upload_session(upload_id, UPLOAD_SESSIONS[upload_id])
+    try:
+        _persist_upload_session(upload_id, UPLOAD_SESSIONS[upload_id])
+    except OSError as exc:
+        UPLOAD_SESSIONS.pop(upload_id, None)
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise HTTPException(507, "Không thể lưu phiên tải lên trên ổ đĩa.") from exc
     return {"upload_id": upload_id, "chunk_size": UPLOAD_CHUNK_BYTES}
 
 
@@ -488,6 +499,7 @@ async def import_drive_links(payload: dict = Body(...)):
         for path in added_paths:
             Path(path).unlink(missing_ok=True)
         if is_new_session:
+            UPLOAD_SESSIONS.pop(upload_id, None)
             shutil.rmtree(workdir, ignore_errors=True)
         raise
 
