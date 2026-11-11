@@ -164,7 +164,12 @@ def plan_resource_compatibility(resources: list[dict[str, Any]]) -> dict[str, An
         missing_dependencies = [dep for dep in dependencies if dep not in all_paths]
         source_counts: dict[str, int] = defaultdict(int)
         for entry in entries:
-            source_counts[entry["source"]] += 1
+            # A nested Resources.zip is a distinct archive namespace even though
+            # it shares the outer uploaded ZIP's source filename.
+            archive_identity = entry["source"]
+            if entry.get("container_path"):
+                archive_identity += " :: " + str(entry["container_path"])
+            source_counts[archive_identity] += 1
         duplicate_sources = sorted(
             source for source, count in source_counts.items() if count > 1
         )
