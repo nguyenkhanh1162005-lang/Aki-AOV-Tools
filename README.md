@@ -17,6 +17,8 @@ Công cụ web và Telegram bot dùng chung bộ xử lý ZIP, kiểm kê cấu 
 
 Chọn ZIP rồi bấm **Giải mã tài nguyên .bytes đã hỗ trợ**. Web gọi bộ giải mã AES-CBC/Zstandard hiện có, nhận diện theo header và tên tài nguyên, giải nén các mục `.bytes` hỗ trợ ra một ZIP riêng. Có thể đọc ZIP `Resources.zip` lồng nhau và tiếp tục bung các package `.pkg.bytes` sau giải mã nếu payload bên trong là ZIP, tối đa hai tầng lồng. ZIP nguồn không bị thay đổi; báo cáo `decode-report.json` ghi chế độ giải mã, kích thước, file chưa hỗ trợ và đường dẫn đầu ra. Payload MSES được phân tích thêm version, số field, số row và trạng thái checksum; `HeroSkin_1/2.bytes` được thử parse IFix để báo số FixInfo/method/type/string/field; payload `.pkg.bytes` dạng ZIP được bung tiếp và ghi số entry.
 
+Bộ lõi MSES v7 có parser, serializer, kiểm tra checksum và ghép theo khóa. Khi schema khác nhau, nó từ chối thêm row mới dạng opaque nếu chưa có adapter riêng chứng minh layout tương thích; chỉ giữ/ghi đè row đã xác định rõ. Đây là chốt an toàn, không phải cam kết ghép mọi bảng MSES.
+
 Giới hạn: tối đa 20.000 entry, 1 GiB dữ liệu giải nén, 256 MiB mỗi entry và 256 MiB kích thước giải mã khai báo cho mỗi tài nguyên. Chức năng này chỉ trích xuất payload đã giải mã để kiểm tra/phân tích; không sửa MSES/IFix, không giải mã Unity AssetBundle hoặc Wwise BNK, không ghép skin và không tạo ZIP có thể cài vào game.
 
 ## Bộ ghép AOV được hỗ trợ
