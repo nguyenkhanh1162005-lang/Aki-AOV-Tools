@@ -62,7 +62,7 @@ def parse_vtk_table(name, b):
         nodes=[]
         for _ in range(nn):
             off,sz,nf=struct.unpack_from(">QQI",raw,q); q+=20
-            end=raw.find(b"\\0",q)
+            end=raw.find(b"\0",q)
             path=raw[q:end].decode("utf-8","replace"); q=end+1
             nodes.append((off,sz,nf,path))
         print(f"\\n[DECODED TABLE] {name} flags=0x{flags:x} info_at={pos if not flags&0x80 else len(b)-csize} blocks={blocks} nodes={len(nodes)}")
