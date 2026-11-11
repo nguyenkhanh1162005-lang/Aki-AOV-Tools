@@ -78,6 +78,7 @@ def merge_mses_rows(
     *,
     override_keys: set[int] | None = None,
     allow_schema_mismatch: bool = False,
+    allow_new_rows_across_schema_mismatch: bool = False,
     verify_base_checksum: bool = True,
     verify_overlay_checksum: bool = True,
 ) -> tuple[bytes, dict]:
@@ -129,7 +130,7 @@ def merge_mses_rows(
         # Refuse cross-schema additions until a table-specific translator
         # proves that the row layout is compatible.
         schema_drift_new_keys = set(overlay_map) - set(base_map)
-        if schema_drift_new_keys:
+        if schema_drift_new_keys and not allow_new_rows_across_schema_mismatch:
             raise MSESError(
                 "Schema MSES khác nhau và overlay có bản ghi mới chưa được "
                 "chứng minh tương thích; cần adapter theo từng bảng."
