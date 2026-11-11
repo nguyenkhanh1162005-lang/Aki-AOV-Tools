@@ -104,7 +104,7 @@ class ResourceManifestTests(unittest.TestCase):
                 warnings.simplefilter("ignore", UserWarning)
                 with zipfile.ZipFile(path, "w") as archive:
                     archive.writestr("Resources/Hero.bytes", b"first")
-                    archive.writestr("Resources\Hero.bytes", b"second")
+                    archive.writestr("Resources\\Hero.bytes", b"second")
             with self.assertRaisesRegex(ResourceManifestError, "trùng đường dẫn"):
                 build_resource_manifest([str(path)])
 
