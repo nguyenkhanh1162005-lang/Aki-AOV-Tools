@@ -69,6 +69,18 @@ class ChunkedUploadEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(retry["received"], 4)
         self.assertEqual(self.path.read_bytes(), b"part")
 
+    async def test_identical_retry_refreshes_upload_session_ttl(self):
+        await main.upload_chunk(
+            self.upload_id, 0, make_request(b"part"), 0
+        )
+        main.UPLOAD_SESSIONS[self.upload_id]["created"] = 100
+        with patch("app.main.time.time", return_value=200):
+            retry = await main.upload_chunk(
+                self.upload_id, 0, make_request(b"part"), 0
+            )
+        self.assertEqual(retry["received"], 4)
+        self.assertEqual(main.UPLOAD_SESSIONS[self.upload_id]["created"], 200)
+
     async def test_repeated_different_chunk_is_rejected_for_resume(self):
         await main.upload_chunk(
             self.upload_id, 0, make_request(b"part"), 0
