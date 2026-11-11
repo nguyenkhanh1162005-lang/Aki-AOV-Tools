@@ -1,0 +1,46 @@
+name: Transfer original AOV ZIPs as one artifact
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Download original release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p incoming transfer
+          gh release download aov-upload-01 \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir incoming \
+            --pattern 'Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip' \
+            --pattern 'VTK.IOS.VIP.zip'
+
+      - name: Verify originals and create one bundle
+        run: |
+          cd incoming
+          echo "944d01f6a4e31dbaa7ea31c14d292b799818843a4e3533860b2e16ff4bb77aa0  Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip" | sha256sum -c -
+          echo "b78976a7d9c0d7ce2420fdd631cdf47136bc9b0f313fbfcbbb6cb9af3a582249  VTK.IOS.VIP.zip" | sha256sum -c -
+          unzip -tqq 'Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip'
+          unzip -tqq 'VTK.IOS.VIP.zip'
+          zip -0 -q ../transfer/aov-source-bundle.zip \
+            'Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip' \
+            'VTK.IOS.VIP.zip'
+          cd ..
+          sha256sum transfer/aov-source-bundle.zip | tee transfer/bundle.sha256
+          ls -lh transfer/
+
+      - name: Upload one artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aov-source-bundle
+          path: transfer/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
