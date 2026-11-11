@@ -1071,6 +1071,28 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertFalse(result["ready"])
         self.assertIn("MainAsset", result["reason"])
 
+        missing_main_remap = {
+            "ready": True,
+            "rewritten": {
+                "preload": [{"file_id": 0, "path_id": 20}],
+                "container": [{"file_id": 0, "path_id": 20}],
+                "main_asset": None,
+            },
+        }
+        result = build_assetbundle_metadata_merge_plan(base, overlay_with_main, missing_main_remap)
+        self.assertFalse(result["ready"])
+        self.assertIn("remap is missing", result["reason"])
+
+        malformed_main_source = metadata("overlay")
+        malformed_main_source["main_asset"] = {
+            "preload_index": 0,
+            "preload_size": 1,
+            "asset": {"file_id": 0, "path_id": True},
+        }
+        result = build_assetbundle_metadata_merge_plan(base, malformed_main_source, invalid_main_remap)
+        self.assertFalse(result["ready"])
+        self.assertIn("source metadata", result["reason"])
+
         result = build_assetbundle_metadata_merge_plan(base, overlay, rewritten)
         self.assertTrue(result["ready"])
         self.assertEqual(result["preload_table"], [
