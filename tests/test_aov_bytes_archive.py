@@ -1,4 +1,6 @@
+import hashlib
 import json
+import struct
 import tempfile
 import unittest
 import zipfile
@@ -6,6 +8,16 @@ from pathlib import Path
 
 from app.aov_bytes import encrypt_aes_zstd_resource
 from app.aov_bytes_archive import AOVBytesArchiveError, decode_archive_resources
+
+
+def make_mses_payload():
+    header = bytearray(0x8C)
+    header[:4] = b"MSES"
+    row = struct.pack("<I", 42) + b"test-row"
+    body = struct.pack("<I", len(row)) + row
+    struct.pack_into("<III", header, 4, 7, 3, 1)
+    header[0x60:0x80] = hashlib.md5(body).hexdigest().encode("ascii")
+    return bytes(header) + body
 
 
 class AOVBytesArchiveTests(unittest.TestCase):
@@ -18,7 +30,7 @@ class AOVBytesArchiveTests(unittest.TestCase):
     def test_decodes_supported_bytes_and_writes_report(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
-            original = b"MSES" + b"resource-data-" * 40
+            original = make_mses_payload()
             encoded = encrypt_aes_zstd_resource(original, "111_AssetRef")
             source = self._archive(folder / "mod.zip", {
                 "Resources/111_AssetRef.bytes": encoded,
@@ -31,6 +43,10 @@ class AOVBytesArchiveTests(unittest.TestCase):
             self.assertEqual(len(report["decoded"]), 1)
             self.assertEqual(report["decoded"][0]["mode"], "aes+zstd")
             self.assertEqual(report["decoded"][0]["decoded_size"], len(original))
+            self.assertEqual(report["decoded"][0]["payload"]["payload_type"], "mses_v7")
+            self.assertEqual(report["decoded"][0]["payload"]["field_count"], 3)
+            self.assertEqual(report["decoded"][0]["payload"]["row_count"], 1)
+            self.assertTrue(report["decoded"][0]["payload"]["checksum_valid"])
             with zipfile.ZipFile(output) as archive:
                 decoded_path = report["decoded"][0]["output_path"]
                 self.assertEqual(archive.read(decoded_path), original)
