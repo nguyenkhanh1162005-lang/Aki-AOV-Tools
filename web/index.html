@@ -4,19 +4,48 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101522"><title>Aki AOV Tools</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#101522;color:#eef2ff;font:16px system-ui,sans-serif;min-height:100vh;display:grid;place-items:center;padding:20px}.card{width:min(100%,620px);background:#1a2334;border:1px solid #34435d;border-radius:22px;padding:26px;box-shadow:0 18px 60px #0006}h1{margin:0 0 8px;font-size:28px}.muted{color:#aab7cc;line-height:1.55}.drop{display:block;border:2px dashed #60789e;border-radius:16px;padding:28px 16px;text-align:center;margin:22px 0;cursor:pointer}.drop input{display:none}button{width:100%;border:0;border-radius:12px;background:#7c9cff;color:#101522;font-weight:800;font-size:16px;padding:15px;cursor:pointer}button:disabled{opacity:.5}textarea{width:100%;min-height:90px;background:#101522;color:#eef2ff;border:1px solid #60789e;border-radius:12px;padding:12px;font:14px system-ui;margin-top:8px}#files{margin:12px 0;color:#cbd5e1;overflow-wrap:anywhere}#status{min-height:26px;margin-top:14px;color:#cbd5e1}.warning{background:#342b1b;border:1px solid #776039;border-radius:12px;padding:13px;margin-top:20px;color:#f4d9a2;font-size:13px;line-height:1.5}
+*{box-sizing:border-box}body{margin:0;background:#101522;color:#eef2ff;font:16px system-ui,sans-serif;min-height:100vh;display:grid;place-items:center;padding:20px}.card{width:min(100%,620px);background:#1a2334;border:1px solid #34435d;border-radius:22px;padding:26px;box-shadow:0 18px 60px #0006}h1{margin:0 0 8px;font-size:28px}.muted{color:#aab7cc;line-height:1.55}.drop{display:block;border:2px dashed #60789e;border-radius:16px;padding:28px 16px;text-align:center;margin:22px 0;cursor:pointer}.drop input{display:none}button{width:100%;border:0;border-radius:12px;background:#7c9cff;color:#101522;font-weight:800;font-size:16px;padding:15px;cursor:pointer}button:disabled{opacity:.5}textarea{width:100%;min-height:90px;background:#101522;color:#eef2ff;border:1px solid #60789e;border-radius:12px;padding:12px;font:14px system-ui;margin-top:8px}#files{margin:12px 0;color:#cbd5e1;overflow-wrap:anywhere}#status{min-height:26px;margin-top:14px;color:#cbd5e1}.warning{background:#342b1b;border:1px solid #776039;border-radius:12px;padding:13px;margin-top:20px;color:#f4d9a2;font-size:13px;line-height:1.5}.capabilities{margin-top:18px;padding:14px;border:1px solid #34435d;border-radius:14px;background:#141d2c}.capabilities h2{font-size:16px;margin:0 0 6px}.capabilities ul{padding-left:20px;margin:10px 0}.capabilities li{margin:9px 0;color:#dbe5f5}.capabilities small{display:block;color:#aab7cc;line-height:1.45;margin-top:2px}
 </style></head>
 <body><main class="card">
 <h1>⚡ Aki AOV Tools</h1><p class="muted">Công cụ kiểm tra cấu trúc và ghép tài nguyên Liên Quân iOS theo phiên bản.</p>
 <label class="drop"><strong>📦 Chọn các file ZIP</strong><p class="muted">Nhấn để chọn tối đa 10 file</p><input id="upload" type="file" accept=".zip,application/zip" multiple></label>
 <div id="files">Chưa chọn file nào.</div><div style="margin-top:18px"><strong>Hoặc nhập link Google Drive</strong><p class="muted" style="margin:6px 0">Có thể chọn ZIP từ thiết bị ở trên rồi dán thêm link ZIP từ Drive tại đây. Mỗi dòng một link; cần bật quyền “Bất kỳ ai có đường liên kết”. Tổng tối đa 500 MB.</p><textarea id="driveLinks" placeholder="https://drive.google.com/file/d/..."></textarea><button id="driveImport" style="margin-top:10px;background:#f0c987">Tải ZIP từ Google Drive</button><button id="driveMerge" disabled style="display:none;margin-top:10px;background:#9ed8c5">Ghép mod AOV từ Drive</button></div><button id="compatibility" disabled style="margin-top:10px;background:#b7a6f6">Kiểm tra tương thích nhiều ZIP</button><button id="decodeBytes" disabled style="margin-top:10px;background:#c6a6f6">Giải mã tài nguyên .bytes đã hỗ trợ</button><button id="inspect" disabled style="margin-top:10px;background:#9ed8c5">Kiểm tra cấu trúc ZIP</button><button id="go" disabled style="margin-top:10px">Ghép ZIP thông thường</button><button id="aovMerge" disabled style="margin-top:10px;background:#f0c987">Ghép mod AOV chuyên sâu</button><pre id="report" style="white-space:pre-wrap;overflow-wrap:anywhere;color:#cbd5e1"></pre><div id="status" role="status"></div>
 <div class="warning"><b>Lưu ý:</b> Bộ ghép AOV chuyên sâu hiện khóa theo ZIP nền 1.64.1.12 và Vấn Tâm Kiếm 1.64.1.11. Máy chủ kiểm tra cấu trúc, bảng tài nguyên, IFix và hiệu ứng XML; kết quả vẫn cần thử trong Liên Quân iOS, không thể cam kết chạy 100% trước khi test game.</div>
+<section class="capabilities" aria-labelledby="capabilityTitle">
+<h2 id="capabilityTitle">Phạm vi xử lý hiện tại</h2>
+<p class="muted" style="margin:0">Danh sách được tải trực tiếp từ máy chủ, phân biệt rõ định dạng chỉ kiểm tra với adapter thực sự có thể ghép.</p>
+<ul id="capabilityList"><li>Đang tải danh sách hỗ trợ...</li></ul>
+<p id="capabilityNote" class="muted" style="font-size:12px;margin:0"></p>
+</section>
 </main><script>
 const driveLinks=document.querySelector('#driveLinks'),driveImport=document.querySelector('#driveImport'),driveMerge=document.querySelector('#driveMerge');let driveUploadId=null,localAovUploadId=null;const input=document.querySelector('#upload'),go=document.querySelector('#go'),aovMerge=document.querySelector('#aovMerge'),decodeBytesBtn=document.querySelector('#decodeBytes'),compatibilityBtn=document.querySelector('#compatibility'),inspectBtn=document.querySelector('#inspect'),report=document.querySelector('#report'),list=document.querySelector('#files'),status=document.querySelector('#status');
 const CHUNK_BYTES=4*1024*1024;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const capabilityList=document.querySelector('#capabilityList'),capabilityNote=document.querySelector('#capabilityNote');
+async function loadCapabilities(){
+  try{
+    const response=await fetchWithRetry('/api/capabilities',{method:'GET'},2);
+    const data=await response.json();
+    capabilityList.replaceChildren();
+    for(const adapter of (data.adapters||[])){
+      const item=document.createElement('li'),name=document.createElement('strong'),detail=document.createElement('small');
+      name.textContent=adapter.name+' · '+adapter.status;
+      detail.textContent=adapter.scope+' '+adapter.merge_policy;
+      item.append(name,detail);
+      capabilityList.append(item);
+    }
+    capabilityNote.textContent=data.game_tested===true
+      ?'Trạng thái test game: đã xác nhận.'
+      :'Chưa có xác nhận test trong Liên Quân iOS. SAFE/merge_supported ở cấp ZIP không đồng nghĩa tài nguyên game tương thích.';
+  }catch(error){
+    capabilityList.textContent='Không tải được danh sách khả năng xử lý từ máy chủ.';
+    capabilityNote.textContent='Hãy kiểm tra kết nối rồi tải lại trang.';
+  }
+}
+
 async function fetchWithRetry(url,options={},attempts=4){const method=(options.method||'GET').toUpperCase(),retryable=['GET','HEAD','PUT','DELETE'].includes(method);let last;for(let n=0;n<(retryable?attempts:1);n++){try{const r=await fetch(url,options);if(!r.ok){let msg='HTTP '+r.status;try{const j=await r.json();msg=j.detail||msg}catch{}const error=Error(msg);error.status=r.status;if(!(retryable&&(r.status===408||r.status===429||r.status>=500))||n===attempts-1)throw error;last=error;}else return r;}catch(e){last=e;if(e.status!==undefined)throw e;if(!retryable||n===attempts-1)throw e;}if(n<attempts-1)await sleep(700*(n+1));}throw last;}
 const UPLOAD_STATE_KEY='aki-aov-upload-session-v1';
+loadCapabilities();
 async function uploadFingerprint(files){
   const fingerprints=[];
   for(const file of files){
