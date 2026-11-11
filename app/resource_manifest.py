@@ -48,7 +48,7 @@ def _hash_entry(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> str:
 
 
 def _is_metadata_noise(path: str) -> bool:
-    normalized = path.replace("\\\\", "/")
+    normalized = path
     leaf = PurePosixPath(normalized).name
     return (
         normalized.startswith("__MACOSX/")
