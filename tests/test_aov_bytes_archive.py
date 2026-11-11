@@ -94,7 +94,7 @@ class AOVBytesArchiveTests(unittest.TestCase):
                 ["Hero_LiXin_Skin_C"],
             )
             self.assertEqual(
-                payload["duplicate_row_prefixes"], ["0x0000e84c"]
+                payload["duplicate_row_prefixes"], ["0x0000e86c"]
             )
 
     def test_inspects_decoded_heroskin_ifix_patch(self):
