@@ -173,7 +173,7 @@ def find_mono_behaviour(env, object_name: str):
                 return obj, tree
     raise ValueError(f"AssetBundle metadata thiếu {object_name}")
 
-def merge_actor_packer(base_data: bytes, vtk_data: bytes) -> tuple[bytes, dict]:
+def merge_actor_packer(base_data: bytes, vtk_data: bytes, physical_paths: set[str]) -> tuple[bytes, dict]:
     parser = load_unitypy()
     base_env = parser.load(base_data)
     vtk_env = parser.load(vtk_data)
@@ -195,11 +195,14 @@ def merge_actor_packer(base_data: bytes, vtk_data: bytes) -> tuple[bytes, dict]:
     # named by VTK's own packer index, including the 5952 LiXin skin bundles.
     actor_assets = {
         path for path in vtk_index
-        if path.startswith("assetbundle/") and is_lixin_asset(path)
+        if path.startswith("assetbundle/") and is_lixin_asset(path) and path in physical_paths
     } | set(ACTOR_ASSETS)
     missing = actor_assets - set(vtk_index)
     if missing:
         raise ValueError(f"VTK Packer thiếu Actor595 bundles: {sorted(missing)}")
+    missing_physical_static = ACTOR_ASSETS - physical_paths
+    if missing_physical_static:
+        raise ValueError(f"VTK/KPM đều thiếu payload Actor595 cốt lõi: {sorted(missing_physical_static)}")
 
     replaced, appended_actor = [], []
     for path in sorted(actor_assets):
@@ -222,10 +225,20 @@ def merge_actor_packer(base_data: bytes, vtk_data: bytes) -> tuple[bytes, dict]:
     output_index = dict(base_index)
 
     relevant_edges = []
+    skipped_edges_without_payload = []
     for edge in vtk_edges:
         parent_path = vtk_entries[int(edge["parentIdx"])]["PathInIFS"]
         child_path = vtk_entries[int(edge["childIdx"])]["PathInIFS"]
         if parent_path in actor_assets or child_path in actor_assets:
+            # Do not invent packer dependencies whose payload is absent from
+            # both source archives and whose row does not exist in KPM.
+            unavailable = [
+                p for p in (parent_path, child_path)
+                if p not in physical_paths and p not in base_index
+            ]
+            if unavailable:
+                skipped_edges_without_payload.append((parent_path, child_path))
+                continue
             relevant_edges.append((parent_path, child_path))
 
     for parent_path, child_path in relevant_edges:
@@ -235,6 +248,10 @@ def merge_actor_packer(base_data: bytes, vtk_data: bytes) -> tuple[bytes, dict]:
             if dependency_path not in vtk_index:
                 raise ValueError(
                     f"VTK Actor595 dependency không có packer row: {dependency_path}"
+                )
+            if dependency_path not in physical_paths:
+                raise ValueError(
+                    f"Dependency mới không có payload trong KPM hoặc VTK: {dependency_path}"
                 )
             base_entries.append(__import__("copy").deepcopy(vtk_index[dependency_path]))
             output_index[dependency_path] = len(base_entries) - 1
@@ -279,6 +296,7 @@ def merge_actor_packer(base_data: bytes, vtk_data: bytes) -> tuple[bytes, dict]:
         "appended_dependency_rows": sorted(appended_dependencies),
         "appended_paths": appended_paths,
         "new_actor_edges": added_edges,
+        "skipped_edges_without_payload": skipped_edges_without_payload,
         "output_edges": len(verify_tree["AllParentIdexToChild"]),
         "verified": True,
     }
@@ -454,7 +472,18 @@ def build(args: argparse.Namespace) -> dict:
             replacements[relative] = merged
             mses_reports[relative] = table_report
 
-        replacements[PACKER_PATH], packer_report = merge_actor_packer(read_base(PACKER_PATH), read_vtk(PACKER_PATH))
+        physical_actor_paths = {
+            name for name in vtk_map
+            if name.startswith("assetbundle/")
+        }
+        physical_actor_paths.update(
+            name[len(PREFIX):]
+            for name in base_map
+            if name.startswith(PREFIX + "assetbundle/")
+        )
+        replacements[PACKER_PATH], packer_report = merge_actor_packer(
+            read_base(PACKER_PATH), read_vtk(PACKER_PATH), physical_actor_paths
+        )
 
         # Replace every Lixin/595-specific assetbundle for which VTK ships
         # physical bytes. Some packer rows intentionally reuse shared KPM files;
