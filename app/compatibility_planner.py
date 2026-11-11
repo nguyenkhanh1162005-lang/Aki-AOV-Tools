@@ -24,9 +24,15 @@ def _clean_path(value: Any) -> str:
         raise CompatibilityPlanError("Mỗi resource phải có path hợp lệ.")
     normalized = value.replace("\\", "/")
     path = PurePosixPath(normalized)
-    if path.is_absolute() or ".." in path.parts or "\x00" in normalized or (path.parts and path.parts[0].endswith(":")):
-        raise CompatibilityPlanError(f"Đường dẫn resource không an toàn: {value}")
-    return normalized
+    raw_parts = normalized.split("/")
+    if (
+        path.is_absolute()
+        or any(part in {"", ".", ".."} for part in raw_parts)
+        or "\x00" in normalized
+        or (path.parts and path.parts[0].endswith(":"))
+    ):
+        raise CompatibilityPlanError(f"Đường dẫn resource không an toàn hoặc mơ hồ: {value}")
+    return path.as_posix()
 
 
 def _validate_resource(item: Any, index: int) -> dict[str, Any]:
@@ -54,6 +60,25 @@ def _validate_resource(item: Any, index: int) -> dict[str, Any]:
     dependency_inventory_complete = item.get("dependency_inventory_complete", False)
     if not isinstance(dependency_inventory_complete, bool):
         raise CompatibilityPlanError(f"Cờ dependency_inventory_complete không hợp lệ cho resource: {path}")
+    for field_name in ("game_version", "platform"):
+        value = item.get(field_name)
+        if value is not None and value != "" and (
+            not isinstance(value, str) or not value.strip()
+        ):
+            raise CompatibilityPlanError(f"Metadata {field_name} không hợp lệ cho resource: {path}")
+    for field_name in ("actor_id", "skin_id"):
+        value = item.get(field_name)
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (str, int))
+            or (isinstance(value, str) and not value.strip())
+            or (isinstance(value, int) and value < 0)
+        ):
+            raise CompatibilityPlanError(f"Metadata {field_name} không hợp lệ cho resource: {path}")
+    for field_name in ("is_metadata_noise", "is_aov_resource"):
+        value = item.get(field_name, False)
+        if not isinstance(value, bool):
+            raise CompatibilityPlanError(f"Cờ {field_name} không hợp lệ cho resource: {path}")
     result = dict(item)
     result.update({
         "path": path,
