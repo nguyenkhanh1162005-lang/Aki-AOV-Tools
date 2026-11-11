@@ -59,8 +59,21 @@ def _persist_upload_session(upload_id: str, session: dict) -> None:
     }
     metadata = workdir / ".aki-upload-session.json"
     temporary = workdir / ".aki-upload-session.json.tmp"
-    temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+    with temporary.open("w", encoding="utf-8") as stream:
+        json.dump(payload, stream, separators=(",", ":"))
+        stream.flush()
+        os.fsync(stream.fileno())
     os.replace(temporary, metadata)
+    try:
+        directory_fd = os.open(workdir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError:
+        # Some filesystems do not support directory fsync; the metadata rename
+        # is still atomic, and the upload can be retried if durability is lost.
+        pass
 
 
 def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
@@ -134,11 +147,15 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
                     raise ValueError("upload file cannot be a symlink")
                 if file_path.exists():
                     actual_size = file_path.stat().st_size
-                    if actual_size < received or actual_size > size:
-                        raise ValueError("upload file size does not match session")
+                    if actual_size > size:
+                        raise ValueError("upload file exceeds declared size")
+                    # A crash may leave a partially written chunk while the
+                    # metadata still records the previous offset. Resume from
+                    # the bytes that actually reached disk.
                     received = actual_size
                 elif received:
-                    raise ValueError("upload file is missing")
+                    # The file itself can be recreated by the browser retry.
+                    received = 0
                 total += size
                 clean_files.append({"name": name, "size": size, "received": received})
                 safe_paths.append(str(file_path))
@@ -279,10 +296,14 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
         # Idempotent retry: accept an already-written identical chunk.
         if chunk_offset + len(chunk) > offset:
             raise HTTPException(409, "Khối tải lên bị chồng lấn, hãy chọn lại file.")
-        with open(session["paths"][file_index], "rb") as existing:
+        with open(session["paths"][file_index], "r+b") as existing:
             existing.seek(chunk_offset)
             if existing.read(len(chunk)) != chunk:
                 raise HTTPException(409, "Khối gửi lại khác dữ liệu đã nhận.")
+            # Discard any uncommitted tail left by an interrupted write.
+            existing.truncate(offset)
+            existing.flush()
+            os.fsync(existing.fileno())
         session["created"] = time.time()
         _persist_upload_session(upload_id, session)
         return {"received": offset, "size": item["size"]}
@@ -290,8 +311,14 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
         raise HTTPException(409, "Sai vị trí khối tải lên, hãy thử lại.")
     if offset + len(chunk) > item["size"]:
         raise HTTPException(400, "Khối tải lên vượt quá kích thước file.")
-    with open(session["paths"][file_index], "ab") as target:
+    upload_path = session["paths"][file_index]
+    mode = "r+b" if Path(upload_path).exists() else "w+b"
+    with open(upload_path, mode) as target:
+        target.seek(offset)
         target.write(chunk)
+        target.truncate(offset + len(chunk))
+        target.flush()
+        os.fsync(target.fileno())
     item["received"] += len(chunk)
     session["created"] = time.time()
     _persist_upload_session(upload_id, session)
