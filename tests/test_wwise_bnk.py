@@ -8,8 +8,8 @@ def chunk(name, payload):
     return name.encode("ascii") + struct.pack("<I", len(payload)) + payload
 
 
-def make_bank(*extra_chunks):
-    header = chunk("BKHD", struct.pack("<II", 134, 12345))
+def make_bank(*extra_chunks, version=134):
+    header = chunk("BKHD", struct.pack("<II", version, 12345))
     return header + b"".join(extra_chunks)
 
 
@@ -29,6 +29,19 @@ class WwiseBNKInspectorTests(unittest.TestCase):
         self.assertEqual(report["hirc_objects"][0]["size"], 10)
         self.assertEqual(report["hirc_objects"][0]["sha256"], __import__("hashlib").sha256(b"\x02" + struct.pack("<I", 10) + object_body).hexdigest())
 
+
+    def test_parses_legacy_u32_hirc_object_type_for_version_48(self):
+        object_body = struct.pack("<I", 9002) + b"legacy"
+        legacy_object = (
+            struct.pack("<I", 2)
+            + struct.pack("<I", len(object_body))
+            + object_body
+        )
+        hirc = chunk("HIRC", struct.pack("<I", 1) + legacy_object)
+        report = inspect_wwise_bnk(make_bank(hirc, version=48))
+        self.assertEqual(report["version"], 48)
+        self.assertEqual(report["hirc_objects"][0]["type"], 2)
+        self.assertEqual(report["hirc_objects"][0]["id"], 9002)
 
     def test_compares_media_and_hirc_payloads_without_authorizing_merge(self):
         def bank(media_id, media_payload, object_id, object_payload=b"opaque"):
