@@ -464,6 +464,77 @@ def build_assetbundle_metadata_merge_plan(
     if not isinstance(rewritten, dict):
         return {"ready": False, "reason": "Overlay rewritten metadata is missing."}
 
+    def valid_pointer(pointer: Any) -> bool:
+        return (
+            isinstance(pointer, dict)
+            and isinstance(pointer.get("file_id"), int)
+            and not isinstance(pointer.get("file_id"), bool)
+            and pointer["file_id"] >= 0
+            and isinstance(pointer.get("path_id"), int)
+            and not isinstance(pointer.get("path_id"), bool)
+            and -(1 << 63) <= pointer["path_id"] < (1 << 63)
+        )
+
+    # Validate every base pointer too. Previously the overlay was checked,
+    # but malformed base inventory entries could pass through into a plan
+    # marked ready and later fail in a serializer.
+    if not all(valid_pointer(pointer) for pointer in base_preload):
+        return {"ready": False, "reason": "Base preload inventory contains an invalid PPtr."}
+    for record in base_containers:
+        if (
+            not isinstance(record, dict)
+            or not isinstance(record.get("path"), str)
+            or not record["path"].strip()
+            or not valid_pointer(record.get("asset"))
+        ):
+            return {"ready": False, "reason": "Base Container inventory contains an invalid path or PPtr."}
+        start, size = record.get("preload_index"), record.get("preload_size")
+        if (
+            not isinstance(start, int) or isinstance(start, bool)
+            or not isinstance(size, int) or isinstance(size, bool)
+            or start < 0 or size < 0 or start + size > len(base_preload)
+        ):
+            return {"ready": False, "reason": "Base Container preload range is invalid."}
+
+    for record in overlay_containers:
+        if (
+            not isinstance(record, dict)
+            or not isinstance(record.get("path"), str)
+            or not record["path"].strip()
+            or not isinstance(record.get("asset"), dict)
+        ):
+            return {"ready": False, "reason": "Overlay Container inventory contains an invalid path or source PPtr."}
+        start, size = record.get("preload_index"), record.get("preload_size")
+        if (
+            not isinstance(start, int) or isinstance(start, bool)
+            or not isinstance(size, int) or isinstance(size, bool)
+            or start < 0 or size < 0 or start + size > len(overlay_metadata["preload_pointer_inventory"])
+        ):
+            return {"ready": False, "reason": "Overlay Container preload range is invalid."}
+
+    if base_main is not None and (
+        not isinstance(base_main, dict)
+        or not valid_pointer(base_main.get("asset"))
+    ):
+        return {"ready": False, "reason": "Base MainAsset contains an invalid PPtr."}
+    if base_main is not None:
+        start, size = base_main.get("preload_index"), base_main.get("preload_size")
+        if (
+            not isinstance(start, int) or isinstance(start, bool)
+            or not isinstance(size, int) or isinstance(size, bool)
+            or start < 0 or size < 0 or start + size > len(base_preload)
+        ):
+            return {"ready": False, "reason": "Base MainAsset preload range is invalid."}
+
+    base_dependencies = base_metadata.get("dependencies", [])
+    overlay_dependencies = overlay_metadata.get("dependencies", [])
+    if (
+        not isinstance(base_dependencies, list)
+        or not isinstance(overlay_dependencies, list)
+        or any(not isinstance(value, str) or not value for value in base_dependencies + overlay_dependencies)
+    ):
+        return {"ready": False, "reason": "Dependency inventory is invalid."}
+
     base_name = base_metadata.get("assetbundle_name", "")
     overlay_name = overlay_metadata.get("assetbundle_name", "")
     if base_name and overlay_name and base_name != overlay_name:
@@ -529,7 +600,13 @@ def build_assetbundle_metadata_merge_plan(
                 "container_path_collisions": collisions[:MAX_REPORTED_REFERENCES]}
 
     preload_offset = len(base_preload)
-    merged_preload = list(base_preload) + list(overlay_preload)
+    merged_preload = [
+        {"file_id": pointer["file_id"], "path_id": pointer["path_id"]}
+        for pointer in base_preload
+    ] + [
+        {"file_id": pointer["file_id"], "path_id": pointer["path_id"]}
+        for pointer in overlay_preload
+    ]
     merged_containers = []
     for record in base_containers:
         merged_containers.append({
