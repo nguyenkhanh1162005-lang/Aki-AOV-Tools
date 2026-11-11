@@ -70,6 +70,29 @@ class AOVBytesTests(unittest.TestCase):
             with self.assertRaisesRegex(AOVBytesError, "vượt giới hạn 256 MiB"):
                 _decompress_frame(_compress_frame(b"A" * 65))
 
+    def test_rejects_noncanonical_zstd_wrapper_flag(self):
+        payload = b"payload"
+        malformed = b"\\x22\\x4a\\x01\\xef" + len(payload).to_bytes(4, "little") + _compress_frame(payload)
+        with self.assertRaisesRegex(AOVBytesError, "header AoV Zstandard"):
+            decompress_aov_bytes(malformed)
+
+    def test_rejects_zstd_frame_outside_expected_wrapper_offset(self):
+        payload = b"payload"
+        malformed = (
+            b"\\x22\\x4a\\x00\\xef"
+            + len(payload).to_bytes(4, "little")
+            + b"\\x00"
+            + _compress_frame(payload)
+        )
+        with self.assertRaisesRegex(AOVBytesError, "không nằm đúng vị trí"):
+            decompress_aov_bytes(malformed)
+
+    def test_validates_declared_size_for_empty_and_nonempty_payloads(self):
+        self.assertEqual(decompress_aov_bytes(compress_aov_bytes(b"")), b"")
+        malformed = b"\\x22\\x4a\\x00\\xef" + (0).to_bytes(4, "little") + _compress_frame(b"x")
+        with self.assertRaisesRegex(AOVBytesError, "không khớp header"):
+            decompress_aov_bytes(malformed)
+
     def test_rejects_unknown_header(self):
         with self.assertRaises(AOVBytesError):
             decompress_aov_bytes(b"not-an-aov-resource")
