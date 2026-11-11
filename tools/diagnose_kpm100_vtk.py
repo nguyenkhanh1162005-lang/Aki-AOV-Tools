@@ -245,6 +245,18 @@ for row in mapping_rows:
                 bi = bmap.get(("595_LiXin/skill/" + entry_name).lower())
                 if bi and sha(pdata) == sha(bz.read(bi)):
                     base_member_equal = True
+    # KPM_MOD files have PK local headers but may use a private container layout.
+    # Record exact local-header offsets and central-directory signatures without guessing.
+    if payload[:4] == b"PK\\x03\\x04" and len(payload) >= 30:
+        flags = int.from_bytes(payload[6:8], "little")
+        method = int.from_bytes(payload[8:10], "little")
+        crc = int.from_bytes(payload[14:18], "little")
+        csize = int.from_bytes(payload[18:22], "little")
+        usize = int.from_bytes(payload[22:26], "little")
+        nlen = int.from_bytes(payload[26:28], "little")
+        elen = int.from_bytes(payload[28:30], "little")
+        data_at = 30 + nlen + elen
+        log(f"KPM_CONTAINER {payload_name} flags={flags:04x} method={method} crc={crc:08x} csize={csize} usize={usize} nlen={nlen} elen={elen} data_at={data_at} data_head={payload[data_at:data_at+40].hex()} tail={payload[-64:].hex()} sigs={{'local':payload.count(b'PK\\x03\\x04'),'central':payload.count(b'PK\\x01\\x02'),'eocd':payload.count(b'PK\\x05\\x06'),'descriptor':payload.count(b'PK\\x07\\x08')}}")
     decoded = []
     if decode_aov_resource:
         for candidate in (entry_name, payload_name, "595_LiXin/skill/" + entry_name):
