@@ -74,11 +74,12 @@ class AOVBytesArchiveTests(unittest.TestCase):
             package_encoded = encrypt_aes_zstd_resource(
                 package_bytes, "CommonActions.pkg.bytes"
             )
+            resources_path = folder / "resources.zip"
+            self._archive(resources_path, {
+                "CommonActions.pkg.bytes": package_encoded,
+            })
             source = self._archive(folder / "wrapper.zip", {
-                "Resources.zip": self._archive(
-                    folder / "resources.zip",
-                    {"CommonActions.pkg.bytes": package_encoded},
-                ) and (folder / "resources.zip").read_bytes(),
+                "Resources.zip": resources_path.read_bytes(),
             })
             output = folder / "decoded.zip"
 
