@@ -7,6 +7,7 @@ import zipfile
 from pathlib import Path
 
 from app.aov_bytes import encrypt_aes_zstd_resource
+from app.ifix_merger import serialize_ifix_patch
 from app.aov_bytes_archive import AOVBytesArchiveError, decode_archive_resources
 
 
@@ -53,6 +54,41 @@ class AOVBytesArchiveTests(unittest.TestCase):
                 stored_report = json.loads(archive.read("decode-report.json"))
             self.assertEqual(len(stored_report["decoded"]), 1)
             self.assertFalse(stored_report["game_tested"])
+
+    def test_inspects_decoded_heroskin_ifix_patch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            patch = {
+                "magic": 123456789,
+                "bridge": "Project_d",
+                "types": ["HeroType"],
+                "methods": [{"inst": [(103, 0)], "eh": []}],
+                "extern_methods": [],
+                "strings": ["skin"],
+                "fields": [{"new": False, "type": 0, "name": "skinField", "extra": b""}],
+                "static_fields": [],
+                "anon": [],
+                "wrappers": "Wrappers",
+                "assembly": "Project_d",
+                "fixes": [{
+                    "gen": False, "type": 0, "name": "SkinFix",
+                    "g": [], "params": [], "patch": 0,
+                }],
+                "new_classes": [],
+            }
+            original = serialize_ifix_patch(patch)
+            encoded = encrypt_aes_zstd_resource(original, "HeroSkin_2.bytes")
+            source = self._archive(folder / "ifix.zip", {
+                "Thanos/HeroSkin_2.bytes": encoded,
+            })
+            report = decode_archive_resources(
+                [source], str(folder / "decoded.zip")
+            )
+            payload = report["decoded"][0]["payload"]
+            self.assertEqual(payload["payload_type"], "ifix_patch")
+            self.assertEqual(payload["fix_count"], 1)
+            self.assertEqual(payload["method_count"], 1)
+            self.assertEqual(payload["type_count"], 1)
 
     def test_decodes_bytes_inside_one_nested_resources_zip(self):
         with tempfile.TemporaryDirectory() as tmp:
