@@ -41,6 +41,19 @@ jobs:
         run: python -c "import re,pathlib; h=pathlib.Path('web/index.html').read_text(); pathlib.Path('/tmp/aki-web.js').write_text('\\n'.join(re.findall(r'<script>(.*?)</script>',h,re.S)))" && node --check /tmp/aki-web.js
       - name: Build deployment Docker image
         run: docker build --pull -t aki-aov-tools:ci .
+      - name: Smoke-test Docker container health endpoint
+        run: |
+          container_id="$(docker run -d --rm -p 8000:8000 aki-aov-tools:ci)"
+          trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error http://127.0.0.1:8000/health -o /tmp/aki-health.json; then
+              python -c 'import json; data=json.load(open("/tmp/aki-health.json")); assert data == {"status":"ok","service":"Aki AOV Tools"}, data'
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$container_id"
+          exit 1
       - uses: actions/upload-artifact@v4
         with:
           name: ifix-parser-source
