@@ -59,8 +59,13 @@ def parse_vtk_table(name, b):
         q=16
         n=struct.unpack_from(">I",raw,q)[0]; q+=4
         blocks=[]
+        has_offsets = (_version >= 9) or _engine.startswith("2022.3")
         for _ in range(n):
-            us,cs,bf=struct.unpack_from(">IIH",raw,q); q+=10; blocks.append((us,cs,bf))
+            us,cs,bf=struct.unpack_from(">IIH",raw,q); q+=10
+            block_offset=None
+            if has_offsets:
+                block_offset=struct.unpack_from(">Q",raw,q)[0]; q+=8
+            blocks.append((us,cs,bf,block_offset))
         nn=struct.unpack_from(">I",raw,q)[0]; q+=4
         nodes=[]
         for _ in range(nn):
