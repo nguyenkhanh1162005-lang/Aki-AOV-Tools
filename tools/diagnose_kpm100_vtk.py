@@ -357,6 +357,19 @@ log(f"ZSTD dictionary magic hits={magic_hits[:100]}")
 log(f"ZSTD dictionary ID hits={id_hits[:100]}")
 
 log("\n=== Decrypt in-archive dictionary candidate resources ===")
+import pyzstd
+from app.aov_zstd_dict import ZSTD_DICT as REPO_ZSTD_DICT
+first_mapping = mapping_rows[0]
+first_payload_path = PREFIX + "Mod_by_Youtube_KHAM-PHA-MOBILE/" + first_mapping["payload_file"]
+first_payload = base.read(first_payload_path)
+first_nlen = int.from_bytes(first_payload[26:28], "little")
+first_elen = int.from_bytes(first_payload[28:30], "little")
+first_at = 30 + first_nlen + first_elen
+first_csize = int.from_bytes(first_payload[18:22], "little")
+first_member = first_payload[first_at:first_at+first_csize]
+first_frame_at = first_member.find(bytes.fromhex("28b52ffd"))
+first_frame = first_member[first_frame_at:] if first_frame_at >= 0 else b""
+log(f"REPO_ZSTD_DICT bytes={len(REPO_ZSTD_DICT)} sha256={sha(REPO_ZSTD_DICT)} head={REPO_ZSTD_DICT[:16].hex()}")
 dict_resources = {}
 for candidate_path, resource_name in (
     (PREFIX + "Config/bytesDict.bytes", "bytesDict.bytes"),
@@ -366,7 +379,7 @@ for candidate_path, resource_name in (
         candidate_data = base.read(candidate_path)
         decoded_candidate, mode = decode_aov_resource(candidate_data, resource_name)
         dict_resources[resource_name] = decoded_candidate
-        log(f"DICT_DECODE {resource_name} mode={mode} bytes={len(decoded_candidate)} head={decoded_candidate[:96].hex()} zstd_magic={decoded_candidate.find(bytes.fromhex('37a430ec'))} dict_id={decoded_candidate.find(bytes.fromhex('e755430b'))}")
+        log(f"DICT_DECODE {resource_name} mode={mode} bytes={len(decoded_candidate)} sha256={sha(decoded_candidate)} head={decoded_candidate[:96].hex()} repo_equal={decoded_candidate==REPO_ZSTD_DICT}")
         for variant_name, raw_dictionary in (
             ("full", decoded_candidate),
             ("skip8", decoded_candidate[8:]),
