@@ -84,6 +84,20 @@ class ChunkedUploadEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn(self.upload_id, main.UPLOAD_SESSIONS)
 
+    async def test_incomplete_upload_is_rejected_before_bytes_decode(self):
+        with self.assertRaises(HTTPException) as raised:
+            await main.decode_chunked_aov_bytes(self.upload_id)
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn(self.upload_id, main.UPLOAD_SESSIONS)
+        self.assertFalse(self.path.exists())
+
+    async def test_incomplete_upload_is_rejected_before_aov_merge(self):
+        with self.assertRaises(HTTPException) as raised:
+            await main.merge_aov_chunked_upload(self.upload_id)
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn(self.upload_id, main.UPLOAD_SESSIONS)
+        self.assertFalse(self.path.exists())
+
     async def test_incomplete_upload_is_rejected_before_generic_merge(self):
         with self.assertRaises(HTTPException) as raised:
             await main.merge_chunked_upload(self.upload_id)
