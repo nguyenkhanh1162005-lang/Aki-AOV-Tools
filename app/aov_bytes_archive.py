@@ -14,6 +14,7 @@ from typing import Any
 
 from .aov_bytes import AOVBytesError, decode_aov_resource
 from .aov_mses import MSESError, parse_mses
+from .ifix_merger import IFixMergeError, parse_ifix_patch
 
 MAX_ARCHIVE_ENTRIES = 20000
 MAX_ARCHIVE_UNCOMPRESSED = 1024 * 1024 * 1024
@@ -169,8 +170,25 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
                 "mode": mode_name,
                 "original_size": len(raw),
                 "decoded_size": len(decoded),
-                "payload": _inspect_decoded_payload(decoded),
+                "payload": payload_details,
             })
+            payload_details = _inspect_decoded_payload(decoded)
+            if path.lower().endswith(("heroskin_1.bytes", "heroskin_2.bytes")):
+                try:
+                    patch = parse_ifix_patch(decoded)
+                    payload_details = {
+                        "payload_type": "ifix_patch",
+                        "fix_count": len(patch["fixes"]),
+                        "method_count": len(patch["methods"]),
+                        "type_count": len(patch["types"]),
+                        "string_count": len(patch["strings"]),
+                        "field_count": len(patch["fields"]),
+                    }
+                except IFixMergeError as exc:
+                    payload_details = {
+                        "payload_type": "ifix_candidate_invalid",
+                        "reason": str(exc),
+                    }
             report["decoded_bytes"] += len(decoded)
 
             # AoV package resources such as CommonActions.pkg.bytes can contain
