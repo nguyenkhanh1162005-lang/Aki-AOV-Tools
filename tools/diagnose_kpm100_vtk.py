@@ -333,6 +333,29 @@ for pkg in PACKAGE_NAMES:
         if sha(bz.read(bmap[name])) != sha(vz.read(vmap[name])):
             log(f"PKG_DIFF {pkg}\t{name}\tKPM={bmap[name].file_size}\tVTK={vmap[name].file_size}")
 
+log("\n=== Search KPM archive for ZSTD dictionary and codec references ===")
+magic_hits = []
+id_hits = []
+named = []
+for info in base.infolist():
+    if info.is_dir():
+        continue
+    leaf = PurePosixPath(info.filename).name.lower()
+    if any(token in leaf for token in ("zstd", "dict", "codec", "compress")):
+        named.append((info.filename, info.file_size))
+    try:
+        with base.open(info, "r") as stream:
+            head = stream.read(min(info.file_size, 1024 * 1024))
+    except Exception:
+        continue
+    if bytes.fromhex("37a430ec") in head:
+        magic_hits.append((info.filename, info.file_size, head.find(bytes.fromhex("37a430ec"))))
+    if bytes.fromhex("e755430b") in head:
+        id_hits.append((info.filename, info.file_size, head.find(bytes.fromhex("e755430b"))))
+log(f"ZSTD named candidates={named[:100]}")
+log(f"ZSTD dictionary magic hits={magic_hits[:100]}")
+log(f"ZSTD dictionary ID hits={id_hits[:100]}")
+
 log("\n=== KPM/VTK same path conflicts ===")
 v_by_full = {}
 for name, info in vtk_entries.items():
