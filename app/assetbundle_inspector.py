@@ -449,7 +449,7 @@ def build_assetbundle_metadata_merge_plan(
     Conflicting Container keys or two MainAsset records are rejected conservatively.
     """
     for label, metadata in (("base", base_metadata), ("overlay", overlay_metadata)):
-        if not isinstance(metadata, dict) or not metadata.get("inspection_complete"):
+        if not isinstance(metadata, dict) or metadata.get("inspection_complete") is not True:
             return {"ready": False, "reason": f"{label} metadata inventory is incomplete."}
         if not isinstance(metadata.get("preload_pointer_inventory"), list):
             return {"ready": False, "reason": f"{label} preload inventory is unavailable."}
