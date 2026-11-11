@@ -58,6 +58,8 @@ def parse_vtk_table(name, b):
         if len(raw)!=usize: raise ValueError(f"table size {len(raw)} != {usize}")
         q=16
         n=struct.unpack_from(">I",raw,q)[0]; q+=4
+        if "VTK.IOS.VIP.zip" in name and ("commercializenotify" in name or "595_lixin_battle_base.assetbundle" in name or "resourcepackerinfosetall" in name):
+            print(f"[TABLE RAW] {name} len={len(raw)} n={n} hex={raw[:min(110,len(raw))].hex()}")
         blocks=[]
         has_offsets = (_version >= 9) or _engine.startswith("2022.3")
         for _ in range(n):
