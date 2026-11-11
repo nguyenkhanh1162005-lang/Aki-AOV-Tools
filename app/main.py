@@ -263,7 +263,10 @@ async def start_chunked_upload(payload: dict = Body(...)):
         total += size
         chunk_hashes = item.get("chunk_sha256")
         expected_chunks = (size + UPLOAD_CHUNK_BYTES - 1) // UPLOAD_CHUNK_BYTES
-        if (
+        # Keep older API clients working; the dedicated upload page always sends hashes.
+        if chunk_hashes is None:
+            chunk_hashes = []
+        elif (
             not isinstance(chunk_hashes, list)
             or len(chunk_hashes) != expected_chunks
             or not all(
@@ -273,7 +276,7 @@ async def start_chunked_upload(payload: dict = Body(...)):
                 for value in chunk_hashes
             )
         ):
-            raise HTTPException(400, "Thiếu SHA-256 cho từng khối tải lên.")
+            raise HTTPException(400, "SHA-256 từng khối không hợp lệ.")
         clean_files.append({
             "name": name, "size": size, "received": 0,
             "chunk_sha256": chunk_hashes,
