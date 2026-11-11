@@ -314,6 +314,31 @@ def _merge_verification_metadata(base_data: bytes, vtk_data: bytes,
     return merged, sorted(updated_paths), sorted(retained_version_drift)
 
 
+def _assert_archive_inventory(
+    archive: zipfile.ZipFile,
+    expected_names: set[str],
+    label: str,
+) -> None:
+    """Require an output ZIP to retain the exact expected path inventory."""
+    try:
+        _validate_archive_paths(archive, label)
+        actual_names = [info.filename for info in archive.infolist()]
+        if set(actual_names) != expected_names or len(actual_names) != len(expected_names):
+            missing = sorted(expected_names - set(actual_names))
+            unexpected = sorted(set(actual_names) - expected_names)
+            raise AOVMergeError(
+                f"{label} không giữ nguyên danh sách tài nguyên. "
+                f"Thiếu={missing[:20]}; thừa={unexpected[:20]}."
+            )
+        bad = archive.testzip()
+        if bad:
+            raise AOVMergeError(f"{label} lỗi CRC tại {bad}.")
+    except AOVMergeError:
+        raise
+    except (OSError, RuntimeError, zipfile.BadZipFile, EOFError) as exc:
+        raise AOVMergeError(f"Không thể xác minh cấu trúc {label}.") from exc
+
+
 def _copy_stream(source, destination) -> None:
     shutil.copyfileobj(source, destination, length=1024 * 1024)
 
@@ -543,9 +568,12 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                         added_files.append(destination)
 
                 with zipfile.ZipFile(inner_output_path) as check_inner:
-                    bad = check_inner.testzip()
-                    if bad:
-                        raise AOVMergeError(f"Resources.zip sau ghép lỗi CRC tại {bad}")
+                    expected_inner_names = base_names | {
+                        BASE_PREFIX + name for name in added_files
+                    }
+                    _assert_archive_inventory(
+                        check_inner, expected_inner_names, "Resources.zip sau ghép"
+                    )
                     final_names = set(check_inner.namelist())
                     for relative in replacements:
                         if BASE_PREFIX + relative not in final_names:
@@ -581,9 +609,11 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                     output_path_obj.unlink(missing_ok=True)
                     raise AOVMergeError("ZIP kết quả vượt quá giới hạn 1 GiB.")
                 with zipfile.ZipFile(output_path_obj) as check_outer:
-                    bad = check_outer.testzip()
-                    if bad:
-                        raise AOVMergeError(f"ZIP ngoài sau ghép lỗi CRC tại {bad}")
+                    _assert_archive_inventory(
+                        check_outer,
+                        {info.filename for info in base_outer.infolist()},
+                        "ZIP ngoài sau ghép",
+                    )
 
                 packer_env = _load_unitypy_aov().load(replacements[PACKER_PATH])
                 _, packer_tree = _find_mono_behaviour(packer_env, "ResourcePackerInfoSetXML")
