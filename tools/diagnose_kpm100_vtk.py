@@ -424,6 +424,34 @@ for candidate_path, resource_name in (
     except Exception as exc:
         log(f"DICT_DECODE_ERROR {resource_name} {type(exc).__name__}: {exc}")
 
+log("\n=== Inspect mergeable MSES tables ===")
+from app.aov_mses import parse_mses
+mses_paths = [
+    "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes",
+    "Databin/Client/Huanhua/ResBillboardCfg.bytes",
+    "Databin/Client/Huanhua/ResBillboardSkinCfg.bytes",
+    "Databin/Client/Huanhua/ResKillBillboardCfg.bytes",
+    "Databin/Client/Skill/skillcombine.bytes",
+    "Databin/Client/Sound/BattleBank.bytes",
+    "Databin/Client/Sound/LobbyBank.bytes",
+]
+for relative in mses_paths:
+    full = PREFIX + relative
+    vtk_info = vtk_entries.get(relative)
+    if full not in base_names or vtk_info is None:
+        log(f"MSES_MISSING {relative} base={full in base_names} vtk={vtk_info is not None}")
+        continue
+    try:
+        base_decoded, base_mode = decode_aov_resource(base.read(full), relative)
+        vtk_decoded, vtk_mode = decode_aov_resource(vtk.read(vtk_info), relative)
+        bt = parse_mses(base_decoded)
+        vt = parse_mses(vtk_decoded)
+        bkeys = {int.from_bytes(row[:4],"little") for row in bt.rows}
+        vkeys = {int.from_bytes(row[:4],"little") for row in vt.rows}
+        log(f"MSES_TABLE {relative} base_mode={base_mode} vtk_mode={vtk_mode} base_fields={bt.field_count} vtk_fields={vt.field_count} base_rows={len(bt.rows)} vtk_rows={len(vt.rows)} common_keys={len(bkeys&vkeys)} overlay_only={sorted(vkeys-bkeys)[:25]} base_only={sorted(bkeys-vkeys)[:25]} base_595={[k for k in sorted(bkeys) if k in (59500,59501)]} vtk_595={[k for k in sorted(vkeys) if k in (59500,59501)]}")
+    except Exception as exc:
+        log(f"MSES_TABLE_ERROR {relative} {type(exc).__name__}: {exc}")
+
 log("\n=== KPM/VTK same path conflicts ===")
 v_by_full = {}
 for name, info in vtk_entries.items():
