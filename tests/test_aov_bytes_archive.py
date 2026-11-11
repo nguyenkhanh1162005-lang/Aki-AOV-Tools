@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from app.aov_bytes import encrypt_aes_zstd_resource
 from app.ifix_merger import serialize_ifix_patch
@@ -189,6 +190,25 @@ class AOVBytesArchiveTests(unittest.TestCase):
                 self.assertEqual(
                     archive.read(nested_record["output_path"]), inner_payload
                 )
+
+    def test_rejects_total_decoded_output_over_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            header = b"\\x22\\x4a\\x00\\x00" + (1).to_bytes(4, "little") + b"payload"
+            source = self._archive(folder / "many-bytes.zip", {
+                "first.bytes": header,
+                "second.bytes": header,
+            })
+            output = folder / "decoded.zip"
+            with patch("app.aov_bytes_archive.MAX_TOTAL_DECODED_BYTES", 10), patch(
+                "app.aov_bytes_archive.decode_aov_resource",
+                return_value=(b"123456", "test"),
+            ):
+                with self.assertRaisesRegex(
+                    AOVBytesArchiveError, "Tổng dữ liệu sau giải mã vượt giới hạn"
+                ):
+                    decode_archive_resources([source], str(output))
+            self.assertFalse(output.exists())
 
     def test_reports_unrecognized_bytes_without_claiming_decode(self):
         with tempfile.TemporaryDirectory() as tmp:
