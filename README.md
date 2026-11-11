@@ -29,6 +29,10 @@ Engine thực hiện:
 
 Bộ ghép từ chối nếu phiên bản, số lượng AssetBundle, bảng chỉ mục hoặc dữ liệu dùng chung không khớp với cấu hình được hỗ trợ. Bộ nhận diện định dạng chỉ giúp kiểm kê nhiều loại tài nguyên; nó không phải bộ giải mã/hợp nhất tổng quát cho mọi bản mod Liên Quân. API `/api/capabilities` công bố trạng thái chính xác của từng adapter: ZIP thường ghép theo quy tắc an toàn; cặp Vấn Tâm Kiếm được hỗ trợ theo phiên bản khóa; AoV AES/Zstandard, MSES/IFix ngoài cặp khóa, Unity AssetBundle, Wwise BNK và tài nguyên văn bản/ảnh/âm thanh khác hiện chỉ được kiểm tra hoặc nhận diện. Engine từ chối ghi đầu ra khi chưa có adapter tương thích, không âm thầm ghi đè.
 
+## Phạm vi kiểm tra Wwise BNK
+
+Bộ đọc BNK hiện kiểm tra chunk, DIDX/DATA, hash media và inventory HIRC. Phần framing HIRC chọn độ rộng trường object type theo bank version: 4 byte với version <= 48 và 1 byte từ version 49. Payload của từng loại HIRC vẫn được giữ opaque; chưa giải mã đồ thị Event/Action/Container, chưa giải quyết tham chiếu WEM/HIRC và chưa có serializer. So sánh BNK chỉ mang tính tư vấn, không cấp quyền ghép hoặc thay thế SoundBank.
+
 ## Chạy web
 ```bash
 pip install -r requirements.txt
