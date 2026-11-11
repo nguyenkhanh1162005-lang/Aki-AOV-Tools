@@ -86,6 +86,9 @@ def decrypt_aes_resource(data: bytes, resource_name: str) -> bytes:
     flag = data[3]
     if flag not in (0x00, 0xEF):
         raise AOVBytesError(f"Flag AES AoV chưa hỗ trợ: 0x{flag:02X}.")
+    expected_size = int.from_bytes(data[4:8], "little")
+    if expected_size > MAX_DECODED_RESOURCE:
+        raise AOVBytesError("Kích thước khai báo sau giải mã vượt giới hạn 256 MiB.")
     ciphertext = data[8:]
     if not ciphertext or len(ciphertext) % AES.block_size:
         raise AOVBytesError("Độ dài dữ liệu AES không hợp lệ.")
@@ -94,10 +97,6 @@ def decrypt_aes_resource(data: bytes, resource_name: str) -> bytes:
         decrypted = unpad(decryptor.decrypt(ciphertext), AES.block_size)
     except ValueError as exc:
         raise AOVBytesError("Giải mã AES thất bại: sai tên tài nguyên hoặc dữ liệu hỏng.") from exc
-
-    expected_size = int.from_bytes(data[4:8], "little")
-    if expected_size > MAX_DECODED_RESOURCE:
-        raise AOVBytesError("Kích thước khai báo sau giải mã vượt giới hạn 256 MiB.")
     if flag == 0xEF:
         if not decrypted.startswith(ZSTD_MAGIC):
             raise AOVBytesError("Payload AES-Zstandard không có magic Zstandard hợp lệ.")
