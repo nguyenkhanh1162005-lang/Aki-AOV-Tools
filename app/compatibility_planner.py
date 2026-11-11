@@ -162,6 +162,12 @@ def plan_resource_compatibility(resources: list[dict[str, Any]]) -> dict[str, An
         formats = {item["format"] for item in entries}
         dependencies = sorted({dep for item in entries for dep in item["dependencies"]})
         missing_dependencies = [dep for dep in dependencies if dep not in all_paths]
+        source_counts: dict[str, int] = defaultdict(int)
+        for entry in entries:
+            source_counts[entry["source"]] += 1
+        duplicate_sources = sorted(
+            source for source, count in source_counts.items() if count > 1
+        )
 
         status = "NEEDS_RULE"
         reasons: list[str] = []
@@ -180,9 +186,16 @@ def plan_resource_compatibility(resources: list[dict[str, Any]]) -> dict[str, An
         elif missing_dependencies:
             status = "NEEDS_RULE"
             reasons.append("Thiếu dependency: " + ", ".join(missing_dependencies))
+        elif duplicate_sources:
+            status = "NEEDS_RULE"
+            reasons.append(
+                "Một ZIP chứa nhiều entry trùng đường dẫn sau chuẩn hóa: "
+                + ", ".join(duplicate_sources)
+                + "; cần xử lý rõ ràng vì consumer ZIP có thể chọn bản khác nhau."
+            )
         elif len(entries) > 1 and len(hashes) == 1:
             status = "IDENTICAL_DUPLICATE"
-            reasons.append("Cùng đường dẫn và SHA-256; có thể giữ một bản byte-identical.")
+            reasons.append("Cùng đường dẫn và SHA-256 giữa các ZIP khác nhau; có thể giữ một bản byte-identical.")
         elif len(entries) > 1:
             status = "NEEDS_RULE"
             reasons.append("Cùng đường dẫn nhưng payload khác nhau; mặc định không ghi đè.")
@@ -212,6 +225,7 @@ def plan_resource_compatibility(resources: list[dict[str, Any]]) -> dict[str, An
             "path": path,
             "status": status,
             "sources": sorted({item["source"] for item in entries}),
+            "duplicate_sources": duplicate_sources,
             "formats": sorted(formats),
             "sha256_count": len(hashes),
             "game_versions": sorted(versions),
