@@ -542,6 +542,36 @@ try:
 except Exception as exc:
     log(f"ACTOR_METADATA_ERROR {type(exc).__name__}: {exc}")
 
+log("\n=== Inspect Actor595 standalone package and direct AssetRef ===")
+for rel in (
+    "Prefab_Characters/Actor_595_Infos.pkg.bytes",
+    "Ages/Prefab_Characters/Prefab_Hero/Actor_595_Actions.pkg.bytes",
+    "Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes",
+):
+    kfull = PREFIX + rel
+    vrel = rel[0:] 
+    vinfo = vtk_entries.get(vrel)
+    if vinfo is None:
+        log(f"PKG_MISSING {rel}")
+        continue
+    kraw = base.read(kfull) if kfull in base_names else b""
+    vraw = vtk.read(vinfo)
+    kz = inner_zip(kraw, f"KPM direct {rel}") if kraw else None
+    vz = inner_zip(vraw, f"VTK direct {rel}")
+    if kz:
+        log(f"KPM_DIRECT_PKG {rel} members={[(i.filename,i.file_size,kz.read(i)[:24].hex()) for i in kz.infolist() if not i.is_dir()]}")
+    if vz:
+        log(f"VTK_DIRECT_PKG {rel} members={[(i.filename,i.file_size,vz.read(i)[:24].hex()) for i in vz.infolist() if not i.is_dir()]}")
+for rel in ("AssetRefs/Hero/595_AssetRef.bytes",):
+    kfull=PREFIX+rel
+    vinfo=vtk_entries.get(rel)
+    try:
+        kd,km=decode_aov_resource(base.read(kfull),rel)
+        vd,vm=decode_aov_resource(vtk.read(vinfo),rel)
+        log(f"DIRECT_ASSETREF kpm_mode={km} kpm_size={len(kd)} kpm_head={kd[:96].hex()} vtk_mode={vm} vtk_size={len(vd)} vtk_head={vd[:96].hex()}")
+    except Exception as exc:
+        log(f"DIRECT_ASSETREF_ERROR {type(exc).__name__}: {exc}")
+
 log("\n=== KPM/VTK same path conflicts ===")
 v_by_full = {}
 for name, info in vtk_entries.items():
