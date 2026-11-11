@@ -117,8 +117,9 @@ def custom_mod_payload(data: bytes, expected_member: str) -> bytes:
         raise ValueError(f"KPM_MOD header không đúng dạng lưu gốc: {expected_member}")
     if compressed_size != uncompressed_size or start + compressed_size > len(data):
         raise ValueError(f"KPM_MOD kích thước member sai: {expected_member}")
-    if data[start+compressed_size:start+compressed_size+4] != bytes.fromhex("504b0506"):
-        raise ValueError(f"KPM_MOD thiếu EOCD ngay sau member: {expected_member}")
+    trailer = data[start+compressed_size:]
+    if not trailer.startswith(bytes.fromhex("504b0102")) or bytes.fromhex("504b0506") not in trailer:
+        raise ValueError(f"KPM_MOD thiếu central directory/EOCD sau member: {expected_member}")
     return data[start:start+compressed_size]
 
 def make_custom_mod_payload(member_name: str, wrapped_resource: bytes, original: bytes) -> bytes:
@@ -403,7 +404,7 @@ def build(args: argparse.Namespace) -> dict:
                 raise ValueError(f"KPM_MOD round-trip sai: {payload_file}")
             if role == "skill":
                 ET.fromstring(verify_raw)
-            mod_replacements[old_outer_path] = rebuilt
+            mod_replacements[old_outer_path[len(PREFIX):]] = rebuilt
             validation_raw[payload_file] = raw
             role_counts[role] += 1
         if role_counts != {"skill": 68, "assetref": 1, "actorinfo": 1}:
@@ -491,6 +492,11 @@ def build(args: argparse.Namespace) -> dict:
                     new_info.create_system = info.create_system
                     with inner_output_path.open("rb") as src, out_outer.open(new_info, "w", force_zip64=True) as dst:
                         shutil.copyfileobj(src, dst, 1024 * 1024)
+                elif info.filename == skins_name:
+                    original = base_outer.read(info.filename).decode("utf-8-sig", errors="replace").rstrip()
+                    if "Vấn Tâm Kiếm" not in original:
+                        original += "\nLý Tín - Vấn Tâm Kiếm (Actor 595)"
+                    out_outer.writestr(info, (original + "\n").encode("utf-8"))
                 else:
                     with base_outer.open(info, "r") as src, out_outer.open(info, "w", force_zip64=True) as dst:
                         shutil.copyfileobj(src, dst, 1024 * 1024)
