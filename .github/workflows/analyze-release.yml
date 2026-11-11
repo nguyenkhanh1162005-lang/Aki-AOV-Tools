@@ -37,7 +37,7 @@ jobs:
           git rm -rf . >/dev/null 2>&1 || true
           git add aov-deep-inspection.txt
           git commit -m "Publish AOV deep inspection report"
-          git push origin HEAD:deep-inspect-report-20261111
+          git push --force origin HEAD:deep-inspect-report-20261111
       - name: Upload inspection report
         uses: actions/upload-artifact@v4
         with:
