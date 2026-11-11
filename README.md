@@ -118,7 +118,7 @@ Bộ kiểm tra Wwise BNK đọc tối đa 40 SoundBank mỗi lượt, mỗi fil
 
 ### Persistent upload sessions (optional)
 
-By default, upload sessions and temporary ZIP files live in the instance's temporary filesystem and in-memory session registry. To restore interrupted uploads after an application restart, set `AOV_UPLOAD_STORAGE_DIR` to a writable persistent mount path. The application writes each upload session's metadata atomically beside its uploaded ZIP chunks and validates the files before restoring a session.
+By default, upload sessions and temporary ZIP files live in the instance's temporary filesystem and in-memory session registry. To restore interrupted uploads after an application restart, set `AOV_UPLOAD_STORAGE_DIR` to a writable persistent mount path. The application writes each upload session's metadata atomically beside its uploaded ZIP chunks and validates the files before restoring a session. The web service must run with a single Uvicorn worker: active session state is held in that worker's memory, so multiple worker processes would not share upload IDs or chunk offsets. The repository Dockerfile starts one worker by default; do not add `--workers` unless session state is moved to a shared backend.
 
 For a Render service using a persistent disk, a typical configuration is:
 - Disk mount path: `/var/data`
