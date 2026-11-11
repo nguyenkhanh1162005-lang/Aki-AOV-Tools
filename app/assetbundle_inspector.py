@@ -1392,7 +1392,7 @@ def build_external_file_id_remap_plan(
         if ":/" in normalized:
             scheme, relative = normalized.split(":/", 1)
             if (
-                not scheme
+                len(scheme) < 2
                 or not all(char.isalnum() or char in "._-" for char in scheme)
                 or not relative
                 or relative.startswith("/")
