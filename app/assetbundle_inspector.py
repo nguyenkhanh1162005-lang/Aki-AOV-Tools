@@ -72,7 +72,12 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
         file_id = int(getattr(pointer, "file_id", 0))
         path_id = int(getattr(pointer, "path_id", 0))
         result = {"source": source, "file_id": file_id, "path_id": path_id}
-        if file_id == 0:
+        # Unity uses PathID 0 for a null PPtr. It is a valid empty
+        # reference, not a missing local object (for example, scene
+        # AssetBundle container entries can intentionally use a null asset).
+        if path_id == 0:
+            result["target_file"] = "null"
+        elif file_id == 0:
             if path_id not in local_objects and len(missing_local_pointers) < MAX_REPORTED_REFERENCES:
                 missing_local_pointers.append(result)
             elif path_id not in local_objects:
@@ -1379,6 +1384,17 @@ def build_pptr_remap_plan(
         path_id = reference.get("path_id")
         if not isinstance(file_id, int) or isinstance(file_id, bool) or file_id < 0 or not valid_path_id(path_id):
             blocked.append({"index": index, "reason": "PPtr file_id or PathID is invalid"})
+            continue
+
+        # PathID 0 is Unity's null PPtr sentinel. Preserve it without
+        # requiring a target object or external-table entry.
+        if path_id == 0:
+            rewritten.append({
+                "index": index,
+                "file_id": file_id,
+                "path_id": 0,
+                "target": "null",
+            })
             continue
 
         if file_id == 0:
