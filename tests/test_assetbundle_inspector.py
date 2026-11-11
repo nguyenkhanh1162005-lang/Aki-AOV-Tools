@@ -279,6 +279,22 @@ class AssetBundleInspectorTests(unittest.TestCase):
         )
         self.assertFalse(plan["ready"])
 
+    def test_pptr_remap_plan_preserves_null_pointer(self):
+        plan = build_pptr_remap_plan(
+            [{"file_id": 0, "path_id": 0}],
+            {},
+            {},
+            {},
+            local_target_path_ids=set(),
+            external_target_path_ids={},
+        )
+        self.assertTrue(plan["ready"])
+        self.assertEqual(
+            [(item["file_id"], item["path_id"], item["target"])
+             for item in plan["rewritten_references"]],
+            [(0, 0, "null")],
+        )
+
     def test_pptr_remap_plan_resolves_local_and_external_targets(self):
         plan = build_pptr_remap_plan(
             [{"file_id": 0, "path_id": 10}, {"file_id": 2, "path_id": 20}],
