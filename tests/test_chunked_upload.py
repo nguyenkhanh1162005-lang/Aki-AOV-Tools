@@ -58,6 +58,42 @@ class ChunkedUploadEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["received"], 8)
         self.assertEqual(self.path.read_bytes(), b"zipdata!")
 
+    async def test_repeated_identical_chunk_is_idempotent_for_resume(self):
+        first = await main.upload_chunk(
+            self.upload_id, 0, make_request(b"part"), 0
+        )
+        retry = await main.upload_chunk(
+            self.upload_id, 0, make_request(b"part"), 0
+        )
+        self.assertEqual(first["received"], 4)
+        self.assertEqual(retry["received"], 4)
+        self.assertEqual(self.path.read_bytes(), b"part")
+
+    async def test_repeated_different_chunk_is_rejected_for_resume(self):
+        await main.upload_chunk(
+            self.upload_id, 0, make_request(b"part"), 0
+        )
+        with self.assertRaises(HTTPException) as raised:
+            await main.upload_chunk(
+                self.upload_id, 0, make_request(b"evil"), 0
+            )
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(self.path.read_bytes(), b"part")
+        self.assertEqual(
+            main.UPLOAD_SESSIONS[self.upload_id]["files"][0]["received"], 4
+        )
+
+    async def test_out_of_order_chunk_is_rejected_without_writing(self):
+        with self.assertRaises(HTTPException) as raised:
+            await main.upload_chunk(
+                self.upload_id, 0, make_request(b"part"), 4
+            )
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertFalse(self.path.exists())
+        self.assertEqual(
+            main.UPLOAD_SESSIONS[self.upload_id]["files"][0]["received"], 0
+        )
+
     async def test_oversized_chunk_is_rejected_while_streaming(self):
         with patch("app.main.UPLOAD_CHUNK_BYTES", 3):
             with self.assertRaises(HTTPException) as raised:
