@@ -19,7 +19,7 @@
 </section>
 </main><script>
 const driveLinks=document.querySelector('#driveLinks'),driveImport=document.querySelector('#driveImport'),driveMerge=document.querySelector('#driveMerge');let driveUploadId=null,localAovUploadId=null;const input=document.querySelector('#upload'),go=document.querySelector('#go'),aovMerge=document.querySelector('#aovMerge'),decodeBytesBtn=document.querySelector('#decodeBytes'),compatibilityBtn=document.querySelector('#compatibility'),inspectBtn=document.querySelector('#inspect'),report=document.querySelector('#report'),list=document.querySelector('#files'),status=document.querySelector('#status');
-const CHUNK_BYTES=4*1024*1024;
+const CHUNK_BYTES=1*1024*1024;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const capabilityList=document.querySelector('#capabilityList'),capabilityNote=document.querySelector('#capabilityNote');
 async function loadCapabilities(){
@@ -85,7 +85,7 @@ async function uploadInChunks(files){
     }
   }
   if(!uploadId){
-    const start=await fetchWithRetry('/api/upload/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:files.map(f=>({name:f.name,size:f.size}))})});
+    const fingerprintItems=JSON.parse(fingerprint);const start=await fetchWithRetry('/api/upload/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:files.map((f,i)=>({name:f.name,size:f.size,chunk_sha256:fingerprintItems[i].content_chunk_sha256}))})});
     const data=await start.json();uploadId=data.upload_id;offsets=files.map(()=>0);
     saveUploadState({fingerprint,upload_id:uploadId});
   }
