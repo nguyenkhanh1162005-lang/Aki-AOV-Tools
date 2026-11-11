@@ -9,6 +9,9 @@ from Crypto.Util.Padding import pad, unpad
 from .aov_zstd_dict import ZSTD_DICT
 
 ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
+MAX_DECODED_RESOURCE = 256 * 1024 * 1024
+ZSTD_INPUT_CHUNK = 128 * 1024
+ZSTD_OUTPUT_CHUNK = 1024 * 1024
 ZSTD_HEADER = b"\x22\x4a\x00\xef"
 AES_HEADER = b"\x22\x4a\x67\x00"
 AES_ZSTD_HEADER = b"\x22\x4a\x67\xef"
@@ -40,9 +43,36 @@ def _aes_key(resource_name: str) -> bytes:
 
 
 def _decompress_frame(frame: bytes) -> bytes:
+    """Decompress Zstandard frames without allowing unbounded output allocation."""
     try:
-        return pyzstd.decompress(frame, _ZSTD_DICT)
-    except pyzstd.ZstdError as exc:
+        decompressor = pyzstd.EndlessZstdDecompressor(_ZSTD_DICT)
+        output = bytearray()
+        offset = 0
+        while True:
+            if decompressor.needs_input:
+                if offset >= len(frame):
+                    if not decompressor.at_frame_edge:
+                        raise AOVBytesError("Khung Zstandard bị cắt cụt hoặc chưa hoàn chỉnh.")
+                    break
+                chunk = frame[offset:offset + ZSTD_INPUT_CHUNK]
+                offset += len(chunk)
+            else:
+                chunk = b""
+
+            # One extra byte distinguishes an exact-limit payload from an oversized one.
+            remaining = MAX_DECODED_RESOURCE + 1 - len(output)
+            if remaining <= 0:
+                raise AOVBytesError("Dữ liệu sau giải nén vượt giới hạn 256 MiB.")
+            decoded = decompressor.decompress(
+                chunk, min(ZSTD_OUTPUT_CHUNK, remaining)
+            )
+            output.extend(decoded)
+            if len(output) > MAX_DECODED_RESOURCE:
+                raise AOVBytesError("Dữ liệu sau giải nén vượt giới hạn 256 MiB.")
+        return bytes(output)
+    except AOVBytesError:
+        raise
+    except (pyzstd.ZstdError, EOFError, ValueError) as exc:
         raise AOVBytesError("Giải nén Zstandard thất bại: sai dictionary hoặc dữ liệu hỏng.") from exc
 
 
@@ -66,6 +96,8 @@ def decrypt_aes_resource(data: bytes, resource_name: str) -> bytes:
         raise AOVBytesError("Giải mã AES thất bại: sai tên tài nguyên hoặc dữ liệu hỏng.") from exc
 
     expected_size = int.from_bytes(data[4:8], "little")
+    if expected_size > MAX_DECODED_RESOURCE:
+        raise AOVBytesError("Kích thước khai báo sau giải mã vượt giới hạn 256 MiB.")
     if flag == 0xEF:
         if not decrypted.startswith(ZSTD_MAGIC):
             raise AOVBytesError("Payload AES-Zstandard không có magic Zstandard hợp lệ.")
@@ -107,6 +139,8 @@ def decompress_aov_bytes(data: bytes) -> bytes:
     if frame_offset < 0:
         raise AOVBytesError("Tệp không chứa khung Zstandard AoV đã nhận diện.")
     expected_size = int.from_bytes(data[4:8], "little")
+    if expected_size > MAX_DECODED_RESOURCE:
+        raise AOVBytesError("Kích thước khai báo sau giải nén vượt giới hạn 256 MiB.")
     decoded = _decompress_frame(data[frame_offset:])
     if expected_size and len(decoded) != expected_size:
         raise AOVBytesError(
