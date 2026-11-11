@@ -47,6 +47,19 @@ class AOVBytesArchiveTests(unittest.TestCase):
             self.assertEqual(report["decoded"][0]["payload"]["payload_type"], "mses_v7")
             self.assertEqual(report["decoded"][0]["payload"]["field_count"], 3)
             self.assertEqual(report["decoded"][0]["payload"]["row_count"], 1)
+            self.assertEqual(
+                report["decoded"][0]["payload"]["row_prefix_inventory"],
+                [{
+                    "row_index": 0,
+                    "row_prefix_u32_le": 42,
+                    "row_prefix_hex": "0x0000002a",
+                    "row_size": len(struct.pack("<I", 42) + b"test-row"),
+                    "markers": [],
+                }],
+            )
+            self.assertEqual(
+                report["decoded"][0]["payload"]["duplicate_row_prefixes"], []
+            )
             self.assertTrue(report["decoded"][0]["payload"]["checksum_valid"])
             with zipfile.ZipFile(output) as archive:
                 decoded_path = report["decoded"][0]["output_path"]
@@ -54,6 +67,35 @@ class AOVBytesArchiveTests(unittest.TestCase):
                 stored_report = json.loads(archive.read("decode-report.json"))
             self.assertEqual(len(stored_report["decoded"]), 1)
             self.assertFalse(stored_report["game_tested"])
+
+    def test_mses_inventory_reports_marker_and_duplicate_prefixes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            rows = [
+                struct.pack("<I", 59500) + b"Hero_LiXin_Skin_C",
+                struct.pack("<I", 59500) + b"second-row",
+            ]
+            header = bytearray(0x8C)
+            header[:4] = b"MSES"
+            body = b"".join(struct.pack("<I", len(row)) + row for row in rows)
+            struct.pack_into("<III", header, 4, 7, 5, len(rows))
+            header[0x60:0x80] = hashlib.md5(body).hexdigest().encode("ascii")
+            original = bytes(header) + body
+            encoded = encrypt_aes_zstd_resource(original, "InventoryTable")
+            source = self._archive(folder / "inventory.zip", {
+                "InventoryTable.bytes": encoded,
+            })
+            report = decode_archive_resources(
+                [source], str(folder / "decoded.zip")
+            )
+            payload = report["decoded"][0]["payload"]
+            self.assertEqual(
+                payload["row_prefix_inventory"][0]["markers"],
+                ["Hero_LiXin_Skin_C"],
+            )
+            self.assertEqual(
+                payload["duplicate_row_prefixes"], ["0x0000e84c"]
+            )
 
     def test_inspects_decoded_heroskin_ifix_patch(self):
         with tempfile.TemporaryDirectory() as tmp:
