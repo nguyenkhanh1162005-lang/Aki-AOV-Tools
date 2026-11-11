@@ -201,24 +201,37 @@ def compare_wwise_bnk(base_data: bytes, overlay_data: bytes) -> dict[str, Any]:
 
     version_match = base["version"] == overlay["version"]
     bank_id_match = base["bank_id"] == overlay["bank_id"]
+    base_sha256 = hashlib.sha256(base_data).hexdigest()
+    overlay_sha256 = hashlib.sha256(overlay_data).hexdigest()
+    whole_bank_identical = base_sha256 == overlay_sha256
+    new_media_ids = sorted(set(overlay_media) - set(base_media))
+    new_hirc_ids = sorted(set(overlay_objects) - set(base_objects))
     if not version_match:
         status = "VERSION_CONFLICT"
         reasons = ["Wwise SoundBank có version khác nhau."]
     elif not bank_id_match:
         status = "BANK_ID_CONFLICT"
         reasons = ["Bank ID khác nhau; đây là hai SoundBank identity khác nhau, không được xem là cùng bank để thay thế trực tiếp."]
-    elif changed_media or changed_objects or object_type_conflicts:
-        status = "NEEDS_RULE"
-        reasons = ["Có media ID hoặc HIRC object ID trùng nhưng payload khác nhau; cần remap và kiểm tra tham chiếu."]
+    elif whole_bank_identical:
+        status = "IDENTICAL_BANK_PAYLOAD"
+        reasons = ["Toàn bộ BNK có SHA-256 giống nhau."]
     else:
-        status = "INSPECTED_ONLY"
-        reasons = ["Không thấy xung đột ID/payload trong phần đã kiểm kê; HIRC references và event semantics chưa được xác minh."]
+        status = "NEEDS_RULE"
+        if changed_media or changed_objects or object_type_conflicts:
+            reasons = ["Có media ID hoặc HIRC object ID trùng nhưng payload khác nhau; cần remap và kiểm tra tham chiếu."]
+        elif new_media_ids or new_hirc_ids:
+            reasons = ["Có media ID hoặc HIRC object ID mới; cần giải quyết dependency và tham chiếu trước khi ghép."]
+        else:
+            reasons = ["Toàn bộ BNK khác SHA-256 nhưng phần khác biệt nằm ngoài các trường đã kiểm kê; cần adapter/kiểm tra sâu hơn."]
 
     return {
         "format": "Wwise BNK comparison",
         "status": status,
         "bank_versions_match": version_match,
         "bank_id_match": bank_id_match,
+        "bank_payload_identical": whole_bank_identical,
+        "base_bank_sha256": base_sha256,
+        "overlay_bank_sha256": overlay_sha256,
         "bank_ids": {"base": base["bank_id"], "overlay": overlay["bank_id"]},
         "base_chunk_ids": [item["id"] for item in base["chunks"]],
         "overlay_chunk_ids": [item["id"] for item in overlay["chunks"]],
@@ -228,7 +241,7 @@ def compare_wwise_bnk(base_data: bytes, overlay_data: bytes) -> dict[str, Any]:
             "shared_ids": shared_media[:200],
             "identical_payload_ids": identical_media[:200],
             "changed_payload_ids": changed_media[:200],
-            "new_overlay_ids": sorted(set(overlay_media) - set(base_media))[:200],
+            "new_overlay_ids": new_media_ids[:200],
         },
         "hirc": {
             "base_count": len(base_objects),
@@ -237,7 +250,7 @@ def compare_wwise_bnk(base_data: bytes, overlay_data: bytes) -> dict[str, Any]:
             "identical_payload_ids": identical_objects[:200],
             "changed_payload_ids": changed_objects[:200],
             "object_type_conflict_ids": object_type_conflicts[:200],
-            "new_overlay_ids": sorted(set(overlay_objects) - set(base_objects))[:200],
+            "new_overlay_ids": new_hirc_ids[:200],
         },
         "advisory_only": True,
         "merge_authorized": False,
