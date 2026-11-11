@@ -8,6 +8,7 @@ import shutil
 import tempfile
 import time
 import uuid
+import zlib
 from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Body, Header, Query
@@ -323,7 +324,7 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
     async for part in request.stream():
         chunk_buffer.extend(part)
         if len(chunk_buffer) > UPLOAD_CHUNK_BYTES:
-            raise HTTPException(413, "Mỗi khối tải lên không được vượt quá 4 MB.")
+            raise HTTPException(413, "Mỗi khối tải lên không được vượt quá 1 MB.")
     chunk = bytes(chunk_buffer)
     if not chunk:
         raise HTTPException(400, "Kích thước khối tải lên không hợp lệ.")
@@ -395,18 +396,22 @@ async def verify_chunked_upload(upload_id: str):
             with zipfile.ZipFile(path, "r") as archive:
                 infos = archive.infolist()
                 archive_info["entries"] = len(infos)
-                bad_member = archive.testzip()
-                if bad_member:
-                    archive_info["crc_warning"] = f"CRC không khớp tại entry: {bad_member}"
+                expanded_bytes = sum(info.file_size for info in infos)
+                if expanded_bytes <= 1024 * 1024 * 1024:
+                    bad_member = archive.testzip()
+                    if bad_member:
+                        archive_info["crc_warning"] = f"CRC không khớp tại entry: {bad_member}"
+                else:
+                    archive_info["crc_warning"] = "Bỏ qua kiểm tra CRC giải nén vì tổng kích thước khai báo vượt 1 GiB."
                 archive_info["zip_directory_valid"] = True
-        except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
+        except (OSError, zipfile.BadZipFile, RuntimeError, EOFError, zlib.error) as exc:
             archive_info["crc_warning"] = str(exc)[:240]
             # The transfer hash remains authoritative for byte-for-byte integrity.
             try:
                 with zipfile.ZipFile(path, "r") as archive:
                     archive_info["entries"] = len(archive.infolist())
                     archive_info["zip_directory_valid"] = True
-            except (OSError, zipfile.BadZipFile, RuntimeError):
+            except (OSError, zipfile.BadZipFile, RuntimeError, EOFError, zlib.error):
                 raise HTTPException(422, f"ZIP {item['name']} không đọc được cấu trúc thư mục.")
         results.append({
             "name": item["name"],
