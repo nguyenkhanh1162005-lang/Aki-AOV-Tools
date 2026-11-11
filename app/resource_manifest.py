@@ -134,8 +134,10 @@ def _build_manifest_item(
     }
     if container_path:
         item["container_path"] = container_path
-    version = _version(path)
-    platform = _platform(path)
+    # ZIP wrappers often carry the game version/platform in their filename,
+    # while the inner resource paths omit it. Use the source label as a fallback.
+    version = _version(path) or _version(source)
+    platform = _platform(path) or _platform(source)
     if version:
         item["game_version"] = version
     if platform:
