@@ -107,9 +107,14 @@ compatibilityBtn.addEventListener('click',async()=>{
     const response=await fetchWithRetry('/api/upload/'+encodeURIComponent(uploadId)+'/compatibility',{method:'POST'});
     const data=await response.json(),plan=data.compatibility_plan,manifest=data.manifest;
     const summary=plan.summary||{};
+    const sourceCompatibility=plan.source_compatibility||{};
     const lines=[
       'BÁO CÁO TƯƠNG THÍCH TÀI NGUYÊN',
       'ZIP: '+manifest.archive_count+' | Resource: '+manifest.resource_count,
+      'TƯƠNG THÍCH TOÀN BỘ ZIP: '+(sourceCompatibility.status||'không rõ'),
+      'Phiên bản phát hiện: '+((sourceCompatibility.game_versions||[]).join(', ')||'không xác định'),
+      'Nền tảng phát hiện: '+((sourceCompatibility.platforms||[]).join(', ')||'không xác định'),
+      ...(sourceCompatibility.reasons||[]).map(reason=>'CẢNH BÁO: '+reason),
       'SAFE_MERGE: '+(summary.SAFE_MERGE||0),
       'IDENTICAL_DUPLICATE: '+(summary.IDENTICAL_DUPLICATE||0),
       'NEEDS_RULE: '+(summary.NEEDS_RULE||0),
