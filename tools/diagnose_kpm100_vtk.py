@@ -184,6 +184,76 @@ for pkg in (ACTION_PKG.split("/")[-1],):
         for token,path,size in unmapped[:100]:
             log(f"UNMAPPED {token}\t{path}\t{size}")
 
+log("\n=== Exact Actor595 payload-map inspection ===")
+import csv
+from pathlib import Path
+mapping_path = Path("tools/kpm100_actor595_payload_map.csv")
+mapping_rows = list(csv.DictReader(mapping_path.open(encoding="utf-8", newline="")))
+log(f"Verified payload-map rows={len(mapping_rows)}")
+try:
+    from app.aov_bytes import decode_aov_resource
+except Exception as exc:
+    decode_aov_resource = None
+    log(f"AOV codec unavailable in diagnostic: {type(exc).__name__}: {exc}")
+
+for row in mapping_rows:
+    payload_name = row["payload_file"]
+    entry_name = row["entry_name"]
+    payload_path = PREFIX + "Mod_by_Youtube_KHAM-PHA-MOBILE/" + payload_name
+    try:
+        payload = base.read(payload_path)
+    except KeyError:
+        log(f"PAYLOAD_MISSING {payload_name}")
+        continue
+    if row["role"] == "skill":
+        vtk_zip = vtk_pkg_zips.get("Actor_595_Actions.pkg.bytes")
+        vtk_target = "595_LiXin/skill/" + entry_name
+        if not vtk_zip:
+            log(f"VTK_PACKAGE_MISSING {entry_name}")
+            continue
+        try:
+            info = vtk_zip.getinfo(vtk_target)
+            vtk_data = vtk_zip.read(info)
+        except KeyError:
+            log(f"VTK_ENTRY_MISSING {vtk_target}")
+            continue
+    elif row["role"] == "assetref":
+        info = vtk_entries.get("AssetRefs/Hero/595_AssetRef.bytes")
+        vtk_data = vtk.read(info) if info else b""
+    elif row["role"] == "actorinfo":
+        info = vtk_entries.get("Prefab_Characters/Actor_595_Infos.pkg.bytes")
+        vtk_data = vtk.read(info) if info else b""
+    else:
+        vtk_data = b""
+    decoded = []
+    if decode_aov_resource and payload[:2] == b"\x22\x4a":
+        for candidate in (entry_name, payload_name, "595_LiXin/skill/" + entry_name):
+            try:
+                raw, mode = decode_aov_resource(payload, candidate)
+                decoded.append((candidate, mode, raw))
+            except Exception:
+                pass
+    detail = ""
+    if decoded:
+        detail = " DECODED=" + ",".join(f"{nm}:{mode}:{len(raw)}:{raw[:10]!r}" for nm,mode,raw in decoded)
+    log(
+        f"PAYLOAD {payload_name} role={row['role']} entry={entry_name} "
+        f"bytes={len(payload)} head={payload[:24].hex()} "
+        f"vtk_bytes={len(vtk_data)} vtk_head={vtk_data[:24].hex()} "
+        f"same={bool(vtk_data) and sha(payload)==sha(vtk_data)}{detail}"
+    )
+
+log("\n=== Selective package diffs ===")
+for pkg in PACKAGE_NAMES:
+    if pkg not in base_pkg_zips or pkg not in vtk_pkg_zips:
+        continue
+    bz, vz = base_pkg_zips[pkg], vtk_pkg_zips[pkg]
+    bmap = {i.filename:i for i in bz.infolist() if not i.is_dir()}
+    vmap = {i.filename:i for i in vz.infolist() if not i.is_dir()}
+    for name in sorted(set(bmap)&set(vmap)):
+        if sha(bz.read(bmap[name])) != sha(vz.read(vmap[name])):
+            log(f"PKG_DIFF {pkg}\t{name}\tKPM={bmap[name].file_size}\tVTK={vmap[name].file_size}")
+
 log("\n=== KPM/VTK same path conflicts ===")
 v_by_full = {}
 for name, info in vtk_entries.items():
