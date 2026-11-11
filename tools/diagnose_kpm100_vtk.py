@@ -492,6 +492,7 @@ try:
                 if p in relevant or ch in relevant:
                     log(f"PACKER_EDGE {p} -> {ch}")
         else:
+            log(f"VERIFY_VERSIONS base={bt.get('Version')!r} vtk={vt.get('Version')!r}")
             for list_name in ("AllZipVerificationInfo","AllDatabinVerificationInfo"):
                 br = {r["PathInIFS"]:r.get("CrcXor") for r in bt[list_name]}
                 vr = {r["PathInIFS"]:r.get("CrcXor") for r in vt[list_name]}
