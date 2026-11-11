@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import sys
 import zipfile
 from collections import Counter, defaultdict
 from pathlib import PurePosixPath
@@ -190,6 +191,7 @@ from pathlib import Path
 mapping_path = Path("tools/kpm100_actor595_payload_map.csv")
 mapping_rows = list(csv.DictReader(mapping_path.open(encoding="utf-8", newline="")))
 log(f"Verified payload-map rows={len(mapping_rows)}")
+sys.path.insert(0, os.getcwd())
 try:
     from app.aov_bytes import decode_aov_resource
 except Exception as exc:
@@ -212,7 +214,11 @@ for row in mapping_rows:
             log(f"VTK_PACKAGE_MISSING {entry_name}")
             continue
         try:
-            info = vtk_zip.getinfo(vtk_target)
+            vmap = {i.filename.lower():i for i in vtk_zip.infolist() if not i.is_dir()}
+            info = vmap.get(vtk_target.lower())
+            if info is None:
+                log(f"VTK_ENTRY_MISSING {vtk_target}")
+                continue
             vtk_data = vtk_zip.read(info)
         except KeyError:
             log(f"VTK_ENTRY_MISSING {vtk_target}")
@@ -225,8 +231,22 @@ for row in mapping_rows:
         vtk_data = vtk.read(info) if info else b""
     else:
         vtk_data = b""
+    payload_zip = inner_zip(payload, f"KPM_MOD {payload_name}")
+    member_details = []
+    base_member_equal = False
+    if payload_zip:
+        pmembers = [i for i in payload_zip.infolist() if not i.is_dir()]
+        for pi in pmembers:
+            pdata = payload_zip.read(pi)
+            member_details.append(f"{pi.filename}:{len(pdata)}:{pdata[:12].hex()}")
+            if row["role"] == "skill" and ACTION_PKG.split("/")[-1] in base_pkg_zips:
+                bz = base_pkg_zips[ACTION_PKG.split("/")[-1]]
+                bmap = {i.filename.lower(): i for i in bz.infolist() if not i.is_dir()}
+                bi = bmap.get(("595_LiXin/skill/" + entry_name).lower())
+                if bi and sha(pdata) == sha(bz.read(bi)):
+                    base_member_equal = True
     decoded = []
-    if decode_aov_resource and payload[:2] == b"\x22\x4a":
+    if decode_aov_resource:
         for candidate in (entry_name, payload_name, "595_LiXin/skill/" + entry_name):
             try:
                 raw, mode = decode_aov_resource(payload, candidate)
@@ -238,7 +258,8 @@ for row in mapping_rows:
         detail = " DECODED=" + ",".join(f"{nm}:{mode}:{len(raw)}:{raw[:10]!r}" for nm,mode,raw in decoded)
     log(
         f"PAYLOAD {payload_name} role={row['role']} entry={entry_name} "
-        f"bytes={len(payload)} head={payload[:24].hex()} "
+        f"bytes={len(payload)} head={payload[:24].hex()} members={member_details} "
+        f"matches_base_member={base_member_equal} "
         f"vtk_bytes={len(vtk_data)} vtk_head={vtk_data[:24].hex()} "
         f"same={bool(vtk_data) and sha(payload)==sha(vtk_data)}{detail}"
     )
