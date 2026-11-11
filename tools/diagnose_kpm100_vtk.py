@@ -459,8 +459,13 @@ for name in sorted(vtk_entries):
         info = vtk_entries[name]
         log(f"VTK_ADD {name}\t{info.file_size}")
 try:
-    from app.aov_merger import _load_unitypy_aov, _find_mono_behaviour, PACKER_PATH, VERIFICATION_PATH
-    parser = _load_unitypy_aov()
+    sys.path.insert(0, os.path.join(os.getcwd(), "app", "vendor"))
+    try:
+        import UnityPy_AOV as parser
+    except Exception as import_exc:
+        log(f"UNITYPY_IMPORT_ERROR {type(import_exc).__name__}: {import_exc}")
+        raise
+    from app.aov_merger import _find_mono_behaviour, PACKER_PATH, VERIFICATION_PATH
     for rel, object_name in (
         (PACKER_PATH, "ResourcePackerInfoSetXML"),
         (VERIFICATION_PATH, "ResourceVerificationInfoSetXML"),
