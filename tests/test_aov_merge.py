@@ -55,6 +55,12 @@ class AOVResourceMergeTests(unittest.TestCase):
         self.assertEqual(report["base_checksum_repaired"], True)
         self.assertEqual(parsed.rows[-1][:4], struct.pack("<I", 59500))
 
+    def test_rejects_unregistered_mses_table_path(self):
+        base = encode_aov_resource(table(3, [struct.pack("<I", 1) + b"base"]), "Unknown.bytes", "aes")
+        overlay = encode_aov_resource(table(3, [struct.pack("<I", 2) + b"overlay"]), "Unknown.bytes", "aes")
+        with self.assertRaisesRegex(AOVResourceMergeError, "không có adapter MSES"):
+            merge_aov_mses_resource(base, overlay, "Databin/Client/Unknown.bytes")
+
     def test_sound_bank_requires_vtk_lixin_skin_row(self):
         name = "Databin/Client/Sound/LobbyBank.bytes"
         base = encode_aov_resource(table(3, [struct.pack("<I", 1) + b"base"]), name, "aes")
