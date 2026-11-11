@@ -1,0 +1,104 @@
+name: Split original AOV ZIPs into small transfer artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download original release ZIPs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p source parts
+          gh release download aov-upload-01 --repo ${{ github.repository }} --dir source --pattern 'Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip'
+          gh release download aov-upload-01 --repo ${{ github.repository }} --dir source --pattern 'VTK.IOS.VIP.zip'
+
+      - name: Split without modifying original bytes
+        run: |
+          split -b 45m --numeric-suffixes=0 --suffix-length=2 source/Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip parts/kpm-
+          split -b 45m --numeric-suffixes=0 --suffix-length=2 source/VTK.IOS.VIP.zip parts/vtk-
+          sha256sum source/*.zip
+          ls -lh parts/
+
+      - name: Upload KPM part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: kpm-part-00
+          path: parts/kpm-00
+          compression-level: 0
+          retention-days: 3
+      - name: Upload KPM part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: kpm-part-01
+          path: parts/kpm-01
+          compression-level: 0
+          retention-days: 3
+      - name: Upload KPM part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: kpm-part-02
+          path: parts/kpm-02
+          compression-level: 0
+          retention-days: 3
+      - name: Upload KPM part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: kpm-part-03
+          path: parts/kpm-03
+          compression-level: 0
+          retention-days: 3
+      - name: Upload KPM part 04
+        uses: actions/upload-artifact@v4
+        with:
+          name: kpm-part-04
+          path: parts/kpm-04
+          compression-level: 0
+          retention-days: 3
+      - name: Upload KPM part 05
+        uses: actions/upload-artifact@v4
+        with:
+          name: kpm-part-05
+          path: parts/kpm-05
+          compression-level: 0
+          retention-days: 3
+      - name: Upload KPM part 06
+        uses: actions/upload-artifact@v4
+        with:
+          name: kpm-part-06
+          path: parts/kpm-06
+          compression-level: 0
+          retention-days: 3
+      - name: Upload VTK part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: vtk-part-00
+          path: parts/vtk-00
+          compression-level: 0
+          retention-days: 3
+      - name: Upload VTK part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: vtk-part-01
+          path: parts/vtk-01
+          compression-level: 0
+          retention-days: 3
+      - name: Upload VTK part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: vtk-part-02
+          path: parts/vtk-02
+          compression-level: 0
+          retention-days: 3
+      - name: Upload VTK part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: vtk-part-03
+          path: parts/vtk-03
+          compression-level: 0
+          retention-days: 3
