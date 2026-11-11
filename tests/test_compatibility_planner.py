@@ -35,6 +35,24 @@ class CompatibilityPlannerTests(unittest.TestCase):
         ])
         self.assertEqual(result["resources"][0]["status"], "NEEDS_RULE")
 
+    def test_duplicate_entries_inside_one_zip_require_explicit_rule(self):
+        result = plan_resource_compatibility([
+            resource("same.txt", "b", source="one.zip"),
+            resource("same.txt", "b", source="one.zip"),
+        ])
+        item = result["resources"][0]
+        self.assertEqual(item["status"], "NEEDS_RULE")
+        self.assertEqual(item["duplicate_sources"], ["one.zip"])
+        self.assertIn("nhiều entry trùng đường dẫn", item["reasons"][0])
+
+    def test_duplicate_different_payloads_inside_one_zip_require_explicit_rule(self):
+        result = plan_resource_compatibility([
+            resource("same.txt", "b", source="one.zip"),
+            resource("same.txt", "c", source="one.zip"),
+        ])
+        self.assertEqual(result["resources"][0]["status"], "NEEDS_RULE")
+        self.assertEqual(result["resources"][0]["duplicate_sources"], ["one.zip"])
+
     def test_version_and_platform_conflicts_fail_closed(self):
         version = plan_resource_compatibility([
             resource("asset.bin", "e", game_version="1.0"),
