@@ -27,7 +27,7 @@ class WwiseBNKInspectorTests(unittest.TestCase):
         self.assertEqual(report["hirc_objects"][0]["type"], 2)
         self.assertEqual(report["hirc_objects"][0]["id"], 9001)
         self.assertEqual(report["hirc_objects"][0]["size"], 10)
-        self.assertEqual(report["hirc_objects"][0]["sha256"], __import__("hashlib").sha256(b"\\x02" + struct.pack("<I", 10) + object_body).hexdigest())
+        self.assertEqual(report["hirc_objects"][0]["sha256"], __import__("hashlib").sha256(b"\x02" + struct.pack("<I", 10) + object_body).hexdigest())
 
 
     def test_compares_media_and_hirc_payloads_without_authorizing_merge(self):
@@ -35,7 +35,7 @@ class WwiseBNKInspectorTests(unittest.TestCase):
             didx = chunk("DIDX", struct.pack("<III", media_id, 0, len(media_payload)))
             data = chunk("DATA", media_payload)
             body = struct.pack("<I", object_id) + object_payload
-            hirc = chunk("HIRC", struct.pack("<I", 1) + b"\\x02" + struct.pack("<I", len(body)) + body)
+            hirc = chunk("HIRC", struct.pack("<I", 1) + b"\x02" + struct.pack("<I", len(body)) + body)
             return make_bank(didx, data, hirc)
 
         report = compare_wwise_bnk(
@@ -53,7 +53,7 @@ class WwiseBNKInspectorTests(unittest.TestCase):
             didx = chunk("DIDX", struct.pack("<III", media_id, 0, len(payload)))
             data = chunk("DATA", payload)
             body = struct.pack("<I", object_id) + b"node"
-            hirc = chunk("HIRC", struct.pack("<I", 1) + b"\\x02" + struct.pack("<I", len(body)) + body)
+            hirc = chunk("HIRC", struct.pack("<I", 1) + b"\x02" + struct.pack("<I", len(body)) + body)
             return make_bank(didx, data, hirc)
 
         report = compare_wwise_bnk(bank(1, b"a", 2), bank(3, b"b", 2))
