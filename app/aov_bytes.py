@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pyzstd
+import zstandard as zstd
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
@@ -14,7 +14,7 @@ AES_HEADER = b"\x22\x4a\x67\x00"
 AES_ZSTD_HEADER = b"\x22\x4a\x67\xef"
 _AES_BASE_KEY = bytes.fromhex("99 64 b1 b0 6b 03 8d 7f b7 7d b6 a7 54 90 8b 73")
 _AES_IV = bytes(16)
-_ZSTD_DICT = pyzstd.ZstdDict(ZSTD_DICT, is_raw=True)
+_ZSTD_DICT = zstd.ZstdCompressionDict(ZSTD_DICT, dict_type=zstd.DICT_TYPE_AUTO)
 
 
 class AOVBytesError(ValueError):
@@ -41,13 +41,13 @@ def _aes_key(resource_name: str) -> bytes:
 
 def _decompress_frame(frame: bytes) -> bytes:
     try:
-        return pyzstd.decompress(frame, _ZSTD_DICT)
-    except pyzstd.ZstdError as exc:
+        return zstd.ZstdDecompressor(dict_data=_ZSTD_DICT).decompress(frame)
+    except zstd.ZstdError as exc:
         raise AOVBytesError("Giải nén Zstandard thất bại: sai dictionary hoặc dữ liệu hỏng.") from exc
 
 
 def _compress_frame(data: bytes, level: int = 17) -> bytes:
-    return pyzstd.compress(data, level, _ZSTD_DICT)
+    return zstd.ZstdCompressor(dict_data=_ZSTD_DICT, level=level).compress(data)
 
 
 def decrypt_aes_resource(data: bytes, resource_name: str) -> bytes:
