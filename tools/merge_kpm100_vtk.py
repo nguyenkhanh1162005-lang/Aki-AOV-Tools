@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import struct
 import sys
@@ -46,6 +47,9 @@ IOS_SOUNDS = {
     "Sound/iOS/Hero_LiXin_Skin_C_SFX.bnk",
     "Sound/iOS/Hero_LiXin_Skin_C_Show.bnk",
     "Sound/iOS/Hero_LiXin_Skin_C_VO.bnk",
+    "Sound/iOS/Hero_Sinon_SFX.bnk",
+    "Sound/iOS/Hero_Sinon_Show.bnk",
+    "Sound/iOS/Hero_Sinon_VO.bnk",
 }
 MSES_PATHS = [
     "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes",
@@ -177,50 +181,75 @@ def merge_actor_packer(base_data: bytes, vtk_data: bytes) -> tuple[bytes, dict]:
     _, vtk_tree = find_mono_behaviour(vtk_env, "ResourcePackerInfoSetXML")
     if base_tree.get("Version") != BASE_VERSION or vtk_tree.get("Version") != VTK_VERSION:
         raise ValueError("Packer version không đúng cặp KPM100/VTK.")
+
     base_entries = base_tree["AllResourcePackInfo"]
     vtk_entries = vtk_tree["AllResourcePackInfo"]
     base_index = {row["PathInIFS"]: i for i, row in enumerate(base_entries)}
     vtk_index = {row["PathInIFS"]: row for row in vtk_entries}
-    missing = ACTOR_ASSETS - set(vtk_index)
+
+    def is_lixin_asset(path: str) -> bool:
+        lowered = path.casefold()
+        return "lixin" in lowered or bool(re.search(r"(^|[/_])595(?:\d{0,2})_", lowered))
+
+    # Do not limit the merge to a hand-picked list. Pull every 595/LiXin bundle
+    # named by VTK's own packer index, including the 5952 LiXin skin bundles.
+    actor_assets = {
+        path for path in vtk_index
+        if path.startswith("assetbundle/") and is_lixin_asset(path)
+    } | set(ACTOR_ASSETS)
+    missing = actor_assets - set(vtk_index)
     if missing:
         raise ValueError(f"VTK Packer thiếu Actor595 bundles: {sorted(missing)}")
-    replaced, appended = [], []
-    for path in sorted(ACTOR_ASSETS):
+
+    replaced, appended_actor = [], []
+    for path in sorted(actor_assets):
         if path in base_index:
             base_entries[base_index[path]] = __import__("copy").deepcopy(vtk_index[path])
             replaced.append(path)
         else:
             base_entries.append(__import__("copy").deepcopy(vtk_index[path]))
             base_index[path] = len(base_entries) - 1
-            appended.append(path)
+            appended_actor.append(path)
 
-    # Merge only VTK dependency edges touching one of the seven Actor595 bundles.
+    # Include the complete dependency closure for every VTK Lixin bundle.
+    # Existing non-LiXin KPM rows remain untouched; only missing dependency rows
+    # are imported from VTK so the other 99 skins retain their own bundle data.
     edges = base_tree["AllParentIdexToChild"]
     vtk_edges = vtk_tree["AllParentIdexToChild"]
     pair_set = {(int(e["parentIdx"]), int(e["childIdx"])) for e in edges}
-    output_index = dict(base_index)
     added_edges = []
+    appended_dependencies = set()
+    output_index = dict(base_index)
+
+    relevant_edges = []
     for edge in vtk_edges:
         parent_path = vtk_entries[int(edge["parentIdx"])]["PathInIFS"]
         child_path = vtk_entries[int(edge["childIdx"])]["PathInIFS"]
-        if parent_path not in ACTOR_ASSETS and child_path not in ACTOR_ASSETS:
-            continue
+        if parent_path in actor_assets or child_path in actor_assets:
+            relevant_edges.append((parent_path, child_path))
+
+    for parent_path, child_path in relevant_edges:
+        for dependency_path in (parent_path, child_path):
+            if dependency_path in output_index:
+                continue
+            if dependency_path not in vtk_index:
+                raise ValueError(
+                    f"VTK Actor595 dependency không có packer row: {dependency_path}"
+                )
+            base_entries.append(__import__("copy").deepcopy(vtk_index[dependency_path]))
+            output_index[dependency_path] = len(base_entries) - 1
+            appended_dependencies.add(dependency_path)
+
+    for parent_path, child_path in relevant_edges:
         if parent_path not in output_index or child_path not in output_index:
-            raise ValueError(f"Actor595 dependency chưa có trong KPM: {parent_path} -> {child_path}")
+            raise ValueError(
+                f"Actor595 dependency chưa có trong output index: {parent_path} -> {child_path}"
+            )
         pair = (output_index[parent_path], output_index[child_path])
         if pair not in pair_set:
             edges.append({"parentIdx": pair[0], "childIdx": pair[1]})
             pair_set.add(pair)
             added_edges.append((parent_path, child_path))
-
-    # Every VTK edge touching the Actor595 assets must now be represented.
-    for edge in vtk_edges:
-        parent_path = vtk_entries[int(edge["parentIdx"])]["PathInIFS"]
-        child_path = vtk_entries[int(edge["childIdx"])]["PathInIFS"]
-        if parent_path in ACTOR_ASSETS or child_path in ACTOR_ASSETS:
-            pair = (output_index.get(parent_path), output_index.get(child_path))
-            if pair not in pair_set:
-                raise ValueError(f"Thiếu Actor595 dependency edge: {parent_path} -> {child_path}")
 
     base_obj.save_typetree(base_tree)
     bundle = next(iter(base_env.files.values()))
@@ -230,17 +259,25 @@ def merge_actor_packer(base_data: bytes, vtk_data: bytes) -> tuple[bytes, dict]:
     if verify_tree.get("Version") != BASE_VERSION:
         raise ValueError("Packer sau ghép mất version nền.")
     verify_index = {row["PathInIFS"]: i for i, row in enumerate(verify_tree["AllResourcePackInfo"])}
-    if not ACTOR_ASSETS.issubset(verify_index):
+    if not actor_assets.issubset(verify_index):
         raise ValueError("Packer đầu ra thiếu bundle Actor595.")
-    verify_edges = {(int(e["parentIdx"]), int(e["childIdx"])) for e in verify_tree["AllParentIdexToChild"]}
+    verify_edges = {
+        (int(e["parentIdx"]), int(e["childIdx"]))
+        for e in verify_tree["AllParentIdexToChild"]
+    }
     if not pair_set.issubset(verify_edges):
         raise ValueError("Packer sau ghi thiếu dependency edge.")
+
+    appended_paths = sorted(set(appended_actor) | appended_dependencies)
     return result, {
         "version": verify_tree["Version"],
-        "base_entries": len(base_tree["AllResourcePackInfo"]) - len(appended),
+        "base_entries": len(base_tree["AllResourcePackInfo"]) - len(appended_paths),
         "output_entries": len(verify_tree["AllResourcePackInfo"]),
+        "actor_assets_from_vtk": sorted(actor_assets),
         "replaced_actor_rows": replaced,
-        "appended_actor_rows": appended,
+        "appended_actor_rows": appended_actor,
+        "appended_dependency_rows": sorted(appended_dependencies),
+        "appended_paths": appended_paths,
         "new_actor_edges": added_edges,
         "output_edges": len(verify_tree["AllParentIdexToChild"]),
         "verified": True,
@@ -272,8 +309,17 @@ def merge_actor_verification(base_data: bytes, vtk_data: bytes, included_paths: 
                 field_updated.append(path)
             else:
                 field_retained.append(path)
+
+        # Add verification rows for newly imported VTK Lixin bundles/soundbanks.
+        field_appended = []
+        for path, candidate in vtk_index.items():
+            if path in included_paths and path not in base_index:
+                base_rows.append(__import__("copy").deepcopy(candidate))
+                base_index[path] = len(base_rows) - 1
+                field_appended.append(path)
         updated[field] = field_updated
         retained[field] = field_retained
+        updated[field + "_appended"] = field_appended
     base_obj.save_typetree(base_tree)
     bundle = next(iter(base_env.files.values()))
     result = bundle.save("original")
@@ -314,7 +360,7 @@ def build(args: argparse.Namespace) -> dict:
         "game_tested": False,
         "warnings": [
             "IFix HeroSkin_1 không được hợp nhất vì parser gặp opcode 89 chưa hỗ trợ; các tệp Thanos/HeroSkin được giữ nguyên KPM100.",
-            "Không thay ba UI assetbundle dùng chung từ VTK; giữ phiên bản KPM100 để bảo toàn giao diện và 100 skin.",
+            "Giữ nguyên tài nguyên dùng chung không thuộc Lý Tín; thay toàn bộ bundle 595/LiXin được liệt kê trong VTK Packer và giữ nguyên các gói của 99 skin còn lại.",
             "KPM100 không chứa Resources.zip hoặc danhsachskin.txt wrapper; cấu trúc ZIP gốc được giữ nguyên."
         ],
     }
@@ -409,16 +455,35 @@ def build(args: argparse.Namespace) -> dict:
             mses_reports[relative] = table_report
 
         replacements[PACKER_PATH], packer_report = merge_actor_packer(read_base(PACKER_PATH), read_vtk(PACKER_PATH))
-        replacements[VERIFY_PATH], verification_report = merge_actor_verification(
-            read_base(VERIFY_PATH), read_vtk(VERIFY_PATH), VERIFICATION_INCLUDE
-        )
 
-        additions = ACTOR_ASSETS | IOS_SOUNDS
+        # Replace every Lixin/595-specific assetbundle already in KPM, and add
+        # any VTK actor/dependency bundle that is absent from the KPM archive.
+        actor_assets = set(packer_report["actor_assets_from_vtk"])
+        appended_actor_paths = set(packer_report["appended_paths"])
+        for name in sorted(actor_assets):
+            if name not in vtk_map:
+                raise ValueError(f"VTK ZIP thiếu Actor595 AssetBundle: {name}")
+            if PREFIX + name in base_map:
+                replacements[name] = read_vtk(name)
+            elif name not in appended_actor_paths:
+                raise ValueError(f"Actor595 asset chưa nằm trong KPM hoặc danh sách additions: {name}")
+
+        additions = appended_actor_paths | IOS_SOUNDS
         for name in additions:
             if name not in vtk_map:
-                raise ValueError(f"VTK ZIP thiếu file iOS Actor595: {name}")
+                raise ValueError(f"VTK ZIP thiếu file Actor595/iOS cần thêm: {name}")
             if PREFIX + name in base_map:
-                raise ValueError(f"File VTK iOS trùng với KPM ngoài danh sách cho phép: {name}")
+                raise ValueError(f"File addition trùng đường dẫn KPM ngoài danh sách thay thế: {name}")
+
+        verification_include = (
+            set(VERIFICATION_INCLUDE)
+            | actor_assets
+            | additions
+            | set(replacements)
+        )
+        replacements[VERIFY_PATH], verification_report = merge_actor_verification(
+            read_base(VERIFY_PATH), read_vtk(VERIFY_PATH), verification_include
+        )
 
         out_path = Path(args.output)
         out_path.parent.mkdir(parents=True, exist_ok=True)
