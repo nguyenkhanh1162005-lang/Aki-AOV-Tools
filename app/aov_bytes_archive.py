@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .aov_bytes import AOVBytesError, decode_aov_resource
+from .aov_mses import MSESError, parse_mses
 
 MAX_ARCHIVE_ENTRIES = 20000
 MAX_ARCHIVE_UNCOMPRESSED = 1024 * 1024 * 1024
@@ -44,6 +45,36 @@ def _expected_decoded_size(data: bytes) -> int | None:
     if len(data) < 8 or data[:2] != b"\x22\x4a":
         return None
     return int.from_bytes(data[4:8], "little")
+
+
+def _inspect_decoded_payload(data: bytes) -> dict[str, Any]:
+    if data.startswith(b"MSES"):
+        try:
+            table = parse_mses(data, verify_checksum=False)
+        except MSESError as exc:
+            return {"payload_type": "mses_invalid", "reason": str(exc)}
+        return {
+            "payload_type": "mses_v7",
+            "version": table.version,
+            "field_count": table.field_count,
+            "row_count": len(table.rows),
+            "checksum_valid": table.checksum_valid,
+        }
+    stream = io.BytesIO(data)
+    if zipfile.is_zipfile(stream):
+        stream.seek(0)
+        try:
+            with zipfile.ZipFile(stream, "r") as package:
+                return {
+                    "payload_type": "zip_package",
+                    "entry_count": len(package.infolist()),
+                    "uncompressed_bytes": sum(
+                        item.file_size for item in package.infolist()
+                    ),
+                }
+        except zipfile.BadZipFile:
+            return {"payload_type": "zip_invalid"}
+    return {"payload_type": "opaque_binary"}
 
 
 def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[str, Any]:
@@ -138,6 +169,7 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
                 "mode": mode_name,
                 "original_size": len(raw),
                 "decoded_size": len(decoded),
+                "payload": _inspect_decoded_payload(decoded),
             })
             report["decoded_bytes"] += len(decoded)
 
