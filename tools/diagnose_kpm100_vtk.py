@@ -57,7 +57,7 @@ def is_package(name):
 
 def java_hash(text):
     value = 0
-    for ch in text.upper():
+    for ch in text:
         value = ((value * 31) + ord(ch)) & 0xffffffff
     return value
 
@@ -160,10 +160,14 @@ for pkg in (ACTION_PKG.split("/")[-1],):
         mapped_diff = 0
         mapped_equal = 0
         for name, vi in sorted(vmap.items()):
-            stem = PurePosixPath(name).stem.upper()
-            hv = java_hash(stem)
-            key = f"{hv:08X}"
-            candidates = payload_hash_index.get(key, [])
+            stem = PurePosixPath(name).stem
+            candidate_keys = {
+                java_hash(variant).to_bytes(4, "little").hex().upper()
+                for variant in {stem, stem.lower(), stem.upper()}
+            }
+            candidates = []
+            for key in candidate_keys:
+                candidates.extend(payload_hash_index.get(key, []))
             if not candidates:
                 continue
             for token, path, info in candidates:
