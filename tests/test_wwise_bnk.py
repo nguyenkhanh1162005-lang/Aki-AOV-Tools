@@ -24,7 +24,10 @@ class WwiseBNKInspectorTests(unittest.TestCase):
         self.assertEqual(report["bank_id"], 12345)
         self.assertEqual(report["media"][0]["id"], 7001)
         self.assertEqual(report["media"][0]["sha256"], __import__("hashlib").sha256(b"WEM!").hexdigest())
-        self.assertEqual(report["hirc_objects"], [{"type": 2, "id": 9001, "size": 10}])
+        self.assertEqual(report["hirc_objects"][0]["type"], 2)
+        self.assertEqual(report["hirc_objects"][0]["id"], 9001)
+        self.assertEqual(report["hirc_objects"][0]["size"], 10)
+        self.assertEqual(report["hirc_objects"][0]["sha256"], __import__("hashlib").sha256(b"\\x02" + struct.pack("<I", 10) + object_body).hexdigest())
 
 
     def test_compares_media_and_hirc_payloads_without_authorizing_merge(self):
