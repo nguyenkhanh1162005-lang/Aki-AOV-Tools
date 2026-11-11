@@ -464,6 +464,39 @@ def build_assetbundle_metadata_merge_plan(
     if not isinstance(rewritten, dict):
         return {"ready": False, "reason": "Overlay rewritten metadata is missing."}
 
+    base_name = base_metadata.get("assetbundle_name", "")
+    overlay_name = overlay_metadata.get("assetbundle_name", "")
+    if base_name and overlay_name and base_name != overlay_name:
+        return {"ready": False, "reason": "AssetBundle names differ; metadata ownership is ambiguous."}
+
+    base_preload = base_metadata["preload_pointer_inventory"]
+    overlay_preload = rewritten.get("preload")
+    base_containers = base_metadata["container_record_inventory"]
+    overlay_containers = overlay_metadata["container_record_inventory"]
+    rewritten_containers = rewritten.get("container")
+    if not all(isinstance(value, list) for value in (overlay_preload, rewritten_containers)):
+        return {"ready": False, "reason": "Overlay preload or Container remap inventory is incomplete."}
+    if len(overlay_preload) != len(overlay_metadata["preload_pointer_inventory"]):
+        return {"ready": False, "reason": "Overlay preload remap count mismatch."}
+    if len(rewritten_containers) != len(overlay_containers):
+        return {"ready": False, "reason": "Overlay Container remap count mismatch."}
+    for pointer in list(overlay_preload) + list(rewritten_containers):
+        if (not isinstance(pointer, dict)
+                or not isinstance(pointer.get("file_id"), int)
+                or isinstance(pointer.get("file_id"), bool)
+                or pointer["file_id"] < 0
+                or not isinstance(pointer.get("path_id"), int)
+                or isinstance(pointer.get("path_id"), bool)):
+            return {"ready": False, "reason": "Overlay remapped metadata contains an invalid PPtr."}
+    for record in base_containers:
+        start = record.get("preload_index") if isinstance(record, dict) else None
+        size = record.get("preload_size") if isinstance(record, dict) else None
+        if (not isinstance(start, int) or not isinstance(size, int)
+                or start < 0 or size < 0 or start + size > len(base_preload)
+                or not isinstance(record.get("asset"), dict)):
+            return {"ready": False, "reason": "Base Container preload range or pointer is invalid."}
+
+    base_main = base_metadata.get("main_asset")
     def valid_pointer(pointer: Any) -> bool:
         return (
             isinstance(pointer, dict)
@@ -535,39 +568,6 @@ def build_assetbundle_metadata_merge_plan(
     ):
         return {"ready": False, "reason": "Dependency inventory is invalid."}
 
-    base_name = base_metadata.get("assetbundle_name", "")
-    overlay_name = overlay_metadata.get("assetbundle_name", "")
-    if base_name and overlay_name and base_name != overlay_name:
-        return {"ready": False, "reason": "AssetBundle names differ; metadata ownership is ambiguous."}
-
-    base_preload = base_metadata["preload_pointer_inventory"]
-    overlay_preload = rewritten.get("preload")
-    base_containers = base_metadata["container_record_inventory"]
-    overlay_containers = overlay_metadata["container_record_inventory"]
-    rewritten_containers = rewritten.get("container")
-    if not all(isinstance(value, list) for value in (overlay_preload, rewritten_containers)):
-        return {"ready": False, "reason": "Overlay preload or Container remap inventory is incomplete."}
-    if len(overlay_preload) != len(overlay_metadata["preload_pointer_inventory"]):
-        return {"ready": False, "reason": "Overlay preload remap count mismatch."}
-    if len(rewritten_containers) != len(overlay_containers):
-        return {"ready": False, "reason": "Overlay Container remap count mismatch."}
-    for pointer in list(overlay_preload) + list(rewritten_containers):
-        if (not isinstance(pointer, dict)
-                or not isinstance(pointer.get("file_id"), int)
-                or isinstance(pointer.get("file_id"), bool)
-                or pointer["file_id"] < 0
-                or not isinstance(pointer.get("path_id"), int)
-                or isinstance(pointer.get("path_id"), bool)):
-            return {"ready": False, "reason": "Overlay remapped metadata contains an invalid PPtr."}
-    for record in base_containers:
-        start = record.get("preload_index") if isinstance(record, dict) else None
-        size = record.get("preload_size") if isinstance(record, dict) else None
-        if (not isinstance(start, int) or not isinstance(size, int)
-                or start < 0 or size < 0 or start + size > len(base_preload)
-                or not isinstance(record.get("asset"), dict)):
-            return {"ready": False, "reason": "Base Container preload range or pointer is invalid."}
-
-    base_main = base_metadata.get("main_asset")
     overlay_main = rewritten.get("main_asset")
     if base_main is not None and overlay_main is not None:
         return {"ready": False, "reason": "Both bundles define MainAsset; automatic selection is unsafe."}
