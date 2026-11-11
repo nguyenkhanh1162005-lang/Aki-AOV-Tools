@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import os
+import re
+import zipfile
+from collections import Counter, defaultdict
+from pathlib import PurePosixPath
+
+BASE_ZIP = "incoming/Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip"
+VTK_ZIP = "incoming/VTK.IOS.VIP.zip"
+PREFIX = "Resources/1.64.1/"
+ACTION_PKG = PREFIX + "Ages/Prefab_Characters/Prefab_Hero/Actor_595_Actions.pkg.bytes"
+PACKAGE_NAMES = (
+    "Actor_595_Actions.pkg.bytes",
+    "CommonActions.pkg.bytes",
+    "KernelLua.pkg.bytes",
+    "StableSystems_3.pkg.bytes",
+)
+IMPORTANT_LEAVES = {
+    "HeroSkin_1.bytes", "HeroSkin_2.bytes", "ResSkinSeniorLabelCfg.bytes",
+    "BattleBank.bytes", "LobbyBank.bytes", "skillcombine.bytes",
+    "ResKillBillboardCfg.bytes", "ResPersonalButtonCfg.bytes",
+    "595_AssetRef.bytes", "Actor_595_Infos.pkg.bytes",
+}
+OUT = []
+
+def log(s=""):
+    OUT.append(str(s))
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+def read_zip(path, label):
+    z = zipfile.ZipFile(path)
+    bad = z.testzip()
+    if bad:
+        raise RuntimeError(f"{label} CRC failed: {bad}")
+    log(f"{label}: bytes={os.path.getsize(path)} entries={len(z.infolist())} sha256={sha(open(path,'rb').read())}")
+    return z
+
+def safe_vtk_name(name):
+    name = name.replace("\\", "/").lstrip("/")
+    if name.startswith(PREFIX):
+        name = name[len(PREFIX):]
+    elif name.startswith("Resources/"):
+        p = name.split("/", 2)
+        if len(p) == 3:
+            name = p[2]
+    return name
+
+def is_package(name):
+    return PurePosixPath(name).name in PACKAGE_NAMES
+
+def java_hash(text):
+    value = 0
+    for ch in text.upper():
+        value = ((value * 31) + ord(ch)) & 0xffffffff
+    return value
+
+def inner_zip(data, label):
+    try:
+        z = zipfile.ZipFile(io.BytesIO(data))
+        bad = z.testzip()
+        if bad:
+            log(f"  {label}: nested ZIP CRC ERROR {bad}")
+            return None
+        return z
+    except Exception as exc:
+        log(f"  {label}: not a ZIP ({type(exc).__name__}: {exc}); head={data[:24].hex()}")
+        return None
+
+base = read_zip(BASE_ZIP, "KPM100")
+vtk = read_zip(VTK_ZIP, "VTK")
+
+base_names = [i.filename for i in base.infolist() if not i.is_dir()]
+vtk_entries = {}
+for info in vtk.infolist():
+    if info.is_dir():
+        continue
+    name = safe_vtk_name(info.filename)
+    if name in vtk_entries:
+        old = vtk_entries[name]
+        if sha(vtk.read(old)) != sha(vtk.read(info)):
+            log(f"DUPLICATE VTK PATH CONFLICT: {name}")
+        continue
+    vtk_entries[name] = info
+
+log("\n=== KPM100 relevant top-level files ===")
+for name in base_names:
+    leaf = PurePosixPath(name).name
+    if leaf in IMPORTANT_LEAVES or is_package(name) or leaf.startswith("KPM_MOD_"):
+        info = base.getinfo(name)
+        if leaf.startswith("KPM_MOD_"):
+            continue
+        log(f"{name}\t{info.file_size}\t{info.CRC:08x}")
+
+log("\n=== VTK relevant top-level files ===")
+for name, info in sorted(vtk_entries.items()):
+    leaf = PurePosixPath(name).name
+    if leaf in IMPORTANT_LEAVES or is_package(name) or leaf.endswith(".assetbundle") or leaf.startswith("KPM_MOD_"):
+        log(f"{name}\t{info.file_size}\t{info.CRC:08x}")
+
+log("\n=== Expected VTK Actor 595 bundles ===")
+for name in sorted(k for k in vtk_entries if k.endswith(".assetbundle") and ("595" in k.lower() or "595" in PurePosixPath(k).name.lower())):
+    info = vtk_entries[name]
+    log(f"{name}\t{info.file_size}\t{info.CRC:08x}")
+
+base_pkg_zips = {}
+vtk_pkg_zips = {}
+for pkg in PACKAGE_NAMES:
+    bpaths = [n for n in base_names if PurePosixPath(n).name.lower() == pkg.lower()]
+    vpaths = [n for n in vtk_entries if PurePosixPath(n).name.lower() == pkg.lower()]
+    log(f"\n=== PACKAGE {pkg} ===")
+    log(f"KPM paths: {bpaths}")
+    log(f"VTK paths: {vpaths}")
+    bz = inner_zip(base.read(bpaths[0]), f"KPM {pkg}") if len(bpaths) == 1 else None
+    vz = inner_zip(vtk.read(vtk_entries[vpaths[0]]), f"VTK {pkg}") if len(vpaths) == 1 else None
+    if bz: base_pkg_zips[pkg] = bz
+    if vz: vtk_pkg_zips[pkg] = vz
+    if bz and vz:
+        bmap = {i.filename: i for i in bz.infolist() if not i.is_dir()}
+        vmap = {i.filename: i for i in vz.infolist() if not i.is_dir()}
+        same = sorted(set(bmap) & set(vmap))
+        changed = [n for n in same if sha(bz.read(bmap[n])) != sha(vz.read(vmap[n]))]
+        b_only = sorted(set(bmap) - set(vmap))
+        v_only = sorted(set(vmap) - set(bmap))
+        log(f"inner KPM={len(bmap)} VTK={len(vmap)} common={len(same)} identical={len(same)-len(changed)} changed={len(changed)} KPM-only={len(b_only)} VTK-only={len(v_only)}")
+        for n in changed[:160]:
+            log(f"  DIFF {n}\tKPM={bmap[n].file_size}\tVTK={vmap[n].file_size}")
+        for n in v_only[:100]:
+            log(f"  VTK_ONLY {n}\t{vmap[n].file_size}")
+        for n in b_only[:100]:
+            log(f"  KPM_ONLY {n}\t{bmap[n].file_size}")
+
+log("\n=== KPM hashed payloads that may map to Actor595 Action XML ===")
+kpm_mods = {}
+for name in base_names:
+    leaf = PurePosixPath(name).name
+    m = re.fullmatch(r"KPM_MOD_([0-9A-Fa-f]{16})", leaf)
+    if m:
+        token = m.group(1).upper()
+        kpm_mods[token] = (name, base.getinfo(name))
+log(f"KPM_MOD total={len(kpm_mods)}")
+payload_hash_index = defaultdict(list)
+for token, (path, info) in sorted(kpm_mods.items()):
+    # The second 32-bit half in the payload name is little-endian Java hash of the XML stem.
+    half2 = token[8:16]
+    payload_hash_index[half2].append((token, path, info))
+
+for pkg in (ACTION_PKG.split("/")[-1],):
+    if pkg in base_pkg_zips and pkg in vtk_pkg_zips:
+        bz, vz = base_pkg_zips[pkg], vtk_pkg_zips[pkg]
+        vmap = {i.filename: i for i in vz.infolist() if not i.is_dir()}
+        names_seen = set()
+        mapped = 0
+        mapped_diff = 0
+        mapped_equal = 0
+        for name, vi in sorted(vmap.items()):
+            stem = PurePosixPath(name).stem.upper()
+            hv = java_hash(stem)
+            key = f"{hv:08X}"
+            candidates = payload_hash_index.get(key, [])
+            if not candidates:
+                continue
+            for token, path, info in candidates:
+                names_seen.add(token)
+                mapped += 1
+                kpm_payload = base.read(path)
+                vtk_xml = vz.read(vi)
+                relation = "DIFF" if sha(kpm_payload) != sha(vtk_xml) else "SAME"
+                if relation == "DIFF": mapped_diff += 1
+                else: mapped_equal += 1
+                log(f"MAP {token} -> {name}\tKPM_MOD={info.file_size}\tVTK_XML={len(vtk_xml)}\t{relation}\tKPM_SHA={sha(kpm_payload)[:16]}\tVTK_SHA={sha(vtk_xml)[:16]}")
+        log(f"MAPPING summary: mapped KPM_MOD={len(names_seen)} pairs={mapped} differing={mapped_diff} identical={mapped_equal} unmapped_payloads={len(kpm_mods)-len(names_seen)}")
+        unmapped = [ (token,path,info.file_size) for token,(path,info) in sorted(kpm_mods.items()) if token not in names_seen ]
+        for token,path,size in unmapped[:100]:
+            log(f"UNMAPPED {token}\t{path}\t{size}")
+
+log("\n=== KPM/VTK same path conflicts ===")
+v_by_full = {}
+for name, info in vtk_entries.items():
+    full = PREFIX + name
+    v_by_full[full] = info
+conflicts = []
+additions = []
+for name in sorted(v_by_full):
+    vi = v_by_full[name]
+    if name in base_names:
+        bi = base.getinfo(name)
+        if sha(base.read(bi)) != sha(vtk.read(vi)):
+            conflicts.append(name)
+    else:
+        additions.append(name)
+log(f"overlaps differing={len(conflicts)} additions={len(additions)}")
+for name in conflicts:
+    log(f"CONFLICT {name}\tKPM={base.getinfo(name).file_size}\tVTK={v_by_full[name].file_size}")
+log("\n=== END ===")
+with open("diagnostic-report.txt", "w", encoding="utf-8") as f:
+    f.write("\n".join(OUT) + "\n")
+print("\n".join(OUT))
