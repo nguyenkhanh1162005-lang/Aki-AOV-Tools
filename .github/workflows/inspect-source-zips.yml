@@ -1,6 +1,9 @@
 name: Inspect KPM and VTK ZIP structures
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/inspect-source-zips.yml'
 permissions:
   contents: read
 jobs:
