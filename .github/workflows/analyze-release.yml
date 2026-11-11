@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 jobs:
@@ -52,6 +52,17 @@ jobs:
           pathlib.Path('aov-archive-report.txt').write_text('\n'.join(out), encoding='utf-8')
           print('\n'.join(out[:80]))
           PY
+      - name: Publish text report on a separate branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --orphan archive-report-20261111
+          git rm -rf . >/dev/null 2>&1 || true
+          git add aov-archive-report.txt
+          git commit -m "Publish AOV archive inspection report"
+          git push origin HEAD:archive-report-20261111
       - name: Upload inspection report
         uses: actions/upload-artifact@v4
         with:
