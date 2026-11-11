@@ -276,7 +276,17 @@ for row in mapping_rows:
         decode_errors.append("KPM_MOD local payload missing")
     else:
         try:
-            decoded_base, base_mode = decode_aov_resource(member_data, entry_name)
+            import zstandard as zstd
+            from app.aov_zstd_dict import ZSTD_DICT
+            expected_kpm_size = int.from_bytes(member_data[4:8], "little")
+            frame_offset = member_data.find(bytes.fromhex("28b52ffd"))
+            if frame_offset < 0:
+                raise ValueError("KPM payload missing Zstandard frame")
+            dictionary = zstd.ZstdCompressionDict(ZSTD_DICT, dict_type=zstd.DICT_TYPE_AUTO)
+            decoded_base = zstd.ZstdDecompressor(dict_data=dictionary).decompress(member_data[frame_offset:])
+            if len(decoded_base) != expected_kpm_size:
+                raise ValueError(f"KPM decoded size mismatch: {len(decoded_base)} != {expected_kpm_size}")
+            base_mode = "zstd-kpm"
         except Exception as exc:
             decode_errors.append(f"KPM decode: {type(exc).__name__}: {exc}")
     if row["role"] in ("skill", "assetref"):
