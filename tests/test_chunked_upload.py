@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -84,7 +85,7 @@ class ChunkedUploadEndpointTests(unittest.IsolatedAsyncioTestCase):
             "files": [{"name": "test.zip", "size": 8, "received": 0}],
             "paths": ["../outside.zip"],
         }
-        (workdir / ".aki-upload-session.json").write_text(__import__("json").dumps(metadata))
+        (workdir / ".aki-upload-session.json").write_text(json.dumps(metadata))
         with patch.object(main, "MAX_ACTIVE_UPLOAD_SESSIONS", 8), patch("app.main.time.time", return_value=1100):
             restored = main._load_persistent_upload_sessions(storage)
         self.assertNotIn("b" * 32, restored)
