@@ -114,6 +114,8 @@ def merge_mses_rows(
     common = set(base_map).intersection(overlay_map)
     differing_common = {key for key in common if base_map[key] != overlay_map[key]}
     overrides = set(override_keys or ())
+    if any(type(key) is not int or not 0 <= key <= 0xFFFFFFFF for key in overrides):
+        raise MSESError("Khóa ghi đè MSES phải là uint32 hợp lệ.")
     missing_override_keys = overrides - set(overlay_map)
     if missing_override_keys:
         formatted = ", ".join(f"0x{key:08x}" for key in sorted(missing_override_keys))
@@ -122,6 +124,16 @@ def merge_mses_rows(
         )
 
     if base.field_count != overlay.field_count:
+        # Row payloads are opaque here. A row absent from the base cannot be
+        # assumed to use the base schema merely because its key is unique.
+        # Refuse cross-schema additions until a table-specific translator
+        # proves that the row layout is compatible.
+        schema_drift_new_keys = set(overlay_map) - set(base_map)
+        if schema_drift_new_keys:
+            raise MSESError(
+                "Schema MSES khác nhau và overlay có bản ghi mới chưa được "
+                "chứng minh tương thích; cần adapter theo từng bảng."
+            )
         unsafe_differing_common = differing_common - overrides
         if unsafe_differing_common:
             raise MSESError(
