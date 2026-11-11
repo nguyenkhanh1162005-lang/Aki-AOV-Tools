@@ -54,12 +54,45 @@ def _inspect_decoded_payload(data: bytes) -> dict[str, Any]:
             table = parse_mses(data, verify_checksum=False)
         except MSESError as exc:
             return {"payload_type": "mses_invalid", "reason": str(exc)}
+        # This is a structural inventory only. The first four bytes are
+        # exposed as a raw prefix, not asserted to be a semantic table key.
+        # Keep the report bounded for large production tables.
+        inventory_limit = 4096
+        marker_tokens = (b"Hero_LiXin_Skin_C",)
+        row_inventory = []
+        for index, row in enumerate(table.rows[:inventory_limit]):
+            prefix = int.from_bytes(row[:4], "little")
+            row_inventory.append({
+                "row_index": index,
+                "row_prefix_u32_le": prefix,
+                "row_prefix_hex": f"0x{prefix:08x}",
+                "row_size": len(row),
+                "markers": [
+                    marker.decode("ascii")
+                    for marker in marker_tokens
+                    if marker in row
+                ],
+            })
+        prefix_counts: dict[int, int] = {}
+        for row in table.rows:
+            prefix = int.from_bytes(row[:4], "little")
+            prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
+        duplicate_prefixes = sorted(
+            (key for key, count in prefix_counts.items() if count > 1)
+        )
         return {
             "payload_type": "mses_v7",
             "version": table.version,
             "field_count": table.field_count,
             "row_count": len(table.rows),
             "checksum_valid": table.checksum_valid,
+            "row_prefix_inventory": row_inventory,
+            "row_prefix_inventory_limit": inventory_limit,
+            "row_prefix_inventory_truncated": len(table.rows) > inventory_limit,
+            "duplicate_row_prefixes": [
+                f"0x{key:08x}" for key in duplicate_prefixes[:256]
+            ],
+            "duplicate_row_prefixes_truncated": len(duplicate_prefixes) > 256,
         }
     stream = io.BytesIO(data)
     if zipfile.is_zipfile(stream):
