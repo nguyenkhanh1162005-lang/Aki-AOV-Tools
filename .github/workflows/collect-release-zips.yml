@@ -2,7 +2,7 @@ name: Collect AOV ZIPs from Release
 
 on:
   release:
-    types: [published]
+    types: [published, edited]
 
 permissions:
   contents: read
@@ -12,38 +12,98 @@ jobs:
   collect:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        asset: [kpm, vtk]
     steps:
       - name: Download release assets
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
         run: |
-          mkdir -p incoming
+          mkdir -p incoming chunks
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir incoming
 
-      - name: Validate ZIPs and calculate SHA-256
+      - name: Validate and split original ZIP
         shell: bash
+        env:
+          ASSET: ${{ matrix.asset }}
         run: |
           shopt -s nullglob nocaseglob
-          files=(incoming/*.zip)
-          if (( ${#files[@]} == 0 )); then
-            echo "No .zip assets found in this release." >&2
+          if [[ "$ASSET" == "kpm" ]]; then
+            files=(incoming/*100*skin*.zip)
+          else
+            files=(incoming/*vtk*.zip)
+          fi
+          if (( ${#files[@]} != 1 )); then
+            echo "Expected exactly one $ASSET ZIP, found ${#files[@]}" >&2
+            printf '%s\n' "${files[@]}"
             exit 1
           fi
-          for file in "${files[@]}"; do
-            echo "Checking: $file"
-            unzip -tqq "$file"
-          done
-          sha256sum "${files[@]}" | tee SHA256SUMS.txt
-          printf '\nValidated %s ZIP file(s).\n' "${#files[@]}"
+          file="${files[0]}"
+          echo "Checking $file"
+          unzip -tqq "$file"
+          sha256sum "$file" | tee "chunks/${ASSET}-original.sha256"
+          split -b 80m -d -a 2 "$file" "chunks/${ASSET}.part"
+          ls -lh chunks/
 
-      - name: Upload verified ZIPs as a downloadable artifact
+      - name: Upload KPM chunk 00
+        if: matrix.asset == 'kpm'
         uses: actions/upload-artifact@v4
         with:
-          name: aov-zips-${{ github.event.release.tag_name }}
-          path: |
-            incoming/*.zip
-            SHA256SUMS.txt
+          name: aov-kpm-00-${{ github.event.release.tag_name }}
+          path: chunks/kpm.part00
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload KPM chunk 01
+        if: matrix.asset == 'kpm'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aov-kpm-01-${{ github.event.release.tag_name }}
+          path: chunks/kpm.part01
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload KPM chunk 02
+        if: matrix.asset == 'kpm'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aov-kpm-02-${{ github.event.release.tag_name }}
+          path: chunks/kpm.part02
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload KPM chunk 03
+        if: matrix.asset == 'kpm'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aov-kpm-03-${{ github.event.release.tag_name }}
+          path: chunks/kpm.part03
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload VTK chunk 00
+        if: matrix.asset == 'vtk'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aov-vtk-00-${{ github.event.release.tag_name }}
+          path: chunks/vtk.part00
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload VTK chunk 01
+        if: matrix.asset == 'vtk'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aov-vtk-01-${{ github.event.release.tag_name }}
+          path: chunks/vtk.part01
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
