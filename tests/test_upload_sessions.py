@@ -68,7 +68,12 @@ class UploadSessionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["upload_id"], "resume-me")
         self.assertEqual(result["files"], [
-            {"name": "sample.zip", "size": 8, "received": 3}
+            {
+                "name": "sample.zip",
+                "size": 8,
+                "received": 3,
+                "received_chunk_sha256": [],
+            }
         ])
         self.assertEqual(result["chunk_size"], main.UPLOAD_CHUNK_BYTES)
         self.assertLess(time.time() - main.UPLOAD_SESSIONS["resume-me"]["created"], 2)
