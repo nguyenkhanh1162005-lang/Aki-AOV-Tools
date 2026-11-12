@@ -4,12 +4,12 @@ Công cụ web và Telegram bot dùng chung bộ xử lý ZIP, kiểm kê cấu 
 
 ## Tính năng
 - Web UI tiếng Việt, dùng được trên điện thoại.
-- Web: tải tối đa 10 ZIP theo khối 4 MB, kiểm tra cấu trúc, ghép ZIP thông thường hoặc ghép mod AOV chuyên sâu.
+- Web: tải tối đa 10 ZIP theo khối 1 MiB có SHA-256 từng khối, khôi phục phiên tải, kiểm tra cấu trúc, lập manifest và đối chiếu xung đột; ZIP thường chỉ ghép khi không có xung đột.
 - Web API `/api/inspect`: liệt kê phần mở rộng, tên có dấu hiệu là tài nguyên game và so sánh SHA-256 các đường dẫn trùng để phân biệt nội dung giống hệt với xung đột thật (tối đa 80 đường dẫn trùng được hiển thị chi tiết).
 - Web API `/api/capabilities`: công bố registry adapter, phân biệt định dạng chỉ kiểm tra với định dạng có bộ ghép đã xác minh; mặc định fail-closed.
 - Bộ kiểm tra `/inspect` và `/api/inspect` đọc chữ ký 32 byte đầu mỗi mục để phân loại sơ bộ AoV AES/Zstandard, Unity AssetBundle, ZIP lồng, Wwise, ảnh, XML/JSON và dữ liệu chưa nhận diện; chỉ đọc, không sửa tài nguyên.
 - Web API `/api/drive/import`: tải ZIP từ link Google Drive công khai trực tiếp về máy chủ, tối đa 10 link và tổng 500 MB.
-- Web API `/api/upload/{upload_id}/aov-merge`: chạy bộ ghép Vấn Tâm Kiếm chuyên sâu trên phiên upload.
+- Web API `/api/upload/{upload_id}/aov-merge`: giữ endpoint adapter chuyên biệt; hiện từ chối an toàn cặp VTK khi IFix opcode 89 chưa được hỗ trợ.
 - Web API `/api/upload/{upload_id}/decode-bytes`: giải mã các tài nguyên `.bytes` AoV AES/Zstandard đã nhận diện từ ZIP đã tải lên; hỗ trợ ZIP `Resources.zip` lồng nhau và bung tiếp ZIP bên trong `.pkg.bytes` đã giải mã (tối đa hai tầng), xuất ZIP riêng cùng `decode-report.json`, không sửa ZIP gốc và không ghép tài nguyên.
 - Telegram: `/inspect`, `/merge`, `/aovmerge`, `/clear`, `/status`. Web và bot dùng chung engine AOV.
 
@@ -21,22 +21,23 @@ Bộ lõi MSES v7 có parser, serializer, kiểm tra checksum và ghép theo kh�
 
 Giới hạn: tối đa 20.000 entry, 1 GiB dữ liệu giải nén, 256 MiB mỗi entry và 256 MiB kích thước giải mã khai báo cho mỗi tài nguyên. Chức năng này chỉ trích xuất payload đã giải mã để kiểm tra/phân tích; không sửa MSES/IFix, không giải mã Unity AssetBundle hoặc Wwise BNK, không ghép skin và không tạo ZIP có thể cài vào game.
 
-## Bộ ghép AOV được hỗ trợ
+## Trạng thái bộ ghép AOV chuyên sâu
 
-Bản hiện tại khóa theo đúng cặp tài nguyên đã kiểm tra:
-- Gói MOD 10 skin iOS 1.64.1.12: bộ 10 skin + nút bấm/thông báo. Đây là gói mod do người dùng cung cấp, không phải gói game gốc.
-- Gói MOD Vấn Tâm Kiếm Actor 595, dữ liệu 1.64.1.11: có thể là một ZIP hoặc nhiều phần ZIP.
+Adapter Vấn Tâm Kiếm Actor 595 đã được thiết kế cho đúng cặp:
+- Gói MOD 10 skin iOS 1.64.1.12 do người dùng cung cấp.
+- Gói MOD Vấn Tâm Kiếm Actor 595, dữ liệu 1.64.1.11, có thể chia nhiều ZIP.
 
-**Quy tắc nguồn:** chỉ ghép gói mod với gói mod. Engine không tải, không yêu cầu và không chèn tài nguyên từ bộ cài Liên Quân gốc. Từ "nền" trong mô tả kỹ thuật cũ chỉ gói mod 10 skin được dùng làm pack đích, không có nghĩa là game gốc.
+**Trạng thái hiện tại: TẠM KHÓA, chưa phát hành đầu ra ghép.** Khi kiểm tra file IFix `Thanos/HeroSkin_2.bytes` của VTK, parser gặp opcode `89` chưa có cách giải mã operand và serialize đã xác minh. Không được phép bỏ qua instruction, tự đoán loại operand hoặc ghi lại patch khi chưa có schema và fixture round-trip tương ứng. Adapter registry trả về `blocked_pending_ifix_opcode_89`, và giao diện web khóa nút ghép Vấn Tâm Kiếm thay vì báo hỗ trợ.
 
-Engine thực hiện:
-- Ghép IFix của `Thanos/HeroSkin_2.bytes` vào `HeroSkin_1.bytes`, remap chỉ số type/method/field/string và kiểm tra lại patch.
-- Xử lý các bảng MSES `BattleBank.bytes`, `LobbyBank.bytes`, `skillcombine.bytes` và `ResSkinSeniorLabelCfg.bytes` theo khóa dòng với allowlist khóa mới riêng từng bảng. Soundbank chỉ thay/thêm row có marker skin LiXin; `ResSkinSeniorLabelCfg` chỉ nhận key 59500, từ chối xung đột payload nếu key này đã tồn tại, và chỉ sửa checksum nền cũ sau khi xác minh đủ 53 dòng cùng cấu trúc bảng; `skillcombine` từ chối row mới cho tới khi có dữ liệu/fixture chứng minh khóa và layout hợp lệ.
-- Ghép track CommonActions dành cho skin ID 59500/59501.
-- Cập nhật ResourcePackerInfoSet cho 10 AssetBundle Vấn Tâm Kiếm; cập nhật CrcXor trong ResourceVerificationInfoSet cho các file VTK thực sự được đưa vào kết quả và giữ giá trị 1.64.1.12 cho những file chỉ khác do lệch phiên bản.
-- Thêm AssetBundle và soundbank iOS của Vấn Tâm Kiếm; giữ `KernelLua.pkg.bytes` và `StableSystems_3.pkg.bytes` của bản nền 1.64.1.12 để tránh hạ phiên bản hệ thống dùng chung.
+Web vẫn cho phép:
+- Tải nhiều ZIP theo từng khối có SHA-256 và tiếp tục phiên bị gián đoạn.
+- Lập manifest chỉ đọc, so sánh hash đường dẫn, phiên bản/nền tảng và dependency AssetBundle.
+- Kiểm tra cấu trúc ZIP, nhận diện BNK/AssetBundle/.bytes và giải mã riêng các wrapper .bytes đã hỗ trợ để phân tích.
+- Ghép ZIP thông thường chỉ khi xung đột đường dẫn được xử lý an toàn; tài nguyên AoV có định dạng riêng vẫn bị từ chối nếu không có adapter.
 
-Bộ ghép từ chối nếu phiên bản, số lượng AssetBundle, bảng chỉ mục hoặc dữ liệu dùng chung không khớp với cấu hình được hỗ trợ. Bộ nhận diện định dạng chỉ giúp kiểm kê nhiều loại tài nguyên; nó không phải bộ giải mã/hợp nhất tổng quát cho mọi bản mod Liên Quân. API `/api/capabilities` công bố trạng thái chính xác của từng adapter: ZIP thường ghép theo quy tắc an toàn; cặp Vấn Tâm Kiếm được hỗ trợ theo phiên bản khóa; AoV AES/Zstandard, MSES/IFix ngoài cặp khóa, Unity AssetBundle, Wwise BNK và tài nguyên văn bản/ảnh/âm thanh khác hiện chỉ được kiểm tra hoặc nhận diện. Engine từ chối ghi đầu ra khi chưa có adapter tương thích, không âm thầm ghi đè.
+Các báo cáo tương thích chỉ mang tính tư vấn. `SAFE_MERGE` ở mức tệp ZIP không chứng minh nội dung hoạt động trong game. Không có kiểm thử thực tế trong Liên Quân iOS, vì vậy chưa có cam kết tương thích 100%. Chỉ mở lại adapter VTK sau khi opcode 89 được triển khai, có fixture gốc, round-trip parser/serializer, kiểm tra bảng/AssetBundle/dependency và CI thành công.
+
+**Quy tắc nguồn:** khi adapter được mở lại, chỉ ghép gói mod với gói mod. Không tải, không yêu cầu và không chèn tài nguyên từ bộ cài Liên Quân gốc.
 
 ## Phạm vi kiểm tra Wwise BNK
 
