@@ -185,6 +185,28 @@ class ModPipelineTests(unittest.TestCase):
             self.assertFalse(output.exists())
 
 
+    def test_10skin_wrapper_is_not_enabled_for_non_web_callers_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            mod_pack = self._zip(folder, "10-skin-mod.zip", {
+                "Resources.zip": b"nested mod resources",
+                "DanhSachSkin.txt": b"skin mod list",
+            })
+            ifix_part = self._zip(folder, "vtk-ifix-part.zip", {
+                "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"VTK IFix payload",
+            })
+            asset_part = self._zip(folder, "vtk-assets-part.zip", {
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"Actor 595 bundle",
+            })
+            output = folder / "blocked.zip"
+            with self.assertRaisesRegex(
+                ModPipelineError, "chỉ được bật qua API web"
+            ):
+                merge_mod_archives(
+                    [mod_pack, ifix_part, asset_part], str(output)
+                )
+            self.assertFalse(output.exists())
+
     def test_10skin_wrapper_selects_typed_vtk_merger_and_publishes_valid_zip(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
@@ -215,7 +237,9 @@ class ModPipelineTests(unittest.TestCase):
 
             with patch("app.mod_pipeline.merge_aov_archives", side_effect=fake_typed_merge) as typed_merge:
                 result = merge_mod_archives(
-                    [mod_pack, ifix_part, asset_part], str(output)
+                    [mod_pack, ifix_part, asset_part],
+                    str(output),
+                    allow_wrapper_adapter=True,
                 )
 
             typed_merge.assert_called_once()
