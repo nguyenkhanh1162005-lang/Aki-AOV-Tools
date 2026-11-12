@@ -163,7 +163,7 @@ async def aovmerge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     folder = _workdir(context)
-    output_path = folder / "Aki-AOV-KPM100-VTK.zip"
+    output_path = folder / "aki-mod-merged.zip"
     status_message = await update.effective_message.reply_text(
         "Đang kiểm tra phiên bản, nguồn và SHA-256 rồi ghép bằng pipeline chung..."
     )
@@ -188,7 +188,7 @@ async def aovmerge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Đang gửi file..."
         )
         await update.effective_message.reply_document(
-            document=FSInputFile(str(output_path), filename="Aki-AOV-KPM100-VTK.zip"),
+            document=FSInputFile(str(output_path), filename="aki-mod-merged.zip"),
             read_timeout=1800,
             write_timeout=1800,
             connect_timeout=60,
