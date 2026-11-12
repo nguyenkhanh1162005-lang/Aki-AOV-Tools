@@ -142,7 +142,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
     has_kpm_mod_payloads = kpm_mod_payload_count > 0
     has_kpm100_direct_base = (
         has_base_ifix
-        and kpm_mod_payload_count == 70
+        and kpm_mod_payload_count >= 70
         and any(name.casefold() == (
             "Resources/1.64.1/assetbundle/resourcepackerinfosetall.assetbundle".casefold()
         ) for name in names)
