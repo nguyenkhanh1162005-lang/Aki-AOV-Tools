@@ -1,4 +1,5 @@
 import hashlib
+import io
 import tempfile
 import unittest
 import zipfile
@@ -281,6 +282,51 @@ class ModPipelineTests(unittest.TestCase):
             self.assertEqual(report["role_counts"]["aov_skin_mod_container_candidate"], 1)
             self.assertEqual(report["actor_asset_ids"], ["595"])
             self.assertEqual(report["blockers"], [])
+
+    def test_multi_mod_preflight_reports_exact_nested_resource_conflicts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+
+            def resources_zip(battle_payload: bytes) -> bytes:
+                buffer = io.BytesIO()
+                with zipfile.ZipFile(buffer, "w") as nested:
+                    nested.writestr(
+                        "Resources/1.64.1/Databin/Client/Sound/BattleBank.bytes",
+                        battle_payload,
+                    )
+                    nested.writestr(
+                        "Resources/1.64.1/Databin/Client/Global/HeadImage.bytes",
+                        b"same shared image",
+                    )
+                return buffer.getvalue()
+
+            mod9 = self._zip(folder, "P9-9-skin.zip", {
+                "mod/Resources.zip": resources_zip(b"p9 battle payload"),
+                "mod/DanhSachSkin.txt": b"skin 9",
+            })
+            mod10 = self._zip(folder, "P10-10-skin.zip", {
+                "mod/Resources.zip": resources_zip(b"p10 battle payload"),
+                "mod/DanhSachSkin.txt": b"skin 10",
+            })
+
+            report = analyze_aov_input_set([mod9, mod10])
+
+            self.assertFalse(report["ready_to_merge"])
+            self.assertEqual(len([
+                item for item in report["blockers"]
+                if "nhiều MOD wrapper" in item
+            ]), 1)
+            analysis = report["resource_analysis"]
+            self.assertTrue(analysis["available"])
+            self.assertFalse(analysis["merge_authorized"])
+            self.assertGreaterEqual(analysis["summary"]["NEEDS_RULE"], 1)
+            self.assertGreaterEqual(analysis["summary"]["IDENTICAL_DUPLICATE"], 1)
+            by_path = {item["path"]: item for item in analysis["important_paths"]}
+            battle_path = "Resources/1.64.1/Databin/Client/Sound/BattleBank.bytes"
+            image_path = "Resources/1.64.1/Databin/Client/Global/HeadImage.bytes"
+            self.assertEqual(by_path[battle_path]["status"], "NEEDS_RULE")
+            self.assertEqual(by_path[battle_path]["sources"], ["P10-10-skin.zip", "P9-9-skin.zip"])
+            self.assertEqual(by_path[image_path]["status"], "IDENTICAL_DUPLICATE")
 
     def test_unknown_aov_resource_pack_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
