@@ -34,6 +34,8 @@ Trên web dùng nút **Quét thông báo khởi động**; trên Telegram dùng 
 - VTK iOS Vấn Tâm Kiếm Actor 595, dữ liệu 1.64.1.11.
 
 Bộ xử lý ghim SHA-256 của cả hai archive. Không nhận ZIP khác hash, sai phiên bản hoặc sai cấu trúc chỉ vì tên file giống nhau. KPM100 là ZIP resource tree trực tiếp, không phải wrapper ngoài có `Resources.zip` và `DanhSachSkin.txt`. Adapter wrapper 10 skin khác vẫn bị khóa cho tới khi có bài tích hợp riêng.
+Để kiểm tra đúng wrapper 10 skin của người dùng, workflow **10-skin wrapper + VTK source audit** đang chờ asset `IOS-Pack-10Skin-Cam30.zip` trong release [`aov-upload-01`](https://github.com/nguyenkhanh1162005-lang/Aki-AOV-Tools/releases/tag/aov-upload-01). Release hiện có KPM100 trực tiếp và `VTK.IOS.VIP.zip`, chưa có wrapper 10 skin. Sau khi tải wrapper ZIP lên release với đúng tên asset trên, chạy workflow này trong GitHub Actions. Workflow sẽ quét chuỗi thông báo, chạy ghép thử trên nguồn thật, kiểm tra CRC và bảo toàn đường dẫn nền, rồi lưu báo cáo cùng ZIP ứng viên. Workflow không tự mở khóa adapter; cần ghim SHA-256 và xác nhận toàn bộ kiểm tra trước.
+
 
 Trong cặp nguồn được hỗ trợ, bộ ghép:
 - Giữ nguyên mọi đường dẫn của KPM100 và chỉ thay payload liên quan Actor 595; báo cáo xác nhận toàn bộ đường dẫn gốc vẫn còn.
