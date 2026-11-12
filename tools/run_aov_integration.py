@@ -5,6 +5,10 @@ import sys
 import zipfile
 from pathlib import Path
 
+# Running this file as tools/run_aov_integration.py puts tools/ on sys.path,
+# so explicitly add the repository root before importing the application package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from app.aov_merger import merge_aov_archives
 
 
