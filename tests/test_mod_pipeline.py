@@ -137,6 +137,48 @@ class ModPipelineTests(unittest.TestCase):
                 "aov_mod_to_mod_vtk_actor595_1.64.1",
             )
 
+    def test_vtk_adapter_rejects_mixed_p9_p10_or_tm_overlays(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            wrapper = self._zip(folder, "10-skin-mod.zip", {
+                "Resources.zip": b"nested resources",
+                "DanhSachSkin.txt": b"skin list",
+            })
+            vtk = self._zip(folder, "vtk-part.zip", {
+                "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"VTK IFix",
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"Actor 595",
+            })
+            for name, marker in (
+                ("P9-9-skin.zip", "9 skin"),
+                ("P10-10-skin.zip", "10 skin"),
+                ("TM-Tamyn-Robot.zip", "TM Robot"),
+            ):
+                with self.subTest(source=name):
+                    other = self._zip(folder, name, {
+                        "Resources/1.64.1/Databin/Client/Actor/heroSkin.bytes": marker.encode(),
+                    })
+                    profiles = [_archive_profile(path) for path in (wrapper, vtk, other)]
+                    with self.assertRaisesRegex(ModPipelineError, "chưa có adapter"):
+                        _select_adapter(profiles)
+
+    def test_vtk_adapter_rejects_actor593_payload_mixed_with_actor595(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            wrapper = self._zip(folder, "10-skin-mod.zip", {
+                "Resources.zip": b"nested resources",
+                "DanhSachSkin.txt": b"skin list",
+            })
+            vtk = self._zip(folder, "vtk-part.zip", {
+                "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"VTK IFix",
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"Actor 595",
+            })
+            tm = self._zip(folder, "TM-Tamyn-Robot.zip", {
+                "Resources/1.64.1/assetbundle/battle/hero/593_machao_battle_base.assetbundle": b"Actor 593",
+            })
+            profiles = [_archive_profile(path) for path in (wrapper, vtk, tm)]
+            with self.assertRaisesRegex(ModPipelineError, "chưa có adapter"):
+                _select_adapter(profiles)
+
     def test_kpm100_direct_base_and_pinned_vtk_select_dedicated_adapter(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
