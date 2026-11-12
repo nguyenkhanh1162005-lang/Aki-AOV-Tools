@@ -131,21 +131,34 @@ class ModPipelineTests(unittest.TestCase):
     def test_kpm100_direct_base_and_pinned_vtk_select_dedicated_adapter(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
-            base = self._zip(folder, "kpm100.zip", {
+            base_entries = {
                 "Resources/1.64.1/Thanos/HeroSkin_1.bytes": b"base-ifix",
-                "Resources/1.64.1/Mod_by_Youtube_KHAM-PHA-MOBILE/KPM_MOD_0123456789ABCDEF": b"payload",
+                # The real KPM100 base also has a HeroSkin_2 and Actor595 references.
+                # It must never be selected as the VTK overlay.
+                "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"base-legacy-ifix",
+                "Resources/1.64.1/assetbundle/resourcepackerinfosetall.assetbundle": b"packer-index",
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"base-actor-bundle",
+            }
+            base_entries.update({
+                f"Resources/1.64.1/Mod_by_Youtube_KHAM-PHA-MOBILE/KPM_MOD_{index:016X}": b"payload"
+                for index in range(70)
             })
+            base = self._zip(folder, "kpm100.zip", base_entries)
             vtk = self._zip(folder, "vtk.zip", {
                 "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"vtk-ifix",
-                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"actor595",
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"vtk-actor595",
             })
             profiles = [_archive_profile(base), _archive_profile(vtk)]
             self.assertEqual(profiles[0]["source_role"], "aov_kpm100_direct_base_candidate")
+            self.assertEqual(profiles[0]["kpm_mod_payload_count"], 70)
+            self.assertTrue(profiles[0]["has_vtk_ifix"])
+            self.assertTrue(profiles[0]["has_595_assets"])
             self.assertEqual(profiles[1]["source_role"], "aov_actor595_mod_candidate")
             self.assertEqual(
                 _select_adapter(profiles),
                 "aov_kpm100_vtk_actor595_1.64.1",
             )
+
 
     def test_unpinned_kpm100_pair_fails_by_hash_before_creating_output(self):
         with tempfile.TemporaryDirectory() as tmp:
