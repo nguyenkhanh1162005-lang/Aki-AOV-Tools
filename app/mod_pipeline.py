@@ -233,7 +233,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
             resource_archives = [
                 info for info in entries
                 if not info.is_dir()
-                and PurePosixPath(info.filename.replace("\\\\", "/")).name.casefold() == "resources.zip"
+                and PurePosixPath(info.filename.replace(chr(92), "/")).name.casefold() == "resources.zip"
             ]
             nested_resource_entries = 0
             if len(resource_archives) == 1:
@@ -267,7 +267,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
                                 )
                             nested_seen: set[str] = set()
                             for inner in nested_entries:
-                                normalized = inner.filename.replace("\\\\", "/")
+                                normalized = inner.filename.replace(chr(92), "/")
                                 candidate = normalized.rstrip("/") if inner.is_dir() else normalized
                                 pure = PurePosixPath(candidate)
                                 raw_parts = candidate.split("/")
@@ -276,7 +276,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
                                     not candidate
                                     or pure.is_absolute()
                                     or any(part in {"", ".", ".."} for part in raw_parts)
-                                    or "\\x00" in normalized
+                                    or chr(0) in normalized
                                     or (pure.parts and pure.parts[0].endswith(":"))
                                     or stat.S_ISLNK(mode)
                                 ):
