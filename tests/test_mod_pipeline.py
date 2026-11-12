@@ -3,6 +3,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from app.mod_pipeline import ModPipelineError, _archive_profile, _preflight_inputs, _select_adapter, merge_mod_archives
 
@@ -184,7 +185,7 @@ class ModPipelineTests(unittest.TestCase):
             self.assertFalse(output.exists())
 
 
-    def test_unverified_10skin_wrapper_adapter_remains_blocked_in_backend(self):
+    def test_10skin_wrapper_selects_typed_vtk_merger_and_publishes_valid_zip(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
             mod_pack = self._zip(folder, "10-skin-mod.zip", {
@@ -197,10 +198,37 @@ class ModPipelineTests(unittest.TestCase):
             asset_part = self._zip(folder, "vtk-assets-part.zip", {
                 "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"Actor 595 bundle",
             })
-            output = folder / "blocked.zip"
-            with self.assertRaisesRegex(ModPipelineError, "blocked_pending_wrapper_pair_integration"):
-                merge_mod_archives([mod_pack, ifix_part, asset_part], str(output))
-            self.assertFalse(output.exists())
+            output = folder / "merged.zip"
+
+            def fake_typed_merge(paths, output_path):
+                self.assertEqual(paths, [mod_pack, ifix_part, asset_part])
+                with zipfile.ZipFile(output_path, "w") as archive:
+                    archive.writestr("validated-candidate.txt", b"structural fixture")
+                return {
+                    "base_version": "1.64.1.12",
+                    "vtk_version": "1.64.1.11",
+                    "assetbundles": 10,
+                    "new_files": 24,
+                    "validation": "fixture validation passed",
+                    "game_tested": False,
+                }
+
+            with patch("app.mod_pipeline.merge_aov_archives", side_effect=fake_typed_merge) as typed_merge:
+                result = merge_mod_archives(
+                    [mod_pack, ifix_part, asset_part], str(output)
+                )
+
+            typed_merge.assert_called_once()
+            self.assertEqual(
+                result["adapter"], "aov_mod_to_mod_vtk_actor595_1.64.1"
+            )
+            self.assertTrue(result["structurally_validated"])
+            self.assertFalse(result["game_compatibility_tested"])
+            with zipfile.ZipFile(output) as archive:
+                self.assertIsNone(archive.testzip())
+                self.assertEqual(
+                    archive.namelist(), ["validated-candidate.txt"]
+                )
 
     def test_unknown_aov_resource_pack_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
