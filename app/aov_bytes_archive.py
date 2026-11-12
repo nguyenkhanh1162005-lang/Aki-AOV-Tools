@@ -361,7 +361,11 @@ def decode_archive_resources(
                     process_archive(archive, label, 0)
             except zipfile.BadZipFile as exc:
                 raise AOVBytesArchiveError(f"File đầu vào không phải ZIP hợp lệ: {Path(input_path).name}") from exc
-        if not report["decoded"] and not report["notice_candidates"]:
+        if (
+            not scan_only
+            and not report["decoded"]
+            and not report["notice_candidates"]
+        ):
             raise AOVBytesArchiveError(
                 "Không tìm thấy tài nguyên .bytes giải mã được hoặc chuỗi thông báo trong các ZIP đã tải lên."
             )
