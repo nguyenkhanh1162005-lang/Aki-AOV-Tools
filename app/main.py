@@ -630,6 +630,11 @@ async def merge_aov_chunked_upload(upload_id: str):
         "X-AOV-AssetBundles": str(bundle_count),
         "X-AOV-New-Files": str(new_file_count),
         "X-AOV-Adapter": str(report.get("adapter", "unknown")),
+        "X-AOV-Nested-Packages": str(len(report.get("nested_pkg_reports", {}) or {})),
+        "X-AOV-Nested-Package-Added-Entries": str(sum(
+            int(item.get("added_entries", 0))
+            for item in (report.get("nested_pkg_reports", {}) or {}).values()
+        )),
         "X-AOV-Output-Bytes": str(report.get("output_bytes", report.get("output_size", 0))),
     }
     return FileResponse(
