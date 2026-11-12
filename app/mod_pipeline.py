@@ -236,6 +236,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
                 and PurePosixPath(info.filename.replace(chr(92), "/")).name.casefold() == "resources.zip"
             ]
             nested_resource_entries = 0
+            nested_resource_scan_warning = None
             if len(resource_archives) == 1:
                 resource_info = resource_archives[0]
                 if resource_info.file_size > MAX_PROFILE_ENTRY:
@@ -307,7 +308,14 @@ def _archive_profile(path: str) -> dict[str, Any]:
                                 )
                     except ModPipelineError:
                         raise
-                    except (OSError, zipfile.BadZipFile, RuntimeError, zlib.error) as exc:
+                    except zipfile.BadZipFile:
+                        # Some archives use the same filename for an opaque or
+                        # non-ZIP payload. Keep it visible as uninspected rather
+                        # than treating its filename as proof of valid contents.
+                        nested_resource_scan_warning = (
+                            "Resources.zip không mở được như ZIP; bỏ qua nhận diện tài nguyên bên trong."
+                        )
+                    except (OSError, RuntimeError, zlib.error) as exc:
                         raise ModPipelineError(
                             f"Không đọc được Resources.zip bên trong: {Path(path).name}"
                         ) from exc
@@ -412,6 +420,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
         "actor_asset_ids": sorted(actor_asset_ids),
         "actor_action_ids": sorted(actor_action_ids),
         "nested_resource_entries": nested_resource_entries,
+        "nested_resource_scan_warning": nested_resource_scan_warning,
         "has_actor593_content": has_actor593_content,
         "source_family_hint": source_family_hint,
         "source_family_basis": source_family_basis,
