@@ -21,12 +21,12 @@ class AOVMergeResponseTests(unittest.IsolatedAsyncioTestCase):
             def fake_merge(_paths, output_path):
                 Path(output_path).write_bytes(b"merged zip")
                 return {
-                    "validation": "ZIP/CRC and resource checks passed",
+                    "validation": {"outer_zip_crc": "passed"},
                     "game_tested": False,
-                    "base_version": "1.64.1.12",
+                    "base_version": "1.64.1.12_KPM",
                     "vtk_version": "1.64.1.11",
-                    "assetbundles": 10,
-                    "new_files": 24,
+                    "packer": {"actor_assets_from_vtk": [f"bundle-{i}" for i in range(10)]},
+                    "added_resources": [f"resource-{i}" for i in range(24)],
                 }
 
             try:
@@ -42,7 +42,7 @@ class AOVMergeResponseTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.headers["X-AOV-VTK-Version"], "1.64.1.11")
                 self.assertEqual(response.headers["X-AOV-AssetBundles"], "10")
                 self.assertEqual(response.headers["X-AOV-New-Files"], "24")
-                self.assertEqual(response.filename, "Aki-AOV-10Skin-VanTamKiem.zip")
+                self.assertEqual(response.filename, "Aki-AOV-KPM100-VTK.zip")
                 self.assertNotIn(upload_id, main.UPLOAD_SESSIONS)
             finally:
                 main.UPLOAD_SESSIONS.pop(upload_id, None)
