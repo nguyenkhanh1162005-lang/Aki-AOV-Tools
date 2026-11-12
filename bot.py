@@ -51,7 +51,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Aki-AOV Bot đã sẵn sàng.\n"
         f"Chế độ nhận file: {mode}.\n\n"
-        "Gửi gói MOD 10 skin và các ZIP phần của MOD Vấn Tâm Kiếm, sau đó dùng /aovmerge để ghép hai bộ mod.\n"
+        "Để ghép cặp đã xác minh: gửi đúng 2 ZIP KPM100 iOS 1.64.1.12 và VTK iOS 1.64.1.11 đã ghim SHA-256, rồi dùng /aovmerge.\n"
+        "Wrapper MOD 10 skin hiện vẫn khóa; bot sẽ từ chối thay vì tạo file ghép chưa được kiểm chứng.\n"
         "/merge ghép ZIP thông thường\n"
         "/status xem giới hạn hiện tại\n"
         "/inspect kiểm tra cấu trúc ZIP đã gửi\n"
