@@ -6,6 +6,8 @@ on:
     paths:
       - "app/ifix_merger.py"
       - "app/aov_merger.py"
+      - "app/kpm100_vtk_merger.py"
+      - "tools/kpm100_actor595_payload_map.csv"
       - "tools/ifix_parse.py"
       - "tools/run_aov_integration.py"
       - ".github/workflows/aov-integration.yml"
