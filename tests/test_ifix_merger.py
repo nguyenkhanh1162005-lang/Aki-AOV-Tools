@@ -32,6 +32,14 @@ class IFixMergerTests(unittest.TestCase):
         encoded = serialize_ifix_patch(patch)
         self.assertEqual(serialize_ifix_patch(parse_ifix_patch(encoded)), encoded)
 
+    def test_canonical_ifix_opcode_operand_kinds(self):
+        from app.ifix_merger import _operand_kind
+
+        # Cross-check the two opcodes encountered in the pinned VTK patch:
+        self.assertEqual(_operand_kind(89), "type")       # Newarr, InlineType
+        self.assertEqual(_operand_kind(175), "none")      # Stelem_Ref, InlineNone
+        self.assertEqual(_operand_kind(162), "method")    # Ldvirtftn, InlineMethod
+
     def test_opcode_89_newarr_type_operand_is_remapped_and_roundtrips(self):
         base = make_patch("BaseFix", "BaseType", "base-string", "baseField")
         incoming = make_patch("IncomingFix", "IncomingType", "incoming-string", "incomingField")
