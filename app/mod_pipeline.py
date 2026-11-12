@@ -306,7 +306,9 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
             "output_sha256": _sha256_file(str(destination)),
         })
         return result
-    except (MergeError, AOVMergeError) as exc:
+    except (MergeError, AOVMergeError, ValueError) as exc:
+        if isinstance(exc, ModPipelineError):
+            raise
         raise ModPipelineError(str(exc)) from exc
     finally:
         temporary.unlink(missing_ok=True)
