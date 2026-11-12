@@ -540,3 +540,227 @@ def merge_common_actions_packages(
         "overlay_reports": reports,
         "verified": all(item["report"]["verified"] for item in reports),
     }
+
+
+_COMMON_ACTIONS_MERGE_CANDIDATES = {
+    "commonresource/Back.xml",
+    "commonresource/BackFast.xml",
+    "commonresource/HasteE1.xml",
+    "commonresource/HasteE1_super.xml",
+    "commonresource/HasteE2.xml",
+    "commonresource/HasteE3.xml",
+}
+
+
+def _inspect_common_actions_overlay(
+    source_name: str,
+    package_bytes: bytes,
+) -> tuple[set[str], dict]:
+    """Read explicit actor skin gates from the supported CommonActions XML files."""
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(package_bytes), "r")
+    except zipfile.BadZipFile as exc:
+        raise CommonActionsMergeError(
+            f"{source_name}: CommonActions.pkg.bytes không phải ZIP hợp lệ."
+        ) from exc
+
+    skin_ids: set[str] = set()
+    gated_tracks = 0
+    gated_conditions = 0
+    xml_files = 0
+    try:
+        entries = {}
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            if info.filename in entries:
+                raise CommonActionsMergeError(
+                    f"{source_name}: trùng entry {info.filename} trong CommonActions."
+                )
+            entries[info.filename] = info
+
+        bad = archive.testzip()
+        if bad:
+            raise CommonActionsMergeError(
+                f"{source_name}: CommonActions lỗi CRC tại {bad}."
+            )
+
+        for name in sorted(_COMMON_ACTIONS_MERGE_CANDIDATES & entries.keys()):
+            xml_files += 1
+            try:
+                decoded, _ = decode_aov_resource(archive.read(entries[name]), name)
+                root = ET.fromstring(decoded)
+            except (AOVBytesError, ET.ParseError) as exc:
+                raise CommonActionsMergeError(
+                    f"{source_name}: {name} không giải mã/parse được: {exc}"
+                ) from exc
+
+            action = root.find("Action")
+            if action is None:
+                raise CommonActionsMergeError(
+                    f"{source_name}: {name} thiếu node Action."
+                )
+            for track in action.iter("Track"):
+                skin_nodes = list(track.iter("SkinOrAvatarList"))
+                if not skin_nodes:
+                    continue
+                direct_nodes = track.findall("SkinOrAvatarList")
+                if len(direct_nodes) != len(skin_nodes):
+                    raise CommonActionsMergeError(
+                        f"{source_name}: {name}, track "
+                        f"{_normalized_track_name(track)} có SkinOrAvatarList lồng "
+                        "ở vị trí chưa được hỗ trợ."
+                    )
+                gated_tracks += 1
+                for node in direct_nodes:
+                    skin_id = node.attrib.get("id", "")
+                    if not skin_id.isdigit():
+                        raise CommonActionsMergeError(
+                            f"{source_name}: {name}, track "
+                            f"{_normalized_track_name(track)} có skin ID không phải số."
+                        )
+                    skin_ids.add(skin_id)
+                    gated_conditions += 1
+    finally:
+        archive.close()
+
+    return skin_ids, {
+        "source": source_name,
+        "xml_file_count": xml_files,
+        "actor_gated_track_count": gated_tracks,
+        "actor_gate_condition_count": gated_conditions,
+        "skin_ids": sorted(skin_ids),
+        "state": "ACTOR_GATED_TRACKS_FOUND" if skin_ids else "NO_ACTOR_GATED_TRACKS",
+    }
+
+
+def _empty_common_actions_package() -> bytes:
+    """Build a parser-only baseline; its output is never used as a game resource."""
+    root = ET.Element("Project")
+    ET.SubElement(root, "TemplateObjectList")
+    ET.SubElement(root, "RefParamList")
+    ET.SubElement(root, "Action", {"length": "0.000", "loop": "false"})
+    xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(
+        buffer, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True
+    ) as archive:
+        for name in sorted(_COMMON_ACTIONS_MERGE_CANDIDATES):
+            archive.writestr(name, encode_aov_resource(xml, name, "zstd"))
+    return buffer.getvalue()
+
+
+def analyze_common_actions_overlay_set(
+    overlays: list[tuple[str, bytes]],
+) -> dict:
+    """Dry-run compatibility check for actor-gated CommonActions from many sources.
+
+    This validates only the supported XML/track subset. It discards the synthetic
+    merge output and never grants permission to merge the surrounding AoV archives.
+    """
+    if not overlays:
+        return {
+            "available": False,
+            "state": "NOT_FOUND",
+            "overlay_count": 0,
+            "merge_authorized": False,
+            "full_merge_authorized": False,
+            "game_tested": False,
+        }
+
+    package_reports = []
+    parser_overlays = []
+    try:
+        for source_name, package_bytes in overlays:
+            skin_ids, report = _inspect_common_actions_overlay(
+                source_name, package_bytes
+            )
+            package_reports.append(report)
+            if skin_ids:
+                parser_overlays.append((package_bytes, skin_ids))
+
+        if not parser_overlays:
+            return {
+                "available": True,
+                "state": "NO_ACTOR_GATED_TRACKS",
+                "overlay_count": 0,
+                "source_package_count": len(overlays),
+                "packages": package_reports,
+                "merge_authorized": False,
+                "full_merge_authorized": False,
+                "output_discarded": True,
+                "game_tested": False,
+                "note": (
+                    "Không tìm thấy track có SkinOrAvatarList trực tiếp trong sáu XML "
+                    "được parser hỗ trợ."
+                ),
+            }
+
+        synthetic_base = _empty_common_actions_package()
+        _, dry_run_report = merge_common_actions_packages(
+            synthetic_base, parser_overlays
+        )
+
+        active_reports = [item for item in package_reports if item["skin_ids"]]
+        for package_report, overlay_report in zip(
+            active_reports, dry_run_report["overlay_reports"]
+        ):
+            merge_report = overlay_report["report"]
+            package_report["parser_merged_xml_files"] = len(
+                merge_report["merged_files"]
+            )
+            package_report["parser_appended_files"] = len(
+                merge_report["appended_files"]
+            )
+            package_report["parser_actor_tracks"] = sum(
+                len(item.get("replaced_tracks", []))
+                + len(item.get("appended_tracks", []))
+                for item in merge_report["merged_files"].values()
+            )
+
+        return {
+            "available": True,
+            "state": (
+                "COMPATIBLE"
+                if len(parser_overlays) > 1
+                else "SINGLE_OVERLAY_VALIDATED"
+            ),
+            "source_package_count": len(overlays),
+            "overlay_count": len(parser_overlays),
+            "skin_ids": sorted({
+                skin_id
+                for _, ids in parser_overlays
+                for skin_id in ids
+            }),
+            "actor_gated_track_count": sum(
+                item["actor_gated_track_count"] for item in active_reports
+            ),
+            "actor_gate_condition_count": sum(
+                item["actor_gate_condition_count"] for item in active_reports
+            ),
+            "packages": package_reports,
+            "parser_verified": bool(dry_run_report["verified"]),
+            "merge_authorized": False,
+            "full_merge_authorized": False,
+            "output_discarded": True,
+            "game_tested": False,
+            "note": (
+                "Dry-run chỉ kiểm tra sáu XML CommonActions và các điều kiện actor. "
+                "ZIP mô phỏng đã bị loại bỏ; kết quả này không ghép MSES, IFix, "
+                "AssetBundle, AssetRef, Packer/Verification hoặc Wwise."
+            ),
+        }
+    except CommonActionsMergeError as exc:
+        return {
+            "available": True,
+            "state": "BLOCKED",
+            "source_package_count": len(overlays),
+            "overlay_count": len(parser_overlays),
+            "packages": package_reports,
+            "reason": str(exc),
+            "merge_authorized": False,
+            "full_merge_authorized": False,
+            "output_discarded": True,
+            "game_tested": False,
+        }

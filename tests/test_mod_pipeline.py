@@ -3,9 +3,11 @@ import io
 import tempfile
 import unittest
 import zipfile
+from xml.etree import ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
+from app.aov_bytes import encode_aov_resource
 from app.mod_pipeline import ModPipelineError, _build_preservation_gates, _archive_profile, _preflight_inputs, _resource_merge_guidance, _resource_priority_hint, _select_adapter, analyze_aov_input_set, merge_mod_archives
 
 
@@ -638,6 +640,63 @@ class ModPipelineTests(unittest.TestCase):
                 merge_mod_archives([source], str(output))
             self.assertFalse(output.exists())
 
+
+
+    def test_preflight_reports_common_actions_multi_overlay_dry_run(self):
+        def common_package(skin_id: str, condition: str) -> bytes:
+            root = ET.Element("Project")
+            ET.SubElement(root, "TemplateObjectList")
+            ET.SubElement(root, "RefParamList")
+            action = ET.SubElement(root, "Action")
+            track = ET.SubElement(action, "Track", {
+                "trackName": "0_RecallTrack",
+                "eventType": "TriggerParticleTick",
+                "enabled": "true",
+            })
+            ET.SubElement(track, "SkinOrAvatarList", {
+                "id": skin_id,
+                "mode": condition,
+            })
+            xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+            payload = encode_aov_resource(
+                xml, "commonresource/Back.xml", "zstd"
+            )
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w") as archive:
+                archive.writestr("commonresource/Back.xml", payload)
+            return buffer.getvalue()
+
+        def resources_zip(package_bytes: bytes) -> bytes:
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w") as archive:
+                archive.writestr(
+                    "Resources/1.64.1/Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes",
+                    package_bytes,
+                )
+            return buffer.getvalue()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            p9 = self._zip(folder, "Actor593-source.zip", {
+                "Resources.zip": resources_zip(common_package("59300", "recall-593")),
+                "DanhSachSkin.txt": b"P9",
+            })
+            p10 = self._zip(folder, "Actor595-source.zip", {
+                "Resources.zip": resources_zip(common_package("59500", "recall-595")),
+                "DanhSachSkin.txt": b"P10",
+            })
+
+            report = analyze_aov_input_set([p9, p10])
+            common = report["common_actions_overlay_assessment"]
+
+            self.assertEqual(common["state"], "COMPATIBLE")
+            self.assertEqual(common["skin_ids"], ["59300", "59500"])
+            self.assertEqual(common["overlay_count"], 2)
+            self.assertTrue(common["parser_verified"])
+            self.assertFalse(common["merge_authorized"])
+            self.assertFalse(common["full_merge_authorized"])
+            self.assertTrue(common["output_discarded"])
+            self.assertFalse(report["ready_to_merge"])
 
 if __name__ == "__main__":
     unittest.main()

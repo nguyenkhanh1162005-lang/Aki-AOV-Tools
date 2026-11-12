@@ -689,6 +689,133 @@ def _resource_priority_hint(resource_path: str) -> tuple[str, int]:
     return "Tài nguyên khác", 4
 
 
+
+
+_COMMON_ACTIONS_PATH_SUFFIX = (
+    "ages/prefab_characters/prefab_hero/commonactions.pkg.bytes"
+)
+_COMMON_ACTIONS_MAX_BYTES = 256 * 1024 * 1024
+
+
+def _is_common_actions_resource(path: str) -> bool:
+    normalized = path.replace(chr(92), "/").lstrip("/").casefold()
+    return normalized.endswith(_COMMON_ACTIONS_PATH_SUFFIX)
+
+
+def _read_zip_member_limited(
+    archive: zipfile.ZipFile,
+    info: zipfile.ZipInfo,
+    label: str,
+    *,
+    limit: int = _COMMON_ACTIONS_MAX_BYTES,
+) -> bytes:
+    if info.file_size > limit:
+        raise ModPipelineError(
+            f"{label} vượt giới hạn đọc {limit // (1024 * 1024)} MiB."
+        )
+    chunks = []
+    total = 0
+    with archive.open(info, "r") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            total += len(chunk)
+            if total > limit:
+                raise ModPipelineError(
+                    f"{label} vượt giới hạn đọc {limit // (1024 * 1024)} MiB."
+                )
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _collect_common_actions_overlays(
+    archive_paths: list[str],
+) -> list[tuple[str, bytes]]:
+    """Extract one CommonActions package per source, including nested Resources.zip."""
+    found = []
+    for archive_path in archive_paths:
+        source_name = Path(archive_path).name
+        source_matches = []
+        with zipfile.ZipFile(archive_path, "r") as outer:
+            for info in outer.infolist():
+                if info.is_dir():
+                    continue
+                if _is_common_actions_resource(info.filename):
+                    payload = _read_zip_member_limited(
+                        outer, info, f"{source_name}:{info.filename}"
+                    )
+                    source_matches.append((info.filename, payload))
+                    continue
+
+                normalized_name = info.filename.replace(chr(92), "/")
+                if PurePosixPath(normalized_name).name.casefold() != "resources.zip":
+                    continue
+                if info.file_size > MAX_PROFILE_UNCOMPRESSED:
+                    raise ModPipelineError(
+                        f"{source_name}:{info.filename} vượt giới hạn Resources.zip lồng."
+                    )
+                with tempfile.TemporaryFile() as nested_stream:
+                    copied = 0
+                    with outer.open(info, "r") as source_stream:
+                        for chunk in iter(
+                            lambda: source_stream.read(1024 * 1024), b""
+                        ):
+                            copied += len(chunk)
+                            if copied > MAX_PROFILE_UNCOMPRESSED:
+                                raise ModPipelineError(
+                                    f"{source_name}:{info.filename} vượt giới hạn giải nén."
+                                )
+                            nested_stream.write(chunk)
+                    nested_stream.seek(0)
+                    try:
+                        with zipfile.ZipFile(nested_stream, "r") as nested:
+                            for nested_info in nested.infolist():
+                                if nested_info.is_dir() or not _is_common_actions_resource(
+                                    nested_info.filename
+                                ):
+                                    continue
+                                payload = _read_zip_member_limited(
+                                    nested,
+                                    nested_info,
+                                    f"{source_name}:{nested_info.filename}",
+                                )
+                                source_matches.append(
+                                    (f"{info.filename}!/{nested_info.filename}", payload)
+                                )
+                    except zipfile.BadZipFile as exc:
+                        raise ModPipelineError(
+                            f"{source_name}:{info.filename} không phải ZIP lồng hợp lệ."
+                        ) from exc
+
+        if len(source_matches) > 1:
+            paths = ", ".join(item[0] for item in source_matches)
+            raise ModPipelineError(
+                f"{source_name} có nhiều CommonActions candidate ({paths}); "
+                "không tự chọn một bản."
+            )
+        if source_matches:
+            internal_path, payload = source_matches[0]
+            found.append((f"{source_name} · {internal_path}", payload))
+    return found
+
+
+def _build_common_actions_overlay_assessment(
+    archive_paths: list[str],
+) -> dict[str, Any]:
+    try:
+        overlays = _collect_common_actions_overlays(archive_paths)
+        from .aov_common_actions import analyze_common_actions_overlay_set
+
+        return analyze_common_actions_overlay_set(overlays)
+    except (OSError, zipfile.BadZipFile, ModPipelineError) as exc:
+        return {
+            "available": True,
+            "state": "BLOCKED",
+            "reason": str(exc),
+            "merge_authorized": False,
+            "full_merge_authorized": False,
+            "game_tested": False,
+        }
+
+
 def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
     """Read-only preflight for a multi-ZIP AoV source set.
 
@@ -840,6 +967,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
         "profiles": profiles,
         "blockers": blockers,
         "resource_analysis": resource_analysis,
+        "common_actions_overlay_assessment": _build_common_actions_overlay_assessment(archive_paths),
         "game_tested": False,
         "note": (
             "Đạt bước chọn adapter theo cấu trúc; bộ ghép vẫn tự xác minh phiên bản, "
