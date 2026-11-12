@@ -22,6 +22,7 @@ MAX_ARCHIVE_UNCOMPRESSED = 1024 * 1024 * 1024
 MAX_ENTRY_UNCOMPRESSED = 256 * 1024 * 1024
 MAX_DECODED_RESOURCE = 256 * 1024 * 1024
 MAX_TOTAL_DECODED_BYTES = 1024 * 1024 * 1024
+MAX_SCAN_DECODED_BYTES = 256 * 1024 * 1024
 MAX_NESTED_ZIP_DEPTH = 2
 MAX_NOTICE_CANDIDATES = 100
 MAX_NOTICE_SNIPPET = 180
@@ -175,10 +176,13 @@ def _inspect_decoded_payload(data: bytes) -> dict[str, Any]:
     return {"payload_type": "opaque_binary"}
 
 
-def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[str, Any]:
+def decode_archive_resources(
+    input_paths: list[str], output_path: str, *, scan_only: bool = False
+) -> dict[str, Any]:
     if not input_paths:
         raise AOVBytesArchiveError("Chưa có ZIP đầu vào.")
     report: dict[str, Any] = {
+        "scan_only": scan_only,
         "decoded": [],
         "unsupported": [],
         "ignored_files": 0,
@@ -268,17 +272,20 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
                     "reason": str(exc),
                 })
                 continue
-            if report["decoded_bytes"] + len(decoded) > MAX_TOTAL_DECODED_BYTES:
+            decoded_limit = MAX_SCAN_DECODED_BYTES if scan_only else MAX_TOTAL_DECODED_BYTES
+            if report["decoded_bytes"] + len(decoded) > decoded_limit:
+                limit_label = "256 MiB cho chế độ quét chỉ đọc" if scan_only else "1 GiB"
                 raise AOVBytesArchiveError(
-                    "Tổng dữ liệu sau giải mã vượt giới hạn 1 GiB."
+                    f"Tổng dữ liệu sau giải mã vượt giới hạn {limit_label}."
                 )
             output_name = f"decoded/{prefix}/{path}"
             if output_name in seen_output_paths:
                 raise AOVBytesArchiveError(f"Đường dẫn đầu ra bị trùng: {output_name}")
             seen_output_paths.add(output_name)
-            output.parent.mkdir(parents=True, exist_ok=True)
-            with zipfile.ZipFile(output, "a", compression=zipfile.ZIP_DEFLATED) as target:
-                target.writestr(output_name, decoded)
+            if not scan_only:
+                output.parent.mkdir(parents=True, exist_ok=True)
+                with zipfile.ZipFile(output, "a", compression=zipfile.ZIP_DEFLATED) as target:
+                    target.writestr(output_name, decoded)
             payload_details = _inspect_decoded_payload(decoded)
             report["notice_scan_files"] += 1
             for finding in _scan_notice_text(decoded, path):
@@ -310,7 +317,7 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
             report["decoded"].append({
                 "source": prefix,
                 "path": path,
-                "output_path": output_name,
+                "output_path": None if scan_only else output_name,
                 "mode": mode_name,
                 "original_size": len(raw),
                 "decoded_size": len(decoded),
@@ -345,7 +352,7 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
                             ) from exc
 
     try:
-        if output.exists():
+        if not scan_only and output.exists():
             output.unlink()
         for index, input_path in enumerate(input_paths, start=1):
             label = f"archive_{index}_{Path(input_path).name}"
@@ -358,12 +365,14 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
             raise AOVBytesArchiveError(
                 "Không tìm thấy tài nguyên .bytes giải mã được hoặc chuỗi thông báo trong các ZIP đã tải lên."
             )
-        with zipfile.ZipFile(output, "a", compression=zipfile.ZIP_DEFLATED) as target:
-            target.writestr(
-                "decode-report.json",
-                json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8"),
-            )
+        if not scan_only:
+            with zipfile.ZipFile(output, "a", compression=zipfile.ZIP_DEFLATED) as target:
+                target.writestr(
+                    "decode-report.json",
+                    json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8"),
+                )
     except Exception:
-        output.unlink(missing_ok=True)
+        if not scan_only:
+            output.unlink(missing_ok=True)
         raise
     return report
