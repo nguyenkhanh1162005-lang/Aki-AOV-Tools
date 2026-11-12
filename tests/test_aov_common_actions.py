@@ -231,5 +231,107 @@ class CommonActionsMergeTests(unittest.TestCase):
         self.assertTrue(report["verified"])
 
 
+    def test_multi_overlay_merge_rejects_conflicting_same_actor_track_conditions(self):
+        path = "commonresource/Back.xml"
+
+        def actor_overlay(track_name, mode):
+            root = ET.Element("Project")
+            action = ET.SubElement(root, "Action")
+            track = ET.SubElement(action, "Track", {
+                "trackName": track_name,
+                "eventType": "TriggerParticleTick",
+                "enabled": "true",
+            })
+            ET.SubElement(track, "SkinOrAvatarList", {
+                "id": "59300",
+                "mode": mode,
+            })
+            return package({
+                path: encode_aov_resource(ET.tostring(root), path, "zstd")
+            })
+
+        base = package({
+            path: encode_aov_resource(action_xml("BaseBackTrack"), path, "zstd")
+        })
+        first = actor_overlay("0_BaseBackTrack", "recall-a")
+        second = actor_overlay("1_BaseBackTrack", "recall-b")
+
+        with self.assertRaisesRegex(
+            CommonActionsMergeError,
+            "nhiều overlay định nghĩa điều kiện khác nhau",
+        ):
+            merge_common_actions_packages(
+                base,
+                [(first, {"59300"}), (second, {"59300"})],
+            )
+
+    def test_multi_overlay_merge_keeps_identical_same_actor_condition_once(self):
+        path = "commonresource/Back.xml"
+        overlay_root = ET.Element("Project")
+        action = ET.SubElement(overlay_root, "Action")
+        track = ET.SubElement(action, "Track", {
+            "trackName": "0_BaseBackTrack",
+            "eventType": "TriggerParticleTick",
+            "enabled": "true",
+        })
+        ET.SubElement(track, "SkinOrAvatarList", {
+            "id": "59300",
+            "mode": "recall-a",
+        })
+        overlay = package({
+            path: encode_aov_resource(ET.tostring(overlay_root), path, "zstd")
+        })
+        base = package({
+            path: encode_aov_resource(action_xml("BaseBackTrack"), path, "zstd")
+        })
+
+        merged, report = merge_common_actions_packages(
+            base,
+            [(overlay, {"59300"}), (overlay, {"59300"})],
+        )
+        with zipfile.ZipFile(io.BytesIO(merged)) as archive:
+            decoded, _ = decode_aov_resource(archive.read(path), path)
+        action_out = ET.fromstring(decoded).find("Action")
+        matching = [
+            node for node in action_out.iter("SkinOrAvatarList")
+            if node.attrib.get("id") == "59300"
+        ]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0].attrib["mode"], "recall-a")
+        self.assertEqual(report["overlay_count"], 2)
+        self.assertTrue(report["verified"])
+
+    def test_single_overlay_rejects_conflicting_duplicate_actor_conditions(self):
+        path = "commonresource/Back.xml"
+        base = package({
+            path: encode_aov_resource(action_xml("BaseBackTrack"), path, "zstd")
+        })
+        root = ET.Element("Project")
+        action = ET.SubElement(root, "Action")
+        track = ET.SubElement(action, "Track", {
+            "trackName": "0_BaseBackTrack",
+            "eventType": "TriggerParticleTick",
+            "enabled": "true",
+        })
+        ET.SubElement(track, "SkinOrAvatarList", {
+            "id": "59500",
+            "mode": "recall-a",
+        })
+        ET.SubElement(track, "SkinOrAvatarList", {
+            "id": "59500",
+            "mode": "recall-b",
+        })
+        overlay = package({
+            path: encode_aov_resource(ET.tostring(root), path, "zstd")
+        })
+
+        with self.assertRaisesRegex(
+            CommonActionsMergeError,
+            "một overlay tự khai báo nhiều điều kiện khác nhau",
+        ):
+            merge_common_actions_pkg(
+                base, overlay, special_ids={"59500"}
+            )
+
 if __name__ == "__main__":
     unittest.main()
