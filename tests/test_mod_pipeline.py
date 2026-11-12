@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from app.mod_pipeline import ModPipelineError, _archive_profile, _preflight_inputs, _resource_priority_hint, _select_adapter, analyze_aov_input_set, merge_mod_archives
+from app.mod_pipeline import ModPipelineError, _archive_profile, _preflight_inputs, _resource_merge_guidance, _resource_priority_hint, _select_adapter, analyze_aov_input_set, merge_mod_archives
 
 
 class ModPipelineTests(unittest.TestCase):
@@ -369,6 +369,40 @@ class ModPipelineTests(unittest.TestCase):
             self.assertEqual(report["role_counts"]["aov_skin_mod_container_candidate"], 1)
             self.assertEqual(report["actor_asset_ids"], ["595"])
             self.assertEqual(report["blockers"], [])
+
+    def test_resource_conflict_guidance_matches_existing_adapter_scope(self):
+        common = _resource_merge_guidance("Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes")
+        self.assertEqual(common["adapter_state"], "partial_parser")
+        self.assertIn("CheckSkinIdTick", common["next_action"])
+
+        ifix = _resource_merge_guidance("Thanos/HeroSkin_2.bytes")
+        self.assertEqual(ifix["adapter_state"], "version_locked_parser")
+        self.assertIn("Actor 595", ifix["next_action"])
+
+        mses = _resource_merge_guidance("Databin/Client/Sound/BattleBank.bytes")
+        self.assertEqual(mses["adapter_state"], "version_locked_schema")
+        self.assertIn("allowlist", mses["next_action"])
+
+        nested = _resource_merge_guidance("KernelLua.pkg.bytes")
+        self.assertEqual(nested["adapter_state"], "nested_package_union_only")
+        self.assertIn("SHA-256", nested["next_action"])
+
+        metadata = _resource_merge_guidance(
+            "assetbundle/resourceverificationinfosetall.assetbundle"
+        )
+        self.assertEqual(metadata["adapter_state"], "version_locked_metadata")
+
+        bundle = _resource_merge_guidance("assetbundle/battle/hero/593_machao_battle_base.assetbundle")
+        self.assertEqual(bundle["adapter_state"], "inspect_only")
+
+        sound = _resource_merge_guidance("Sound/iOS/ZMOD_MaChao_SFX.bnk")
+        self.assertEqual(sound["adapter_state"], "inspect_only")
+        self.assertIn("không nối byte", sound["safety_rule"])
+
+        actor_actions = _resource_merge_guidance(
+            "Ages/Prefab_Characters/Prefab_Hero/Actor_593_Actions.pkg.bytes"
+        )
+        self.assertEqual(actor_actions["adapter_state"], "package_candidate_only")
 
     def test_priority_hints_put_kill_notifications_before_effects_ui_and_audio(self):
         self.assertEqual(
