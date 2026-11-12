@@ -219,7 +219,7 @@ class AOVBytesArchiveTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
-            original_bundle = b"UnityFS\\x00fake-unity-bundle"
+            original_bundle = b"UnityFS\x00fake-unity-bundle"
             source = self._archive(folder / "bundle.zip", {
                 "Resources/1.64.1/assetbundle/ui/startup.assetbundle": original_bundle,
             })
