@@ -143,13 +143,18 @@ class AOVResourceMergeTests(unittest.TestCase):
     def test_skillcombine_rejects_unverified_new_row_keys(self):
         name = "Databin/Client/Skill/skillcombine.bytes"
         base_rows = [struct.pack("<I", 1) + b"base"]
+        approved_keys = (0x000915A7, 0x000915A8, 0x000915A9, 0x000915AA, 0x000915AB)
         overlay_rows = [
             base_rows[0],
-            struct.pack("<I", 595001) + b"unverified-skill-row",
+            *[
+                struct.pack("<I", key) + f"approved-{key:08x}".encode()
+                for key in approved_keys
+            ],
+            struct.pack("<I", 595001) + b"unrelated-skill-row",
         ]
         base = encode_aov_resource(table(4, base_rows), name, "aes")
         overlay = encode_aov_resource(table(3, overlay_rows), name, "aes")
-        with self.assertRaisesRegex(AOVResourceMergeError, "ngoài allowlist theo bảng"):
+        with self.assertRaisesRegex(AOVResourceMergeError, "ngoài allowlist"):
             merge_aov_mses_resource(base, overlay, name)
 
     def test_res_skin_rejects_unrelated_overlay_only_key(self):
