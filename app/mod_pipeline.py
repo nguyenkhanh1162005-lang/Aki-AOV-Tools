@@ -489,6 +489,110 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
     return "generic_zip"
 
 
+def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
+    """Describe the narrowest known adapter for a path without granting merge permission."""
+    path = resource_path.replace("\\", "/")
+    lower = path.casefold()
+    leaf = PurePosixPath(lower).name
+
+    if leaf == "commonactions.pkg.bytes" or "commonactions.pkg.bytes/" in lower:
+        return {
+            "adapter_state": "partial_parser",
+            "next_action": (
+                "Có parser XML/track và ghép tuần tự nhiều overlay theo SkinOrAvatarList "
+                "con trực tiếp. Cần xác minh từng XML của Actor 593/595; CheckSkinIdTick "
+                "dựa trên condition-index chưa được hỗ trợ."
+            ),
+            "safety_rule": "Không thay toàn bộ CommonActions bằng một nguồn; xung đột ở file ngoài danh sách XML có parser phải dừng.",
+        }
+
+    if leaf in {"heroskin_1.bytes", "heroskin_2.bytes"}:
+        return {
+            "adapter_state": "version_locked_parser",
+            "next_action": (
+                "Có parser/serializer IFix, nhưng quy tắc ghép chỉ được xác minh trong "
+                "adapter VTK Actor 595 đã khóa phiên bản. Chưa áp dụng cho P9/P10/TM."
+            ),
+            "safety_rule": "Không nối byte hoặc trộn patch IFix khác actor/build nếu chưa có fixture round-trip riêng.",
+        }
+
+    if leaf in {
+        "resskinseniorlabelcfg.bytes", "battlebank.bytes",
+        "lobbybank.bytes", "skillcombine.bytes",
+    }:
+        return {
+            "adapter_state": "version_locked_schema",
+            "next_action": (
+                "Có parser/serializer MSES v7; allowlist khóa chỉ có trong adapter "
+                "VTK Actor 595. Cần xác định schema, khóa row và allowlist riêng cho từng bảng P9/P10/TM."
+            ),
+            "safety_rule": "Khác payload ở cùng khóa hoặc khóa mới ngoài allowlist phải chặn ghép.",
+        }
+
+    if leaf in {"kernellua.pkg.bytes", "stablesystems_3.pkg.bytes"}:
+        return {
+            "adapter_state": "nested_package_union_only",
+            "next_action": (
+                "Có thể hợp nhất ZIP/PKG lồng theo đường dẫn: giữ mục riêng, bỏ duplicate "
+                "chỉ khi SHA-256 giống hệt; cần kiểm tra tiếp từng xung đột đường dẫn."
+            ),
+            "safety_rule": "Cùng đường dẫn bên trong nhưng payload khác nhau phải dừng; union không chứng minh tương thích Lua.",
+        }
+
+    if "resourcepackerinfosetall" in leaf or "resourceverificationinfosetall" in leaf:
+        return {
+            "adapter_state": "version_locked_metadata",
+            "next_action": (
+                "Có bộ cập nhật dependency/checksum đã xác minh cho VTK 595. "
+                "Cần adapter metadata tổng hợp mới cho tất cả bundle P9/P10/TM/VTK."
+            ),
+            "safety_rule": "Không thêm AssetBundle nếu PackerInfo/Verification không phản ánh đúng path, ID và checksum.",
+        }
+
+    if lower.endswith(".assetbundle"):
+        return {
+            "adapter_state": "inspect_only",
+            "next_action": (
+                "Có thể đọc UnityFS header/object/dependency trong giới hạn hiện tại; "
+                "chưa có bộ ghép/rewrite object hoặc dependency tổng quát."
+            ),
+            "safety_rule": "Không ghi đè hoặc ghép AssetBundle chỉ vì tên hay Actor ID giống nhau.",
+        }
+
+    if lower.endswith((".bnk", ".wem")) or "/sound/" in lower:
+        return {
+            "adapter_state": "inspect_only",
+            "next_action": (
+                "Có kiểm tra cấu trúc Wwise/BNK và inventory media; chưa có serializer "
+                "remap Event/Action/HIRC/WEM cho nhiều skin."
+            ),
+            "safety_rule": "Không nối byte BNK hoặc thay bank iOS bằng bank Android.",
+        }
+
+    if "assetrefs/" in lower or leaf.endswith("_assetref.bytes"):
+        return {
+            "adapter_state": "needs_assetref_schema",
+            "next_action": "Cần parser AssetRef và kiểm tra tham chiếu tới bundle/dependency tương ứng.",
+            "safety_rule": "Không chép AssetRef độc lập nếu chưa kiểm tra object/path mà nó trỏ tới.",
+        }
+
+    if "actions.pkg.bytes" in leaf or "_infos.pkg.bytes" in leaf:
+        return {
+            "adapter_state": "package_candidate_only",
+            "next_action": (
+                "Đường dẫn actor riêng có thể là ứng viên thêm mới, nhưng cần parse package "
+                "và kiểm tra tham chiếu/metadata trước khi đưa vào gói đích."
+            ),
+            "safety_rule": "Không coi việc tên file chưa trùng là đủ để xác nhận dependency hoàn chỉnh.",
+        }
+
+    return {
+        "adapter_state": "no_known_adapter",
+        "next_action": "Chưa có adapter chuyên biệt được xác minh cho đường dẫn này; tiếp tục chỉ kiểm kê.",
+        "safety_rule": "Không tự ghi đè payload khác nội dung.",
+    }
+
+
 def _resource_priority_hint(resource_path: str) -> tuple[str, int]:
     """Heuristic UI grouping only; names do not prove a resource's runtime role."""
     path = resource_path.replace("\\", "/").casefold()
@@ -607,6 +711,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             item["priority_group"] = priority_group
             item["priority_rank"] = priority_rank
             item["priority_hint_only"] = True
+            item.update(_resource_merge_guidance(item["path"]))
         details.sort(
             key=lambda item: (
                 item["priority_rank"],
@@ -616,10 +721,15 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
                 item["path"],
             )
         )
+        guidance_counts: dict[str, int] = {}
+        for item in details:
+            state = item.get("adapter_state", "no_known_adapter")
+            guidance_counts[state] = guidance_counts.get(state, 0) + 1
         resource_analysis = {
             "available": True,
             "advisory_only": True,
             "merge_authorized": False,
+            "merge_guidance_counts": guidance_counts,
             "resource_count": manifest["resource_count"],
             "path_count": plan["path_count"],
             "unique_path_count": sum(
