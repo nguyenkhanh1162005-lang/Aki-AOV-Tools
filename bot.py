@@ -284,6 +284,9 @@ def main():
     app.add_handler(CommandHandler("merge", merge))
     app.add_handler(CommandHandler("aovmerge", aovmerge))
     app.add_handler(CommandHandler("inspect", inspect))
+    app.add_handler(CommandHandler("compatibility", compatibility))
+    app.add_handler(CommandHandler("findnotice", findnotice))
+    app.add_handler(CommandHandler("decodebytes", decodebytes))
     app.add_handler(MessageHandler(filters.Document.ALL, receive))
     app.run_polling()
 
