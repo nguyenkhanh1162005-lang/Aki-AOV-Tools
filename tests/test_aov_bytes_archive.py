@@ -155,6 +155,45 @@ class AOVBytesArchiveTests(unittest.TestCase):
                     archive.read(report["decoded"][0]["output_path"]), original
                 )
 
+    def test_scans_startup_notice_text_inside_decoded_kernel_lua_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            package_buffer = __import__("io").BytesIO()
+            with zipfile.ZipFile(package_buffer, "w") as package:
+                package.writestr(
+                    "Scripts/LoginNotice.lua",
+                    "function ShowLoginNotice() print('Welcome notice') end",
+                )
+            encoded_package = encrypt_aes_zstd_resource(
+                package_buffer.getvalue(), "KernelLua.pkg.bytes"
+            )
+            resources = self._archive(
+                folder / "Resources.zip",
+                {"KernelLua.pkg.bytes": encoded_package},
+            )
+            wrapper = self._archive(
+                folder / "10-skin-wrapper.zip",
+                {"Resources.zip": Path(resources).read_bytes()},
+            )
+
+            report = decode_archive_resources(
+                [wrapper], str(folder / "decoded.zip")
+            )
+
+            self.assertGreater(report["notice_scan_files"], 0)
+            self.assertTrue(report["notice_candidates"])
+            self.assertTrue(any(
+                item["keyword_group"] == "login_notice"
+                and item["path"] == "Scripts/LoginNotice.lua"
+                for item in report["notice_candidates"]
+            ))
+            self.assertEqual(
+                report["notice_scan_scope"].split(";")[0],
+                "Text-like Lua/XML/JSON/TXT/config/CSV and decoded non-MSES .bytes only",
+            )
+            self.assertFalse(report["game_tested"])
+
+
     def test_expands_zip_inside_decoded_pkg_bytes(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
