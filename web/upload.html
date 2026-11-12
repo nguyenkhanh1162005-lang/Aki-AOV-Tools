@@ -8,7 +8,7 @@
 </style></head>
 <body><main class="card">
 <h1>☁️ Aki Upload</h1>
-<p class="muted">Tải ZIP dung lượng lớn theo từng khối 1 MB. Nếu mạng ngắt, chọn lại đúng file để tiếp tục phần còn thiếu.</p>
+<p class="muted">Tải ZIP dung lượng lớn theo từng khối 4 MB, tối đa hai file truyền song song. Nếu mạng ngắt, chọn lại đúng file để tiếp tục phần còn thiếu.</p>
 <label class="pick"><strong>📦 Chọn file ZIP từ iPhone</strong><p class="muted">Tối đa 10 file, tổng dung lượng 500 MB</p><input id="files" type="file" accept=".zip,application/zip" multiple></label>
 <div id="fileList">Chưa chọn file.</div>
 <div class="track"><div class="bar" id="bar"></div></div>
@@ -22,7 +22,7 @@
 <div class="note">Lưu ý: máy chủ kiểm tra SHA-256 từng khối khi nhận, tính SHA-256 toàn file và đọc cấu trúc ZIP. Phiên tải tồn tại tối đa 1 giờ; nếu dịch vụ Render khởi động lại mà chưa có ổ lưu trữ bền vững, phiên có thể mất. Đây là kiểm tra tính toàn vẹn truyền tải, không phải xác nhận nội dung mod chạy trong game.</div>
 </main>
 <script>
-const CHUNK=1024*1024,MAX=500*1024*1024,KEY='aki-upload-verified-v1';
+const CHUNK=4*1024*1024,MAX=500*1024*1024,PARALLEL=2,KEY='aki-upload-verified-v2';
 const input=document.querySelector('#files'),button=document.querySelector('#upload'),status=document.querySelector('#status'),fileList=document.querySelector('#fileList'),bar=document.querySelector('#bar'),result=document.querySelector('#result'),links=document.querySelector('#links');
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function hex(buf){return [...new Uint8Array(buf)].map(x=>x.toString(16).padStart(2,'0')).join('');}
@@ -88,7 +88,8 @@ button.addEventListener('click',async()=>{
    localStorage.setItem(KEY,JSON.stringify({fingerprint:fingerprintText,upload_id:uploadId}));
   }
   const total=files.reduce((n,f)=>n+f.size,0);let sent=offsets.reduce((n,x)=>n+x,0);
-  for(let i=0;i<files.length;i++){
+  let nextFileIndex=0;
+  async function uploadFile(i){
    const file=files[i];
    for(let offset=offsets[i];offset<file.size;offset+=CHUNK){
     const part=file.slice(offset,Math.min(file.size,offset+CHUNK));
@@ -99,6 +100,8 @@ button.addEventListener('click',async()=>{
     status.textContent='Đang tải '+file.name+' · '+(sent/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB';
    }
   }
+  async function worker(){while(true){const i=nextFileIndex++;if(i>=files.length)return;await uploadFile(i);}}
+  await Promise.all(Array.from({length:Math.min(PARALLEL,files.length)},()=>worker()));
   status.textContent='Đang xác minh SHA-256 và cấu trúc ZIP trên máy chủ...';
   const verified=await request('/api/upload/'+uploadId+'/verify',{method:'POST'});
   const report=await verified.json();
