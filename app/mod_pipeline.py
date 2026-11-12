@@ -61,6 +61,120 @@ def _preflight_inputs(paths: list[str]) -> int:
     return total_bytes
 
 
+
+def _source_family_hint(
+    archive_name: str,
+    *,
+    actor_asset_ids: set[str] | None = None,
+    actor_action_ids: set[str] | None = None,
+    has_vtk_ifix: bool = False,
+    has_595_assets: bool = False,
+) -> tuple[str | None, str | None, int | None]:
+    """Return a cautious source-family hint, its evidence, and an optional part number."""
+    stem = Path(archive_name).stem.casefold()
+    actors = set(actor_asset_ids or ()) | set(actor_action_ids or ())
+
+    if re.search(r"(?<![a-z0-9])p\s*9(?![0-9])", stem) or re.search(r"(?<![0-9])9[\s_-]*skin(?![a-z])", stem):
+        return "P9", "filename_hint", None
+    if re.search(r"(?<![a-z0-9])p\s*10(?![0-9])", stem) or re.search(r"(?<![0-9])10[\s_-]*skin(?![a-z])", stem):
+        return "P10", "filename_hint", None
+
+    part_match = re.search(r"(?:^|[^a-z0-9])part[\s_-]*([1-3])(?:$|[^0-9])", stem)
+    part_number = int(part_match.group(1)) if part_match else None
+
+    if re.search(r"tamyn|robot|machao|ma\s*chao", stem) or "593" in actors:
+        basis = "resource_signature" if "593" in actors else "filename_hint"
+        return "TM", basis, None
+    if "vtk" in stem:
+        return "VTK", "filename_hint", part_number
+    if has_vtk_ifix or has_595_assets or "595" in actors:
+        return "VTK", "resource_signature", part_number
+    if part_number is not None:
+        return f"PART_{part_number}_CANDIDATE", "filename_hint", part_number
+    return None, None, None
+
+
+def _build_target_set_report(profiles: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize the requested six-archive set; it never authorizes a merge."""
+    vtk_group_signature = (
+        any(item.get("has_vtk_ifix") for item in profiles)
+        and any(item.get("has_595_assets") for item in profiles)
+    )
+    expected = [
+        ("P9", "P9 · 9 skin"),
+        ("P10", "P10 · 10 skin"),
+        ("TM", "TM · Tamyn - Robot"),
+        ("VTK_PART_1", "VTK · Part 1"),
+        ("VTK_PART_2", "VTK · Part 2"),
+        ("VTK_PART_3", "VTK · Part 3"),
+    ]
+    assignments: dict[str, list[str]] = {key: [] for key, _ in expected}
+    detected_inputs = []
+
+    for item in profiles:
+        family = item.get("source_family_hint")
+        basis = item.get("source_family_basis")
+        part_number = item.get("source_part_number")
+        if family and family.startswith("PART_") and vtk_group_signature and item.get("looks_like_aov"):
+            family = "VTK"
+            basis = "filename_hint+group_actor595_signature"
+
+        target_key = None
+        if family in {"P9", "P10", "TM"}:
+            target_key = family
+        elif family == "VTK" and part_number in {1, 2, 3}:
+            target_key = f"VTK_PART_{part_number}"
+        if target_key in assignments:
+            assignments[target_key].append(item["name"])
+
+        detected_inputs.append({
+            "name": item["name"],
+            "family_hint": family,
+            "basis": basis,
+            "part_number": part_number,
+            "actor_asset_ids": item.get("actor_asset_ids", []),
+            "actor_action_ids": item.get("actor_action_ids", []),
+        })
+
+    summary = [
+        {
+            "id": key,
+            "label": label,
+            "count": len(assignments[key]),
+            "files": assignments[key],
+            "state": "đã nhận diện" if len(assignments[key]) == 1 else
+                     "chưa có file" if not assignments[key] else
+                     "có nhiều file trùng vai trò",
+        }
+        for key, label in expected
+    ]
+    missing = [item["label"] for item in summary if item["count"] == 0]
+    duplicated = [item["label"] for item in summary if item["count"] > 1]
+    complete = not missing and not duplicated and len(profiles) == 6
+
+    return {
+        "name": "P9 + P10 + TM Tamyn - Robot + VTK Part 1–3",
+        "expected_archive_count": 6,
+        "detected_archive_count": len(profiles),
+        "input_set_complete": complete,
+        "merge_supported": False,
+        "merge_status": "not_supported_multi_mod",
+        "vtk_parts_grouped_by_actor595_signature": vtk_group_signature,
+        "sources": summary,
+        "detected_inputs": detected_inputs,
+        "missing": missing,
+        "duplicates": duplicated,
+        "blockers": [
+            "Bộ ghép nhiều MOD P9 + P10 + TM + VTK chưa có adapter đã xác minh. Đây là báo cáo nhận diện nguồn, không phải xác nhận có thể xuất ZIP.",
+            "Các xung đột IFix/MSES/CommonActions/metadata/soundbank và AssetBundle cần quy tắc parse/ghép riêng; không được tự chọn file thắng chỉ theo tên hoặc thời gian tải.",
+        ],
+        "evidence_note": (
+            "P9/P10/TM/VTK là nhãn gợi ý từ tên ZIP hoặc chữ ký tài nguyên. "
+            "Nhãn VTK Part 1–3 chỉ được gán khi có bằng chứng Actor 595 và HeroSkin_2 trong cả bộ nguồn."
+        ),
+    }
+
+
 def _archive_profile(path: str) -> dict[str, Any]:
     try:
         with zipfile.ZipFile(path, "r") as archive:
@@ -112,16 +226,110 @@ def _archive_profile(path: str) -> dict[str, Any]:
             bad = archive.testzip()
             if bad:
                 raise ModPipelineError(f"ZIP lỗi CRC tại {bad}: {Path(path).name}")
+
+            # Read only the directory metadata of one nested Resources.zip.
+            # A spool file avoids keeping large nested archives entirely in RAM.
+            nested_resource_names: list[str] = []
+            resource_archives = [
+                info for info in entries
+                if not info.is_dir()
+                and PurePosixPath(info.filename.replace(chr(92), "/")).name.casefold() == "resources.zip"
+            ]
+            nested_resource_entries = 0
+            nested_resource_scan_warning = None
+            if len(resource_archives) == 1:
+                resource_info = resource_archives[0]
+                if resource_info.file_size > MAX_PROFILE_ENTRY:
+                    raise ModPipelineError(
+                        f"Resources.zip vượt giới hạn 512 MiB: {Path(path).name}"
+                    )
+                with tempfile.SpooledTemporaryFile(
+                    max_size=16 * 1024 * 1024, mode="w+b"
+                ) as nested_stream:
+                    with archive.open(resource_info, "r") as source_stream:
+                        while True:
+                            chunk = source_stream.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            nested_stream.write(chunk)
+                    nested_stream.seek(0)
+                    try:
+                        with zipfile.ZipFile(nested_stream, "r") as nested:
+                            nested_entries = nested.infolist()
+                            nested_resource_entries = len(nested_entries)
+                            if nested_resource_entries > MAX_PROFILE_ENTRIES:
+                                raise ModPipelineError(
+                                    f"Resources.zip có quá nhiều mục (tối đa {MAX_PROFILE_ENTRIES})."
+                                )
+                            nested_total = sum(item.file_size for item in nested_entries)
+                            if nested_total > MAX_PROFILE_UNCOMPRESSED:
+                                raise ModPipelineError(
+                                    "Resources.zip vượt giới hạn giải nén 1 GiB."
+                                )
+                            nested_seen: set[str] = set()
+                            for inner in nested_entries:
+                                normalized = inner.filename.replace(chr(92), "/")
+                                candidate = normalized.rstrip("/") if inner.is_dir() else normalized
+                                pure = PurePosixPath(candidate)
+                                raw_parts = candidate.split("/")
+                                mode = (inner.external_attr >> 16) & 0xFFFF
+                                if (
+                                    not candidate
+                                    or pure.is_absolute()
+                                    or any(part in {"", ".", ".."} for part in raw_parts)
+                                    or chr(0) in normalized
+                                    or (pure.parts and pure.parts[0].endswith(":"))
+                                    or stat.S_ISLNK(mode)
+                                ):
+                                    raise ModPipelineError(
+                                        f"Đường dẫn trong Resources.zip không an toàn: {inner.filename}"
+                                    )
+                                canonical = pure.as_posix()
+                                if canonical in nested_seen:
+                                    raise ModPipelineError(
+                                        f"Resources.zip có đường dẫn trùng lặp: {canonical}"
+                                    )
+                                nested_seen.add(canonical)
+                                if inner.is_dir():
+                                    continue
+                                if inner.flag_bits & 1:
+                                    raise ModPipelineError(
+                                        f"Không hỗ trợ mục mã hóa mật khẩu trong Resources.zip: {inner.filename}"
+                                    )
+                                if inner.file_size > MAX_PROFILE_ENTRY:
+                                    raise ModPipelineError(
+                                        f"Mục Resources.zip vượt giới hạn 512 MiB: {inner.filename}"
+                                    )
+                                nested_resource_names.append(canonical)
+                            nested_bad = nested.testzip()
+                            if nested_bad:
+                                raise ModPipelineError(
+                                    f"Resources.zip lỗi CRC tại {nested_bad}: {Path(path).name}"
+                                )
+                    except ModPipelineError:
+                        raise
+                    except zipfile.BadZipFile:
+                        # Some archives use the same filename for an opaque or
+                        # non-ZIP payload. Keep it visible as uninspected rather
+                        # than treating its filename as proof of valid contents.
+                        nested_resource_scan_warning = (
+                            "Resources.zip không mở được như ZIP; bỏ qua nhận diện tài nguyên bên trong."
+                        )
+                    except (OSError, RuntimeError, zlib.error) as exc:
+                        raise ModPipelineError(
+                            f"Không đọc được Resources.zip bên trong: {Path(path).name}"
+                        ) from exc
     except ModPipelineError:
         raise
     except (OSError, zipfile.BadZipFile, RuntimeError, zlib.error) as exc:
         raise ModPipelineError(f"Không đọc được ZIP: {Path(path).name}") from exc
 
-    leaves = {PurePosixPath(name).name.lower() for name in names}
-    extensions = {PurePosixPath(name).suffix.lower() for name in names}
+    resource_names = names + nested_resource_names
+    leaves = {PurePosixPath(name).name.lower() for name in resource_names}
+    extensions = {PurePosixPath(name).suffix.lower() for name in resource_names}
     has_resource_tree = any(
         name.lower().startswith(("resources/", "databin/", "ages/", "thanos/", "assetbundle/"))
-        for name in names
+        for name in resource_names
     )
     looks_like_aov = bool(
         leaves.intersection(AOV_MARKERS)
@@ -154,7 +362,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
         ) for name in names)
     )
     actor_asset_ids: set[str] = set()
-    for name in names:
+    for name in resource_names:
         if PurePosixPath(name).suffix.lower() != ".assetbundle":
             continue
         leaf = PurePosixPath(name).name
@@ -165,8 +373,26 @@ def _archive_profile(path: str) -> dict[str, Any]:
     has_595_assets = "595" in actor_asset_ids or any(
         "595_" in PurePosixPath(name).name.lower()
         or "595" in PurePosixPath(name).name.lower()
-        for name in names
+        for name in resource_names
         if PurePosixPath(name).suffix.lower() == ".assetbundle"
+    )
+    actor_action_ids: set[str] = set()
+    for name in resource_names:
+        match = re.search(
+            r"(?:^|/)Actor[_-](\d{3})[_-]Actions\.pkg\.bytes$",
+            name,
+            re.IGNORECASE,
+        )
+        if match:
+            actor_action_ids.add(match.group(1))
+    has_actor593_content = "593" in actor_asset_ids or "593" in actor_action_ids
+
+    source_family_hint, source_family_basis, source_part_number = _source_family_hint(
+        Path(path).name,
+        actor_asset_ids=actor_asset_ids,
+        actor_action_ids=actor_action_ids,
+        has_vtk_ifix=has_vtk_ifix,
+        has_595_assets=has_595_assets,
     )
 
     if not looks_like_aov:
@@ -177,6 +403,8 @@ def _archive_profile(path: str) -> dict[str, Any]:
         source_role = "aov_kpm100_direct_base_candidate"
     elif has_vtk_ifix and has_595_assets:
         source_role = "aov_actor595_mod_candidate"
+    elif has_actor593_content:
+        source_role = "aov_actor593_mod_candidate"
     else:
         source_role = "aov_mod_unclassified"
 
@@ -190,6 +418,13 @@ def _archive_profile(path: str) -> dict[str, Any]:
         "resources_zip_count": resources_zip_count,
         "skin_list_count": skin_list_count,
         "actor_asset_ids": sorted(actor_asset_ids),
+        "actor_action_ids": sorted(actor_action_ids),
+        "nested_resource_entries": nested_resource_entries,
+        "nested_resource_scan_warning": nested_resource_scan_warning,
+        "has_actor593_content": has_actor593_content,
+        "source_family_hint": source_family_hint,
+        "source_family_basis": source_family_basis,
+        "source_part_number": source_part_number,
         "has_vtk_ifix": has_vtk_ifix,
         "has_base_ifix": has_base_ifix,
         "has_kpm_mod_payloads": has_kpm_mod_payloads,
@@ -303,8 +538,11 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
     actor_ids = sorted({
         actor_id
         for item in profiles
-        for actor_id in item.get("actor_asset_ids", [])
+        for actor_id in (
+            item.get("actor_asset_ids", []) + item.get("actor_action_ids", [])
+        )
     })
+    target_set = _build_target_set_report(profiles)
     blockers: list[str] = []
     selected_adapter: str | None = None
     try:
@@ -415,6 +653,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
         "total_uncompressed_bytes": total_uncompressed,
         "role_counts": role_counts,
         "actor_asset_ids": actor_ids,
+        "target_set": target_set,
         "profiles": profiles,
         "blockers": blockers,
         "resource_analysis": resource_analysis,

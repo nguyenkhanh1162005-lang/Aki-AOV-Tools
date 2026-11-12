@@ -52,6 +52,12 @@ Chọn các ZIP 9 skin, 10 skin, Tamyn và các phần VTK rồi bấm **Phân l
 
 Đây là bước nhận diện, không phải bộ ghép nhiều MOD. Hiện adapter wrapper chỉ nhận đúng một MOD nền 10 skin cùng VTK Actor 595 phiên bản đã ghim. Khi có nhiều wrapper (ví dụ 9 skin + 10 skin), Tamyn/Actor khác hoặc xung đột chưa có parser/serializer tương ứng, web sẽ báo blocker và không tự chọn nền, ghi đè hay xuất ZIP. Cần hoàn tất adapter riêng cho từng loại tài nguyên và fixture kiểm thử trước khi bật ghép nhiều MOD.
 
+### Nhận diện bộ nguồn P9 + P10 + TM + VTK
+
+Web preflight cũng hiển thị riêng bộ mục tiêu gồm đúng sáu ZIP: P9 (9 skin, camera xa 30%), P10 (10 skin, camera xa 30%), TM Tamyn - Robot, VTK Part 1, Part 2 và Part 3. Nhãn P9/P10/TM có thể dựa trên tên file hoặc dấu hiệu Actor 593; ba phần VTK chỉ được nhóm khi tên Part 1–3 đi kèm bằng chứng Actor 595 và HeroSkin_2 trong cả bộ đầu vào. Báo cáo nêu rõ cơ sở nhận diện và file còn thiếu/trùng vai trò.
+
+**Quan trọng:** đây mới là cập nhật nhận diện/preflight. Nó không bật quyền ghép P9 + P10 + TM + VTK. Inventory đã ghi nhận xung đột ở CommonActions, IFix, MSES, KernelLua/StableSystems, âm thanh và metadata; mỗi định dạng cần adapter semantic riêng, round-trip test và fixture thực tế. Khi chưa có các quy tắc đó, web tiếp tục fail-closed và không xuất ZIP nhiều MOD có nguy cơ làm mất hiệu ứng, biến về, thông báo hạ, nút bấm hoặc âm thanh.
+
 ## Bộ ghép MOD wrapper 10 skin + Vấn Tâm Kiếm VTK
 
 Adapter này nhận một ZIP MOD wrapper có đúng một `Resources.zip` và một `DanhSachSkin.txt`, cộng với một hoặc nhiều ZIP phần VTK (tối đa 10 ZIP tổng). `Resources.zip` bên trong phải có các tài nguyên nền đúng schema iOS 1.64.1.12; bộ VTK phải đúng phiên bản 1.64.1.11 và có đủ chính xác 10 AssetBundle Actor 595 bắt buộc. VTK chia thành Part1/Part2/Part3 được hỗ trợ; đường dẫn được chuẩn hóa trước khi ghép và các file trùng giữa các phần chỉ được bỏ qua khi nội dung giống hệt.
