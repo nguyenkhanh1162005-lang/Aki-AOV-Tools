@@ -160,7 +160,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
         leaf = PurePosixPath(name).name
         actor_asset_ids.update(
             match.group(1)
-            for match in re.finditer(r"(?:^|[_-])(\\d{3})(?=[_.-]|$)", leaf)
+            for match in re.finditer(r"(?:^|[_-])(\d{3})(?=[_.-]|$)", leaf)
         )
     has_595_assets = "595" in actor_asset_ids or any(
         "595_" in PurePosixPath(name).name.lower()
