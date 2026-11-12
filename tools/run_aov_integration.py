@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 import zipfile
@@ -8,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.kpm100_vtk_merger import build as build_kpm100_vtk
+from app.mod_pipeline import merge_mod_archives
 
 
 def main() -> int:
@@ -21,13 +20,9 @@ def main() -> int:
         if not Path(path).is_file():
             raise SystemExit(f"Missing integration input: {path}")
 
-    report_path = output_path + ".report.json"
-    report = build_kpm100_vtk(argparse.Namespace(
-        base=base_path,
-        vtk=vtk_path,
-        output=output_path,
-        report=report_path,
-    ))
+    report = merge_mod_archives([base_path, vtk_path], output_path)
+    if report.get("adapter") != "aov_kpm100_vtk_actor595_1.64.1":
+        raise SystemExit(f"Wrong adapter selected for pinned KPM100/VTK pair: {report.get('adapter')}")
 
     output = Path(output_path)
     if not output.is_file() or output.stat().st_size <= 0:
@@ -89,6 +84,8 @@ def main() -> int:
         "verification": report["verification"],
         "validation": report["validation"],
         "game_tested": False,
+        "adapter": report.get("adapter"),
+        "structurally_validated": report.get("structurally_validated"),
     }
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0
