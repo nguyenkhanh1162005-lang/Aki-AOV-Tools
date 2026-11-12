@@ -459,6 +459,8 @@ aovPreflightBtn.addEventListener('click',async()=>{
       lines.push('- '+item.name+' | '+(roleNames[item.source_role]||item.source_role)+' | '+item.entries+' entries | '+(item.uncompressed_bytes/1048576).toFixed(1)+' MB giải nén');
       if(item.source_family_hint)lines.push('  Nhóm nguồn gợi ý: '+item.source_family_hint+' | cơ sở: '+(item.source_family_basis||'không rõ'));
       if(item.resources_zip_count||item.skin_list_count)lines.push('  Resources.zip: '+item.resources_zip_count+' | DanhSachSkin.txt: '+item.skin_list_count);
+      if(item.nested_resource_entries)lines.push('  Đã đọc danh sách '+item.nested_resource_entries+' mục bên trong Resources.zip (chỉ đọc).');
+      if(item.nested_resource_scan_warning)lines.push('  Cảnh báo quét Resources.zip: '+item.nested_resource_scan_warning);
       if(item.actor_asset_ids?.length)lines.push('  Actor ID AssetBundle: '+item.actor_asset_ids.join(', '));
       if(item.actor_action_ids?.length)lines.push('  Actor ID Actions package: '+item.actor_action_ids.join(', '));
       if(item.has_vtk_ifix)lines.push('  Có HeroSkin_2.bytes');
