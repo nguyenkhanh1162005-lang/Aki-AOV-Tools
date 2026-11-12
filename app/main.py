@@ -205,16 +205,15 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
                 file_path = workdir / path_name
                 if file_path.is_symlink():
                     raise ValueError("upload file cannot be a symlink")
-                if file_path.exists():
-                    actual_size = file_path.stat().st_size
-                    if actual_size > size:
-                        raise ValueError("upload file exceeds declared size")
-                    # A crash may leave a partially written chunk while the
-                    # metadata still records the previous offset. Resume from
-                    # the bytes that actually reached disk.
-                    received = actual_size
-                elif received:
-                    # The file itself can be recreated by the browser retry.
+                if upload_protocol != "chunk_map_v2":
+                    if file_path.exists():
+                        actual_size = file_path.stat().st_size
+                        if actual_size > size:
+                            raise ValueError("upload file exceeds declared size")
+                        received = actual_size
+                    elif received:
+                        received = 0
+                else:
                     received = 0
                 total += size
                 chunk_hashes = item.get("chunk_sha256", [])
@@ -232,6 +231,54 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
                     ))
                 ):
                     raise ValueError("invalid chunk hashes")
+                if upload_protocol == "chunk_map_v2":
+                    raw_map = item.get("received_chunks", {})
+                    if not isinstance(raw_map, dict):
+                        raise ValueError("invalid received chunk map")
+                    chunk_map: dict[str, str] = {}
+                    for raw_index, digest in raw_map.items():
+                        if (not isinstance(raw_index, str) or not raw_index.isdigit()
+                                or int(raw_index) >= expected_chunks or not isinstance(digest, str)
+                                or len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest)):
+                            raise ValueError("invalid received chunk map entry")
+                        chunk_map[raw_index] = digest
+                    if file_path.is_file() and file_path.stat().st_size == size:
+                        for chunk_index in range(expected_chunks):
+                            offset = chunk_index * UPLOAD_CHUNK_BYTES
+                            length = min(UPLOAD_CHUNK_BYTES, size - offset)
+                            actual = _sha256_file_range(file_path, offset, length)
+                            if raw_map.get(str(chunk_index), actual) != actual:
+                                raise ValueError("assembled upload chunk hash mismatch")
+                            chunk_map[str(chunk_index)] = actual
+                        for chunk_index in range(expected_chunks):
+                            _chunk_part_path(workdir, index - 1, chunk_index).unlink(missing_ok=True)
+                    else:
+                        if file_path.exists():
+                            file_path.unlink()
+                        valid_map: dict[str, str] = {}
+                        for raw_index, digest in chunk_map.items():
+                            chunk_index = int(raw_index)
+                            part_path = _chunk_part_path(workdir, index - 1, chunk_index)
+                            length = min(UPLOAD_CHUNK_BYTES, size - chunk_index * UPLOAD_CHUNK_BYTES)
+                            if (part_path.is_file() and part_path.stat().st_size == length
+                                    and _sha256_file_range(part_path, 0, length) == digest):
+                                valid_map[raw_index] = digest
+                            else:
+                                part_path.unlink(missing_ok=True)
+                        chunk_map = valid_map
+                        if len(chunk_map) == expected_chunks:
+                            _assemble_parallel_chunks(workdir, file_path, size, chunk_map, index - 1)
+                            for chunk_index in range(expected_chunks):
+                                _chunk_part_path(workdir, index - 1, chunk_index).unlink(missing_ok=True)
+                    received, received_chunk_hashes = _contiguous_chunk_bytes(chunk_map, size)
+                    clean_files.append({
+                        "name": name, "size": size, "received": received,
+                        "chunk_sha256": chunk_hashes,
+                        "received_chunk_sha256": received_chunk_hashes,
+                        "received_chunks": chunk_map,
+                    })
+                    safe_paths.append(str(file_path))
+                    continue
                 received_chunk_hashes = item.get("received_chunk_sha256", [])
                 expected_received_chunks = (
                     received + UPLOAD_CHUNK_BYTES - 1
