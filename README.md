@@ -9,7 +9,7 @@ Công cụ web tiếng Việt để tải, kiểm tra cấu trúc, đối chiế
 - Web API `/api/capabilities`: công bố registry adapter, phân biệt định dạng chỉ kiểm tra với định dạng có bộ ghép đã xác minh; mặc định fail-closed.
 - Bộ kiểm tra `/inspect` và `/api/inspect` đọc chữ ký 32 byte đầu mỗi mục để phân loại sơ bộ AoV AES/Zstandard, Unity AssetBundle, ZIP lồng, Wwise, ảnh, XML/JSON và dữ liệu chưa nhận diện; chỉ đọc, không sửa tài nguyên.
 - Web API `/api/drive/import`: tải ZIP từ link Google Drive công khai trực tiếp về máy chủ, tối đa 10 link và tổng 500 MB.
-- Web API `/api/upload/{upload_id}/aov-merge`: dùng cùng pipeline chọn adapter; hỗ trợ đúng cặp ZIP KPM100 trực tiếp + VTK iOS đã ghim SHA-256.
+- Web API `/api/upload/{upload_id}/aov-merge`: tự chọn adapter theo cấu trúc ZIP; hỗ trợ hai đường ghép có giới hạn: KPM100 ZIP trực tiếp + VTK, hoặc MOD wrapper 10 skin + các ZIP phần VTK iOS.
 - Web API `/api/upload/{upload_id}/decode-bytes`: giải mã các tài nguyên `.bytes` AoV AES/Zstandard đã nhận diện từ ZIP đã tải lên; hỗ trợ ZIP `Resources.zip` lồng nhau và bung tiếp ZIP bên trong `.pkg.bytes` đã giải mã (tối đa hai tầng), xuất ZIP riêng cùng `decode-report.json`, không sửa ZIP gốc và không ghép tài nguyên.
 - Web API `/api/upload/{upload_id}/notice-scan`: quét chỉ đọc các chuỗi liên quan thông báo trong Lua/XML/JSON/TXT/config/CSV và `.bytes` đã giải mã; trả đường dẫn, từ khóa, đoạn trích ngắn; giữ nguyên phiên tải và file gốc.
 
@@ -17,7 +17,7 @@ Công cụ web tiếng Việt để tải, kiểm tra cấu trúc, đối chiế
 
 Chọn ZIP rồi bấm **Giải mã tài nguyên .bytes đã hỗ trợ**. Web gọi bộ giải mã AES-CBC/Zstandard hiện có, nhận diện theo header và tên tài nguyên, giải nén các mục `.bytes` hỗ trợ ra một ZIP riêng. Có thể đọc ZIP `Resources.zip` lồng nhau và tiếp tục bung các package `.pkg.bytes` sau giải mã nếu payload bên trong là ZIP, tối đa hai tầng lồng. ZIP nguồn không bị thay đổi; báo cáo `decode-report.json` ghi chế độ giải mã, kích thước, file chưa hỗ trợ và đường dẫn đầu ra. Payload MSES được phân tích thêm version, số field, số row, trạng thái checksum, inventory prefix 4 byte đầu từng row (giới hạn 4.096 row), kích thước row, marker `Hero_LiXin_Skin_C` và prefix trùng; prefix được ghi rõ là dữ liệu thô, không khẳng định đó là khóa ngữ nghĩa; `HeroSkin_1/2.bytes` được thử parse IFix để báo số FixInfo/method/type/string/field; payload `.pkg.bytes` dạng ZIP được bung tiếp và ghi số entry.
 
-Bộ lõi MSES v7 có parser, serializer, kiểm tra checksum và ghép theo khóa. Mọi khóa row mới đều phải nằm trong allowlist cụ thể của bảng; schema khác nhau còn cần bật rõ quyền thêm row cho adapter đó. Soundbank chỉ nhận row có marker `Hero_LiXin_Skin_C`, `ResSkinSeniorLabelCfg` chỉ nhận key 59500 và từ chối nếu key này đã tồn tại với payload khác vì chưa có quy tắc ghi đè đã xác minh; `skillcombine` hiện chưa có allowlist row mới đã xác minh nên sẽ từ chối nếu overlay thêm key. Đây là chốt an toàn, đồng nghĩa bộ ghép Vấn Tâm Kiếm có thể dừng ở bước MSES cho tới khi xác minh được schema/khóa skillcombine thực tế.
+Bộ lõi MSES v7 có parser, serializer, kiểm tra checksum và ghép theo khóa. Mọi khóa row mới phải nằm trong allowlist riêng của bảng. Soundbank chỉ nhận row có marker `Hero_LiXin_Skin_C`; `ResSkinSeniorLabelCfg` chỉ nhận key 59500 và từ chối nếu key này đã tồn tại với payload khác; `skillcombine` chỉ nhận đúng năm key Actor 595 đã xác minh (0x000915A7–0x000915AB). Không nối byte hoặc ghi đè bảng khi thiếu quy tắc theo schema.
 
 Giới hạn: tối đa 20.000 entry, 1 GiB dữ liệu giải nén, 256 MiB mỗi entry và 256 MiB kích thước giải mã khai báo cho mỗi tài nguyên. Chức năng này chỉ trích xuất payload đã giải mã để kiểm tra/phân tích; không sửa MSES/IFix, không giải mã Unity AssetBundle hoặc Wwise BNK, không ghép skin và không tạo ZIP có thể cài vào game.
 
@@ -28,24 +28,17 @@ Trên web dùng nút **Quét thông báo khởi động**; sau khi quét, có th
 Đây là quét heuristic để tìm ứng viên, không chứng minh chuỗi tìm được là popup đang hiển thị. Bundle vượt giới hạn, payload nhị phân opaque và định dạng không giải mã được có thể bị bỏ qua; báo cáo nêu rõ số AssetBundle đã quét/bỏ qua và lý do. Không tự xóa hoặc ghi đè tài nguyên chỉ vì một từ khóa xuất hiện. Cần đối chiếu object/script và kiểm tra trong game trước khi tạo bản sửa.
 ## Bộ ghép KPM100 iOS + Vấn Tâm Kiếm VTK
 
-**Adapter đang bật có giới hạn phiên bản** cho đúng hai archive nguồn đã kiểm tra:
-- KPM100 iOS MOD 1.64.1.12_KPM, ZIP trực tiếp chứa cây `Resources/1.64.1/` và đúng 70 `KPM_MOD_*` payload.
-- VTK iOS Vấn Tâm Kiếm Actor 595, dữ liệu 1.64.1.11.
+Adapter này nhận đúng KPM100 iOS MOD 1.64.1.12_KPM dạng ZIP trực tiếp (cây `Resources/1.64.1/`, 70 `KPM_MOD_*` payload) cùng VTK iOS Vấn Tâm Kiếm Actor 595 phiên bản 1.64.1.11. Bộ xử lý kiểm tra hash và cấu trúc của cặp nguồn KPM100 đã được tích hợp riêng; không nhận ZIP khác chỉ vì tên file giống nhau.
 
-Bộ xử lý ghim SHA-256 của cả hai archive. Không nhận ZIP khác hash, sai phiên bản hoặc sai cấu trúc chỉ vì tên file giống nhau. KPM100 là ZIP resource tree trực tiếp, không phải wrapper ngoài có `Resources.zip` và `DanhSachSkin.txt`. Adapter wrapper 10 skin khác vẫn bị khóa cho tới khi có bài tích hợp riêng.
-Để kiểm tra đúng wrapper 10 skin của người dùng, workflow **10-skin wrapper + VTK source audit** đang chờ asset `IOS-Pack-10Skin-Cam30.zip` trong release [`aov-upload-01`](https://github.com/nguyenkhanh1162005-lang/Aki-AOV-Tools/releases/tag/aov-upload-01). Release hiện có KPM100 trực tiếp và `VTK.IOS.VIP.zip`, chưa có wrapper 10 skin. Sau khi tải wrapper ZIP lên release với đúng tên asset trên, chạy workflow này trong GitHub Actions. Workflow sẽ quét chuỗi thông báo, chạy ghép thử trên nguồn thật, kiểm tra CRC và bảo toàn đường dẫn nền, rồi lưu báo cáo cùng ZIP ứng viên. Workflow không tự mở khóa adapter; cần ghim SHA-256 và xác nhận toàn bộ kiểm tra trước.
+## Bộ ghép MOD wrapper 10 skin + Vấn Tâm Kiếm VTK
 
+Adapter này nhận một ZIP MOD wrapper có đúng một `Resources.zip` và một `DanhSachSkin.txt`, cộng với một hoặc nhiều ZIP phần VTK (tối đa 10 ZIP tổng). `Resources.zip` bên trong phải có các tài nguyên nền đúng schema iOS 1.64.1.12; bộ VTK phải đúng phiên bản 1.64.1.11 và có đủ chính xác 10 AssetBundle Actor 595 bắt buộc. VTK chia thành Part1/Part2/Part3 được hỗ trợ; đường dẫn được chuẩn hóa trước khi ghép và các file trùng giữa các phần chỉ được bỏ qua khi nội dung giống hệt.
 
-Trong cặp nguồn được hỗ trợ, bộ ghép:
-- Giữ nguyên mọi đường dẫn của KPM100 và chỉ thay payload liên quan Actor 595; báo cáo xác nhận toàn bộ đường dẫn gốc vẫn còn.
-- Thay 68 XML kỹ năng cùng một AssetRef và một ActorInfo trong 70 payload KPM_MOD; kiểm tra round-trip của 70 payload và parse 68 XML.
-- Ghép IFix của `Thanos/HeroSkin_2.bytes` vào `HeroSkin_1.bytes`, remap chỉ số và kiểm tra parse/serialize sau mã hóa.
-- Ghép các bảng MSES có allowlist theo từng bảng, CommonActions theo track, cập nhật ResourcePacker/ResourceVerification và các dependency AssetBundle của Actor 595.
-- Thêm các AssetBundle và soundbank iOS VTK được liệt kê trong báo cáo kiểm tra.
+Bộ ghép không thay cả file trùng một cách mù quáng. Nó dùng adapter riêng cho IFix, MSES v7 theo allowlist, CommonActions XML/track, ResourcePackerInfoSet, ResourceVerificationInfoSet, AssetBundle và sound iOS. Nó kiểm tra CRC ZIP đầu vào/đầu ra, checksum bảng, inventory đường dẫn nền và metadata phụ thuộc; thiếu/thừa AssetBundle, sai phiên bản, checksum không hợp lệ hoặc xung đột chưa có quy tắc sẽ dừng và không xuất file hoàn chỉnh. Không cần đưa ZIP wrapper lên GitHub Release; có thể tải trực tiếp các ZIP nguồn lên web.
 
-Bài tích hợp trên đúng hai archive đã ghim đã thành công: CRC ZIP ngoài, IFix round-trip, 70/70 payload, 68/68 XML kỹ năng, Actor Actions package 129 entry CRC và ActorInfo package CRC đều đạt. Đây là **xác minh cấu trúc**, không phải thử nghiệm chạy trong Liên Quân iOS. Chưa có xác nhận rằng model, hoạt ảnh, hiệu ứng, thông báo hạ, biến về, nút bấm và âm thanh đều hiển thị/phát đúng trong trận; cần sao lưu bản gốc và thử trên thiết bị trước khi sử dụng.
+Trên bộ nguồn 10 skin + ba phần VTK đã được tích hợp trước đó, báo cáo ghi nhận ZIP ứng viên 150,793,052 byte, giữ 59/59 đường dẫn nền, thêm 24 tài nguyên VTK, 10/10 AssetBundle Actor 595 có thể đọc và các bước IFix, CommonActions, MSES, Packer/Verification đều qua kiểm tra cấu trúc. Đây là **xác minh cấu trúc**, không phải test trong Liên Quân iOS. Hiệu ứng, biến về, thông báo hạ, nút bấm, âm thanh và khả năng vào trận vẫn phải thử trên thiết bị; không có cam kết tương thích 100% trước bước đó.
 
-**Quy tắc nguồn:** chỉ ghép đúng MOD KPM100 với MOD VTK đã ghim; không tải, không yêu cầu và không chèn tài nguyên từ bộ cài game gốc. Những ZIP AoV khác tiếp tục bị từ chối hoặc chỉ kiểm kê cho tới khi có adapter riêng.
+**Giới hạn chung:** chỉ hỗ trợ đúng schema iOS 1.64.1.12 + VTK 1.64.1.11 và bộ Actor 595 nêu trên. Không tải, không yêu cầu và không chèn tài nguyên từ bộ cài game gốc. Các ZIP AoV khác tiếp tục bị từ chối hoặc chỉ kiểm kê cho tới khi có adapter riêng.
 
 ## Phạm vi kiểm tra Wwise BNK
 
@@ -59,7 +52,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 Mở http://localhost:8000
 
 ## Nhập ZIP từ Google Drive
-- Trên web, để ghép AOV, dùng đúng 2 ZIP KPM100 iOS 1.64.1.12 và VTK iOS 1.64.1.11 đã ghim SHA-256. Wrapper MOD 10 skin có `Resources.zip` + `DanhSachSkin.txt` vẫn bị khóa; không gửi nhầm bộ đó để ghép.
+- Trên web, để ghép MOD wrapper 10 skin, chọn ZIP có `Resources.zip` + `DanhSachSkin.txt` cùng các ZIP phần VTK iOS (Part1/Part2/Part3). Hoặc chọn KPM100 ZIP trực tiếp + VTK. Máy chủ tự nhận dạng adapter; cả hai chỉ nhận đúng phiên bản/schema.
 - File phải bật quyền “Bất kỳ ai có đường liên kết”.
 - Chỉ nhận link `drive.google.com` hoặc `docs.google.com`; máy chủ tự tải file, giới hạn 500 MB mỗi ZIP và tổng 500 MB.
 - Sau khi tải và kiểm tra, dùng nút ghép AOV chuyên sâu trước khi phiên upload hết hạn (1 giờ).
@@ -75,7 +68,7 @@ Mở http://localhost:8000
 - CI chạy unit tests và kiểm tra cú pháp Python.
 - Bộ ghép kiểm tra CRC ZIP, checksum MSES, IFix index, XML CommonActions và cấu trúc PackerInfo.
 - Chưa có xác nhận chạy thực tế trong Liên Quân iOS. ZIP kết quả phải được thử trong game; không xem kiểm tra cấu trúc là bảo đảm tương thích 100%.
-- Chỉ hỗ trợ đúng cặp phiên bản nêu trên. Không tự áp dụng cho bản game/skin khác.
+- Chỉ hỗ trợ hai cặp nguồn/schema và phiên bản nêu trên. Không tự áp dụng cho bản game/skin khác.
 
 ### Lập kế hoạch tương thích tài nguyên (chỉ tư vấn)
 
