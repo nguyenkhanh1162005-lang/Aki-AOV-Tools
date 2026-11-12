@@ -39,6 +39,7 @@ class IFixMergerTests(unittest.TestCase):
         self.assertEqual(_operand_kind(89), "type")       # Newarr, InlineType
         self.assertEqual(_operand_kind(175), "none")      # Stelem_Ref, InlineNone
         self.assertEqual(_operand_kind(162), "method")    # Ldvirtftn, InlineMethod
+        self.assertEqual(_operand_kind(146), "stack")       # AoV custom StackSpace pseudo-op
 
     def test_opcode_89_newarr_type_operand_is_remapped_and_roundtrips(self):
         base = make_patch("BaseFix", "BaseType", "base-string", "baseField")
