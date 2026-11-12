@@ -2,6 +2,7 @@ import asyncio
 import io
 import unittest
 import zipfile
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from starlette.requests import Request
