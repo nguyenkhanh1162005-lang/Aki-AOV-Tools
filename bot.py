@@ -16,6 +16,9 @@ from telegram import FSInputFile
 
 from app.mod_pipeline import merge_mod_archives, ModPipelineError
 from app.aov_inspector import inspect_archives, InspectError
+from app.aov_bytes_archive import decode_archive_resources, AOVBytesArchiveError
+from app.resource_manifest import build_resource_manifest, ResourceManifestError
+from app.compatibility_planner import plan_resource_compatibility, CompatibilityPlanError
 
 MIB = 1024 * 1024
 LOCAL_API = bool(
@@ -56,6 +59,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/merge ghép ZIP thông thường\n"
         "/status xem giới hạn hiện tại\n"
         "/inspect kiểm tra cấu trúc ZIP đã gửi\n"
+        "/compatibility đối chiếu metadata và xung đột (chỉ đọc)\n"
+        "/findnotice tìm chuỗi liên quan thông báo khởi động (chỉ đọc)\n"
+        "/decodebytes giải mã tài nguyên .bytes đã hỗ trợ\n"
         "/clear xóa danh sách file"
     )
 
@@ -152,6 +158,153 @@ async def inspect(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_message.edit_text(
             f"Kiểm tra thất bại: {type(exc).__name__}. ZIP gốc vẫn được giữ."
         )
+
+
+async def compatibility(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    files = context.user_data.get("zips", [])
+    if not files:
+        await update.effective_message.reply_text("Chưa có ZIP nào. Gửi file trước nhé.")
+        return
+    status_message = await update.effective_message.reply_text(
+        "Đang lập manifest và đối chiếu phiên bản/xung đột. Chế độ chỉ đọc..."
+    )
+    try:
+        manifest = await asyncio.to_thread(
+            build_resource_manifest, [path for _, path in files]
+        )
+        plan = await asyncio.to_thread(
+            plan_resource_compatibility, manifest["resources"]
+        )
+        source = plan.get("source_compatibility", {})
+        summary = plan.get("summary", {})
+        lines = [
+            "BÁO CÁO TƯƠNG THÍCH (CHỈ ĐỌC)",
+            f"ZIP: {manifest.get('archive_count', 0)} | Resource: {manifest.get('resource_count', 0)}",
+            f"Phiên bản: {', '.join(source.get('game_versions', [])) or 'không xác định'}",
+            f"Nền tảng: {', '.join(source.get('platforms', [])) or 'không xác định'}",
+            f"Trạng thái nguồn: {source.get('status', 'không rõ')}",
+            *[
+                f"{key}: {summary.get(key, 0)}"
+                for key in ("SAFE_MERGE", "IDENTICAL_DUPLICATE", "NEEDS_RULE", "UNSUPPORTED", "VERSION_CONFLICT")
+            ],
+            "",
+            "Tối đa 30 mục cần chú ý:",
+        ]
+        notable = [
+            item for item in plan.get("resources", [])
+            if item.get("status") not in {"SAFE_MERGE", "IDENTICAL_DUPLICATE"}
+        ]
+        for item in notable[:30]:
+            lines.append(f"[{item.get('status', 'UNKNOWN')}] {item.get('path', '?')}")
+            for reason in (item.get("reasons") or [])[:2]:
+                lines.append(f"  - {reason}")
+        if not notable:
+            lines.append("Không có mục cần chú ý theo metadata hiện có.")
+        lines.extend([
+            "",
+            "Đây chỉ là đối chiếu metadata; không xác nhận payload hoặc khả năng chạy trong game, không cấp quyền ghép tài nguyên AoV.",
+        ])
+        chunks = ["\n".join(lines[i:i + 35]) for i in range(0, len(lines), 35)]
+        await status_message.edit_text(chunks[0][:3900])
+        for chunk in chunks[1:]:
+            await update.effective_message.reply_text(chunk[:3900])
+    except (ResourceManifestError, CompatibilityPlanError) as exc:
+        await status_message.edit_text(f"Không đối chiếu được: {exc}")
+    except Exception as exc:
+        await status_message.edit_text(
+            f"Đối chiếu thất bại: {type(exc).__name__}. ZIP nguồn vẫn được giữ."
+        )
+
+
+async def findnotice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    files = context.user_data.get("zips", [])
+    if not files:
+        await update.effective_message.reply_text("Chưa có ZIP nào. Gửi file trước nhé.")
+        return
+    folder = _workdir(context)
+    output_path = folder / ".aki-aov-notice-scan.zip"
+    status_message = await update.effective_message.reply_text(
+        "Đang quét text trong Lua/XML/JSON và package .bytes đã giải mã. Chỉ đọc, không sửa ZIP..."
+    )
+    try:
+        report = await asyncio.to_thread(
+            decode_archive_resources,
+            [path for _, path in files],
+            str(output_path),
+        )
+        candidates = report.get("notice_candidates", [])
+        lines = [
+            "QUÉT THÔNG BÁO KHỞI ĐỘNG (HEURISTIC)",
+            f"Phần nội dung đã quét: {report.get('notice_scan_files', 0)}",
+            f"Package lồng đã bung: {report.get('nested_packages_expanded', 0)}",
+            f"Ứng viên: {len(candidates)}"
+            + (" (đã giới hạn)" if report.get("notice_candidates_truncated") else ""),
+            "",
+        ]
+        for item in candidates[:12]:
+            lines.append(f"[{item.get('keyword_group')}] {item.get('source')}/{item.get('path')}")
+            lines.append(f"  Khớp: {item.get('matched_text')} | {item.get('encoding')}")
+            lines.append(f"  {item.get('excerpt')}")
+        if not candidates:
+            lines.append("Chưa tìm thấy từ khóa phù hợp trong phần văn bản đã quét.")
+        lines.extend([
+            "",
+            "Chỉ quét text-like resource và .bytes giải mã được. Không quét Unity AssetBundle hoặc binary opaque. Tìm thấy từ khóa không chứng minh đó là popup đang hiển thị; không tự xóa file theo kết quả này.",
+        ])
+        await status_message.edit_text("\n".join(lines)[:3900])
+    except AOVBytesArchiveError as exc:
+        await status_message.edit_text(f"Không quét được: {exc}")
+    except Exception as exc:
+        await status_message.edit_text(
+            f"Quét thất bại: {type(exc).__name__}. ZIP nguồn vẫn được giữ."
+        )
+    finally:
+        output_path.unlink(missing_ok=True)
+
+
+async def decodebytes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    files = context.user_data.get("zips", [])
+    if not files:
+        await update.effective_message.reply_text("Chưa có ZIP nào. Gửi file trước nhé.")
+        return
+    folder = _workdir(context)
+    output_path = folder / "aki-aov-decoded-resources.zip"
+    status_message = await update.effective_message.reply_text(
+        "Đang giải mã các .bytes đã hỗ trợ và bung package lồng..."
+    )
+    try:
+        report = await asyncio.to_thread(
+            decode_archive_resources,
+            [path for _, path in files],
+            str(output_path),
+        )
+        output_size = output_path.stat().st_size
+        if output_size > MAX_SEND_BYTES:
+            await status_message.edit_text(
+                f"Đã giải mã {len(report.get('decoded', []))} tài nguyên nhưng ZIP kết quả "
+                f"{output_size / MIB:.1f} MB vượt giới hạn gửi {MAX_SEND_BYTES // MIB} MB. "
+                "ZIP nguồn vẫn được giữ."
+            )
+            return
+        await status_message.edit_text(
+            f"Đã giải mã {len(report.get('decoded', []))} tài nguyên, "
+            f"bung {report.get('nested_packages_expanded', 0)} package. Đang gửi ZIP phân tích..."
+        )
+        await update.effective_message.reply_document(
+            document=FSInputFile(str(output_path), filename="aki-aov-decoded-resources.zip"),
+            read_timeout=1800,
+            write_timeout=1800,
+            connect_timeout=60,
+            pool_timeout=60,
+        )
+    except AOVBytesArchiveError as exc:
+        await status_message.edit_text(f"Không giải mã được: {exc}")
+    except Exception as exc:
+        await status_message.edit_text(
+            f"Giải mã hoặc gửi thất bại: {type(exc).__name__}. ZIP nguồn vẫn được giữ."
+        )
+    finally:
+        output_path.unlink(missing_ok=True)
 
 
 async def aovmerge(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -284,6 +437,9 @@ def main():
     app.add_handler(CommandHandler("merge", merge))
     app.add_handler(CommandHandler("aovmerge", aovmerge))
     app.add_handler(CommandHandler("inspect", inspect))
+    app.add_handler(CommandHandler("compatibility", compatibility))
+    app.add_handler(CommandHandler("findnotice", findnotice))
+    app.add_handler(CommandHandler("decodebytes", decodebytes))
     app.add_handler(MessageHandler(filters.Document.ALL, receive))
     app.run_polling()
 
