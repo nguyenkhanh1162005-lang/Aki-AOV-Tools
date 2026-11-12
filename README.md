@@ -1,6 +1,6 @@
 # Aki AOV Tools
 
-Công cụ web tiếng Việt để tải, kiểm tra cấu trúc, đối chiếu tương thích và xử lý các gói tài nguyên Liên Quân iOS theo adapter đã xác minh. Tài liệu này tập trung vào web; Telegram bot nằm ngoài phạm vi triển khai hiện tại.
+Công cụ web và Telegram bot riêng tư bằng tiếng Việt để tải, kiểm tra cấu trúc, đối chiếu tương thích và xử lý các gói tài nguyên Liên Quân iOS theo adapter đã xác minh.
 
 ## Tính năng
 - Web UI tiếng Việt, dùng được trên điện thoại.
@@ -15,6 +15,19 @@ Công cụ web tiếng Việt để tải, kiểm tra cấu trúc, đối chiế
 - Web API `/api/upload/{upload_id}/aov-merge`: tự chọn adapter theo cấu trúc ZIP; hỗ trợ hai đường ghép có giới hạn: KPM100 ZIP trực tiếp + VTK, hoặc MOD wrapper 10 skin + các ZIP phần VTK iOS.
 - Web API `/api/upload/{upload_id}/decode-bytes`: giải mã các tài nguyên `.bytes` AoV AES/Zstandard đã nhận diện từ ZIP đã tải lên; hỗ trợ ZIP `Resources.zip` lồng nhau và bung tiếp ZIP bên trong `.pkg.bytes` đã giải mã (tối đa hai tầng), xuất ZIP riêng cùng `decode-report.json`, không sửa ZIP gốc và không ghép tài nguyên.
 - Web API `/api/upload/{upload_id}/notice-scan`: quét chỉ đọc các chuỗi liên quan thông báo trong Lua/XML/JSON/TXT/config/CSV và `.bytes` đã giải mã; trả đường dẫn, từ khóa, đoạn trích ngắn; giữ nguyên phiên tải và file gốc.
+
+## Telegram bot riêng tư
+
+Bot dùng chung pipeline phân loại và ghép AoV với web; không tự ghép ZIP AoV chưa có adapter. Các lệnh hiện có:
+
+- `/start`, `/status`, `/files`, `/clear`: trạng thái và quản lý các ZIP trong phiên.
+- `/inspect`: báo cáo cấu trúc ZIP và xung đột.
+- `/preflight`: phân loại bộ MOD AoV, kiểm tra adapter và xuất báo cáo JSON chỉ đọc.
+- `/notice-scan`: dò ứng viên thông báo khởi động trong tài nguyên đã giải mã; chỉ đọc, không tự xóa popup.
+- `/decode`: giải mã tài nguyên `.bytes` có định dạng hỗ trợ và gửi ZIP kết quả riêng.
+- `/merge`: dùng adapter AoV đã xác minh nếu bộ đầu vào đủ điều kiện; bộ chưa hỗ trợ sẽ nhận blocker thay vì ZIP ghép thường.
+
+Cần cấu hình `BOT_TOKEN` và `ALLOWED_USER_IDS`. Bot API Telegram mặc định nhận file tối đa 20 MB; để tải file trực tiếp lớn hơn qua Telegram cần Local Bot API Server cùng `TELEGRAM_API_BASE_URL` và `TELEGRAM_FILE_BASE_URL`. Link HTTPS tải ZIP trực tiếp vẫn có giới hạn tổng 500 MB theo cấu hình bot. Giới hạn gửi file kết quả của Bot API mặc định là 50 MB.
 
 ## Giải mã tài nguyên AoV `.bytes` trên web
 

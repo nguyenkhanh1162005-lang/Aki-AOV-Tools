@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import shutil
 import tempfile
@@ -17,6 +18,12 @@ from app.large_merger import merge_zip_files, MergeError
 from app.aov_inspector import inspect_archives, InspectError
 from app.url_downloader import download_zip_from_url, DownloadError
 from app.access_control import is_allowed_user
+from app.aov_bytes_archive import AOVBytesArchiveError, decode_archive_resources
+from app.mod_pipeline import (
+    ModPipelineError,
+    analyze_aov_input_set,
+    merge_mod_archives,
+)
 
 MIB = 1024 * 1024
 LOCAL_API = bool(
@@ -68,6 +75,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/status xem giới hạn hiện tại\n"
         "/files xem danh sách ZIP đã nhận\n"
         "/inspect xuất báo cáo cấu trúc ZIP dạng TXT\n"
+        "/preflight phân loại MOD AoV và kiểm tra adapter trước khi ghép\n"
+        "/notice-scan dò ứng viên thông báo khởi động (chỉ đọc, không xóa)\n"
+        "/decode giải mã tài nguyên .bytes được hỗ trợ thành ZIP\n"
         "/merge kiểm tra, ghép và xác minh lại dữ liệu đầu ra\n"
         "/clear xóa danh sách file"
     )
@@ -249,6 +259,166 @@ async def inspect(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+
+
+
+async def decode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _authorized(update):
+        return
+    files = context.user_data.get("zips", [])
+    if not files:
+        await update.effective_message.reply_text("Chưa có ZIP nào. Gửi file trước nhé.")
+        return
+
+    folder = _workdir(context)
+    output_path = folder / "aki-aov-decoded-resources.zip"
+    status_message = await update.effective_message.reply_text(
+        "Đang giải mã các tài nguyên .bytes AoV có định dạng được hỗ trợ. ZIP nguồn không bị chỉnh sửa..."
+    )
+    try:
+        report = await asyncio.to_thread(
+            decode_archive_resources,
+            [path for _, path in files],
+            str(output_path),
+        )
+        output_size = output_path.stat().st_size if output_path.exists() else 0
+        if not output_size:
+            await status_message.edit_text(
+                "Không tạo được gói giải mã. Xem báo cáo lỗi hoặc dùng /notice-scan để tìm ứng viên thông báo."
+            )
+            return
+        if not LOCAL_API and output_size > 48 * MIB:
+            await status_message.edit_text(
+                f"Đã giải mã {len(report.get('decoded', []))} tài nguyên "
+                f"({output_size / MIB:.1f} MB), nhưng Bot API mặc định không gửi được file lớn hơn 50 MB. "
+                "ZIP kết quả vẫn được giữ trong phiên làm việc."
+            )
+            return
+        await status_message.edit_text(
+            f"Đã giải mã {len(report.get('decoded', []))} tài nguyên "
+            f"({output_size / MIB:.1f} MB). Đang gửi ZIP..."
+        )
+        await update.effective_message.reply_document(
+            document=FSInputFile(str(output_path), filename="aki-aov-decoded-resources.zip"),
+            read_timeout=1800,
+            write_timeout=1800,
+            connect_timeout=60,
+            pool_timeout=60,
+        )
+    except AOVBytesArchiveError as exc:
+        await status_message.edit_text(f"Không giải mã được: {exc}")
+    except Exception as exc:
+        await status_message.edit_text(
+            f"Giải mã thất bại: {type(exc).__name__}. ZIP nguồn vẫn được giữ nguyên."
+        )
+
+
+async def notice_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _authorized(update):
+        return
+    files = context.user_data.get("zips", [])
+    if not files:
+        await update.effective_message.reply_text("Chưa có ZIP nào. Gửi file trước nhé.")
+        return
+
+    folder = _workdir(context)
+    report_path = folder / "aki-aov-notice-scan.json"
+    status_message = await update.effective_message.reply_text(
+        "Đang giải mã các .bytes được hỗ trợ và dò chuỗi thông báo trong Lua/XML/JSON/config cùng metadata AssetBundle. Chế độ chỉ đọc..."
+    )
+    try:
+        report = await asyncio.to_thread(
+            decode_archive_resources,
+            [path for _, path in files],
+            "",
+            scan_only=True,
+        )
+        report_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        candidates = report.get("notice_candidates", [])
+        lines = [
+            f"Đã quét {report.get('notice_scan_files', 0)} mục.",
+            f"Tìm thấy {len(candidates)} ứng viên từ khóa.",
+            f"AssetBundle đã quét: {report.get('notice_assetbundles_scanned', 0)}; bỏ qua: {report.get('notice_assetbundles_skipped', 0)}.",
+        ]
+        for item in candidates[:8]:
+            lines.append(
+                f"\n• {item.get('path', '(không rõ đường dẫn)')} "
+                f"[{item.get('keyword_group', 'keyword')}] "
+                f"{item.get('matched_text', '')}\n  {item.get('excerpt', '')}"
+            )
+        lines.append(
+            "\nĐây chỉ là ứng viên theo từ khóa, không chứng minh đó là popup đang hiển thị. "
+            "Bot không tự xóa hoặc ghi đè tài nguyên."
+        )
+        await status_message.edit_text("\n".join(lines))
+        await update.effective_message.reply_document(
+            document=FSInputFile(str(report_path), filename="aki-aov-notice-scan.json"),
+            read_timeout=120,
+            write_timeout=120,
+        )
+    except AOVBytesArchiveError as exc:
+        await status_message.edit_text(f"Không quét được tài nguyên: {exc}")
+    except Exception as exc:
+        await status_message.edit_text(
+            f"Quét thất bại: {type(exc).__name__}. ZIP nguồn vẫn được giữ nguyên."
+        )
+
+
+async def preflight(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _authorized(update):
+        return
+    files = context.user_data.get("zips", [])
+    if not files:
+        await update.effective_message.reply_text("Chưa có ZIP nào. Gửi file trước nhé.")
+        return
+
+    folder = _workdir(context)
+    report_path = folder / "aki-aov-preflight.json"
+    status_message = await update.effective_message.reply_text(
+        "Đang phân loại từng ZIP AoV và kiểm tra adapter. Chế độ chỉ đọc, không sửa file gốc..."
+    )
+    try:
+        report = await asyncio.to_thread(
+            analyze_aov_input_set, [path for _, path in files]
+        )
+        report_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        aov_detected = any(
+            item.get("looks_like_aov") for item in report.get("profiles", [])
+        )
+        if not aov_detected:
+            summary = "Không phát hiện cấu trúc MOD AoV; bộ file được phân loại là ZIP thông thường."
+        elif report.get("ready_to_merge"):
+            summary = (
+                f"Đã chọn adapter: {report.get('selected_adapter')}. "
+                "Bộ này vượt qua bước phân loại; lệnh /merge sẽ tự xác minh lại phiên bản và payload."
+            )
+        else:
+            blockers = report.get("blockers", [])
+            summary = "Chưa có adapter ghép đã xác minh cho bộ này."
+            if blockers:
+                summary += "\n" + "\n".join(f"• {item}" for item in blockers[:5])
+        await status_message.edit_text(
+            summary + "\n\nBáo cáo JSON đầy đủ được gửi kèm."
+        )
+        await update.effective_message.reply_document(
+            document=FSInputFile(str(report_path), filename="aki-aov-preflight.json"),
+            read_timeout=120,
+            write_timeout=120,
+        )
+    except ModPipelineError as exc:
+        await status_message.edit_text(f"Không phân loại được bộ AoV: {exc}")
+    except Exception as exc:
+        await status_message.edit_text(
+            f"Preflight thất bại: {type(exc).__name__}. ZIP nguồn vẫn được giữ nguyên."
+        )
+
+
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _authorized(update):
         return
@@ -271,6 +441,67 @@ async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     try:
         input_paths = [path for _, path in files]
+        aov_report = await asyncio.to_thread(analyze_aov_input_set, input_paths)
+        aov_detected = any(
+            item.get("looks_like_aov") for item in aov_report.get("profiles", [])
+        )
+
+        if aov_detected:
+            report_path = folder / "aki-aov-preflight.json"
+            report_path.write_text(
+                json.dumps(aov_report, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            if not aov_report.get("ready_to_merge"):
+                blockers = aov_report.get("blockers", [])
+                detail = "\n".join(f"• {item}" for item in blockers[:4])
+                await status_message.edit_text(
+                    "Đã nhận diện dữ liệu Liên Quân nhưng chưa có adapter ghép đã xác minh cho bộ này. "
+                    "Bot không ghép ZIP thường để tránh mất skin/hiệu ứng/âm thanh.\n"
+                    + detail
+                    + "\nBáo cáo preflight được gửi kèm; ZIP nguồn vẫn được giữ nguyên."
+                )
+                await update.effective_message.reply_document(
+                    document=FSInputFile(str(report_path), filename="aki-aov-preflight.json"),
+                    read_timeout=120,
+                    write_timeout=120,
+                )
+                return
+
+            await status_message.edit_text(
+                f"Đã chọn adapter {aov_report.get('selected_adapter')}. "
+                "Đang ghép tài nguyên AoV và xác minh cấu trúc, checksum, dependency..."
+            )
+            merge_result = await asyncio.to_thread(
+                merge_mod_archives, input_paths, str(output_path)
+            )
+            output_size = Path(output_path).stat().st_size
+            if not LOCAL_API and output_size > 48 * MIB:
+                await status_message.edit_text(
+                    f"Đã ghép AoV và kiểm tra cấu trúc xong ({output_size / MIB:.1f} MB), "
+                    "nhưng Bot API mặc định không gửi được file lớn hơn 50 MB. "
+                    "ZIP nguồn và ZIP kết quả vẫn được giữ trên phiên làm việc."
+                )
+                return
+            await status_message.edit_text(
+                f"Đã ghép AoV bằng adapter {merge_result.get('adapter')} "
+                f"({output_size / MIB:.1f} MB). Đang gửi file..."
+            )
+            await update.effective_message.reply_document(
+                document=FSInputFile(str(output_path), filename="aki-aov-merged-verified.zip"),
+                read_timeout=1800,
+                write_timeout=1800,
+                connect_timeout=60,
+                pool_timeout=60,
+            )
+            await update.effective_message.reply_document(
+                document=FSInputFile(str(report_path), filename="aki-aov-preflight.json"),
+                read_timeout=120,
+                write_timeout=120,
+            )
+            _cleanup(context)
+            return
+
         safety_report = await asyncio.to_thread(inspect_archives, input_paths)
         nested_line = next(
             (line for line in safety_report.splitlines()
@@ -286,9 +517,9 @@ async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             report_path = folder / "aov-merge-safety-report.txt"
             report_path.write_text(safety_report, encoding="utf-8")
             await status_message.edit_text(
-                "Đã phát hiện cấu trúc tài nguyên AOV lồng hoặc bảng MSES. "
-                "Bot dừng ghép ZIP thường để tránh tạo gói sai hoặc làm mất skin/hiệu ứng/âm thanh. "
-                "Báo cáo kiểm tra được gửi kèm; ZIP nguồn vẫn được giữ nguyên."
+                "Đã phát hiện dữ liệu AoV lồng hoặc bảng MSES nhưng không vượt qua nhận diện MOD chuyên sâu. "
+                "Bot dừng ghép ZIP thường để tránh làm hỏng tài nguyên game. "
+                "Báo cáo được gửi kèm; ZIP nguồn vẫn được giữ nguyên."
             )
             await update.effective_message.reply_document(
                 document=FSInputFile(str(report_path), filename="aov-merge-safety-report.txt"),
@@ -320,6 +551,8 @@ async def merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pool_timeout=60,
         )
         _cleanup(context)
+    except ModPipelineError as exc:
+        await status_message.edit_text(f"Không ghép được MOD AoV: {exc}\\nZIP nguồn vẫn được giữ nguyên.")
     except MergeError as exc:
         await status_message.edit_text(f"Không ghép được: {exc}\nZIP nguồn vẫn được giữ nguyên.")
     except Exception as exc:
@@ -347,6 +580,9 @@ def main():
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("merge", merge))
     app.add_handler(CommandHandler("inspect", inspect))
+    app.add_handler(CommandHandler("preflight", preflight))
+    app.add_handler(CommandHandler("notice-scan", notice_scan))
+    app.add_handler(CommandHandler("decode", decode))
     app.add_handler(MessageHandler(filters.Document.ALL, receive))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_link))
     app.run_polling()

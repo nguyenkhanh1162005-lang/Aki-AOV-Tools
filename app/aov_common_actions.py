@@ -19,9 +19,9 @@ class CommonActionsMergeError(ValueError):
     pass
 
 
-def _is_595_track(track: ET.Element) -> bool:
+def _is_special_track(track: ET.Element, special_ids: set[str]) -> bool:
     return any(
-        node.tag == "SkinOrAvatarList" and node.attrib.get("id") in SPECIAL_IDS
+        node.tag == "SkinOrAvatarList" and node.attrib.get("id") in special_ids
         for node in track.iter()
     )
 
@@ -77,8 +77,20 @@ def merge_action_xml(
     base_bytes: bytes,
     overlay_bytes: bytes,
     resource_name: str,
+    *,
+    special_ids: set[str] | None = None,
 ) -> tuple[bytes, dict]:
-    """Merge VTK-gated tracks by full event signature without dropping same-name variants."""
+    """Merge only explicitly actor-gated CommonActions tracks.
+
+    This parser supports direct-child SkinOrAvatarList gates only. Condition-index
+    based CheckSkinIdTick logic used by some MOD packs is a separate format and
+    must not be treated as equivalent to these explicit skin-list gates.
+    """
+    target_ids = {str(value) for value in (SPECIAL_IDS if special_ids is None else special_ids)}
+    if not target_ids or any(not value.isdigit() for value in target_ids):
+        raise CommonActionsMergeError(
+            f"{resource_name}: special skin IDs phải là tập không rỗng gồm chuỗi số."
+        )
     try:
         base_decoded, base_mode = decode_aov_resource(base_bytes, resource_name)
         overlay_decoded, overlay_mode = decode_aov_resource(overlay_bytes, resource_name)
@@ -116,20 +128,40 @@ def merge_action_xml(
     merged_into_existing = []
 
     for source_track in overlay_tracks:
-        if not _is_595_track(source_track):
+        source_skin_nodes = list(source_track.iter("SkinOrAvatarList"))
+        if not source_skin_nodes:
             continue
-        name = _normalized_track_name(source_track)
-        key = _track_key(source_track)
+        if not _is_special_track(source_track, target_ids):
+            continue
+        # The supported track schema keeps SkinOrAvatarList as direct children.
+        # Refuse an unknown nested layout instead of moving nodes to a different
+        # event location during the merge.
+        direct_skin_nodes = source_track.findall("SkinOrAvatarList")
+        if len(direct_skin_nodes) != len(source_skin_nodes):
+            raise CommonActionsMergeError(
+                f"{resource_name}: track {_normalized_track_name(source_track)} "
+                "có SkinOrAvatarList lồng ở vị trí chưa được hỗ trợ."
+            )
+        # Only import IDs explicitly assigned to this overlay. Some packs can
+        # contain shared/common track metadata for other actors as well.
+        filtered_track = copy.deepcopy(source_track)
+        for node in list(filtered_track.findall("SkinOrAvatarList")):
+            if node.attrib.get("id") not in target_ids:
+                filtered_track.remove(node)
+        if not filtered_track.findall("SkinOrAvatarList"):
+            continue
+        name = _normalized_track_name(filtered_track)
+        key = _track_key(filtered_track)
         candidates = index.get(key, [])
         if candidates:
             target = candidates[0]
-            was_special = _is_595_track(target)
+            was_special = _is_special_track(target, target_ids)
             existing_nodes = {
                 node.attrib.get("id"): node
                 for node in target.findall("SkinOrAvatarList")
             }
             changed = False
-            for source_node in source_track.findall("SkinOrAvatarList"):
+            for source_node in filtered_track.findall("SkinOrAvatarList"):
                 skin_id = source_node.attrib.get("id")
                 current = existing_nodes.get(skin_id)
                 cloned = copy.deepcopy(source_node)
@@ -157,7 +189,7 @@ def merge_action_xml(
                 already_present.append(name)
             continue
 
-        addition = copy.deepcopy(source_track)
+        addition = filtered_track
         original_name = addition.attrib.get("trackName", "")
         addition.attrib["trackName"] = _unique_track_name(original_name, used_names, next_index)
         addition.attrib.setdefault(
@@ -183,16 +215,16 @@ def merge_action_xml(
         output_by_key.setdefault(key, set()).update(
             node.attrib.get("id")
             for node in track.iter("SkinOrAvatarList")
-            if node.attrib.get("id") in SPECIAL_IDS
+            if node.attrib.get("id") in target_ids
         )
     for source_track in overlay_action.iter("Track"):
-        if not _is_595_track(source_track):
+        if not _is_special_track(source_track, target_ids):
             continue
         key = _track_key(source_track)
         source_ids = {
             node.attrib.get("id")
             for node in source_track.iter("SkinOrAvatarList")
-            if node.attrib.get("id") in SPECIAL_IDS
+            if node.attrib.get("id") in target_ids
         }
         if not source_ids.issubset(output_by_key.get(key, set())):
             raise CommonActionsMergeError(
@@ -204,11 +236,39 @@ def merge_action_xml(
     try:
         output = encode_aov_resource(output_xml, resource_name, base_mode)
         verify_decoded, verify_mode = decode_aov_resource(output, resource_name)
-        ET.fromstring(verify_decoded)
+        verified_root = ET.fromstring(verify_decoded)
+        verified_action = verified_root.find("Action")
+        if verified_action is None:
+            raise CommonActionsMergeError(
+                f"{resource_name}: Action node biến mất sau encode/decode."
+            )
+        verified_by_key: dict[tuple[str, str, str], set[str]] = {}
+        for track in verified_action.iter("Track"):
+            key = _track_key(track)
+            verified_by_key.setdefault(key, set()).update(
+                node.attrib.get("id")
+                for node in track.iter("SkinOrAvatarList")
+                if node.attrib.get("id") in target_ids
+            )
+        for source_track in overlay_action.iter("Track"):
+            source_ids = {
+                node.attrib.get("id")
+                for node in source_track.iter("SkinOrAvatarList")
+                if node.attrib.get("id") in target_ids
+            }
+            if not source_ids:
+                continue
+            key = _track_key(source_track)
+            if not source_ids.issubset(verified_by_key.get(key, set())):
+                raise CommonActionsMergeError(
+                    f"{resource_name}: IDs {sorted(source_ids - verified_by_key.get(key, set()))} "
+                    f"không còn sau round-trip tại track {key[0]}."
+                )
     except (AOVBytesError, ET.ParseError) as exc:
         raise CommonActionsMergeError(f"{resource_name}: không xác minh được XML sau ghép: {exc}") from exc
 
     return output, {
+        "special_ids": sorted(target_ids),
         "base_encoding": base_mode,
         "overlay_encoding": overlay_mode,
         "output_encoding": verify_mode,
@@ -220,8 +280,14 @@ def merge_action_xml(
     }
 
 
-def merge_common_actions_pkg(base_package: bytes, overlay_package: bytes) -> tuple[bytes, dict]:
-    """Retain the base package and selectively merge VTK-gated common action tracks."""
+def merge_common_actions_pkg(
+    base_package: bytes,
+    overlay_package: bytes,
+    *,
+    special_ids: set[str] | None = None,
+    strict_conflicts: bool = False,
+) -> tuple[bytes, dict]:
+    """Retain the base package and selectively merge actor-gated common action tracks."""
     try:
         base_zip = zipfile.ZipFile(io.BytesIO(base_package), "r")
         overlay_zip = zipfile.ZipFile(io.BytesIO(overlay_package), "r")
@@ -241,6 +307,17 @@ def merge_common_actions_pkg(base_package: bytes, overlay_package: bytes) -> tup
     output_buffer = io.BytesIO()
     merged_files = {}
     appended_files = []
+    if strict_conflicts:
+        for name in set(base_entries) & set(overlay_entries):
+            if name in merge_candidates:
+                continue
+            if base_zip.read(base_entries[name]) != overlay_zip.read(overlay_entries[name]):
+                base_zip.close()
+                overlay_zip.close()
+                raise CommonActionsMergeError(
+                    f"{name}: xung đột tệp CommonActions ngoài danh sách XML có parser; "
+                    "không tự chọn bản nền hoặc bản overlay."
+                )
 
     try:
         with zipfile.ZipFile(output_buffer, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as out:
@@ -251,6 +328,7 @@ def merge_common_actions_pkg(base_package: bytes, overlay_package: bytes) -> tup
                         base_data,
                         overlay_zip.read(overlay_entries[name]),
                         name,
+                        special_ids=special_ids,
                     )
                     base_data = merged
                     merged_files[name] = report
@@ -290,5 +368,40 @@ def merge_common_actions_pkg(base_package: bytes, overlay_package: bytes) -> tup
         "output_entries": len(base_entries) + len(appended_files),
         "merged_files": merged_files,
         "appended_files": appended_files,
+        "special_ids": sorted({str(value) for value in (SPECIAL_IDS if special_ids is None else special_ids)}),
+        "strict_conflicts": strict_conflicts,
         "verified": True,
+    }
+
+
+def merge_common_actions_packages(
+    base_package: bytes,
+    overlays: list[tuple[bytes, set[str]]],
+) -> tuple[bytes, dict]:
+    """Sequentially merge several actor-scoped overlays into one CommonActions package.
+
+    Each overlay carries the exact SkinOrAvatarList IDs that its actor pack is
+    allowed to contribute. Non-parser files that collide with an existing path
+    must be byte-identical. This routine does not infer actor IDs from filenames.
+    """
+    if not overlays:
+        raise CommonActionsMergeError("Cần ít nhất một overlay CommonActions.")
+    current = base_package
+    reports = []
+    for index, (overlay_package, special_ids) in enumerate(overlays, start=1):
+        current, report = merge_common_actions_pkg(
+            current,
+            overlay_package,
+            special_ids=set(special_ids),
+            strict_conflicts=True,
+        )
+        reports.append({
+            "overlay_index": index,
+            "special_ids": sorted({str(value) for value in special_ids}),
+            "report": report,
+        })
+    return current, {
+        "overlay_count": len(overlays),
+        "overlay_reports": reports,
+        "verified": all(item["report"]["verified"] for item in reports),
     }
