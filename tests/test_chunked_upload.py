@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import unittest
@@ -225,6 +226,92 @@ class ChunkedUploadEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             main.UPLOAD_SESSIONS[self.upload_id]["files"][0]["received"], 0
         )
+
+    async def test_parallel_protocol_accepts_out_of_order_chunks_and_assembles_file(self):
+        result = await main.start_chunked_upload({
+            "files": [{"name": "parallel.zip", "size": 8}]
+        })
+        upload_id = result["upload_id"]
+        session = main.UPLOAD_SESSIONS[upload_id]
+        path = Path(session["paths"][0])
+        try:
+            self.assertEqual(result["upload_protocol"], "chunk_map_v2")
+            with patch.object(main, "UPLOAD_CHUNK_BYTES", 4):
+                second = await main.upload_chunk(
+                    upload_id, 0, make_request(b"EFGH"), 4, hashlib.sha256(b"EFGH").hexdigest()
+                )
+                self.assertEqual(second["received"], 0)
+                self.assertEqual(second["chunk_index"], 1)
+                self.assertFalse(path.exists())
+                first = await main.upload_chunk(
+                    upload_id, 0, make_request(b"ABCD"), 0, hashlib.sha256(b"ABCD").hexdigest()
+                )
+            self.assertEqual(first["received"], 8)
+            self.assertEqual(first["received_chunks"], 2)
+            self.assertEqual(path.read_bytes(), b"ABCDEFGH")
+            self.assertEqual(session["files"][0]["received_chunk_sha256"], [
+                hashlib.sha256(b"ABCD").hexdigest(),
+                hashlib.sha256(b"EFGH").hexdigest(),
+            ])
+        finally:
+            main.UPLOAD_SESSIONS.pop(upload_id, None)
+            main.shutil.rmtree(session["workdir"], ignore_errors=True)
+
+    async def test_parallel_protocol_retries_are_idempotent_and_conflicts_fail(self):
+        result = await main.start_chunked_upload({
+            "files": [{"name": "parallel-retry.zip", "size": 4}]
+        })
+        upload_id = result["upload_id"]
+        session = main.UPLOAD_SESSIONS[upload_id]
+        try:
+            with patch.object(main, "UPLOAD_CHUNK_BYTES", 4):
+                digest = hashlib.sha256(b"DATA").hexdigest()
+                first = await main.upload_chunk(upload_id, 0, make_request(b"DATA"), 0, digest)
+                retry = await main.upload_chunk(upload_id, 0, make_request(b"DATA"), 0, digest)
+                self.assertTrue(retry["chunk_received"])
+                self.assertEqual(first["received"], retry["received"])
+                with self.assertRaises(HTTPException) as raised:
+                    await main.upload_chunk(upload_id, 0, make_request(b"EVIL"), 0, hashlib.sha256(b"EVIL").hexdigest())
+                self.assertEqual(raised.exception.status_code, 409)
+            self.assertEqual(Path(session["paths"][0]).read_bytes(), b"DATA")
+        finally:
+            main.UPLOAD_SESSIONS.pop(upload_id, None)
+            main.shutil.rmtree(session["workdir"], ignore_errors=True)
+
+    async def test_parallel_protocol_rejects_bad_chunk_hash(self):
+        result = await main.start_chunked_upload({
+            "files": [{"name": "parallel-hash.zip", "size": 4}]
+        })
+        upload_id = result["upload_id"]
+        session = main.UPLOAD_SESSIONS[upload_id]
+        try:
+            with patch.object(main, "UPLOAD_CHUNK_BYTES", 4):
+                with self.assertRaises(HTTPException) as raised:
+                    await main.upload_chunk(upload_id, 0, make_request(b"DATA"), 0, "0" * 64)
+            self.assertEqual(raised.exception.status_code, 422)
+            self.assertFalse(Path(session["paths"][0]).exists())
+        finally:
+            main.UPLOAD_SESSIONS.pop(upload_id, None)
+            main.shutil.rmtree(session["workdir"], ignore_errors=True)
+
+    async def test_parallel_status_reports_out_of_order_received_chunks(self):
+        result = await main.start_chunked_upload({
+            "files": [{"name": "parallel-status.zip", "size": 8}]
+        })
+        upload_id = result["upload_id"]
+        session = main.UPLOAD_SESSIONS[upload_id]
+        try:
+            with patch.object(main, "UPLOAD_CHUNK_BYTES", 4):
+                await main.upload_chunk(upload_id, 0, make_request(b"EFGH"), 4, hashlib.sha256(b"EFGH").hexdigest())
+                status = await main.chunked_upload_status(upload_id)
+            self.assertEqual(status["upload_protocol"], "chunk_map_v2")
+            self.assertEqual(status["files"][0]["received"], 0)
+            self.assertEqual(status["files"][0]["received_chunks"], [
+                {"index": 1, "sha256": hashlib.sha256(b"EFGH").hexdigest()}
+            ])
+        finally:
+            main.UPLOAD_SESSIONS.pop(upload_id, None)
+            main.shutil.rmtree(session["workdir"], ignore_errors=True)
 
 
 if __name__ == "__main__":
