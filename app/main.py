@@ -684,7 +684,14 @@ async def merge_aov_chunked_upload(upload_id: str):
         if adapter_id == "aov_mod_to_mod_vtk_actor595_1.64.1"
         else "Aki-AOV-KPM100-VTK.zip"
     )
+    huanhua_reports = report.get("huanhua_billboard_reports", {}) or {}
+    huanhua_rows_added = sum(
+        len(item.get("appended_keys", []))
+        for item in huanhua_reports.values()
+    )
     result_headers = {
+        "X-AOV-Huanhua-Tables-Merged": str(len(huanhua_reports)),
+        "X-AOV-Huanhua-Actor595-Rows-Added": str(huanhua_rows_added),
         "X-AOV-Validation": "passed" if report.get("validation") else "incomplete",
         "X-AOV-Game-Tested": "true" if report.get("game_tested") else "false",
         "X-AOV-Base-Version": str(report.get("base_version", "unknown")),
