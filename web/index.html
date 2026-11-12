@@ -284,6 +284,29 @@ function renderPreflightDashboard(data){
   }
   root.append(metrics);
 
+  const preservation=dashboardElement('section','preflight-group');
+  preservation.append(dashboardElement('h3','','BẢNG ƯU TIÊN BẢO TOÀN MOD'));
+  const preservationGrid=dashboardElement('div','preflight-sources');
+  const preservationGroups=[
+    'Thông báo hạ gục / billboard',
+    'Hiệu ứng / hoạt ảnh / biến về',
+    'Giao diện / nút bấm / biểu tượng',
+    'Âm thanh'
+  ];
+  for(const group of preservationGroups){
+    const items=(analysis.important_paths||[]).filter(item=>item.priority_group===group);
+    const blocked=items.filter(item=>['VERSION_CONFLICT','NEEDS_RULE','UNSUPPORTED'].includes(item.status));
+    const card=dashboardElement('div','preflight-source');
+    card.append(dashboardElement('strong','',group));
+    let stateText='CHƯA ĐỦ DỮ LIỆU ĐỂ KẾT LUẬN';
+    if(items.length&&blocked.length)stateText='CÓ '+blocked.length+' MỤC CẦN XỬ LÝ';
+    else if(items.length)stateText='CÁC MỤC LIỆT KÊ ĐANG TRÙNG BYTE';
+    card.append(dashboardElement('span','',stateText));
+    card.append(dashboardElement('span','','Số mục xung đột trong báo cáo: '+items.length+'. Báo cáo tĩnh không chứng minh đã giữ hiệu ứng trong game.'));
+    preservationGrid.append(card);
+  }
+  preservation.append(preservationGrid);root.append(preservation);
+
   const sources=dashboardElement('section','preflight-group');
   sources.append(dashboardElement('h3','','CÁC MOD ĐÃ NHẬN DIỆN'));
   const sourceGrid=dashboardElement('div','preflight-sources');
