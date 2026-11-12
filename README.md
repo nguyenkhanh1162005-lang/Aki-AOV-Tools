@@ -52,6 +52,8 @@ Chọn các ZIP 9 skin, 10 skin, Tamyn và các phần VTK rồi bấm **Phân l
 
 Đây là bước nhận diện, không phải bộ ghép nhiều MOD. Hiện adapter wrapper chỉ nhận đúng một MOD nền 10 skin cùng VTK Actor 595 phiên bản đã ghim. Khi có nhiều wrapper (ví dụ 9 skin + 10 skin), Tamyn/Actor khác hoặc xung đột chưa có parser/serializer tương ứng, web sẽ báo blocker và không tự chọn nền, ghi đè hay xuất ZIP. Cần hoàn tất adapter riêng cho từng loại tài nguyên và fixture kiểm thử trước khi bật ghép nhiều MOD.
 
+Báo cáo đối chiếu xung đột còn gắn **gợi ý adapter theo đúng đường dẫn**: CommonActions XML/track (hỗ trợ có giới hạn), IFix và MSES (chỉ theo adapter/allowlist đã khóa), ZIP lồng KernelLua/StableSystems (chỉ union path không xung đột), Packer/Verification metadata (chỉ VTK adapter hiện tại), Unity AssetBundle và Wwise BNK (inspect-only), AssetRef/package actor (cần parser và kiểm tra dependency). Đây là hướng xử lý tiếp theo, không cấp quyền ghép và không đồng nghĩa các parser hiện có tương thích mọi MOD.
+
 ### Nhận diện bộ nguồn P9 + P10 + TM + VTK
 
 Web preflight cũng hiển thị riêng bộ mục tiêu gồm đúng sáu ZIP: P9 (9 skin, camera xa 30%), P10 (10 skin, camera xa 30%), TM Tamyn - Robot, VTK Part 1, Part 2 và Part 3. Nhãn P9/P10/TM có thể dựa trên tên file hoặc dấu hiệu Actor 593; ba phần VTK chỉ được nhóm khi tên Part 1–3 đi kèm bằng chứng Actor 595 và HeroSkin_2 trong cả bộ đầu vào. Báo cáo nêu rõ cơ sở nhận diện và file còn thiếu/trùng vai trò.
