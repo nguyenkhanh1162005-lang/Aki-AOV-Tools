@@ -22,6 +22,24 @@ def main() -> int:
         if not Path(path).is_file():
             raise SystemExit(f"Missing integration input: {path}")
 
+    # Print a compact archive inventory before adapter selection so wrapper
+    # detection failures can be diagnosed against the actual pinned ZIP layout.
+    for path in (base_path, vtk_path):
+        with zipfile.ZipFile(path, "r") as archive:
+            names = [info.filename for info in archive.infolist() if not info.is_dir()]
+            relevant = [
+                name for name in names
+                if any(token in name.casefold() for token in (
+                    "resources", "skin", "danhsach", "heroskin", "595", "lixin"
+                ))
+            ]
+            print(json.dumps({
+                "input": Path(path).name,
+                "entry_count": len(names),
+                "first_entries": names[:30],
+                "relevant_entries": relevant[:100],
+            }, ensure_ascii=False, indent=2), flush=True)
+
     report = merge_aov_archives([base_path, vtk_path], output_path)
     output = Path(output_path)
     if not output.is_file() or output.stat().st_size <= 0:
