@@ -80,7 +80,12 @@ def merge_action_xml(
     *,
     special_ids: set[str] | None = None,
 ) -> tuple[bytes, dict]:
-    """Merge actor-gated tracks by full event signature without dropping same-name variants."""
+    """Merge only explicitly actor-gated CommonActions tracks.
+
+    This parser supports direct-child SkinOrAvatarList gates only. Condition-index
+    based CheckSkinIdTick logic used by some MOD packs is a separate format and
+    must not be treated as equivalent to these explicit skin-list gates.
+    """
     target_ids = {str(value) for value in (SPECIAL_IDS if special_ids is None else special_ids)}
     if not target_ids or any(not value.isdigit() for value in target_ids):
         raise CommonActionsMergeError(
