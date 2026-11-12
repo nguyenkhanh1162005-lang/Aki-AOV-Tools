@@ -49,6 +49,60 @@ def _new_upload_workdir(prefix: str) -> Path:
     return Path(tempfile.mkdtemp(prefix=prefix, dir=str(UPLOAD_STORAGE_DIR) if UPLOAD_STORAGE_DIR else None))
 
 
+def _chunk_part_path(workdir: Path, file_index: int, chunk_index: int) -> Path:
+    return workdir / (".aki-chunk-{}-{}.part".format(file_index, chunk_index))
+
+def _sha256_file_range(path: Path, offset: int, length: int) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        stream.seek(offset)
+        remaining = length
+        while remaining:
+            block = stream.read(min(1024 * 1024, remaining))
+            if not block:
+                raise ValueError("incomplete chunk data")
+            digest.update(block)
+            remaining -= len(block)
+    return digest.hexdigest()
+
+def _contiguous_chunk_bytes(chunk_map: dict[str, str], size: int) -> tuple[int, list[str]]:
+    expected_chunks = (size + UPLOAD_CHUNK_BYTES - 1) // UPLOAD_CHUNK_BYTES
+    hashes: list[str] = []
+    for index in range(expected_chunks):
+        digest = chunk_map.get(str(index))
+        if not digest:
+            break
+        hashes.append(digest)
+    received = min(len(hashes) * UPLOAD_CHUNK_BYTES, size)
+    if len(hashes) == expected_chunks:
+        received = size
+    return received, hashes
+
+def _assemble_parallel_chunks(workdir: Path, destination: Path, file_size: int, chunk_map: dict[str, str], file_index: int) -> None:
+    expected_chunks = (file_size + UPLOAD_CHUNK_BYTES - 1) // UPLOAD_CHUNK_BYTES
+    if len(chunk_map) != expected_chunks or any(str(index) not in chunk_map for index in range(expected_chunks)):
+        raise ValueError("parallel upload is missing one or more chunks")
+    fd, temporary_name = tempfile.mkstemp(prefix=".{}-".format(destination.name), suffix=".assembling", dir=str(workdir))
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            for index in range(expected_chunks):
+                part_path = _chunk_part_path(workdir, file_index, index)
+                expected_length = min(UPLOAD_CHUNK_BYTES, file_size - index * UPLOAD_CHUNK_BYTES)
+                if not part_path.is_file() or part_path.stat().st_size != expected_length:
+                    raise ValueError("parallel upload chunk {} is missing or truncated".format(index))
+                digest = _sha256_file_range(part_path, 0, expected_length)
+                if digest != chunk_map[str(index)]:
+                    raise ValueError("parallel upload chunk {} failed SHA-256 verification".format(index))
+                with part_path.open("rb") as source:
+                    shutil.copyfileobj(source, output, length=1024 * 1024)
+            output.flush()
+            os.fsync(output.fileno())
+        if temporary.stat().st_size != file_size:
+            raise ValueError("assembled upload size does not match the declared file size")
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 def _persist_upload_session(upload_id: str, session: dict) -> None:
     if UPLOAD_STORAGE_DIR is None:
         return
