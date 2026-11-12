@@ -11,7 +11,8 @@ Công cụ web và Telegram bot dùng chung bộ xử lý ZIP, kiểm kê cấu 
 - Web API `/api/drive/import`: tải ZIP từ link Google Drive công khai trực tiếp về máy chủ, tối đa 10 link và tổng 500 MB.
 - Web API `/api/upload/{upload_id}/aov-merge`: dùng cùng pipeline chọn adapter; hỗ trợ đúng cặp ZIP KPM100 trực tiếp + VTK iOS đã ghim SHA-256.
 - Web API `/api/upload/{upload_id}/decode-bytes`: giải mã các tài nguyên `.bytes` AoV AES/Zstandard đã nhận diện từ ZIP đã tải lên; hỗ trợ ZIP `Resources.zip` lồng nhau và bung tiếp ZIP bên trong `.pkg.bytes` đã giải mã (tối đa hai tầng), xuất ZIP riêng cùng `decode-report.json`, không sửa ZIP gốc và không ghép tài nguyên.
-- Telegram: `/inspect`, `/merge`, `/aovmerge`, `/clear`, `/status`. Cả `/merge` và `/aovmerge` đều gọi chung production pipeline `merge_mod_archives`; không còn đường ghép AOV cũ bỏ qua kiểm tra adapter.
+- Web API `/api/upload/{upload_id}/notice-scan`: quét chỉ đọc các chuỗi liên quan thông báo trong Lua/XML/JSON/TXT/config/CSV và `.bytes` đã giải mã; trả đường dẫn, từ khóa, đoạn trích ngắn; giữ nguyên phiên tải và file gốc.
+- Telegram: `/inspect`, `/compatibility`, `/findnotice`, `/decodebytes`, `/merge`, `/aovmerge`, `/clear`, `/status`. `/findnotice` dùng cùng bộ quét read-only; `/decodebytes` gửi ZIP phân tích; `/merge` và `/aovmerge` cùng gọi production pipeline `merge_mod_archives`.
 
 ## Giải mã tài nguyên AoV `.bytes` trên web
 
@@ -21,6 +22,11 @@ Bộ lõi MSES v7 có parser, serializer, kiểm tra checksum và ghép theo kh�
 
 Giới hạn: tối đa 20.000 entry, 1 GiB dữ liệu giải nén, 256 MiB mỗi entry và 256 MiB kích thước giải mã khai báo cho mỗi tài nguyên. Chức năng này chỉ trích xuất payload đã giải mã để kiểm tra/phân tích; không sửa MSES/IFix, không giải mã Unity AssetBundle hoặc Wwise BNK, không ghép skin và không tạo ZIP có thể cài vào game.
 
+## Quét thông báo khởi động (chỉ đọc)
+
+Trên web dùng nút **Quét thông báo khởi động**; trên Telegram dùng `/findnotice`. Bộ quét giải mã các `.bytes` đã hỗ trợ, bung ZIP package lồng nhau và dò từ khóa trong Lua/XML/JSON/TXT/INI/CFG/CSV cùng nội dung `.bytes` dạng văn bản. Kết quả gồm package/path, nhóm từ khóa, encoding và một đoạn trích giới hạn; ZIP nguồn và phiên tải vẫn được giữ nguyên.
+
+Đây là quét heuristic để tìm ứng viên, không chứng minh một chuỗi là popup đang hiển thị. Unity AssetBundle, payload nhị phân opaque và định dạng không giải mã được không được quét. Không tự xóa hoặc ghi đè tài nguyên chỉ vì một từ khóa xuất hiện. Cần đối chiếu script và kiểm tra trong game trước khi tạo bản sửa.
 ## Bộ ghép KPM100 iOS + Vấn Tâm Kiếm VTK
 
 **Adapter đang bật có giới hạn phiên bản** cho đúng hai archive nguồn đã kiểm tra:
