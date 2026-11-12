@@ -128,6 +128,59 @@ class ModPipelineTests(unittest.TestCase):
                 "aov_mod_to_mod_vtk_actor595_1.64.1",
             )
 
+    def test_kpm100_direct_base_and_pinned_vtk_select_dedicated_adapter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            base = self._zip(folder, "kpm100.zip", {
+                "Resources/1.64.1/Thanos/HeroSkin_1.bytes": b"base-ifix",
+                "Resources/1.64.1/Mod_by_Youtube_KHAM-PHA-MOBILE/KPM_MOD_0123456789ABCDEF": b"payload",
+            })
+            vtk = self._zip(folder, "vtk.zip", {
+                "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"vtk-ifix",
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"actor595",
+            })
+            profiles = [_archive_profile(base), _archive_profile(vtk)]
+            self.assertEqual(profiles[0]["source_role"], "aov_kpm100_direct_base_candidate")
+            self.assertEqual(profiles[1]["source_role"], "aov_actor595_mod_candidate")
+            self.assertEqual(
+                _select_adapter(profiles),
+                "aov_kpm100_vtk_actor595_1.64.1",
+            )
+
+    def test_unpinned_kpm100_pair_fails_by_hash_before_creating_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            base = self._zip(folder, "kpm100.zip", {
+                "Resources/1.64.1/Thanos/HeroSkin_1.bytes": b"base-ifix",
+                "Resources/1.64.1/Mod_by_Youtube_KHAM-PHA-MOBILE/KPM_MOD_0123456789ABCDEF": b"payload",
+            })
+            vtk = self._zip(folder, "vtk.zip", {
+                "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"vtk-ifix",
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"actor595",
+            })
+            output = folder / "candidate.zip"
+            with self.assertRaisesRegex(ModPipelineError, "SHA-256 KPM100 gốc không khớp"):
+                merge_mod_archives([base, vtk], str(output))
+            self.assertFalse(output.exists())
+
+    def test_unverified_10skin_wrapper_adapter_remains_blocked_in_backend(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            mod_pack = self._zip(folder, "10-skin-mod.zip", {
+                "Resources.zip": b"nested mod resources",
+                "DanhSachSkin.txt": b"skin mod list",
+            })
+            ifix_part = self._zip(folder, "vtk-ifix-part.zip", {
+                "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"VTK IFix payload",
+            })
+            asset_part = self._zip(folder, "vtk-assets-part.zip", {
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"Actor 595 bundle",
+            })
+            output = folder / "blocked.zip"
+            with self.assertRaisesRegex(ModPipelineError, "blocked_pending_wrapper_pair_integration"):
+                merge_mod_archives([mod_pack, ifix_part, asset_part], str(output))
+            self.assertFalse(output.exists())
+
     def test_unknown_aov_resource_pack_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
