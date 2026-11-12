@@ -564,6 +564,11 @@ class ModPipelineTests(unittest.TestCase):
             analysis = report["resource_analysis"]
             self.assertTrue(analysis["available"])
             self.assertFalse(analysis["merge_authorized"])
+            gates = {item["id"]: item for item in analysis["preservation_gates"]}
+            self.assertEqual(gates["audio"]["path_count"], 1)
+            self.assertEqual(gates["audio"]["unresolved_count"], 1)
+            self.assertFalse(gates["audio"]["merge_authorized"])
+            self.assertEqual(gates["ui_buttons"]["path_count"], 1)
             self.assertGreaterEqual(analysis["summary"]["NEEDS_RULE"], 1)
             self.assertGreaterEqual(analysis["summary"]["IDENTICAL_DUPLICATE"], 1)
             by_path = {item["path"]: item for item in analysis["important_paths"]}
