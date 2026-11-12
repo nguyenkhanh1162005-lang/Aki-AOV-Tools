@@ -32,6 +32,22 @@ class IFixMergerTests(unittest.TestCase):
         encoded = serialize_ifix_patch(patch)
         self.assertEqual(serialize_ifix_patch(parse_ifix_patch(encoded)), encoded)
 
+    def test_opcode_89_newarr_type_operand_is_remapped_and_roundtrips(self):
+        base = make_patch("BaseFix", "BaseType", "base-string", "baseField")
+        incoming = make_patch("IncomingFix", "IncomingType", "incoming-string", "incomingField")
+        incoming["methods"][0]["inst"] = [
+            (89, 0),   # Newarr, InlineType operand (verified in tools/ifix_parse.py)
+            (103, 0),  # Ret
+        ]
+
+        merged = merge_ifix_patches(base, incoming)
+        self.assertEqual(merged["methods"][1]["inst"], [(89, 1), (103, 0)])
+
+        encoded = serialize_ifix_patch(merged)
+        reparsed = parse_ifix_patch(encoded)
+        self.assertEqual(serialize_ifix_patch(reparsed), encoded)
+        self.assertEqual(reparsed["methods"][1]["inst"], [(89, 1), (103, 0)])
+
     def test_merge_remaps_all_referenced_tables(self):
         base = make_patch("BaseFix", "BaseType", "base-string", "baseField")
         incoming = make_patch("IncomingFix", "IncomingType", "incoming-string", "incomingField")
