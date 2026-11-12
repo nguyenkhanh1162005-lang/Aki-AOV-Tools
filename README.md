@@ -1,6 +1,6 @@
 # Aki AOV Tools
 
-Công cụ web và Telegram bot dùng chung bộ xử lý ZIP, kiểm kê cấu trúc và bộ ghép tài nguyên Liên Quân iOS theo phiên bản.
+Công cụ web tiếng Việt để tải, kiểm tra cấu trúc, đối chiếu tương thích và xử lý các gói tài nguyên Liên Quân iOS theo adapter đã xác minh. Tài liệu này tập trung vào web; Telegram bot nằm ngoài phạm vi triển khai hiện tại.
 
 ## Tính năng
 - Web UI tiếng Việt, dùng được trên điện thoại.
@@ -12,7 +12,6 @@ Công cụ web và Telegram bot dùng chung bộ xử lý ZIP, kiểm kê cấu 
 - Web API `/api/upload/{upload_id}/aov-merge`: dùng cùng pipeline chọn adapter; hỗ trợ đúng cặp ZIP KPM100 trực tiếp + VTK iOS đã ghim SHA-256.
 - Web API `/api/upload/{upload_id}/decode-bytes`: giải mã các tài nguyên `.bytes` AoV AES/Zstandard đã nhận diện từ ZIP đã tải lên; hỗ trợ ZIP `Resources.zip` lồng nhau và bung tiếp ZIP bên trong `.pkg.bytes` đã giải mã (tối đa hai tầng), xuất ZIP riêng cùng `decode-report.json`, không sửa ZIP gốc và không ghép tài nguyên.
 - Web API `/api/upload/{upload_id}/notice-scan`: quét chỉ đọc các chuỗi liên quan thông báo trong Lua/XML/JSON/TXT/config/CSV và `.bytes` đã giải mã; trả đường dẫn, từ khóa, đoạn trích ngắn; giữ nguyên phiên tải và file gốc.
-- Telegram: `/inspect`, `/compatibility`, `/findnotice`, `/decodebytes`, `/merge`, `/aovmerge`, `/clear`, `/status`. `/findnotice` dùng cùng bộ quét read-only; `/decodebytes` gửi ZIP phân tích; `/merge` và `/aovmerge` cùng gọi production pipeline `merge_mod_archives`.
 
 ## Giải mã tài nguyên AoV `.bytes` trên web
 
@@ -24,9 +23,9 @@ Giới hạn: tối đa 20.000 entry, 1 GiB dữ liệu giải nén, 256 MiB m�
 
 ## Quét thông báo khởi động (chỉ đọc)
 
-Trên web dùng nút **Quét thông báo khởi động**; trên Telegram dùng `/findnotice`. Bộ quét giải mã các `.bytes` đã hỗ trợ, bung ZIP package lồng nhau và dò từ khóa trong Lua/XML/JSON/TXT/INI/CFG/CSV cùng nội dung `.bytes` dạng văn bản. Kết quả gồm package/path, nhóm từ khóa, encoding và một đoạn trích giới hạn; ZIP nguồn và phiên tải vẫn được giữ nguyên.
+Trên web dùng nút **Quét thông báo khởi động**; sau khi quét, có thể tải riêng `aki-aov-notice-scan-report.json`. Bộ quét chỉ đọc, giải mã các `.bytes` đã hỗ trợ, bung ZIP package lồng nhau và dò từ khóa trong Lua/XML/JSON/TXT/INI/CFG/CSV cùng metadata object của UnityFS AssetBundle (MonoBehaviour, TextAsset, ScriptableObject; giới hạn 64 MiB/bundle và 500 object). Chế độ quét không tạo ZIP tạm, giới hạn 256 MiB dữ liệu đã giải mã và giữ nguyên ZIP nguồn.
 
-Đây là quét heuristic để tìm ứng viên, không chứng minh một chuỗi là popup đang hiển thị. Unity AssetBundle, payload nhị phân opaque và định dạng không giải mã được không được quét. Không tự xóa hoặc ghi đè tài nguyên chỉ vì một từ khóa xuất hiện. Cần đối chiếu script và kiểm tra trong game trước khi tạo bản sửa.
+Đây là quét heuristic để tìm ứng viên, không chứng minh chuỗi tìm được là popup đang hiển thị. Bundle vượt giới hạn, payload nhị phân opaque và định dạng không giải mã được có thể bị bỏ qua; báo cáo nêu rõ số AssetBundle đã quét/bỏ qua và lý do. Không tự xóa hoặc ghi đè tài nguyên chỉ vì một từ khóa xuất hiện. Cần đối chiếu object/script và kiểm tra trong game trước khi tạo bản sửa.
 ## Bộ ghép KPM100 iOS + Vấn Tâm Kiếm VTK
 
 **Adapter đang bật có giới hạn phiên bản** cho đúng hai archive nguồn đã kiểm tra:
@@ -59,45 +58,18 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 Mở http://localhost:8000
 
-## Chạy Telegram bot
-Thiết lập biến môi trường `BOT_TOKEN` trong phần Secrets của nền tảng triển khai. Không commit token vào GitHub.
-```bash
-python bot.py
-```
-
-### Giới hạn file Telegram
-- Bot API mặc định chỉ tải được file tối đa 20 MB.
-- Để nhận ZIP VTK khoảng 141 MB và gửi ZIP kết quả lớn, cần Local Bot API Server với cờ `--local`.
-- Khi đã có Local Bot API Server, thêm hai biến môi trường vào dịch vụ bot:
-  - `TELEGRAM_API_BASE_URL=http://<host-noi-bo>:8081/bot`
-  - `TELEGRAM_FILE_BASE_URL=http://<host-noi-bo>:8081/file/bot`
-- Hai URL phải trỏ tới Local Bot API Server có thể truy cập từ bot. Không dùng URL ví dụ nếu chưa triển khai server.
-- Local Bot API Server cần `TELEGRAM_API_ID` và `TELEGRAM_API_HASH` lấy từ https://my.telegram.org. Không đưa các giá trị này lên GitHub.
-- Trước khi chuyển bot từ Bot API chính thức sang Local Bot API Server, gọi `logOut` trên Bot API chính thức, dừng worker cũ, rồi mới đổi URL và khởi động worker mới.
-- Khi bật Local Bot API theo cấu hình hiện tại: tối đa 500 MB mỗi ZIP, tổng đầu vào 500 MB, tối đa 10 ZIP và giới hạn gửi ZIP kết quả 500 MB. Máy chủ vẫn cần đủ RAM và dung lượng ổ đĩa tạm.
-
-## Triển khai web + Telegram với Local Bot API
-
-Để bot nhận ZIP lớn (như các phần VTK hơn 20 MB) và gửi ZIP kết quả lớn, có thể dùng Docker Compose trên VPS có Docker. Cấu hình mẫu chạy web, bot worker và Local Bot API trong cùng mạng riêng:
-
-```sh
-cp .env.example .env
-# Điền BOT_TOKEN, TELEGRAM_API_ID và TELEGRAM_API_HASH trong .env
-docker compose -f docker-compose.local-bot-api.yml up -d --build
-```
-
-Đọc [hướng dẫn triển khai Local Bot API](docs/telegram-local-api.md) trước khi chuyển bot từ máy chủ Telegram mặc định. Phải dừng worker cũ và gọi `logOut` đúng quy trình; không chạy hai polling worker cùng một bot. Không đưa file `.env` lên GitHub.
-
 ## Nhập ZIP từ Google Drive
-- Để ghép AOV qua web hoặc Telegram, dùng đúng 2 ZIP KPM100 iOS 1.64.1.12 và VTK iOS 1.64.1.11 đã ghim SHA-256. Wrapper MOD 10 skin có `Resources.zip` + `DanhSachSkin.txt` vẫn bị khóa; không gửi nhầm bộ đó để ghép.
+- Trên web, để ghép AOV, dùng đúng 2 ZIP KPM100 iOS 1.64.1.12 và VTK iOS 1.64.1.11 đã ghim SHA-256. Wrapper MOD 10 skin có `Resources.zip` + `DanhSachSkin.txt` vẫn bị khóa; không gửi nhầm bộ đó để ghép.
 - File phải bật quyền “Bất kỳ ai có đường liên kết”.
 - Chỉ nhận link `drive.google.com` hoặc `docs.google.com`; máy chủ tự tải file, giới hạn 500 MB mỗi ZIP và tổng 500 MB.
 - Sau khi tải và kiểm tra, dùng nút ghép AOV chuyên sâu trước khi phiên upload hết hạn (1 giờ).
 
-## Triển khai
-- Web: triển khai riêng bằng Dockerfile hiện có.
-- Telegram bot: triển khai như worker riêng, lệnh chạy `python bot.py`, có biến `BOT_TOKEN`.
-- Local Bot API Server: dịch vụ riêng, cần Docker và ổ đĩa đủ lớn. Worker bot phải truy cập được server qua mạng nội bộ hoặc URL riêng an toàn.
+## Triển khai web
+- Build bằng Dockerfile hiện có; ứng dụng FastAPI lắng nghe cổng `8000`.
+- Health check: `GET /health`.
+- Kiểm tra phạm vi adapter trước khi dùng: `GET /api/capabilities`.
+- Phiên tải mặc định nằm trên filesystem tạm và bộ nhớ tiến trình. Nếu bật persistent disk, đặt `AOV_UPLOAD_STORAGE_DIR` theo mount path có quyền ghi; ứng dụng hiện yêu cầu một Uvicorn worker để giữ session nhất quán.
+- Không bật adapter chỉ dựa vào CI xanh. `game_tested` chỉ được true sau khi có xác nhận thử nghiệm thật trong Liên Quân iOS.
 
 ## Giới hạn và xác minh
 - CI chạy unit tests và kiểm tra cú pháp Python.
