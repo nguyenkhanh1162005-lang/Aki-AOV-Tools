@@ -231,6 +231,79 @@ class ModPipelineTests(unittest.TestCase):
                     archive.namelist(), ["validated-candidate.txt"]
                 )
 
+    def test_source_family_hints_and_actor_action_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            p9 = self._zip(folder, "IOS-Pack 9 Skin Cam xa 30%.zip", {
+                "Resources.zip": b"nested resources",
+                "DanhSachSkin.txt": b"nine skins",
+            })
+            p10 = self._zip(folder, "IOS-Pack 10 Skin Cam xa 30%.zip", {
+                "Resources.zip": b"nested resources",
+                "DanhSachSkin.txt": b"ten skins",
+            })
+            tamyn = self._zip(folder, "TM Tamyn Robot.zip", {
+                "Resources/1.64.1/Ages/Prefab_Characters/Prefab_Hero/Actor_593_Actions.pkg.bytes": b"actor actions",
+                "Resources/1.64.1/assetbundle/battle/hero/593_machao_battle_base.assetbundle": b"actor bundle",
+            })
+
+            p9_profile = _archive_profile(p9)
+            p10_profile = _archive_profile(p10)
+            tm_profile = _archive_profile(tamyn)
+
+            self.assertEqual(p9_profile["source_family_hint"], "P9")
+            self.assertEqual(p9_profile["source_family_basis"], "filename_hint")
+            self.assertEqual(p10_profile["source_family_hint"], "P10")
+            self.assertEqual(tm_profile["source_family_hint"], "TM")
+            self.assertEqual(tm_profile["source_family_basis"], "resource_signature")
+            self.assertEqual(tm_profile["actor_action_ids"], ["593"])
+            self.assertEqual(tm_profile["source_role"], "aov_actor593_mod_candidate")
+
+    def test_requested_six_archive_set_groups_three_vtk_parts_but_never_authorizes_merge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            p9 = self._zip(folder, "IOS-Pack 9 Skin Cam xa 30%.zip", {
+                "Resources.zip": b"p9 resources",
+                "DanhSachSkin.txt": b"p9 skins",
+            })
+            p10 = self._zip(folder, "IOS-Pack 10 Skin Cam xa 30%.zip", {
+                "Resources.zip": b"p10 resources",
+                "DanhSachSkin.txt": b"p10 skins",
+            })
+            tm = self._zip(folder, "TM Tamyn Robot.zip", {
+                "Resources/1.64.1/Ages/Prefab_Characters/Prefab_Hero/Actor_593_Actions.pkg.bytes": b"actor 593 actions",
+                "Resources/1.64.1/assetbundle/battle/hero/593_machao_battle_base.assetbundle": b"actor 593 bundle",
+            })
+            vtk1 = self._zip(folder, "Part1.zip", {
+                "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"vtk ifix part",
+            })
+            vtk2 = self._zip(folder, "Part2.zip", {
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"actor 595 main",
+            })
+            vtk3 = self._zip(folder, "Part3.zip", {
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base_low.assetbundle": b"actor 595 low",
+            })
+
+            report = analyze_aov_input_set([p9, p10, tm, vtk1, vtk2, vtk3])
+            target_set = report["target_set"]
+            counts = {item["id"]: item["count"] for item in target_set["sources"]}
+
+            self.assertTrue(target_set["input_set_complete"])
+            self.assertEqual(target_set["detected_archive_count"], 6)
+            self.assertEqual(counts, {
+                "P9": 1,
+                "P10": 1,
+                "TM": 1,
+                "VTK_PART_1": 1,
+                "VTK_PART_2": 1,
+                "VTK_PART_3": 1,
+            })
+            self.assertTrue(target_set["vtk_parts_grouped_by_actor595_signature"])
+            self.assertFalse(target_set["merge_supported"])
+            self.assertIn("593", report["actor_asset_ids"])
+            self.assertIn("595", report["actor_asset_ids"])
+            self.assertFalse(report["ready_to_merge"])
+
     def test_multi_mod_preflight_reports_multiple_wrappers_and_actor_ids(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
