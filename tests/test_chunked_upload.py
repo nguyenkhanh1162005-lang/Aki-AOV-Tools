@@ -70,8 +70,10 @@ class ChunkedUploadEndpointTests(unittest.IsolatedAsyncioTestCase):
             main._persist_upload_session("a" * 32, session)
         with patch.object(main, "UPLOAD_TTL_SECONDS", 3600), patch("app.main.time.time", return_value=1100):
             restored = main._load_persistent_upload_sessions(storage)
-        self.assertEqual(restored["a" * 32]["files"][0]["received"], 4)
-        self.assertEqual(Path(restored["a" * 32]["paths"][0]).read_bytes(), b"part")
+        # Legacy interrupted chunks have no persisted inline hash and are
+        # restarted rather than resumed from unverified bytes.
+        self.assertEqual(restored["a" * 32]["files"][0]["received"], 0)
+        self.assertEqual(Path(restored["a" * 32]["paths"][0]).read_bytes(), b"")
 
     def test_persistent_session_rejects_path_traversal_metadata(self):
         storage = Path(self.temp.name) / "persistent"

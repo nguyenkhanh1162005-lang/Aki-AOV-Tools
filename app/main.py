@@ -175,9 +175,32 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
                     ))
                 ):
                     raise ValueError("invalid chunk hashes")
+                received_chunk_hashes = item.get("received_chunk_sha256", [])
+                expected_received_chunks = (
+                    received + UPLOAD_CHUNK_BYTES - 1
+                ) // UPLOAD_CHUNK_BYTES
+                if (
+                    not isinstance(received_chunk_hashes, list)
+                    or len(received_chunk_hashes) > expected_received_chunks
+                    or not all(
+                        isinstance(value, str)
+                        and len(value) == 64
+                        and all(ch in "0123456789abcdef" for ch in value)
+                        for value in received_chunk_hashes
+                    )
+                ):
+                    raise ValueError("invalid received chunk hashes")
+                # A disk write without its atomic metadata update is not a
+                # resumable chunk. Restart that file rather than trust it.
+                if received and len(received_chunk_hashes) != expected_received_chunks:
+                    received = 0
+                    received_chunk_hashes = []
+                    if file_path.exists():
+                        file_path.write_bytes(b"")
                 clean_files.append({
                     "name": name, "size": size, "received": received,
                     "chunk_sha256": chunk_hashes,
+                    "received_chunk_sha256": received_chunk_hashes,
                 })
                 safe_paths.append(str(file_path))
             if total > MAX_INPUT_BYTES or upload_id in restored:
@@ -268,18 +291,21 @@ async def start_chunked_upload(payload: dict = Body(...)):
             chunk_hashes = []
         elif (
             not isinstance(chunk_hashes, list)
-            or len(chunk_hashes) != expected_chunks
-            or not all(
-                isinstance(value, str)
-                and len(value) == 64
-                and all(ch in "0123456789abcdef" for ch in value)
-                for value in chunk_hashes
-            )
+            or (chunk_hashes and (
+                len(chunk_hashes) != expected_chunks
+                or not all(
+                    isinstance(value, str)
+                    and len(value) == 64
+                    and all(ch in "0123456789abcdef" for ch in value)
+                    for value in chunk_hashes
+                )
+            ))
         ):
             raise HTTPException(400, "SHA-256 từng khối không hợp lệ.")
         clean_files.append({
             "name": name, "size": size, "received": 0,
             "chunk_sha256": chunk_hashes,
+            "received_chunk_sha256": [],
         })
     if total > MAX_INPUT_BYTES:
         raise HTTPException(413, "Tổng dung lượng ZIP vượt quá 500 MB.")
@@ -308,7 +334,12 @@ async def chunked_upload_status(upload_id: str):
         "upload_id": upload_id,
         "chunk_size": UPLOAD_CHUNK_BYTES,
         "files": [
-            {"name": item["name"], "size": item["size"], "received": item["received"]}
+            {
+                "name": item["name"],
+                "size": item["size"],
+                "received": item["received"],
+                "received_chunk_sha256": item.get("received_chunk_sha256", []),
+            }
             for item in session["files"]
         ],
         "expires_in_seconds": UPLOAD_TTL_SECONDS,
@@ -316,7 +347,13 @@ async def chunked_upload_status(upload_id: str):
 
 
 @app.put("/api/upload/{upload_id}/{file_index}")
-async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_offset: int = Header(..., alias="X-Chunk-Offset")):
+async def upload_chunk(
+    upload_id: str,
+    file_index: int,
+    request: Request,
+    chunk_offset: int = Header(..., alias="X-Chunk-Offset"),
+    chunk_sha256: str | None = Header(None, alias="X-Chunk-SHA256"),
+):
     session = _get_upload_session(upload_id)
     if chunk_offset < 0:
         raise HTTPException(400, "Vị trí khối tải lên không hợp lệ.")
@@ -331,6 +368,26 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
     chunk = bytes(chunk_buffer)
     if not chunk:
         raise HTTPException(400, "Kích thước khối tải lên không hợp lệ.")
+    actual_chunk_sha256 = hashlib.sha256(chunk).hexdigest()
+    # Direct Python callers in the test suite receive FastAPI's Header object
+    # as the default; only an actual string is a supplied HTTP header value.
+    if not isinstance(chunk_sha256, str):
+        chunk_sha256 = None
+    if chunk_sha256 is not None:
+        if (
+            len(chunk_sha256) != 64
+            or any(ch not in "0123456789abcdef" for ch in chunk_sha256)
+        ):
+            raise HTTPException(400, "SHA-256 khối tải lên không đúng định dạng.")
+        if chunk_offset % UPLOAD_CHUNK_BYTES != 0:
+            raise HTTPException(400, "Vị trí khối tải lên không đúng ranh giới.")
+        expected_length = min(
+            UPLOAD_CHUNK_BYTES, item["size"] - chunk_offset
+        )
+        if expected_length <= 0 or len(chunk) != expected_length:
+            raise HTTPException(400, "Kích thước khối tải lên không đúng.")
+        if actual_chunk_sha256 != chunk_sha256:
+            raise HTTPException(422, "SHA-256 khối tải lên không khớp; hãy gửi lại khối.")
     offset = item["received"]
     chunk_hashes = item.get("chunk_sha256", [])
     if chunk_hashes:
@@ -342,7 +399,7 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
         expected_length = min(UPLOAD_CHUNK_BYTES, item["size"] - chunk_offset)
         if len(chunk) != expected_length:
             raise HTTPException(400, "Kích thước khối không đúng.")
-        if hashlib.sha256(chunk).hexdigest() != chunk_hashes[chunk_index]:
+        if actual_chunk_sha256 != chunk_hashes[chunk_index]:
             raise HTTPException(422, "SHA-256 khối tải lên không khớp; hãy gửi lại khối.")
 
     if chunk_offset < offset:
@@ -373,6 +430,11 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
         target.flush()
         os.fsync(target.fileno())
     item["received"] += len(chunk)
+    received_hashes = item.setdefault("received_chunk_sha256", [])
+    chunk_index = chunk_offset // UPLOAD_CHUNK_BYTES
+    while len(received_hashes) <= chunk_index:
+        received_hashes.append("")
+    received_hashes[chunk_index] = actual_chunk_sha256
     session["created"] = time.time()
     _persist_upload_session(upload_id, session)
     return {"received": item["received"], "size": item["size"]}

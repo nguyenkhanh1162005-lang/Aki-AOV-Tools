@@ -1,3 +1,4 @@
+import hashlib
 import tempfile
 import time
 import unittest
@@ -7,6 +8,14 @@ from unittest.mock import patch
 from fastapi import HTTPException
 
 from app import main
+
+
+class _ChunkRequest:
+    def __init__(self, payload: bytes):
+        self.payload = payload
+
+    async def stream(self):
+        yield self.payload
 
 
 class UploadSessionTests(unittest.IsolatedAsyncioTestCase):
@@ -59,7 +68,12 @@ class UploadSessionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["upload_id"], "resume-me")
         self.assertEqual(result["files"], [
-            {"name": "sample.zip", "size": 8, "received": 3}
+            {
+                "name": "sample.zip",
+                "size": 8,
+                "received": 3,
+                "received_chunk_sha256": [],
+            }
         ])
         self.assertEqual(result["chunk_size"], main.UPLOAD_CHUNK_BYTES)
         self.assertLess(time.time() - main.UPLOAD_SESSIONS["resume-me"]["created"], 2)
@@ -78,12 +92,54 @@ class UploadSessionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_chunk_upload_start_creates_session_for_valid_zip(self):
         result = await main.start_chunked_upload(
-            {"files": [{"name": "sample.zip", "size": 123}]}
+            {"files": [{"name": "sample.zip", "size": 123, "chunk_sha256": []}]}
         )
         session = main.UPLOAD_SESSIONS[result["upload_id"]]
         self.assertEqual(result["chunk_size"], main.UPLOAD_CHUNK_BYTES)
         self.assertEqual(session["files"][0]["size"], 123)
+        self.assertEqual(session["files"][0]["received_chunk_sha256"], [])
         self.assertTrue(Path(session["workdir"]).exists())
+
+    async def test_chunk_upload_verifies_inline_sha256_and_exposes_resume_hash(self):
+        payload = b"one verified upload chunk"
+        digest = hashlib.sha256(payload).hexdigest()
+        directory = tempfile.mkdtemp(prefix="aki-test-inline-hash-")
+        path = Path(directory) / "1_sample.zip"
+        main.UPLOAD_SESSIONS["inline-hash"] = {
+            "created": time.time(),
+            "workdir": directory,
+            "files": [{
+                "name": "sample.zip",
+                "size": len(payload),
+                "received": 0,
+                "chunk_sha256": [],
+                "received_chunk_sha256": [],
+            }],
+            "paths": [str(path)],
+        }
+
+        with self.assertRaises(HTTPException) as raised:
+            await main.upload_chunk(
+                "inline-hash", 0, _ChunkRequest(payload), 0, "0" * 64
+            )
+        self.assertEqual(raised.exception.status_code, 422)
+        self.assertEqual(main.UPLOAD_SESSIONS["inline-hash"]["files"][0]["received"], 0)
+
+        uploaded = await main.upload_chunk(
+            "inline-hash", 0, _ChunkRequest(payload), 0, digest
+        )
+        self.assertEqual(uploaded["received"], len(payload))
+        self.assertEqual(
+            main.UPLOAD_SESSIONS["inline-hash"]["files"][0]["received_chunk_sha256"],
+            [digest],
+        )
+        status = await main.chunked_upload_status("inline-hash")
+        self.assertEqual(status["files"][0]["received_chunk_sha256"], [digest])
+
+        retried = await main.upload_chunk(
+            "inline-hash", 0, _ChunkRequest(payload), 0, digest
+        )
+        self.assertEqual(retried["received"], len(payload))
 
 
 if __name__ == "__main__":
