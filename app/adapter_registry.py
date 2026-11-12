@@ -30,11 +30,11 @@ _ADAPTERS = (
     {
         "id": "aov_mod_to_mod_vtk_actor595_1.64.1",
         "name": "AoV iOS MOD 10 skin wrapper + Vấn Tâm Kiếm Actor 595",
-        "status": "blocked_pending_wrapper_pair_integration",
-        "formats": ["AoV MOD container", "IFix", "MSES", "CommonActions", "Unity AssetBundle", "Wwise BNK"],
-        "scope": "Nhận diện được wrapper Resources.zip + DanhSachSkin.txt nhưng chưa có bài tích hợp hoàn chỉnh trên đúng cặp wrapper đã ghim và xác minh toàn bộ payload.",
-        "merge_policy": "Tiếp tục khóa thao tác ghép cho wrapper 10 skin; chỉ mở sau khi có bộ kiểm thử tích hợp riêng và xác minh bảo toàn file.",
-        "game_compatibility": "blocked_before_merge",
+        "status": "merge_supported_version_locked",
+        "formats": ["AoV MOD wrapper 10 skin", "IFix", "MSES v7", "CommonActions", "Unity AssetBundle", "Wwise iOS sound resources"],
+        "scope": "Chỉ nhận MOD wrapper iOS có Resources.zip + DanhSachSkin.txt; Resources.zip phải có đúng cấu trúc nền 1.64.1.12 và các bảng đã kiểm tra. VTK iOS phải là bộ Actor 595 1.64.1.11 có đủ đúng 10 AssetBundle bắt buộc.",
+        "merge_policy": "Ghép IFix, MSES v7 theo allowlist từng bảng, CommonActions XML/track và metadata Packer/Verification; thêm tài nguyên Actor 595 cùng sound iOS. Kiểm tra checksum, CRC và inventory; từ chối sai phiên bản, thiếu/thừa bundle hoặc xung đột ngoài quy tắc.",
+        "game_compatibility": "structurally_validated; not_game_tested",
     },
     {
         "id": "aov_wrapper_inspection",
