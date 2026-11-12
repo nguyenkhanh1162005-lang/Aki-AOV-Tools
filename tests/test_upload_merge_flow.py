@@ -3,6 +3,7 @@ import io
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -190,8 +191,8 @@ class HTTPUploadMergeFlowTests(unittest.TestCase):
 
 
 
-class BlockedWrapperMergeRouteTests(unittest.TestCase):
-    def test_aov_merge_endpoint_cannot_bypass_blocked_wrapper_adapter(self):
+class EnabledWrapperMergeRouteTests(unittest.TestCase):
+    def test_aov_merge_endpoint_returns_10skin_named_zip_for_wrapper_adapter(self):
         wrapper_buffer = io.BytesIO()
         with zipfile.ZipFile(wrapper_buffer, "w") as archive:
             archive.writestr("mod/Resources.zip", b"nested mod resources")
@@ -207,6 +208,20 @@ class BlockedWrapperMergeRouteTests(unittest.TestCase):
         )
         payloads = [wrapper, ifix_part, assets_part]
         names = ["10-skin.zip", "vtk-ifix.zip", "vtk-assets.zip"]
+
+        def fake_merge(_merge_function, _paths, output_path):
+            with zipfile.ZipFile(output_path, "w") as archive:
+                archive.writestr("validated-candidate.txt", b"structural fixture")
+            return {
+                "adapter": "aov_mod_to_mod_vtk_actor595_1.64.1",
+                "validation": "fixture validation passed",
+                "game_tested": False,
+                "base_version": "1.64.1.12",
+                "vtk_version": "1.64.1.11",
+                "assetbundles": 10,
+                "new_files": 24,
+                "output_bytes": Path(output_path).stat().st_size,
+            }
 
         with TestClient(main.app) as client:
             started = client.post("/api/upload/start", json={
@@ -227,16 +242,36 @@ class BlockedWrapperMergeRouteTests(unittest.TestCase):
                     )
                     self.assertEqual(uploaded.status_code, 200)
 
-                merged = client.post(f"/api/upload/{upload_id}/aov-merge")
-                self.assertEqual(merged.status_code, 400)
+                with patch(
+                    "app.main.run_in_threadpool",
+                    new=AsyncMock(side_effect=fake_merge),
+                ):
+                    merged = client.post(
+                        f"/api/upload/{upload_id}/aov-merge"
+                    )
+
+                self.assertEqual(merged.status_code, 200)
+                self.assertIn("application/zip", merged.headers.get("content-type", ""))
+                self.assertEqual(
+                    merged.headers["X-AOV-Adapter"],
+                    "aov_mod_to_mod_vtk_actor595_1.64.1",
+                )
+                self.assertEqual(
+                    merged.headers["X-AOV-Validation"], "passed"
+                )
+                self.assertEqual(
+                    merged.headers["X-AOV-Game-Tested"], "false"
+                )
                 self.assertIn(
-                    "blocked_pending_wrapper_pair_integration",
-                    merged.json()["detail"],
+                    "Aki-AOV-10Skin-VanTamKiem.zip",
+                    merged.headers.get("content-disposition", ""),
                 )
-                self.assertFalse(
-                    (Path(main.UPLOAD_SESSIONS[upload_id]["workdir"]) /
-                     "Aki-AOV-KPM100-VTK.zip").exists()
-                )
+                with zipfile.ZipFile(io.BytesIO(merged.content)) as archive:
+                    self.assertEqual(
+                        archive.namelist(), ["validated-candidate.txt"]
+                    )
+                    self.assertIsNone(archive.testzip())
+                self.assertNotIn(upload_id, main.UPLOAD_SESSIONS)
             finally:
                 session = main.UPLOAD_SESSIONS.pop(upload_id, None)
                 if session:
