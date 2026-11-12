@@ -23,8 +23,9 @@ def main() -> int:
     profiles = [_archive_profile(base_path), _archive_profile(vtk_path)]
     print(json.dumps({
         "source_profiles": profiles,
-        "selected_adapter": _select_adapter(profiles),
     }, ensure_ascii=False, indent=2), flush=True)
+    selected_adapter = _select_adapter(profiles)
+    print(json.dumps({"selected_adapter": selected_adapter}, ensure_ascii=False), flush=True)
     report = merge_mod_archives([base_path, vtk_path], output_path)
     if report.get("adapter") != "aov_kpm100_vtk_actor595_1.64.1":
         raise SystemExit(f"Wrong adapter selected for pinned KPM100/VTK pair: {report.get('adapter')}")
