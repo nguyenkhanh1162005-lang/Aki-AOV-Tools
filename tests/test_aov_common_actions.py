@@ -9,6 +9,7 @@ from app.aov_common_actions import (
     merge_action_xml,
     merge_common_actions_pkg,
     merge_common_actions_packages,
+    analyze_common_actions_overlay_set,
 )
 
 
@@ -230,6 +231,36 @@ class CommonActionsMergeTests(unittest.TestCase):
         self.assertEqual(report["merged_files"][path]["replaced_tracks"], ["BackTrack"])
         self.assertTrue(report["verified"])
 
+
+
+    def test_multi_overlay_analysis_reports_incompatible_actor_conditions(self):
+        path = "commonresource/Back.xml"
+
+        def overlay(mode):
+            root = ET.Element("Project")
+            action = ET.SubElement(root, "Action")
+            track = ET.SubElement(action, "Track", {
+                "trackName": "0_RecallTrack",
+                "eventType": "TriggerParticleTick",
+                "enabled": "true",
+            })
+            ET.SubElement(track, "SkinOrAvatarList", {
+                "id": "59300",
+                "mode": mode,
+            })
+            payload = encode_aov_resource(ET.tostring(root), path, "zstd")
+            return package({path: payload})
+
+        report = analyze_common_actions_overlay_set([
+            ("TM.zip", overlay("recall-a")),
+            ("P9.zip", overlay("recall-b")),
+        ])
+
+        self.assertEqual(report["state"], "BLOCKED")
+        self.assertIn("nhiều overlay định nghĩa điều kiện khác nhau", report["reason"])
+        self.assertFalse(report["merge_authorized"])
+        self.assertFalse(report["full_merge_authorized"])
+        self.assertTrue(report["output_discarded"])
 
     def test_multi_overlay_merge_rejects_conflicting_same_actor_track_conditions(self):
         path = "commonresource/Back.xml"
