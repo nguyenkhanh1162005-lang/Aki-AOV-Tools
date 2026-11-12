@@ -163,10 +163,15 @@ class ModPipelineTests(unittest.TestCase):
     def test_unpinned_kpm100_pair_fails_by_hash_before_creating_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
-            base = self._zip(folder, "kpm100.zip", {
+            base_entries = {
                 "Resources/1.64.1/Thanos/HeroSkin_1.bytes": b"base-ifix",
-                "Resources/1.64.1/Mod_by_Youtube_KHAM-PHA-MOBILE/KPM_MOD_0123456789ABCDEF": b"payload",
+                "Resources/1.64.1/assetbundle/resourcepackerinfosetall.assetbundle": b"packer-index",
+            }
+            base_entries.update({
+                f"Resources/1.64.1/Mod_by_Youtube_KHAM-PHA-MOBILE/KPM_MOD_{index:016X}": b"payload"
+                for index in range(70)
             })
+            base = self._zip(folder, "kpm100.zip", base_entries)
             vtk = self._zip(folder, "vtk.zip", {
                 "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"vtk-ifix",
                 "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"actor595",
@@ -175,6 +180,7 @@ class ModPipelineTests(unittest.TestCase):
             with self.assertRaisesRegex(ModPipelineError, "SHA-256 KPM100 gốc không khớp"):
                 merge_mod_archives([base, vtk], str(output))
             self.assertFalse(output.exists())
+
 
     def test_unverified_10skin_wrapper_adapter_remains_blocked_in_backend(self):
         with tempfile.TemporaryDirectory() as tmp:
