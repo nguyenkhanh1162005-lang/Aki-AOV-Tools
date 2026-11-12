@@ -21,11 +21,11 @@ _ADAPTERS = (
     {
         "id": "aov_mod_to_mod_vtk_actor595_1.64.1",
         "name": "AoV iOS MOD 10 skin + Vấn Tâm Kiếm Actor 595",
-        "status": "merge_supported_version_locked",
+        "status": "blocked_pending_ifix_opcode_89",
         "formats": ["AoV MOD container", "IFix", "MSES", "CommonActions", "Unity AssetBundle", "Wwise BNK"],
-        "scope": "Chỉ gói MOD 10 skin iOS 1.64.1.12 do người dùng cung cấp + MOD Vấn Tâm Kiếm Actor 595 dữ liệu 1.64.1.11.",
-        "merge_policy": "Dùng parser/serializer chuyên biệt; kiểm tra phiên bản, chỉ mục, bảng, metadata và AssetBundle bắt buộc.",
-        "game_compatibility": "structural_validation_only",
+        "scope": "Đã nhận diện đúng cặp MOD 10 skin iOS 1.64.1.12 + Vấn Tâm Kiếm Actor 595 dữ liệu 1.64.1.11, nhưng hiện chưa được phép ghép vì parser IFix gặp opcode 89 chưa có cách giải mã/serialize đã xác minh.",
+        "merge_policy": "Tạm khóa thao tác ghép. Chỉ mở lại sau khi bổ sung opcode 89 bằng schema có nguồn và fixture round-trip; không bỏ qua instruction hoặc tự đoán operand.",
+        "game_compatibility": "blocked_before_merge; structural_validation_only_after_parser_fix",
     },
     {
         "id": "aov_wrapper_inspection",
@@ -96,6 +96,7 @@ def get_adapter_capabilities() -> dict:
         "summary": {
             "merge_supported": sum(item["status"] == "merge_supported" for item in adapters),
             "version_locked": sum(item["status"] == "merge_supported_version_locked" for item in adapters),
+            "blocked": sum(item["status"].startswith("blocked_") for item in adapters),
             "inspection_only": sum(item["status"].startswith("inspect_only") for item in adapters),
         },
     }
