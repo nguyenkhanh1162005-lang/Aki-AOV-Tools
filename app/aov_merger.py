@@ -72,6 +72,16 @@ def _load_unitypy_aov():
     return UnityPy_AOV
 
 
+def _find_outer_entries(zf: zipfile.ZipFile, expected_basename: str) -> list[zipfile.ZipInfo]:
+    """Find one wrapper member by case-insensitive basename, independent of folder prefix."""
+    expected = expected_basename.casefold()
+    return [
+        info for info in zf.infolist()
+        if not info.is_dir()
+        and PurePosixPath(info.filename.replace("\\", "/")).name.casefold() == expected
+    ]
+
+
 def _validate_archive_paths(zf: zipfile.ZipFile, label: str) -> None:
     entries = zf.infolist()
     if len(entries) > MAX_ARCHIVE_ENTRIES:
@@ -407,10 +417,10 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
 
         base_candidates = []
         for path, zf in archives:
-            names = zf.namelist()
-            if any(name.endswith("/Resources.zip") or name == "Resources.zip" for name in names) and any(
-                (name.endswith("/danhsachskin.txt") or name == "danhsachskin.txt") for name in names
-            ):
+            # Mod containers in the wild use different casing and directory prefixes
+            # for these two wrapper files. Match by case-insensitive basename while
+            # still requiring exactly one of each before any payload is changed.
+            if _find_outer_entries(zf, "Resources.zip") and _find_outer_entries(zf, "DanhSachSkin.txt"):
                 base_candidates.append((path, zf))
         if len(base_candidates) != 1:
             raise AOVMergeError("Không xác định được duy nhất ZIP nền có Resources.zip và danhsachskin.txt.")
@@ -419,11 +429,8 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
         if not vtk_archives:
             raise AOVMergeError("Chưa có ZIP Vấn Tâm Kiếm.")
 
-        resources_entries = [
-            info for info in base_outer.infolist()
-            if info.filename.endswith("/Resources.zip") or info.filename == "Resources.zip"
-        ]
-        skin_entries = [info for info in base_outer.infolist() if info.filename.endswith("/danhsachskin.txt") or info.filename == "danhsachskin.txt"]
+        resources_entries = _find_outer_entries(base_outer, "Resources.zip")
+        skin_entries = _find_outer_entries(base_outer, "DanhSachSkin.txt")
         if len(resources_entries) != 1 or len(skin_entries) != 1:
             raise AOVMergeError("ZIP nền có cấu trúc Resources.zip không rõ ràng.")
         resources_info = resources_entries[0]
