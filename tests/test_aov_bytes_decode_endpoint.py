@@ -1,3 +1,4 @@
+import io
 import tempfile
 import time
 import unittest
@@ -51,6 +52,54 @@ class AOVBytesDecodeEndpointTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 main.UPLOAD_SESSIONS.pop(upload_id, None)
 
+
+    async def test_notice_scan_endpoint_finds_nested_lua_without_removing_source_upload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            workdir = folder / "session"
+            workdir.mkdir()
+            source = workdir / "wrapper.zip"
+            package_buffer = io.BytesIO()
+            with zipfile.ZipFile(package_buffer, "w") as package:
+                package.writestr(
+                    "Scripts/LoginNotice.lua",
+                    "function ShowLoginNotice() print('Welcome notice') end",
+                )
+            encoded_package = encrypt_aes_zstd_resource(
+                package_buffer.getvalue(), "KernelLua.pkg.bytes"
+            )
+            resources_buffer = io.BytesIO()
+            with zipfile.ZipFile(resources_buffer, "w") as resources:
+                resources.writestr("KernelLua.pkg.bytes", encoded_package)
+            with zipfile.ZipFile(source, "w") as wrapper:
+                wrapper.writestr("Resources.zip", resources_buffer.getvalue())
+
+            upload_id = "notice-scan-test"
+            main.UPLOAD_SESSIONS[upload_id] = {
+                "created": time.time(),
+                "workdir": str(workdir),
+                "files": [{
+                    "name": "wrapper.zip",
+                    "size": source.stat().st_size,
+                    "received": source.stat().st_size,
+                }],
+                "paths": [str(source)],
+            }
+
+            try:
+                result = await main.scan_chunked_aov_notices(upload_id)
+                self.assertGreater(result["scan_files"], 0)
+                self.assertTrue(any(
+                    item["keyword_group"] == "login_notice"
+                    and item["path"] == "Scripts/LoginNotice.lua"
+                    for item in result["candidates"]
+                ))
+                self.assertIn("AssetBundle", result["warning"])
+                self.assertIn(upload_id, main.UPLOAD_SESSIONS)
+                self.assertTrue(source.exists())
+                self.assertFalse((workdir / ".aki-aov-notice-scan.zip").exists())
+            finally:
+                main.UPLOAD_SESSIONS.pop(upload_id, None)
 
 if __name__ == "__main__":
     unittest.main()
