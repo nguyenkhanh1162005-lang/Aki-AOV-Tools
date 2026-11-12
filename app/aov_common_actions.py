@@ -374,6 +374,90 @@ def merge_common_actions_pkg(
     }
 
 
+def _overlay_actor_track_signatures(
+    overlay_package: bytes,
+    special_ids: set[str],
+) -> dict[tuple[str, tuple[str, str, str], str], str]:
+    """Fingerprint actor-gated XML conditions contributed by one overlay.
+
+    The fingerprint intentionally keeps the full SkinOrAvatarList element,
+    while the track key normalizes generated names/GUIDs. This lets the
+    multi-overlay path detect two sources trying to define the same actor
+    condition differently without confusing distinct event variants.
+    """
+    merge_candidates = {
+        "commonresource/Back.xml",
+        "commonresource/BackFast.xml",
+        "commonresource/HasteE1.xml",
+        "commonresource/HasteE1_super.xml",
+        "commonresource/HasteE2.xml",
+        "commonresource/HasteE3.xml",
+    }
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(overlay_package), "r")
+    except zipfile.BadZipFile as exc:
+        raise CommonActionsMergeError(
+            "CommonActions.pkg.bytes không phải ZIP hợp lệ."
+        ) from exc
+
+    signatures: dict[tuple[str, tuple[str, str, str], str], str] = {}
+    try:
+        entries: dict[str, zipfile.ZipInfo] = {}
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            if info.filename in entries:
+                raise CommonActionsMergeError(
+                    f"{info.filename}: CommonActions có nhiều entry trùng đường dẫn."
+                )
+            entries[info.filename] = info
+
+        for name in merge_candidates & entries.keys():
+            try:
+                decoded, _ = decode_aov_resource(archive.read(entries[name]), name)
+                root = ET.fromstring(decoded)
+            except (AOVBytesError, ET.ParseError) as exc:
+                raise CommonActionsMergeError(
+                    f"{name}: không phân tích được XML khi đối chiếu các overlay: {exc}"
+                ) from exc
+
+            action = root.find("Action")
+            if action is None:
+                raise CommonActionsMergeError(f"{name}: thiếu node Action.")
+
+            for track in action.iter("Track"):
+                all_skin_nodes = list(track.iter("SkinOrAvatarList"))
+                if not all_skin_nodes:
+                    continue
+                direct_skin_nodes = track.findall("SkinOrAvatarList")
+                if len(direct_skin_nodes) != len(all_skin_nodes):
+                    raise CommonActionsMergeError(
+                        f"{name}: track {_normalized_track_name(track)} có "
+                        "SkinOrAvatarList lồng ở vị trí chưa được hỗ trợ."
+                    )
+                track_key = _track_key(track)
+                for node in direct_skin_nodes:
+                    skin_id = node.attrib.get("id")
+                    if skin_id not in special_ids:
+                        continue
+                    key = (name, track_key, skin_id)
+                    digest = hashlib.sha256(
+                        ET.tostring(node, encoding="utf-8")
+                    ).hexdigest()
+                    previous = signatures.get(key)
+                    if previous is not None and previous != digest:
+                        raise CommonActionsMergeError(
+                            f"{name}: một overlay tự khai báo nhiều điều kiện "
+                            f"khác nhau cho skin ID {skin_id} tại track "
+                            f"{track_key[0]}."
+                        )
+                    signatures[key] = digest
+    finally:
+        archive.close()
+
+    return signatures
+
+
 def merge_common_actions_packages(
     base_package: bytes,
     overlays: list[tuple[bytes, set[str]]],
@@ -386,6 +470,33 @@ def merge_common_actions_packages(
     """
     if not overlays:
         raise CommonActionsMergeError("Cần ít nhất một overlay CommonActions.")
+
+    # Preflight all overlays together before mutating the in-memory base.
+    # Identical repeated actor conditions are harmless duplicates; differing
+    # conditions for the same actor + XML track are ambiguous and must stop.
+    seen_conditions: dict[
+        tuple[str, tuple[str, str, str], str], tuple[str, int]
+    ] = {}
+    for index, (overlay_package, special_ids) in enumerate(overlays, start=1):
+        normalized_ids = {str(value) for value in special_ids}
+        if not normalized_ids or any(not value.isdigit() for value in normalized_ids):
+            raise CommonActionsMergeError(
+                f"Overlay {index}: special skin IDs phải là tập không rỗng gồm chuỗi số."
+            )
+        signatures = _overlay_actor_track_signatures(
+            overlay_package, normalized_ids
+        )
+        for key, digest in signatures.items():
+            previous = seen_conditions.get(key)
+            if previous is not None and previous[0] != digest:
+                name, track_key, skin_id = key
+                raise CommonActionsMergeError(
+                    f"{name}: nhiều overlay định nghĩa điều kiện khác nhau cho "
+                    f"skin ID {skin_id} tại track {track_key[0]} "
+                    f"(overlay {previous[1]} và {index}); không tự chọn bản thắng."
+                )
+            seen_conditions[key] = (digest, index)
+
     current = base_package
     reports = []
     for index, (overlay_package, special_ids) in enumerate(overlays, start=1):
