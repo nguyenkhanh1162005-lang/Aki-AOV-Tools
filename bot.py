@@ -77,6 +77,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/inspect xuất báo cáo cấu trúc ZIP dạng TXT\n"
         "/preflight phân loại MOD AoV và kiểm tra adapter trước khi ghép\n"
         "/notice-scan dò ứng viên thông báo khởi động (chỉ đọc, không xóa)\n"
+        "/decode giải mã tài nguyên .bytes được hỗ trợ thành ZIP\n"
         "/merge kiểm tra, ghép và xác minh lại dữ liệu đầu ra\n"
         "/clear xóa danh sách file"
     )
@@ -258,6 +259,58 @@ async def inspect(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+
+
+
+async def decode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _authorized(update):
+        return
+    files = context.user_data.get("zips", [])
+    if not files:
+        await update.effective_message.reply_text("Chưa có ZIP nào. Gửi file trước nhé.")
+        return
+
+    folder = _workdir(context)
+    output_path = folder / "aki-aov-decoded-resources.zip"
+    status_message = await update.effective_message.reply_text(
+        "Đang giải mã các tài nguyên .bytes AoV có định dạng được hỗ trợ. ZIP nguồn không bị chỉnh sửa..."
+    )
+    try:
+        report = await asyncio.to_thread(
+            decode_archive_resources,
+            [path for _, path in files],
+            str(output_path),
+        )
+        output_size = output_path.stat().st_size if output_path.exists() else 0
+        if not output_size:
+            await status_message.edit_text(
+                "Không tạo được gói giải mã. Xem báo cáo lỗi hoặc dùng /notice-scan để tìm ứng viên thông báo."
+            )
+            return
+        if not LOCAL_API and output_size > 48 * MIB:
+            await status_message.edit_text(
+                f"Đã giải mã {len(report.get('decoded', []))} tài nguyên "
+                f"({output_size / MIB:.1f} MB), nhưng Bot API mặc định không gửi được file lớn hơn 50 MB. "
+                "ZIP kết quả vẫn được giữ trong phiên làm việc."
+            )
+            return
+        await status_message.edit_text(
+            f"Đã giải mã {len(report.get('decoded', []))} tài nguyên "
+            f"({output_size / MIB:.1f} MB). Đang gửi ZIP..."
+        )
+        await update.effective_message.reply_document(
+            document=FSInputFile(str(output_path), filename="aki-aov-decoded-resources.zip"),
+            read_timeout=1800,
+            write_timeout=1800,
+            connect_timeout=60,
+            pool_timeout=60,
+        )
+    except AOVBytesArchiveError as exc:
+        await status_message.edit_text(f"Không giải mã được: {exc}")
+    except Exception as exc:
+        await status_message.edit_text(
+            f"Giải mã thất bại: {type(exc).__name__}. ZIP nguồn vẫn được giữ nguyên."
+        )
 
 
 async def notice_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -529,6 +582,7 @@ def main():
     app.add_handler(CommandHandler("inspect", inspect))
     app.add_handler(CommandHandler("preflight", preflight))
     app.add_handler(CommandHandler("notice-scan", notice_scan))
+    app.add_handler(CommandHandler("decode", decode))
     app.add_handler(MessageHandler(filters.Document.ALL, receive))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_link))
     app.run_polling()
