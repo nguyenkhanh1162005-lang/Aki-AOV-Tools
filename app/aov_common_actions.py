@@ -260,6 +260,8 @@ def merge_common_actions_pkg(
             if name in merge_candidates:
                 continue
             if base_zip.read(base_entries[name]) != overlay_zip.read(overlay_entries[name]):
+                base_zip.close()
+                overlay_zip.close()
                 raise CommonActionsMergeError(
                     f"{name}: xung đột tệp CommonActions ngoài danh sách XML có parser; "
                     "không tự chọn bản nền hoặc bản overlay."
