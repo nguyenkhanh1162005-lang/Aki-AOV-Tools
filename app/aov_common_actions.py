@@ -288,6 +288,14 @@ def merge_common_actions_pkg(
     strict_conflicts: bool = False,
 ) -> tuple[bytes, dict]:
     """Retain the base package and selectively merge actor-gated common action tracks."""
+    target_ids = {
+        str(value)
+        for value in (SPECIAL_IDS if special_ids is None else special_ids)
+    }
+    if not target_ids or any(not value.isdigit() for value in target_ids):
+        raise CommonActionsMergeError(
+            "special skin IDs phải là tập không rỗng gồm chuỗi số."
+        )
     try:
         base_zip = zipfile.ZipFile(io.BytesIO(base_package), "r")
         overlay_zip = zipfile.ZipFile(io.BytesIO(overlay_package), "r")
