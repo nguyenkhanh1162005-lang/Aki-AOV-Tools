@@ -12,7 +12,7 @@ from app.aov_common_actions import (
 )
 
 
-def action_xml(track_name, special=False, special_id="59500")
+def action_xml(track_name, special=False, special_id="59500"):
     root = ET.Element("Project")
     ET.SubElement(root, "TemplateObjectList")
     ET.SubElement(root, "RefParamList")
