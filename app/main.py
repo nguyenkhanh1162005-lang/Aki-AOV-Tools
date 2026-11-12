@@ -369,12 +369,23 @@ async def upload_chunk(
     if not chunk:
         raise HTTPException(400, "Kích thước khối tải lên không hợp lệ.")
     actual_chunk_sha256 = hashlib.sha256(chunk).hexdigest()
+    # Direct Python callers in the test suite receive FastAPI's Header object
+    # as the default; only an actual string is a supplied HTTP header value.
+    if not isinstance(chunk_sha256, str):
+        chunk_sha256 = None
     if chunk_sha256 is not None:
         if (
             len(chunk_sha256) != 64
             or any(ch not in "0123456789abcdef" for ch in chunk_sha256)
         ):
             raise HTTPException(400, "SHA-256 khối tải lên không đúng định dạng.")
+        if chunk_offset % UPLOAD_CHUNK_BYTES != 0:
+            raise HTTPException(400, "Vị trí khối tải lên không đúng ranh giới.")
+        expected_length = min(
+            UPLOAD_CHUNK_BYTES, item["size"] - chunk_offset
+        )
+        if expected_length <= 0 or len(chunk) != expected_length:
+            raise HTTPException(400, "Kích thước khối tải lên không đúng.")
         if actual_chunk_sha256 != chunk_sha256:
             raise HTTPException(422, "SHA-256 khối tải lên không khớp; hãy gửi lại khối.")
     offset = item["received"]
