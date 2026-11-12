@@ -35,9 +35,8 @@ def merge_aov_mses_resource(
 
     New opaque rows are admitted only by an exact table-specific key allowlist.
     Sound banks admit only rows carrying the VTK Hero_LiXin_Skin_C marker;
-    ResSkinSeniorLabelCfg admits only the observed 59500 row. skillcombine
-    currently has no verified new-row key allowlist and therefore fails closed
-    if the overlay introduces any new key.
+    ResSkinSeniorLabelCfg admits only the observed 59500 row; skillcombine admits
+    only the five source-verified Actor 595 keys. All other new keys fail closed.
     """
     normalized_name = resource_name.replace("\\", "/").lstrip("/")
     if normalized_name not in _SUPPORTED_MSES_TABLES:
