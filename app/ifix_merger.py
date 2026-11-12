@@ -23,7 +23,7 @@ _OPCODE_NAMES = {
     50: "Ldelem_Ref", 60: "Ldsfld", 62: "Starg", 63: "Conv_I2",
     65: "Rethrow", 67: "Newanon", 69: "Conv_Ovf_I1", 72: "Ldloc",
     73: "Calli", 75: "Stfld", 79: "Or", 80: "Add", 85: "Stsfld",
-    87: "Throw", 93: "Br", 94: "Ldtoken", 96: "Stobj",
+    87: "Throw", 89: "Newarr", 93: "Br", 94: "Ldtoken", 96: "Stobj",
     100: "Ldc_R8", 103: "Ret", 104: "Ldelem_Ref", 110: "Bne_Un",
     111: "Blt_Un", 117: "Initobj", 122: "Callvirt", 123: "Ldelem_I1",
     126: "Sub", 127: "Brtrue", 128: "Pop", 129: "Stelem_Ref",
