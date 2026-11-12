@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from app.mod_pipeline import ModPipelineError, _archive_profile, _preflight_inputs, _resource_merge_guidance, _resource_priority_hint, _select_adapter, analyze_aov_input_set, merge_mod_archives
+from app.mod_pipeline import ModPipelineError, _build_preservation_gates, _archive_profile, _preflight_inputs, _resource_merge_guidance, _resource_priority_hint, _select_adapter, analyze_aov_input_set, merge_mod_archives
 
 
 class ModPipelineTests(unittest.TestCase):
@@ -500,6 +500,34 @@ class ModPipelineTests(unittest.TestCase):
             ("Âm thanh", 3),
         )
 
+    def test_preservation_gates_count_complete_manifest_and_never_authorize_merge(self):
+        resources = [
+            {"path": "Databin/Client/Huanhua/ResKillBillboardCfg.bytes", "status": "NEEDS_RULE", "sources": ["P9", "P10"], "reasons": ["row conflict"]},
+            {"path": "Databin/Client/Huanhua/ResBillboardCfg.bytes", "status": "IDENTICAL_DUPLICATE", "sources": ["P9", "P10"], "reasons": ["same SHA-256"]},
+            {"path": "Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes", "status": "UNSUPPORTED", "sources": ["TM", "VTK"], "reasons": ["condition rule missing"]},
+            {"path": "Resources/1.64.1/assetbundle/uisystem/battle/battleotherui.assetbundle", "status": "VERSION_CONFLICT", "sources": ["P9", "P10"], "reasons": ["version mismatch"]},
+            {"path": "Sound/iOS/Hero_MaChao_SFX.bnk", "status": "UNSUPPORTED", "sources": ["TM"], "reasons": ["Wwise remap missing"]},
+        ]
+        resources.extend({
+            "path": "Databin/Client/Huanhua/ResBillboardCfg_{}.bytes".format(index),
+            "status": "NEEDS_RULE",
+            "sources": ["P9", "P10"],
+            "reasons": ["additional manifest collision"],
+        } for index in range(220))
+
+        gates = _build_preservation_gates(resources)
+        by_id = {item["id"]: item for item in gates}
+        self.assertEqual(by_id["kill_notifications"]["path_count"], 222)
+        self.assertEqual(by_id["kill_notifications"]["unresolved_count"], 221)
+        self.assertEqual(by_id["kill_notifications"]["identical_duplicate_count"], 1)
+        self.assertTrue(by_id["kill_notifications"]["details_truncated"])
+        self.assertEqual(by_id["effects_recall"]["unresolved_count"], 1)
+        self.assertEqual(by_id["ui_buttons"]["unresolved_count"], 1)
+        self.assertEqual(by_id["audio"]["unresolved_count"], 1)
+        self.assertEqual(by_id["audio"]["top_items"][0]["adapter_state"], "inspect_only")
+        self.assertFalse(any(item["merge_authorized"] for item in gates))
+        self.assertFalse(any(item["game_tested"] for item in gates))
+
     def test_multi_mod_preflight_reports_exact_nested_resource_conflicts(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
@@ -536,6 +564,11 @@ class ModPipelineTests(unittest.TestCase):
             analysis = report["resource_analysis"]
             self.assertTrue(analysis["available"])
             self.assertFalse(analysis["merge_authorized"])
+            gates = {item["id"]: item for item in analysis["preservation_gates"]}
+            self.assertEqual(gates["audio"]["path_count"], 1)
+            self.assertEqual(gates["audio"]["unresolved_count"], 1)
+            self.assertFalse(gates["audio"]["merge_authorized"])
+            self.assertEqual(gates["ui_buttons"]["path_count"], 1)
             self.assertGreaterEqual(analysis["summary"]["NEEDS_RULE"], 1)
             self.assertGreaterEqual(analysis["summary"]["IDENTICAL_DUPLICATE"], 1)
             by_path = {item["path"]: item for item in analysis["important_paths"]}

@@ -294,16 +294,19 @@ function renderPreflightDashboard(data){
     'Giao diện / nút bấm / biểu tượng',
     'Âm thanh'
   ];
+  const gateByLabel=new Map((analysis.preservation_gates||[]).map(gate=>[gate.label,gate]));
   for(const group of preservationGroups){
-    const items=(analysis.important_paths||[]).filter(item=>item.priority_group===group);
-    const blocked=items.filter(item=>['VERSION_CONFLICT','NEEDS_RULE','UNSUPPORTED'].includes(item.status));
+    const gate=gateByLabel.get(group);
     const card=dashboardElement('div','preflight-source');
     card.append(dashboardElement('strong','',group));
-    let stateText='CHƯA ĐỦ DỮ LIỆU ĐỂ KẾT LUẬN';
-    if(items.length&&blocked.length)stateText='CÓ '+blocked.length+' MỤC CẦN XỬ LÝ';
-    else if(items.length)stateText='CÁC MỤC LIỆT KÊ ĐANG TRÙNG BYTE';
+    let stateText='CHƯA CÓ DỮ LIỆU ĐẾM';
+    if(gate?.state==='NOT_IN_MANIFEST')stateText='CHƯA THẤY TRONG MANIFEST';
+    else if(gate?.state==='REVIEW_REQUIRED')stateText='CẦN XỬ LÝ '+gate.unresolved_count+' / '+gate.path_count+' MỤC';
+    else if(gate?.state==='NO_UNRESOLVED_PATH_CONFLICTS')stateText='KHÔNG CÒN XUNG ĐỘT ĐƯỜNG DẪN CHƯA XỬ LÝ';
     card.append(dashboardElement('span','',stateText));
-    card.append(dashboardElement('span','','Số mục xung đột trong báo cáo: '+items.length+'. Báo cáo tĩnh không chứng minh đã giữ hiệu ứng trong game.'));
+    card.append(dashboardElement('span','',gate
+      ?'Đã rà '+gate.path_count+' đường dẫn · '+gate.unresolved_count+' cần quy tắc · '+gate.identical_duplicate_count+' trùng byte. '+gate.note
+      :'Chưa có báo cáo cho nhóm này.'));
     preservationGrid.append(card);
   }
   preservation.append(preservationGrid);root.append(preservation);
