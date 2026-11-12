@@ -1,0 +1,111 @@
+"""Explicit capability registry for safe multi-format AoV mod processing.
+
+Detection and inspection do not imply merge support. Every merge-capable adapter
+must be version-scoped and backed by parser/serializer validation and fixtures.
+"""
+from __future__ import annotations
+
+from copy import deepcopy
+
+
+_ADAPTERS = (
+    {
+        "id": "generic_zip",
+        "name": "ZIP thông thường",
+        "status": "merge_supported",
+        "formats": ["ZIP"],
+        "scope": "Tệp không xung đột hoặc trùng byte; không diễn giải tài nguyên game.",
+        "merge_policy": "Giữ tệp mới; chỉ bỏ qua bản trùng khi SHA-256 giống nhau; từ chối xung đột khác nội dung.",
+        "game_compatibility": "not_applicable",
+    },
+    {
+        "id": "aov_kpm100_vtk_actor595_1.64.1",
+        "name": "AoV iOS KPM100 + Vấn Tâm Kiếm Actor 595",
+        "status": "merge_supported_version_locked",
+        "formats": ["KPM100 direct ZIP", "KPM_MOD payload", "IFix", "MSES", "CommonActions", "Unity AssetBundle", "Wwise BNK"],
+        "scope": "Chỉ hỗ trợ đúng cặp archive KPM100 1.64.1.12 + VTK 1.64.1.11 đã ghim SHA-256 trong bộ kiểm tra tích hợp; giữ cây tài nguyên nền và 99 skin còn lại, thay/ghép tài nguyên Actor 595.",
+        "merge_policy": "IFix parse/serialize và remap chỉ số; 70 KPM_MOD payload round-trip; MSES theo allowlist từng bảng; CommonActions theo track; Packer/Verification theo dependency; AssetBundle và soundbank giữ nguyên payload VTK khi được xác minh; từ chối mọi hash/phiên bản ngoài cặp đã ghim.",
+        "game_compatibility": "structurally_validated; not_game_tested",
+    },
+    {
+        "id": "aov_mod_to_mod_vtk_actor595_1.64.1",
+        "name": "AoV iOS MOD 10 skin wrapper + Vấn Tâm Kiếm Actor 595",
+        "status": "blocked_pending_wrapper_pair_integration",
+        "formats": ["AoV MOD container", "IFix", "MSES", "CommonActions", "Unity AssetBundle", "Wwise BNK"],
+        "scope": "Nhận diện được wrapper Resources.zip + DanhSachSkin.txt nhưng chưa có bài tích hợp hoàn chỉnh trên đúng cặp wrapper đã ghim và xác minh toàn bộ payload.",
+        "merge_policy": "Tiếp tục khóa thao tác ghép cho wrapper 10 skin; chỉ mở sau khi có bộ kiểm thử tích hợp riêng và xác minh bảo toàn file.",
+        "game_compatibility": "blocked_before_merge",
+    },
+    {
+        "id": "aov_wrapper_inspection",
+        "name": "AoV AES / Zstandard wrapper",
+        "status": "inspect_only",
+        "formats": ["AoV AES", "AoV AES + Zstandard", "AoV Zstandard wrapper", "Zstandard"],
+        "scope": "Nhận diện chữ ký và kiểm kê; chưa có giải mã/ghi lại tổng quát cho mọi build.",
+        "merge_policy": "Không sửa hoặc ghép payload khi chưa xác định đúng thuật toán, key, dictionary và phiên bản.",
+        "game_compatibility": "not_tested",
+    },
+    {
+        "id": "aov_mses",
+        "name": "MSES tables",
+        "status": "inspect_only_except_locked_vtk_adapter",
+        "formats": ["BattleBank.bytes", "LobbyBank.bytes", "skillcombine.bytes", "ResSkinSeniorLabelCfg.bytes"],
+        "scope": "Parser/serializer chỉ được gọi trong adapter Vấn Tâm Kiếm đã khóa phiên bản; chưa hỗ trợ mọi schema MSES.",
+        "merge_policy": "Không nối byte hoặc thay bảng giữa các phiên bản tùy ý.",
+        "game_compatibility": "not_tested",
+    },
+    {
+        "id": "aov_ifix",
+        "name": "IFix",
+        "status": "inspect_only_except_locked_vtk_adapter",
+        "formats": ["HeroSkin_1.bytes", "HeroSkin_2.bytes", "IFix"],
+        "scope": "Remap chỉ mục chỉ được hỗ trợ trong adapter Vấn Tâm Kiếm đã khóa phiên bản.",
+        "merge_policy": "Không gộp IFix từ actor/build khác khi chưa có schema và fixture tương ứng.",
+        "game_compatibility": "not_tested",
+    },
+    {
+        "id": "unity_assetbundle",
+        "name": "Unity AssetBundle",
+        "status": "inspect_only",
+        "formats": ["UnityFS", "UnityRaw", "UnityWeb", "AssetBundle"],
+        "scope": "Đọc cấu trúc và kiểm tra round-trip giới hạn kích thước; chưa có bộ hợp nhất object/dependency tổng quát.",
+        "merge_policy": "Không ghép hoặc ghi lại bundle chỉ vì cùng Actor ID hay cùng tên file.",
+        "game_compatibility": "not_tested",
+    },
+    {
+        "id": "wwise_bnk",
+        "name": "Wwise SoundBank",
+        "status": "inspect_only",
+        "formats": ["BKHD", "DIDX", "DATA", "HIRC", "BNK"],
+        "scope": "Kiểm tra chunk, media ID và HIRC object trong giới hạn kích thước.",
+        "merge_policy": "Không nối byte các BNK; cần adapter remap media/event và kiểm tra tham chiếu.",
+        "game_compatibility": "not_tested",
+    },
+    {
+        "id": "text_xml_json_image_audio",
+        "name": "Tài nguyên văn bản, ảnh và âm thanh rời",
+        "status": "inspect_only",
+        "formats": ["XML", "JSON", "PNG", "JPEG", "WAV", "Ogg", "GZIP"],
+        "scope": "Nhận diện định dạng và kiểm kê; chưa có quy tắc tương thích AoV tổng quát.",
+        "merge_policy": "Không tự ghi đè cấu hình, UI, hiệu ứng hoặc âm thanh.",
+        "game_compatibility": "not_tested",
+    },
+)
+
+
+def get_adapter_capabilities() -> dict:
+    """Return a detached, JSON-safe snapshot for API/UI consumers."""
+    adapters = deepcopy(list(_ADAPTERS))
+    return {
+        "schema_version": 1,
+        "policy": "fail_closed",
+        "merge_any_mod_claim": False,
+        "game_tested": False,
+        "adapters": adapters,
+        "summary": {
+            "merge_supported": sum(item["status"] == "merge_supported" for item in adapters),
+            "version_locked": sum(item["status"] == "merge_supported_version_locked" for item in adapters),
+            "blocked": sum(item["status"].startswith("blocked_") for item in adapters),
+            "inspection_only": sum(item["status"].startswith("inspect_only") for item in adapters),
+        },
+    }
