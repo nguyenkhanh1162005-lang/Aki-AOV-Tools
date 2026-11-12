@@ -394,6 +394,7 @@ async def chunked_upload_status(upload_id: str):
     _persist_upload_session(upload_id, session)
     return {
         "upload_id": upload_id,
+        "upload_protocol": session.get("upload_protocol", "sequential_v1"),
         "chunk_size": UPLOAD_CHUNK_BYTES,
         "files": [
             {
@@ -401,6 +402,7 @@ async def chunked_upload_status(upload_id: str):
                 "size": item["size"],
                 "received": item["received"],
                 "received_chunk_sha256": item.get("received_chunk_sha256", []),
+                "received_chunks": [{"index": int(k), "sha256": v} for k, v in sorted(item.get("received_chunks", {}).items(), key=lambda pair: int(pair[0]))],
             }
             for item in session["files"]
         ],
