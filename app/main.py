@@ -544,13 +544,16 @@ async def merge_chunked_upload(upload_id: str):
 
 @app.post("/api/upload/{upload_id}/aov-merge")
 async def merge_aov_chunked_upload(upload_id: str):
+    """Use the same capability-gated adapter as the normal merge and Telegram pipeline."""
     session = _get_upload_session(upload_id)
     if any(item["received"] != item["size"] for item in session["files"]):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
-    output_path = Path(session["workdir"]) / "Aki-AOV-10Skin-VanTamKiem.zip"
+    output_path = Path(session["workdir"]) / "Aki-AOV-KPM100-VTK.zip"
     try:
-        report = await run_in_threadpool(merge_aov_archives, session["paths"], str(output_path))
-    except AOVMergeError as exc:
+        report = await run_in_threadpool(
+            merge_mod_archives, session["paths"], str(output_path)
+        )
+    except ModPipelineError as exc:
         raise HTTPException(400, str(exc)) from exc
     _remove_upload_session_metadata(session)
     UPLOAD_SESSIONS.pop(upload_id, None)
@@ -559,13 +562,17 @@ async def merge_aov_chunked_upload(upload_id: str):
         "X-AOV-Game-Tested": "true" if report.get("game_tested") else "false",
         "X-AOV-Base-Version": str(report.get("base_version", "unknown")),
         "X-AOV-VTK-Version": str(report.get("vtk_version", "unknown")),
-        "X-AOV-AssetBundles": str(report.get("assetbundles", 0)),
-        "X-AOV-New-Files": str(report.get("new_files", 0)),
+        "X-AOV-AssetBundles": str(len(
+            report.get("packer", {}).get("actor_assets_from_vtk", [])
+        )),
+        "X-AOV-New-Files": str(len(report.get("added_resources", []))),
+        "X-AOV-Adapter": str(report.get("adapter", "unknown")),
+        "X-AOV-Output-Bytes": str(report.get("output_bytes", 0)),
     }
     return FileResponse(
         path=output_path,
         media_type="application/zip",
-        filename="Aki-AOV-10Skin-VanTamKiem.zip",
+        filename="Aki-AOV-KPM100-VTK.zip",
         headers=result_headers,
         background=BackgroundTask(shutil.rmtree, session["workdir"], ignore_errors=True),
     )
