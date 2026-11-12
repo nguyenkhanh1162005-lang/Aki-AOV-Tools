@@ -21,6 +21,7 @@ class AOVMergeResponseTests(unittest.IsolatedAsyncioTestCase):
             def fake_merge(_paths, output_path):
                 Path(output_path).write_bytes(b"merged zip")
                 return {
+                    "adapter": "aov_kpm100_vtk_actor595_1.64.1",
                     "validation": {"outer_zip_crc": "passed"},
                     "game_tested": False,
                     "base_version": "1.64.1.12_KPM",
