@@ -22,6 +22,18 @@ MAX_ENTRY_UNCOMPRESSED = 256 * 1024 * 1024
 MAX_DECODED_RESOURCE = 256 * 1024 * 1024
 MAX_TOTAL_DECODED_BYTES = 1024 * 1024 * 1024
 MAX_NESTED_ZIP_DEPTH = 2
+MAX_NOTICE_CANDIDATES = 100
+MAX_NOTICE_SNIPPET = 180
+NOTICE_TEXT_EXTENSIONS = {
+    ".lua", ".txt", ".xml", ".json", ".json5", ".ini", ".cfg", ".csv", ".bytes",
+}
+NOTICE_PATTERNS = (
+    ("startup_notice", r"\\b(?:startup|first[_\\s-]?login|on[_\\s-]?game[_\\s-]?start|game[_\\s-]?start)[_\\s-]?(?:notice|popup|message)?\\b"),
+    ("login_notice", r"\\b(?:show[_\\s-]?)?(?:login[_\\s-]?)?notice\\b"),
+    ("announcement", r"\\b(?:announcement|notification|notify|toast|popup)\\b"),
+    ("vietnamese_notice", r"thông\\s*báo|khởi\\s*động|vào\\s*game"),
+    ("cjk_notice", r"公告|通知|提示|弹窗|登录公告|登入公告"),
+)
 
 
 class AOVBytesArchiveError(ValueError):
@@ -123,6 +135,10 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
         "decoded_bytes": 0,
         "nested_packages_expanded": 0,
         "nested_packages_not_expanded": [],
+        "notice_scan_files": 0,
+        "notice_candidates": [],
+        "notice_candidates_truncated": False,
+        "notice_scan_scope": "Text-like Lua/XML/JSON/TXT/config/CSV and decoded non-MSES .bytes only; Unity AssetBundle and opaque binary are not scanned.",
         "advisory_only": True,
         "merge_authorized": False,
         "game_tested": False,
@@ -168,6 +184,17 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
 
             if not path.lower().endswith(".bytes"):
                 report["ignored_files"] += 1
+                if PurePosixPath(path.lower()).suffix in NOTICE_TEXT_EXTENSIONS:
+                    report["notice_scan_files"] += 1
+                    for finding in _scan_notice_text(raw, path):
+                        if len(report["notice_candidates"]) >= MAX_NOTICE_CANDIDATES:
+                            report["notice_candidates_truncated"] = True
+                            break
+                        report["notice_candidates"].append({
+                            "source": prefix,
+                            "path": path,
+                            **finding,
+                        })
                 continue
             expected_size = _expected_decoded_size(raw)
             if expected_size is None:
@@ -202,6 +229,16 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
             with zipfile.ZipFile(output, "a", compression=zipfile.ZIP_DEFLATED) as target:
                 target.writestr(output_name, decoded)
             payload_details = _inspect_decoded_payload(decoded)
+            report["notice_scan_files"] += 1
+            for finding in _scan_notice_text(decoded, path):
+                if len(report["notice_candidates"]) >= MAX_NOTICE_CANDIDATES:
+                    report["notice_candidates_truncated"] = True
+                    break
+                report["notice_candidates"].append({
+                    "source": prefix,
+                    "path": path,
+                    **finding,
+                })
             if path.lower().endswith(("heroskin_1.bytes", "heroskin_2.bytes")):
                 try:
                     patch = parse_ifix_patch(decoded)
