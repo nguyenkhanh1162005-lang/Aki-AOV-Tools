@@ -9,7 +9,7 @@ Công cụ web và Telegram bot dùng chung bộ xử lý ZIP, kiểm kê cấu 
 - Web API `/api/capabilities`: công bố registry adapter, phân biệt định dạng chỉ kiểm tra với định dạng có bộ ghép đã xác minh; mặc định fail-closed.
 - Bộ kiểm tra `/inspect` và `/api/inspect` đọc chữ ký 32 byte đầu mỗi mục để phân loại sơ bộ AoV AES/Zstandard, Unity AssetBundle, ZIP lồng, Wwise, ảnh, XML/JSON và dữ liệu chưa nhận diện; chỉ đọc, không sửa tài nguyên.
 - Web API `/api/drive/import`: tải ZIP từ link Google Drive công khai trực tiếp về máy chủ, tối đa 10 link và tổng 500 MB.
-- Web API `/api/upload/{upload_id}/aov-merge`: giữ endpoint adapter chuyên biệt; hiện từ chối an toàn cặp VTK khi IFix opcode 89 chưa được hỗ trợ.
+- Web API `/api/upload/{upload_id}/aov-merge`: dùng cùng pipeline chọn adapter; hỗ trợ đúng cặp ZIP KPM100 trực tiếp + VTK iOS đã ghim SHA-256.
 - Web API `/api/upload/{upload_id}/decode-bytes`: giải mã các tài nguyên `.bytes` AoV AES/Zstandard đã nhận diện từ ZIP đã tải lên; hỗ trợ ZIP `Resources.zip` lồng nhau và bung tiếp ZIP bên trong `.pkg.bytes` đã giải mã (tối đa hai tầng), xuất ZIP riêng cùng `decode-report.json`, không sửa ZIP gốc và không ghép tài nguyên.
 - Telegram: `/inspect`, `/merge`, `/aovmerge`, `/clear`, `/status`. Web và bot dùng chung engine AOV.
 
@@ -21,23 +21,24 @@ Bộ lõi MSES v7 có parser, serializer, kiểm tra checksum và ghép theo kh�
 
 Giới hạn: tối đa 20.000 entry, 1 GiB dữ liệu giải nén, 256 MiB mỗi entry và 256 MiB kích thước giải mã khai báo cho mỗi tài nguyên. Chức năng này chỉ trích xuất payload đã giải mã để kiểm tra/phân tích; không sửa MSES/IFix, không giải mã Unity AssetBundle hoặc Wwise BNK, không ghép skin và không tạo ZIP có thể cài vào game.
 
-## Trạng thái bộ ghép AOV chuyên sâu
+## Bộ ghép KPM100 iOS + Vấn Tâm Kiếm VTK
 
-Adapter Vấn Tâm Kiếm Actor 595 đã được thiết kế cho đúng cặp:
-- Gói MOD 10 skin iOS 1.64.1.12 do người dùng cung cấp.
-- Gói MOD Vấn Tâm Kiếm Actor 595, dữ liệu 1.64.1.11, có thể chia nhiều ZIP.
+**Adapter đang bật có giới hạn phiên bản** cho đúng hai archive nguồn đã kiểm tra:
+- KPM100 iOS MOD 1.64.1.12_KPM, ZIP trực tiếp chứa cây `Resources/1.64.1/` và đúng 70 `KPM_MOD_*` payload.
+- VTK iOS Vấn Tâm Kiếm Actor 595, dữ liệu 1.64.1.11.
 
-**Trạng thái hiện tại: TẠM KHÓA, chưa phát hành đầu ra ghép.** Khi kiểm tra file IFix `Thanos/HeroSkin_2.bytes` của VTK, parser gặp opcode `89` chưa có cách giải mã operand và serialize đã xác minh. Không được phép bỏ qua instruction, tự đoán loại operand hoặc ghi lại patch khi chưa có schema và fixture round-trip tương ứng. Adapter registry trả về `blocked_pending_ifix_opcode_89`, và giao diện web khóa nút ghép Vấn Tâm Kiếm thay vì báo hỗ trợ.
+Bộ xử lý ghim SHA-256 của cả hai archive. Không nhận ZIP khác hash, sai phiên bản hoặc sai cấu trúc chỉ vì tên file giống nhau. KPM100 là ZIP resource tree trực tiếp, không phải wrapper ngoài có `Resources.zip` và `DanhSachSkin.txt`. Adapter wrapper 10 skin khác vẫn bị khóa cho tới khi có bài tích hợp riêng.
 
-Web vẫn cho phép:
-- Tải nhiều ZIP theo từng khối có SHA-256 và tiếp tục phiên bị gián đoạn.
-- Lập manifest chỉ đọc, so sánh hash đường dẫn, phiên bản/nền tảng và dependency AssetBundle.
-- Kiểm tra cấu trúc ZIP, nhận diện BNK/AssetBundle/.bytes và giải mã riêng các wrapper .bytes đã hỗ trợ để phân tích.
-- Ghép ZIP thông thường chỉ khi xung đột đường dẫn được xử lý an toàn; tài nguyên AoV có định dạng riêng vẫn bị từ chối nếu không có adapter.
+Trong cặp nguồn được hỗ trợ, bộ ghép:
+- Giữ nguyên mọi đường dẫn của KPM100 và chỉ thay payload liên quan Actor 595; báo cáo xác nhận toàn bộ đường dẫn gốc vẫn còn.
+- Thay 68 XML kỹ năng cùng một AssetRef và một ActorInfo trong 70 payload KPM_MOD; kiểm tra round-trip của 70 payload và parse 68 XML.
+- Ghép IFix của `Thanos/HeroSkin_2.bytes` vào `HeroSkin_1.bytes`, remap chỉ số và kiểm tra parse/serialize sau mã hóa.
+- Ghép các bảng MSES có allowlist theo từng bảng, CommonActions theo track, cập nhật ResourcePacker/ResourceVerification và các dependency AssetBundle của Actor 595.
+- Thêm các AssetBundle và soundbank iOS VTK được liệt kê trong báo cáo kiểm tra.
 
-Các báo cáo tương thích chỉ mang tính tư vấn. `SAFE_MERGE` ở mức tệp ZIP không chứng minh nội dung hoạt động trong game. Không có kiểm thử thực tế trong Liên Quân iOS, vì vậy chưa có cam kết tương thích 100%. Chỉ mở lại adapter VTK sau khi opcode 89 được triển khai, có fixture gốc, round-trip parser/serializer, kiểm tra bảng/AssetBundle/dependency và CI thành công.
+Bài tích hợp trên đúng hai archive đã ghim đã thành công: CRC ZIP ngoài, IFix round-trip, 70/70 payload, 68/68 XML kỹ năng, Actor Actions package 129 entry CRC và ActorInfo package CRC đều đạt. Đây là **xác minh cấu trúc**, không phải thử nghiệm chạy trong Liên Quân iOS. Chưa có xác nhận rằng model, hoạt ảnh, hiệu ứng, thông báo hạ, biến về, nút bấm và âm thanh đều hiển thị/phát đúng trong trận; cần sao lưu bản gốc và thử trên thiết bị trước khi sử dụng.
 
-**Quy tắc nguồn:** khi adapter được mở lại, chỉ ghép gói mod với gói mod. Không tải, không yêu cầu và không chèn tài nguyên từ bộ cài Liên Quân gốc.
+**Quy tắc nguồn:** chỉ ghép đúng MOD KPM100 với MOD VTK đã ghim; không tải, không yêu cầu và không chèn tài nguyên từ bộ cài game gốc. Những ZIP AoV khác tiếp tục bị từ chối hoặc chỉ kiểm kê cho tới khi có adapter riêng.
 
 ## Phạm vi kiểm tra Wwise BNK
 
