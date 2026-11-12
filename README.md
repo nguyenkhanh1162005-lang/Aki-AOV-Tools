@@ -7,6 +7,7 @@ Công cụ web tiếng Việt để tải, kiểm tra cấu trúc, đối chiế
 - Web: tải tối đa 10 ZIP theo khối 1 MiB có SHA-256 từng khối, khôi phục phiên tải, kiểm tra cấu trúc, lập manifest và đối chiếu xung đột; ZIP thường chỉ ghép khi không có xung đột.
 - Web API `/api/inspect`: liệt kê phần mở rộng, tên có dấu hiệu là tài nguyên game và so sánh SHA-256 các đường dẫn trùng để phân biệt nội dung giống hệt với xung đột thật (tối đa 80 đường dẫn trùng được hiển thị chi tiết).
 - Web API `/api/capabilities`: công bố registry adapter, phân biệt định dạng chỉ kiểm tra với định dạng có bộ ghép đã xác minh; mặc định fail-closed.
+- Web API `POST /api/upload/{upload_id}/aov-preflight`: phân loại từng ZIP AoV theo vai trò (MOD wrapper, VTK/Actor 595, KPM100, chưa phân loại), trích Actor ID từ tên AssetBundle và liệt kê blocker của adapter. Chỉ đọc, giữ phiên upload; không tạo ZIP và không cấp quyền ghép cho nhiều MOD wrapper.
 - Bộ kiểm tra `/inspect` và `/api/inspect` đọc chữ ký 32 byte đầu mỗi mục để phân loại sơ bộ AoV AES/Zstandard, Unity AssetBundle, ZIP lồng, Wwise, ảnh, XML/JSON và dữ liệu chưa nhận diện; chỉ đọc, không sửa tài nguyên.
 - Web API `/api/drive/import`: tải ZIP từ link Google Drive công khai trực tiếp về máy chủ, tối đa 10 link và tổng 500 MB.
 - Web API `/api/upload/{upload_id}/aov-merge`: tự chọn adapter theo cấu trúc ZIP; hỗ trợ hai đường ghép có giới hạn: KPM100 ZIP trực tiếp + VTK, hoặc MOD wrapper 10 skin + các ZIP phần VTK iOS.
@@ -29,6 +30,12 @@ Trên web dùng nút **Quét thông báo khởi động**; sau khi quét, có th
 ## Bộ ghép KPM100 iOS + Vấn Tâm Kiếm VTK
 
 Adapter này nhận đúng KPM100 iOS MOD 1.64.1.12_KPM dạng ZIP trực tiếp (cây `Resources/1.64.1/`, 70 `KPM_MOD_*` payload) cùng VTK iOS Vấn Tâm Kiếm Actor 595 phiên bản 1.64.1.11. Bộ xử lý kiểm tra hash và cấu trúc của cặp nguồn KPM100 đã được tích hợp riêng; không nhận ZIP khác chỉ vì tên file giống nhau.
+
+## Phân loại bộ nguồn nhiều MOD trước khi ghép
+
+Chọn các ZIP 9 skin, 10 skin, Tamyn và các phần VTK rồi bấm **Phân loại bộ MOD + VTK trước khi ghép (chỉ đọc)**. API `/api/upload/{upload_id}/aov-preflight` báo vai trò từng file, số wrapper `Resources.zip`/`DanhSachSkin.txt`, Actor ID phát hiện trong tên AssetBundle và adapter hiện có có phù hợp hay không. Phiên upload được giữ lại để tiếp tục đối chiếu xung đột.
+
+Đây là bước nhận diện, không phải bộ ghép nhiều MOD. Hiện adapter wrapper chỉ nhận đúng một MOD nền 10 skin cùng VTK Actor 595 phiên bản đã ghim. Khi có nhiều wrapper (ví dụ 9 skin + 10 skin), Tamyn/Actor khác hoặc xung đột chưa có parser/serializer tương ứng, web sẽ báo blocker và không tự chọn nền, ghi đè hay xuất ZIP. Cần hoàn tất adapter riêng cho từng loại tài nguyên và fixture kiểm thử trước khi bật ghép nhiều MOD.
 
 ## Bộ ghép MOD wrapper 10 skin + Vấn Tâm Kiếm VTK
 
