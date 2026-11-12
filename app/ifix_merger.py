@@ -54,6 +54,9 @@ _OPCODE_NAMES = {
     179: "Mul",
 }
 
+# AoV's custom stack-space pseudo-op is registered separately from the Unity IL map.
+_OPCODE_NAMES[146] = "StackSpace"
+
 _INLINE_INT = {"Ldc_I4", "Ldc_R4", "Ldc_I4_S"}
 _INLINE_STRING = {"Ldstr"}
 _INLINE_8BYTE = {"Ldc_I8", "Ldc_R8"}
