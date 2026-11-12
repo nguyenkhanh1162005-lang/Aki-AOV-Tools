@@ -509,6 +509,39 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
     return "generic_zip"
 
 
+_PRESERVATION_GROUPS = (
+    ("kill_notifications", "Thông báo hạ gục / billboard", 0),
+    ("effects_recall", "Hiệu ứng / hoạt ảnh / biến về", 1),
+    ("ui_buttons", "Giao diện / nút bấm / biểu tượng", 2),
+    ("audio", "Âm thanh", 3),
+)
+
+def _build_preservation_gates(resources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Aggregate exact priority counts across the complete manifest."""
+    grouped = {key: [] for key, _, _ in _PRESERVATION_GROUPS}
+    grouped["other"] = []
+    for resource in resources:
+        label, _ = _resource_priority_hint(str(resource.get("path", "")))
+        key = next((key for key, group_label, _ in _PRESERVATION_GROUPS if group_label == label), "other")
+        grouped[key].append(resource)
+    result = []
+    for key, label, rank in _PRESERVATION_GROUPS + (("other", "Tài nguyên khác", 4),):
+        items = grouped[key]
+        counts = {status: sum(item.get("status") == status for item in items) for status in ("VERSION_CONFLICT", "NEEDS_RULE", "UNSUPPORTED", "IDENTICAL_DUPLICATE", "SAFE_MERGE", "IGNORED_METADATA")}
+        unresolved = counts["VERSION_CONFLICT"] + counts["NEEDS_RULE"] + counts["UNSUPPORTED"]
+        enriched = []
+        adapter_counts = {}
+        for item in items:
+            guidance = _resource_merge_guidance(str(item.get("path", "")))
+            adapter = guidance.get("adapter_state", "no_known_adapter")
+            adapter_counts[adapter] = adapter_counts.get(adapter, 0) + 1
+            if item.get("status") in {"VERSION_CONFLICT", "NEEDS_RULE", "UNSUPPORTED", "IDENTICAL_DUPLICATE"}:
+                enriched.append({"path": item.get("path", ""), "status": item.get("status", "UNKNOWN"), "sources": item.get("sources", []), "adapter_state": adapter, "next_action": guidance.get("next_action", ""), "safety_rule": guidance.get("safety_rule", ""), "reasons": item.get("reasons", []), "missing_dependencies": item.get("missing_dependencies", [])})
+        enriched.sort(key=lambda item: (0 if item["status"] == "VERSION_CONFLICT" else 1 if item["status"] == "NEEDS_RULE" else 2 if item["status"] == "UNSUPPORTED" else 3, item["path"]))
+        state = "NOT_IN_MANIFEST" if not items else "REVIEW_REQUIRED" if unresolved else "NO_UNRESOLVED_PATH_CONFLICTS"
+        result.append({"id": key, "label": label, "priority_rank": rank, "state": state, "path_count": len(items), "unresolved_count": unresolved, "identical_duplicate_count": counts["IDENTICAL_DUPLICATE"], "safe_merge_count": counts["SAFE_MERGE"], "adapter_states": dict(sorted(adapter_counts.items())), "status_counts": counts, "top_items": enriched[:12], "details_truncated": len(enriched) > 12, "merge_authorized": False, "game_tested": False})
+    return result
+
 def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
     """Describe the narrowest known adapter for a path without granting merge permission."""
     path = resource_path.replace("\\", "/")
@@ -763,10 +796,12 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
         for item in details:
             state = item.get("adapter_state", "no_known_adapter")
             guidance_counts[state] = guidance_counts.get(state, 0) + 1
+        preservation_gates = _build_preservation_gates(plan["resources"])
         resource_analysis = {
             "available": True,
             "advisory_only": True,
             "merge_authorized": False,
+            "preservation_gates": preservation_gates,
             "merge_guidance_counts": guidance_counts,
             "resource_count": manifest["resource_count"],
             "path_count": plan["path_count"],
