@@ -84,6 +84,36 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
 .preserve-item{display:flex;align-items:center;gap:7px;padding:8px 9px;border:1px solid #29445a;border-radius:10px;background:#0b1928;color:#d6e9f2;font-size:10px;font-weight:750}
 .preserve-item b{font-size:14px}
 @media(max-width:520px){.preserve-item{font-size:9px;padding:7px}.preserve-grid{gap:6px}}
+ 
+.preflight-dashboard{display:grid;gap:13px;margin:12px 0 15px}
+.preflight-dashboard[hidden]{display:none}
+.preflight-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.preflight-metric{padding:13px;border:1px solid #29415e;border-radius:13px;background:linear-gradient(145deg,#14263d,#0d1929)}
+.preflight-metric strong{display:block;font-size:20px;line-height:1.15;color:#e5f1ff;font-variant-numeric:tabular-nums}
+.preflight-metric span{display:block;margin-top:5px;color:#91a8c3;font-size:10px;font-weight:750;letter-spacing:.04em}
+.preflight-state{display:flex;align-items:flex-start;gap:11px;padding:14px;border:1px solid #38506b;border-radius:14px;background:#101e30}
+.preflight-state[data-ready="true"]{border-color:#397f73;background:linear-gradient(110deg,#102a2b,#112437)}
+.preflight-state[data-ready="false"]{border-color:#7a6541;background:linear-gradient(110deg,#2b2519,#1b2331)}
+.preflight-state-icon{display:grid;place-items:center;flex:0 0 34px;height:34px;border-radius:11px;background:#263d57;font-size:17px}
+.preflight-state strong{display:block;font-size:13px}
+.preflight-state p{margin:4px 0 0;color:#a8bad0;font-size:11px;line-height:1.55}
+.preflight-group{padding:13px;border:1px solid #263d58;border-radius:14px;background:#0c1828}
+.preflight-group h3{margin:0 0 10px;color:#dceaff;font-size:12px}
+.preflight-sources{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.preflight-source{min-width:0;padding:10px;border:1px solid #263c56;border-radius:11px;background:#101f32}
+.preflight-source strong{display:block;overflow-wrap:anywhere;color:#e1edfb;font-size:11px}
+.preflight-source span{display:block;margin-top:4px;color:#9bb0ca;font-size:10px;line-height:1.45}
+.preflight-resource-list{display:grid;gap:8px}
+.preflight-resource{padding:11px;border:1px solid #30465f;border-radius:11px;background:#101e30}
+.preflight-resource-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.preflight-resource-head strong{min-width:0;overflow-wrap:anywhere;color:#e2edf9;font-size:11px}
+.preflight-tag{flex:0 0 auto;padding:3px 7px;border:1px solid #465d79;border-radius:99px;color:#bdd2ec;font-size:9px;font-weight:800}
+.preflight-tag.danger{border-color:#8b5555;background:#3a2028;color:#ffc4c4}
+.preflight-tag.warning{border-color:#806b45;background:#352c1b;color:#f4d89b}
+.preflight-tag.safe{border-color:#39756a;background:#16332e;color:#adf0dc}
+.preflight-resource p{margin:5px 0 0;color:#9db0c7;font-size:10px;line-height:1.5}
+.preflight-blockers{margin:0;padding-left:18px;color:#f0d5a3;font-size:11px;line-height:1.6}
+@media(max-width:620px){.preflight-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.preflight-sources{grid-template-columns:1fr}.preflight-resource-head{flex-direction:column}}
 </style></head>
 <body>
 <div class="app-shell">
@@ -186,6 +216,7 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
     <h2 class="section-title"><span class="section-number">03</span> Kết quả phân tích</h2>
     <p class="section-sub">Trạng thái xử lý và báo cáo chi tiết sẽ hiển thị tại đây.</p>
     <div id="status" role="status">Chờ chọn ZIP để bắt đầu.</div>
+    <div id="preflightDashboard" class="preflight-dashboard" hidden aria-live="polite"></div>
     <pre id="report"></pre>
   </div>
 </section>
@@ -202,7 +233,7 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
 </div>
 <script>
 const driveLinks=document.querySelector('#driveLinks'),driveImport=document.querySelector('#driveImport'),driveMerge=document.querySelector('#driveMerge');let driveUploadId=null,localAovUploadId=null;let aovAdapterEnabled=false;const input=document.querySelector('#upload'),go=document.querySelector('#go'),aovMerge=document.querySelector('#aovMerge'),decodeBytesBtn=document.querySelector('#decodeBytes'),noticeScanBtn=document.querySelector('#noticeScan'),downloadNoticeReportBtn=document.querySelector('#downloadNoticeReport'),downloadAovPreflightReportBtn=document.querySelector('#downloadAovPreflightReport'),compatibilityBtn=document.querySelector('#compatibility'),aovPreflightBtn=document.querySelector('#aovPreflight'),inspectBtn=document.querySelector('#inspect'),report=document.querySelector('#report'),list=document.querySelector('#files'),status=document.querySelector('#status');
-const CHUNK_BYTES=4*1024*1024,UPLOAD_CONCURRENCY=3;let noticeScanReport=null,aovPreflightReport=null,transferStartedAt=0;
+const CHUNK_BYTES=4*1024*1024,UPLOAD_CONCURRENCY=4;let noticeScanReport=null,aovPreflightReport=null,transferStartedAt=0;
 const transferBar=document.querySelector('#transferBar'),transferPct=document.querySelector('#transferPct'),transferLabel=document.querySelector('#transferLabel'),transferMeta=document.querySelector('#transferMeta');
 function setTransferProgress(done,total,label){
   const pct=total?Math.min(100,done/total*100):0;
@@ -213,10 +244,149 @@ function setTransferProgress(done,total,label){
   transferLabel.textContent=label||'TẢI LÊN';
   const elapsed=transferStartedAt?Math.max(.1,(Date.now()-transferStartedAt)/1000):0;
   const speed=elapsed>0?((done/1048576)/elapsed):0;
-  transferMeta.textContent=(done/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB'+(speed>0?' · '+speed.toFixed(1)+' MB/s':'')+' · tối đa 3 luồng';
+  const eta=speed>0&&total>done?' · còn khoảng '+Math.ceil((total-done)/1048576/speed)+' giây':'';
+  transferMeta.textContent=(done/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB'+(speed>0?' · '+speed.toFixed(1)+' MB/s':'')+eta+' · tối đa 4 luồng';
 }
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const capabilityList=document.querySelector('#capabilityList'),capabilityNote=document.querySelector('#capabilityNote');
+
+const preflightDashboard=document.querySelector('#preflightDashboard');
+function dashboardElement(tag,className,text){
+  const node=document.createElement(tag);
+  if(className)node.className=className;
+  if(text!==undefined)node.textContent=String(text);
+  return node;
+}
+function renderPreflightDashboard(data){
+  const root=preflightDashboard;
+  root.replaceChildren();root.hidden=false;
+  const analysis=data.resource_analysis||{},counts=analysis.summary||{},target=data.target_set||{};
+  const state=dashboardElement('div','preflight-state');
+  state.dataset.ready=data.ready_to_merge?'true':'false';
+  state.append(dashboardElement('div','preflight-state-icon',data.ready_to_merge?'✓':'!'));
+  const stateCopy=dashboardElement('div');
+  stateCopy.append(dashboardElement('strong','',data.ready_to_merge?'Bộ nguồn khớp adapter đã giới hạn':'Chưa đủ điều kiện ghép an toàn'));
+  stateCopy.append(dashboardElement('p','',data.ready_to_merge
+    ?'Hệ thống vẫn kiểm tra inventory, phiên bản, checksum và dependency trước khi xuất file.'
+    :'Còn xung đột hoặc thiếu adapter. Hệ thống không tự chọn file để ghi đè.'));
+  state.append(stateCopy);root.append(state);
+
+  const metrics=dashboardElement('div','preflight-metrics');
+  const cards=[
+    [data.source_count||0,'ZIP ĐÃ NẠP'],
+    [analysis.resource_count||0,'TÀI NGUYÊN ĐỌC ĐƯỢC'],
+    [counts.VERSION_CONFLICT||0,'LỆCH PHIÊN BẢN'],
+    [(counts.NEEDS_RULE||0)+(counts.UNSUPPORTED||0),'CẦN ADAPTER']
+  ];
+  for(const [value,label] of cards){
+    const card=dashboardElement('div','preflight-metric');
+    card.append(dashboardElement('strong','',Number(value).toLocaleString('vi-VN')));
+    card.append(dashboardElement('span','',label));metrics.append(card);
+  }
+  root.append(metrics);
+
+  const preservation=dashboardElement('section','preflight-group');
+  preservation.append(dashboardElement('h3','','BẢNG ƯU TIÊN BẢO TOÀN MOD'));
+  const preservationGrid=dashboardElement('div','preflight-sources');
+  const preservationGroups=[
+    'Thông báo hạ gục / billboard',
+    'Hiệu ứng / hoạt ảnh / biến về',
+    'Giao diện / nút bấm / biểu tượng',
+    'Âm thanh'
+  ];
+  for(const group of preservationGroups){
+    const items=(analysis.important_paths||[]).filter(item=>item.priority_group===group);
+    const blocked=items.filter(item=>['VERSION_CONFLICT','NEEDS_RULE','UNSUPPORTED'].includes(item.status));
+    const card=dashboardElement('div','preflight-source');
+    card.append(dashboardElement('strong','',group));
+    let stateText='CHƯA ĐỦ DỮ LIỆU ĐỂ KẾT LUẬN';
+    if(items.length&&blocked.length)stateText='CÓ '+blocked.length+' MỤC CẦN XỬ LÝ';
+    else if(items.length)stateText='CÁC MỤC LIỆT KÊ ĐANG TRÙNG BYTE';
+    card.append(dashboardElement('span','',stateText));
+    card.append(dashboardElement('span','','Số mục xung đột trong báo cáo: '+items.length+'. Báo cáo tĩnh không chứng minh đã giữ hiệu ứng trong game.'));
+    preservationGrid.append(card);
+  }
+  preservation.append(preservationGrid);root.append(preservation);
+
+  const sources=dashboardElement('section','preflight-group');
+  sources.append(dashboardElement('h3','','CÁC MOD ĐÃ NHẬN DIỆN'));
+  const sourceGrid=dashboardElement('div','preflight-sources');
+  for(const item of (data.profiles||[])){
+    const card=dashboardElement('div','preflight-source');
+    card.append(dashboardElement('strong','',item.name));
+    const details=[
+      item.source_family_hint||item.source_role||'Chưa phân loại',
+      item.actor_asset_ids?.length?'AssetBundle Actor '+item.actor_asset_ids.join(', '):'',
+      item.actor_action_ids?.length?'Actions Actor '+item.actor_action_ids.join(', '):'',
+      item.source_part_number?'Phần '+item.source_part_number:''
+    ].filter(Boolean);
+    card.append(dashboardElement('span','',details.join(' · ')));
+    sourceGrid.append(card);
+  }
+  if(!sourceGrid.childElementCount)sourceGrid.append(dashboardElement('p','','Không có file nguồn.'));
+  sources.append(sourceGrid);root.append(sources);
+
+  if(target.sources){
+    const targetCard=dashboardElement('section','preflight-group');
+    targetCard.append(dashboardElement('h3','','ĐỐI CHIẾU BỘ P9 + P10 + TM + VTK'));
+    const targetGrid=dashboardElement('div','preflight-sources');
+    for(const item of target.sources){
+      const card=dashboardElement('div','preflight-source');
+      card.append(dashboardElement('strong','',item.label));
+      card.append(dashboardElement('span','',item.state+(item.files?.length?' · '+item.files.join(', '):'')));
+      targetGrid.append(card);
+    }
+    targetCard.append(targetGrid);root.append(targetCard);
+  }
+
+  const priorities=new Map();
+  for(const item of (analysis.important_paths||[])){
+    const group=item.priority_group||'Tài nguyên khác';
+    if(!priorities.has(group))priorities.set(group,[]);
+    priorities.get(group).push(item);
+  }
+  const priorityOrder=['Thông báo hạ gục / billboard','Hiệu ứng / hoạt ảnh / biến về','Giao diện / nút bấm / biểu tượng','Âm thanh','Tài nguyên khác'];
+  const prioritySection=dashboardElement('section','preflight-group');
+  prioritySection.append(dashboardElement('h3','','TÀI NGUYÊN ƯU TIÊN GIỮ LẠI'));
+  if(!priorities.size){
+    prioritySection.append(dashboardElement('p','','Chưa có xung đột quan trọng được trả về. Điều này chưa chứng minh mọi hiệu ứng đã được giữ.'));
+  }else{
+    for(const group of priorityOrder){
+      const items=priorities.get(group);if(!items?.length)continue;
+      const wrap=dashboardElement('div','');wrap.style.marginTop='10px';
+      wrap.append(dashboardElement('h3','',group+' · '+items.length));
+      const list=dashboardElement('div','preflight-resource-list');
+      for(const item of items.slice(0,8)){
+        const card=dashboardElement('article','preflight-resource');
+        const head=dashboardElement('div','preflight-resource-head');
+        head.append(dashboardElement('strong','',item.path));
+        const statusClass=item.status==='VERSION_CONFLICT'||item.status==='UNSUPPORTED'?'danger':item.status==='NEEDS_RULE'?'warning':item.status==='IDENTICAL_DUPLICATE'?'safe':'';
+        head.append(dashboardElement('span','preflight-tag '+statusClass,item.status||'UNKNOWN'));
+        card.append(head);
+        const meta=[item.adapter_state||'chưa rõ adapter',(item.sources||[]).join(', ')].filter(Boolean).join(' · ');
+        card.append(dashboardElement('p','',meta));
+        const reason=(item.reasons||[]).join(' ');
+        if(reason)card.append(dashboardElement('p','',reason));
+        if(item.next_action)card.append(dashboardElement('p','',item.next_action));
+        if(item.missing_dependencies?.length)card.append(dashboardElement('p','danger','Thiếu dependency: '+item.missing_dependencies.join(', ')));
+        list.append(card);
+      }
+      if(items.length>8)list.append(dashboardElement('p','','Còn '+(items.length-8)+' mục trong báo cáo JSON chi tiết.'));
+      wrap.append(list);prioritySection.append(wrap);
+    }
+  }
+  root.append(prioritySection);
+
+  const blockers=data.blockers||target.blockers||[];
+  if(blockers.length){
+    const block=dashboardElement('section','preflight-group');
+    block.append(dashboardElement('h3','','LÝ DO CẦN CHẶN GHÉP'));
+    const list=dashboardElement('ul','preflight-blockers');
+    for(const item of blockers.slice(0,12))list.append(dashboardElement('li','',item));
+    block.append(list);root.append(block);
+  }
+}
+
 async function loadCapabilities(){
   try{
     const response=await fetchWithRetry('/api/capabilities',{method:'GET'},2);
@@ -272,9 +442,19 @@ async function sha256Hex(buffer){
   const digest=await crypto.subtle.digest('SHA-256',buffer);
   return [...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,'0')).join('');
 }
-async function verifyResumablePrefix(files,sessionFiles){
+async function verifyResumableChunks(files,sessionFiles,protocol){
   for(let index=0;index<files.length;index++){
     const file=files[index],item=sessionFiles[index],received=item.received||0;
+    if(protocol==='chunk_map_v2'){
+      if(!Array.isArray(item.received_chunks))return false;
+      for(const chunk of item.received_chunks){
+        if(!Number.isInteger(chunk.index)||chunk.index<0||chunk.index>=Math.ceil(file.size/CHUNK_BYTES)||!/^([0-9a-f]{64})$/.test(chunk.sha256||''))return false;
+        const offset=chunk.index*CHUNK_BYTES;
+        const bytes=await file.slice(offset,Math.min(offset+CHUNK_BYTES,file.size)).arrayBuffer();
+        if(await sha256Hex(bytes)!==chunk.sha256)return false;
+      }
+      continue;
+    }
     if(!received)continue;
     if(received!==file.size&&received%CHUNK_BYTES!==0)return false;
     const count=Math.ceil(received/CHUNK_BYTES),hashes=item.received_chunk_sha256;
@@ -291,7 +471,7 @@ function saveUploadState(state){try{localStorage.setItem(UPLOAD_STATE_KEY,JSON.s
 function clearUploadState(){try{localStorage.removeItem(UPLOAD_STATE_KEY);}catch{}}
 async function uploadInChunks(files){
   const fingerprint=await uploadFingerprint(files);
-  let uploadId=null,offsets=[];
+  let uploadId=null,offsets=[],protocol='sequential_v1',chunkMaps=files.map(()=>[]);
   let saved=null;
   try{saved=JSON.parse(localStorage.getItem(UPLOAD_STATE_KEY)||'null');}
   catch{clearUploadState();}
@@ -305,51 +485,73 @@ async function uploadInChunks(files){
       else throw e;
     }
     if(session){
-      const matches=Array.isArray(session.files)&&session.files.length===files.length&&session.files.every((item,i)=>item.name===files[i].name&&item.size===files[i].size&&Number.isInteger(item.received)&&item.received>=0&&item.received<=item.size);
-      if(matches&&await verifyResumablePrefix(files,session.files)){uploadId=saved.upload_id;offsets=session.files.map(item=>item.received);status.textContent='Đã xác minh các khối đã tải, tiếp tục từ phần còn thiếu...';}
-      else clearUploadState();
+      const matches=session.chunk_size===CHUNK_BYTES&&Array.isArray(session.files)&&session.files.length===files.length&&session.files.every((item,i)=>item.name===files[i].name&&item.size===files[i].size&&Number.isInteger(item.received)&&item.received>=0&&item.received<=item.size);
+      const savedProtocol=session.upload_protocol||'sequential_v1';
+      if(matches&&await verifyResumableChunks(files,session.files,savedProtocol)){
+        uploadId=saved.upload_id;protocol=savedProtocol;
+        if(protocol==='chunk_map_v2')chunkMaps=session.files.map(item=>item.received_chunks||[]);
+        else offsets=session.files.map(item=>item.received);
+        status.textContent='Đã xác minh các khối đã tải, tiếp tục từ phần còn thiếu...';
+      }else clearUploadState();
     }
   }
   if(!uploadId){
-    const start=await fetchWithRetry('/api/upload/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:files.map(file=>({name:file.name,size:file.size,chunk_sha256:[]}))})});
-    const data=await start.json();uploadId=data.upload_id;offsets=files.map(()=>0);
+    const start=await fetchWithRetry('/api/upload/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({upload_protocol:"chunk_map_v2",files:files.map(file=>({name:file.name,size:file.size,chunk_sha256:[]}))})});
+    const data=await start.json();uploadId=data.upload_id;protocol=data.upload_protocol||'sequential_v1';
+    offsets=files.map(()=>0);chunkMaps=files.map(()=>[]);
     saveUploadState({fingerprint,upload_id:uploadId});
   }
   const total=files.reduce((sum,file)=>sum+file.size,0);
-  let sent=offsets.reduce((sum,value)=>sum+value,0);
-  setTransferProgress(sent,total,'ĐANG TẢI LÊN');
-  let nextFileIndex=0;
-  async function uploadFile(index){
-    const file=files[index];
-    for(let offset=offsets[index];offset<file.size;offset+=CHUNK_BYTES){
-      const part=file.slice(offset,Math.min(offset+CHUNK_BYTES,file.size));
-      const bytes=await part.arrayBuffer();
-      const chunkHash=await sha256Hex(bytes);
-      const response=await fetchWithRetry('/api/upload/'+uploadId+'/'+index,{
-        method:'PUT',
-        headers:{
-          'Content-Type':'application/octet-stream',
-          'X-Chunk-Offset':String(offset),
-          'X-Chunk-SHA256':chunkHash
-        },
-        body:bytes
-      });
-      const ack=await response.json();
-      const expected=Math.min(offset+part.size,file.size);
-      if(ack.received!==expected)throw Error('Máy chủ xác nhận sai vị trí khối tải lên.');
-      sent+=part.size;
-      setTransferProgress(sent,total,'ĐANG TẢI LÊN · '+file.name);
-      status.textContent='Đang tải '+file.name+' · '+(sent/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB';
+  let sent=0;
+  if(protocol==='chunk_map_v2'){
+    const tasks=[];
+    for(let fileIndex=0;fileIndex<files.length;fileIndex++){
+      const file=files[fileIndex],received=new Set(chunkMaps[fileIndex].map(item=>item.index));
+      for(const chunk of chunkMaps[fileIndex]){
+        const offset=chunk.index*CHUNK_BYTES;
+        sent+=Math.min(CHUNK_BYTES,file.size-offset);
+      }
+      const count=Math.ceil(file.size/CHUNK_BYTES);
+      for(let chunkIndex=0;chunkIndex<count;chunkIndex++){
+        if(!received.has(chunkIndex))tasks.push({fileIndex,chunkIndex});
+      }
     }
-  }
-  async function worker(){
-    while(true){
-      const index=nextFileIndex++;
-      if(index>=files.length)return;
-      await uploadFile(index);
+    setTransferProgress(sent,total,'ĐANG TẢI LÊN · 4 LUỒNG');
+    let cursor=0;
+    async function worker(){
+      while(true){
+        const task=tasks[cursor++];if(!task)return;
+        const file=files[task.fileIndex],offset=task.chunkIndex*CHUNK_BYTES;
+        const part=file.slice(offset,Math.min(offset+CHUNK_BYTES,file.size));
+        const bytes=await part.arrayBuffer(),chunkHash=await sha256Hex(bytes);
+        const response=await fetchWithRetry('/api/upload/'+uploadId+'/'+task.fileIndex,{
+          method:'PUT',headers:{'Content-Type':'application/octet-stream','X-Chunk-Offset':String(offset),'X-Chunk-SHA256':chunkHash},body:bytes
+        });
+        const ack=await response.json();
+        if(ack.chunk_received!==true||ack.chunk_index!==task.chunkIndex)throw Error('Máy chủ chưa xác nhận đúng khối tải lên.');
+        sent+=part.size;setTransferProgress(sent,total,'ĐANG TẢI LÊN · '+file.name);
+        status.textContent='Đang tải '+file.name+' · '+(sent/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB';
+      }
     }
+    await Promise.all(Array.from({length:Math.min(UPLOAD_CONCURRENCY,tasks.length)},()=>worker()));
+  }else{
+    sent=offsets.reduce((sum,value)=>sum+value,0);
+    setTransferProgress(sent,total,'ĐANG TẢI LÊN');
+    let nextFileIndex=0;
+    async function uploadFile(index){
+      const file=files[index];
+      for(let offset=offsets[index];offset<file.size;offset+=CHUNK_BYTES){
+        const part=file.slice(offset,Math.min(offset+CHUNK_BYTES,file.size)),bytes=await part.arrayBuffer(),chunkHash=await sha256Hex(bytes);
+        const response=await fetchWithRetry('/api/upload/'+uploadId+'/'+index,{method:'PUT',headers:{'Content-Type':'application/octet-stream','X-Chunk-Offset':String(offset),'X-Chunk-SHA256':chunkHash},body:bytes});
+        const ack=await response.json(),expected=Math.min(offset+part.size,file.size);
+        if(ack.received!==expected)throw Error('Máy chủ xác nhận sai vị trí khối tải lên.');
+        sent+=part.size;setTransferProgress(sent,total,'ĐANG TẢI LÊN · '+file.name);
+        status.textContent='Đang tải '+file.name+' · '+(sent/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB';
+      }
+    }
+    async function worker(){while(true){const index=nextFileIndex++;if(index>=files.length)return;await uploadFile(index);}}
+    await Promise.all(Array.from({length:Math.min(UPLOAD_CONCURRENCY,files.length)},()=>worker()));
   }
-  await Promise.all(Array.from({length:Math.min(UPLOAD_CONCURRENCY,files.length)},()=>worker()));
   setTransferProgress(total,total,'TẢI LÊN HOÀN TẤT');
   return uploadId;
 }
@@ -374,7 +576,7 @@ async function withUploadSession(files, action){
 driveImport.addEventListener('click',async()=>{const links=driveLinks.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);if(!links.length){status.textContent='Hãy dán ít nhất một link Google Drive.';return;}driveImport.disabled=true;go.disabled=true;inspectBtn.disabled=true;driveMerge.disabled=true;driveMerge.style.display='none';driveUploadId=null;aovPreflightReport=null;downloadAovPreflightReportBtn.disabled=true;report.textContent='';try{let uploadId=localAovUploadId;if(input.files.length&&!uploadId){status.textContent='Đang tải ZIP đã chọn từ thiết bị lên máy chủ...';uploadId=await uploadInChunks([...input.files]);localAovUploadId=uploadId;}status.textContent='Máy chủ đang tải ZIP trực tiếp từ Google Drive. File lớn có thể mất vài phút...';const payload={links};if(uploadId)payload.upload_id=uploadId;const r=await fetchWithRetry('/api/drive/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await r.json();driveUploadId=data.upload_id;localAovUploadId=null;driveMerge.style.display='block';driveMerge.disabled=!aovAdapterEnabled;aovPreflightBtn.disabled=false;status.textContent='Đã tải '+data.files.length+' ZIP về máy chủ: '+data.files.map(f=>f.name+' ('+(f.size/1048576).toFixed(1)+' MB)').join(', ')+'. Đang kiểm tra cấu trúc...';const checked=await fetchWithRetry('/api/upload/'+data.upload_id+'/inspect?keep_session=true',{method:'POST'});report.textContent=await checked.text();status.textContent='Đã kiểm tra xong ZIP từ Drive. Có thể chạy bộ ghép AOV chuyên sâu.';}catch(e){status.textContent='Lỗi: '+e.message;}finally{driveImport.disabled=false;go.disabled=!input.files.length;inspectBtn.disabled=!input.files.length;}});
 driveMerge.addEventListener('click',async()=>{if(!driveUploadId)return;driveMerge.disabled=true;status.textContent='Đang giải mã và ghép tài nguyên AOV trên máy chủ...';try{const r=await fetchWithRetry('/api/upload/'+driveUploadId+'/aov-merge',{method:'POST'});if(r.headers.get('X-AOV-Validation')!=='passed')throw Error('Máy chủ chưa xác nhận đầy đủ các bước kiểm tra AOV; không tải file như bản đã xác minh.');const base=r.headers.get('X-AOV-Base-Version')||'không rõ',vtk=r.headers.get('X-AOV-VTK-Version')||'không rõ',bundles=r.headers.get('X-AOV-AssetBundles')||'?',added=r.headers.get('X-AOV-New-Files')||'?',nested=r.headers.get('X-AOV-Nested-Packages')||'0',nestedAdded=r.headers.get('X-AOV-Nested-Package-Added-Entries')||'0',billboardTables=r.headers.get('X-AOV-Huanhua-Tables-Merged')||'0',billboardRows=r.headers.get('X-AOV-Huanhua-Actor595-Rows-Added')||'0',adapter=r.headers.get('X-AOV-Adapter')||'';const isWrapper=adapter==='aov_mod_to_mod_vtk_actor595_1.64.1';const mode=isWrapper?'10 skin + VTK':'KPM100 + VTK';const fileName=isWrapper?'Aki-AOV-10Skin-VanTamKiem.zip':'Aki-AOV-KPM100-VTK.zip';const tested=r.headers.get('X-AOV-Game-Tested')==='true';const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);driveUploadId=null;clearUploadState();driveMerge.style.display='none';status.textContent='Đã tạo ZIP '+mode+'. Kiểm tra cấu trúc máy chủ: ĐẠT; nền '+base+'; VTK '+vtk+'; AssetBundle '+bundles+'; tài nguyên thêm '+added+'; package lồng đã hợp nhất '+nested+' (thêm '+nestedAdded+' mục). Bảng thông báo hạ đã ghép: '+billboardTables+'; hàng Actor 595 thêm: '+billboardRows+'. '+(tested?'Đã xác nhận test trong game.':'Chưa test trong Liên Quân iOS, nên cần thử hiệu ứng trực tiếp trên thiết bị.');}catch(e){status.textContent='Lỗi ghép: '+e.message;driveMerge.disabled=false;}});
 
-input.addEventListener('change',()=>{localAovUploadId=null;driveUploadId=null;const fs=[...input.files];list.textContent=fs.length?fs.map(f=>f.name+' ('+(f.size/1048576).toFixed(1)+' MB)').join('\n'):'Chưa chọn file nào.';go.disabled=!fs.length||fs.length>10;aovMerge.disabled=!aovAdapterEnabled||fs.length<2||fs.length>10;inspectBtn.disabled=!fs.length||fs.length>10;compatibilityBtn.disabled=!fs.length||fs.length>10;aovPreflightBtn.disabled=!fs.length||fs.length>10;decodeBytesBtn.disabled=!fs.length||fs.length>10;noticeScanBtn.disabled=!fs.length||fs.length>10;noticeScanReport=null;downloadNoticeReportBtn.disabled=true;aovPreflightReport=null;downloadAovPreflightReportBtn.disabled=true;report.textContent='';status.textContent=fs.length>10?'Chỉ được chọn tối đa 10 file.':'';setTransferProgress(0,1,fs.length?'SẴN SÀNG TẢI LÊN':'CHƯA CHỌN FILE');});
+input.addEventListener('change',()=>{preflightDashboard.hidden=true;preflightDashboard.replaceChildren();localAovUploadId=null;driveUploadId=null;const fs=[...input.files];list.textContent=fs.length?fs.map(f=>f.name+' ('+(f.size/1048576).toFixed(1)+' MB)').join('\n'):'Chưa chọn file nào.';go.disabled=!fs.length||fs.length>10;aovMerge.disabled=!aovAdapterEnabled||fs.length<2||fs.length>10;inspectBtn.disabled=!fs.length||fs.length>10;compatibilityBtn.disabled=!fs.length||fs.length>10;aovPreflightBtn.disabled=!fs.length||fs.length>10;decodeBytesBtn.disabled=!fs.length||fs.length>10;noticeScanBtn.disabled=!fs.length||fs.length>10;noticeScanReport=null;downloadNoticeReportBtn.disabled=true;aovPreflightReport=null;downloadAovPreflightReportBtn.disabled=true;report.textContent='';status.textContent=fs.length>10?'Chỉ được chọn tối đa 10 file.':'';setTransferProgress(0,1,fs.length?'SẴN SÀNG TẢI LÊN':'CHƯA CHỌN FILE');});
 
 
 downloadNoticeReportBtn.addEventListener('click',()=>{
@@ -558,6 +760,7 @@ aovPreflightBtn.addEventListener('click',async()=>{
       for(const blocker of data.blockers)lines.push('- '+blocker);
     }
     lines.push('',data.note||'Báo cáo chỉ đọc; không tạo hoặc sửa ZIP.');
+    renderPreflightDashboard(data);
     report.textContent=lines.join('\n');
     status.textContent=data.ready_to_merge
       ?'Đã phân loại. Bộ nguồn khớp adapter có giới hạn; có thể thử Ghép AOV để máy chủ xác minh payload.'

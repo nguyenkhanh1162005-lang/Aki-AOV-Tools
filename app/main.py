@@ -49,12 +49,67 @@ def _new_upload_workdir(prefix: str) -> Path:
     return Path(tempfile.mkdtemp(prefix=prefix, dir=str(UPLOAD_STORAGE_DIR) if UPLOAD_STORAGE_DIR else None))
 
 
+def _chunk_part_path(workdir: Path, file_index: int, chunk_index: int) -> Path:
+    return workdir / (".aki-chunk-{}-{}.part".format(file_index, chunk_index))
+
+def _sha256_file_range(path: Path, offset: int, length: int) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        stream.seek(offset)
+        remaining = length
+        while remaining:
+            block = stream.read(min(1024 * 1024, remaining))
+            if not block:
+                raise ValueError("incomplete chunk data")
+            digest.update(block)
+            remaining -= len(block)
+    return digest.hexdigest()
+
+def _contiguous_chunk_bytes(chunk_map: dict[str, str], size: int) -> tuple[int, list[str]]:
+    expected_chunks = (size + UPLOAD_CHUNK_BYTES - 1) // UPLOAD_CHUNK_BYTES
+    hashes: list[str] = []
+    for index in range(expected_chunks):
+        digest = chunk_map.get(str(index))
+        if not digest:
+            break
+        hashes.append(digest)
+    received = min(len(hashes) * UPLOAD_CHUNK_BYTES, size)
+    if len(hashes) == expected_chunks:
+        received = size
+    return received, hashes
+
+def _assemble_parallel_chunks(workdir: Path, destination: Path, file_size: int, chunk_map: dict[str, str], file_index: int) -> None:
+    expected_chunks = (file_size + UPLOAD_CHUNK_BYTES - 1) // UPLOAD_CHUNK_BYTES
+    if len(chunk_map) != expected_chunks or any(str(index) not in chunk_map for index in range(expected_chunks)):
+        raise ValueError("parallel upload is missing one or more chunks")
+    fd, temporary_name = tempfile.mkstemp(prefix=".{}-".format(destination.name), suffix=".assembling", dir=str(workdir))
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            for index in range(expected_chunks):
+                part_path = _chunk_part_path(workdir, file_index, index)
+                expected_length = min(UPLOAD_CHUNK_BYTES, file_size - index * UPLOAD_CHUNK_BYTES)
+                if not part_path.is_file() or part_path.stat().st_size != expected_length:
+                    raise ValueError("parallel upload chunk {} is missing or truncated".format(index))
+                digest = _sha256_file_range(part_path, 0, expected_length)
+                if digest != chunk_map[str(index)]:
+                    raise ValueError("parallel upload chunk {} failed SHA-256 verification".format(index))
+                with part_path.open("rb") as source:
+                    shutil.copyfileobj(source, output, length=1024 * 1024)
+            output.flush()
+            os.fsync(output.fileno())
+        if temporary.stat().st_size != file_size:
+            raise ValueError("assembled upload size does not match the declared file size")
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 def _persist_upload_session(upload_id: str, session: dict) -> None:
     if UPLOAD_STORAGE_DIR is None:
         return
     workdir = Path(session["workdir"])
     payload = {
         "schema_version": 1,
+        "upload_protocol": session.get("upload_protocol", "sequential_v1"),
         "upload_id": upload_id,
         "created": session["created"],
         "files": session["files"],
@@ -101,8 +156,10 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
             created = payload["created"]
             files = payload["files"]
             path_names = payload["paths"]
+            upload_protocol = payload.get("upload_protocol", "sequential_v1")
             if (
-                payload.get("schema_version") != 1
+                upload_protocol not in {"sequential_v1", "chunk_map_v2"}
+                or payload.get("schema_version") != 1
                 or not isinstance(upload_id, str)
                 or len(upload_id) != 32
                 or any(ch not in "0123456789abcdef" for ch in upload_id)
@@ -148,16 +205,15 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
                 file_path = workdir / path_name
                 if file_path.is_symlink():
                     raise ValueError("upload file cannot be a symlink")
-                if file_path.exists():
-                    actual_size = file_path.stat().st_size
-                    if actual_size > size:
-                        raise ValueError("upload file exceeds declared size")
-                    # A crash may leave a partially written chunk while the
-                    # metadata still records the previous offset. Resume from
-                    # the bytes that actually reached disk.
-                    received = actual_size
-                elif received:
-                    # The file itself can be recreated by the browser retry.
+                if upload_protocol != "chunk_map_v2":
+                    if file_path.exists():
+                        actual_size = file_path.stat().st_size
+                        if actual_size > size:
+                            raise ValueError("upload file exceeds declared size")
+                        received = actual_size
+                    elif received:
+                        received = 0
+                else:
                     received = 0
                 total += size
                 chunk_hashes = item.get("chunk_sha256", [])
@@ -175,6 +231,54 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
                     ))
                 ):
                     raise ValueError("invalid chunk hashes")
+                if upload_protocol == "chunk_map_v2":
+                    raw_map = item.get("received_chunks", {})
+                    if not isinstance(raw_map, dict):
+                        raise ValueError("invalid received chunk map")
+                    chunk_map: dict[str, str] = {}
+                    for raw_index, digest in raw_map.items():
+                        if (not isinstance(raw_index, str) or not raw_index.isdigit()
+                                or int(raw_index) >= expected_chunks or not isinstance(digest, str)
+                                or len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest)):
+                            raise ValueError("invalid received chunk map entry")
+                        chunk_map[raw_index] = digest
+                    if file_path.is_file() and file_path.stat().st_size == size:
+                        for chunk_index in range(expected_chunks):
+                            offset = chunk_index * UPLOAD_CHUNK_BYTES
+                            length = min(UPLOAD_CHUNK_BYTES, size - offset)
+                            actual = _sha256_file_range(file_path, offset, length)
+                            if raw_map.get(str(chunk_index), actual) != actual:
+                                raise ValueError("assembled upload chunk hash mismatch")
+                            chunk_map[str(chunk_index)] = actual
+                        for chunk_index in range(expected_chunks):
+                            _chunk_part_path(workdir, index - 1, chunk_index).unlink(missing_ok=True)
+                    else:
+                        if file_path.exists():
+                            file_path.unlink()
+                        valid_map: dict[str, str] = {}
+                        for raw_index, digest in chunk_map.items():
+                            chunk_index = int(raw_index)
+                            part_path = _chunk_part_path(workdir, index - 1, chunk_index)
+                            length = min(UPLOAD_CHUNK_BYTES, size - chunk_index * UPLOAD_CHUNK_BYTES)
+                            if (part_path.is_file() and part_path.stat().st_size == length
+                                    and _sha256_file_range(part_path, 0, length) == digest):
+                                valid_map[raw_index] = digest
+                            else:
+                                part_path.unlink(missing_ok=True)
+                        chunk_map = valid_map
+                        if len(chunk_map) == expected_chunks:
+                            _assemble_parallel_chunks(workdir, file_path, size, chunk_map, index - 1)
+                            for chunk_index in range(expected_chunks):
+                                _chunk_part_path(workdir, index - 1, chunk_index).unlink(missing_ok=True)
+                    received, received_chunk_hashes = _contiguous_chunk_bytes(chunk_map, size)
+                    clean_files.append({
+                        "name": name, "size": size, "received": received,
+                        "chunk_sha256": chunk_hashes,
+                        "received_chunk_sha256": received_chunk_hashes,
+                        "received_chunks": chunk_map,
+                    })
+                    safe_paths.append(str(file_path))
+                    continue
                 received_chunk_hashes = item.get("received_chunk_sha256", [])
                 expected_received_chunks = (
                     received + UPLOAD_CHUNK_BYTES - 1
@@ -207,6 +311,7 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
                 raise ValueError("invalid upload session size or id")
             session = {
                 "created": created,
+                "upload_protocol": upload_protocol,
                 "workdir": str(workdir),
                 "files": clean_files,
                 "paths": safe_paths,
@@ -306,13 +411,20 @@ async def start_chunked_upload(payload: dict = Body(...)):
             "name": name, "size": size, "received": 0,
             "chunk_sha256": chunk_hashes,
             "received_chunk_sha256": [],
+            "received_chunks": {},
         })
     if total > MAX_INPUT_BYTES:
         raise HTTPException(413, "Tổng dung lượng ZIP vượt quá 500 MB.")
+    upload_protocol = payload.get("upload_protocol", "sequential_v1")
+    if upload_protocol not in {"sequential_v1", "chunk_map_v2"}:
+        raise HTTPException(400, "Giao thức tải lên không hợp lệ.")
     upload_id = uuid.uuid4().hex
     workdir = _new_upload_workdir("aki-aov-chunks-")
     UPLOAD_SESSIONS[upload_id] = {
-        "created": time.time(), "workdir": str(workdir), "files": clean_files,
+        "created": time.time(),
+        "upload_protocol": upload_protocol,
+        "workdir": str(workdir),
+        "files": clean_files,
         "paths": [str(workdir / f"{i}_{item['name']}") for i, item in enumerate(clean_files, 1)]
     }
     try:
@@ -321,7 +433,7 @@ async def start_chunked_upload(payload: dict = Body(...)):
         UPLOAD_SESSIONS.pop(upload_id, None)
         shutil.rmtree(workdir, ignore_errors=True)
         raise HTTPException(507, "Không thể lưu phiên tải lên trên ổ đĩa.") from exc
-    return {"upload_id": upload_id, "chunk_size": UPLOAD_CHUNK_BYTES}
+    return {"upload_id": upload_id, "upload_protocol": "chunk_map_v2", "chunk_size": UPLOAD_CHUNK_BYTES}
 
 
 @app.get("/api/upload/{upload_id}/status")
@@ -330,18 +442,26 @@ async def chunked_upload_status(upload_id: str):
     session = _get_upload_session(upload_id)
     session["created"] = time.time()
     _persist_upload_session(upload_id, session)
+    protocol = session.get("upload_protocol", "sequential_v1")
+    status_files = []
+    for item in session["files"]:
+        file_status = {
+            "name": item["name"],
+            "size": item["size"],
+            "received": item["received"],
+            "received_chunk_sha256": item.get("received_chunk_sha256", []),
+        }
+        if protocol == "chunk_map_v2":
+            file_status["received_chunks"] = [
+                {"index": int(key), "sha256": digest}
+                for key, digest in sorted(item.get("received_chunks", {}).items(), key=lambda pair: int(pair[0]))
+            ]
+        status_files.append(file_status)
     return {
         "upload_id": upload_id,
+        "upload_protocol": protocol,
         "chunk_size": UPLOAD_CHUNK_BYTES,
-        "files": [
-            {
-                "name": item["name"],
-                "size": item["size"],
-                "received": item["received"],
-                "received_chunk_sha256": item.get("received_chunk_sha256", []),
-            }
-            for item in session["files"]
-        ],
+        "files": status_files,
         "expires_in_seconds": UPLOAD_TTL_SECONDS,
     }
 
@@ -388,8 +508,73 @@ async def upload_chunk(
             raise HTTPException(400, "Kích thước khối tải lên không đúng.")
         if actual_chunk_sha256 != chunk_sha256:
             raise HTTPException(422, "SHA-256 khối tải lên không khớp; hãy gửi lại khối.")
-    offset = item["received"]
     chunk_hashes = item.get("chunk_sha256", [])
+    if session.get("upload_protocol") == "chunk_map_v2":
+        if chunk_offset % UPLOAD_CHUNK_BYTES != 0:
+            raise HTTPException(400, "Vị trí khối tải lên không đúng ranh giới.")
+        chunk_index = chunk_offset // UPLOAD_CHUNK_BYTES
+        expected_length = min(UPLOAD_CHUNK_BYTES, item["size"] - chunk_offset)
+        if expected_length <= 0 or len(chunk) != expected_length:
+            raise HTTPException(400, "Kích thước khối tải lên không đúng.")
+        if chunk_hashes:
+            if chunk_index >= len(chunk_hashes):
+                raise HTTPException(400, "Không tìm thấy SHA-256 của khối.")
+            if actual_chunk_sha256 != chunk_hashes[chunk_index]:
+                raise HTTPException(422, "SHA-256 khối tải lên không khớp; hãy gửi lại khối.")
+
+        chunk_map = item.setdefault("received_chunks", {})
+        chunk_key = str(chunk_index)
+        existing_digest = chunk_map.get(chunk_key)
+        upload_path = Path(session["paths"][file_index])
+        workdir = Path(session["workdir"])
+        part_path = _chunk_part_path(workdir, file_index, chunk_index)
+        if existing_digest is not None:
+            if existing_digest != actual_chunk_sha256:
+                raise HTTPException(409, "Khối gửi lại khác dữ liệu đã nhận.")
+            if upload_path.is_file() and upload_path.stat().st_size == item["size"]:
+                existing_ok = _sha256_file_range(upload_path, chunk_offset, expected_length) == actual_chunk_sha256
+            else:
+                existing_ok = (part_path.is_file() and part_path.stat().st_size == expected_length
+                               and _sha256_file_range(part_path, 0, expected_length) == actual_chunk_sha256)
+            if existing_ok:
+                session["created"] = time.time()
+                _persist_upload_session(upload_id, session)
+                return {"received": item["received"], "size": item["size"], "chunk_index": chunk_index,
+                        "chunk_received": True, "received_chunks": len(chunk_map),
+                        "total_chunks": (item["size"] + UPLOAD_CHUNK_BYTES - 1) // UPLOAD_CHUNK_BYTES}
+            chunk_map.pop(chunk_key, None)
+
+        temporary_part = part_path.with_suffix(".part.tmp")
+        try:
+            with temporary_part.open("wb") as target:
+                target.write(chunk)
+                target.flush()
+                os.fsync(target.fileno())
+            os.replace(temporary_part, part_path)
+        finally:
+            temporary_part.unlink(missing_ok=True)
+        chunk_map[chunk_key] = actual_chunk_sha256
+        expected_chunks = (item["size"] + UPLOAD_CHUNK_BYTES - 1) // UPLOAD_CHUNK_BYTES
+        received, contiguous_hashes = _contiguous_chunk_bytes(chunk_map, item["size"])
+        item["received"] = received
+        item["received_chunk_sha256"] = contiguous_hashes
+        assembled = len(chunk_map) == expected_chunks
+        if assembled:
+            try:
+                _assemble_parallel_chunks(workdir, upload_path, item["size"], chunk_map, file_index)
+            except (OSError, ValueError) as exc:
+                raise HTTPException(500, "Không thể ghép các khối tải lên thành file hoàn chỉnh.") from exc
+            item["received"] = item["size"]
+            item["received_chunk_sha256"] = [chunk_map[str(index)] for index in range(expected_chunks)]
+        session["created"] = time.time()
+        _persist_upload_session(upload_id, session)
+        if assembled:
+            for index in range(expected_chunks):
+                _chunk_part_path(workdir, file_index, index).unlink(missing_ok=True)
+        return {"received": item["received"], "size": item["size"], "chunk_index": chunk_index,
+                "chunk_received": True, "received_chunks": len(chunk_map), "total_chunks": expected_chunks}
+
+    offset = item["received"]
     if chunk_hashes:
         if chunk_offset % UPLOAD_CHUNK_BYTES != 0:
             raise HTTPException(400, "Vị trí khối không đúng ranh giới SHA-256.")
