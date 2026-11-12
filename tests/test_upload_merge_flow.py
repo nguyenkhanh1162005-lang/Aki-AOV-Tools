@@ -44,6 +44,14 @@ def _zip_bytes(path: str, payload: bytes) -> bytes:
     return buffer.getvalue()
 
 
+def _zip_entries_bytes(entries: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for path, payload in entries.items():
+            archive.writestr(path, payload)
+    return buffer.getvalue()
+
+
 class UploadMergeFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_chunked_upload_to_downloadable_merged_zip(self):
         first = _zip_bytes("docs/readme.txt", b"hello")
@@ -171,6 +179,51 @@ class HTTPUploadMergeFlowTests(unittest.TestCase):
                 self.assertEqual(archive.read("docs/resume.txt"), b"resumable upload")
                 self.assertIsNone(archive.testzip())
             self.assertNotIn(upload_id, main.UPLOAD_SESSIONS)
+
+    def test_aov_preflight_classifies_multi_wrapper_inputs_and_keeps_session(self):
+        payloads = [
+            _zip_entries_bytes({"Resources.zip": b"mod9", "DanhSachSkin.txt": b"skin9"}),
+            _zip_entries_bytes({"Resources.zip": b"mod10", "DanhSachSkin.txt": b"skin10"}),
+            _zip_bytes(
+                "Resources/1.64.1/assetbundle/battle/hero/593_tamyn.assetbundle",
+                b"Actor 593",
+            ),
+            _zip_bytes("Resources/1.64.1/Thanos/HeroSkin_2.bytes", b"VTK IFix"),
+            _zip_bytes(
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle",
+                b"Actor 595",
+            ),
+        ]
+        names = ["9-skin.zip", "10-skin.zip", "tamyn.zip", "vtk-part1.zip", "vtk-part2.zip"]
+        with TestClient(main.app) as client:
+            started = client.post("/api/upload/start", json={
+                "files": [
+                    {"name": name, "size": len(payload)}
+                    for name, payload in zip(names, payloads)
+                ]
+            })
+            self.assertEqual(started.status_code, 200)
+            upload_id = started.json()["upload_id"]
+
+            for index, payload in enumerate(payloads):
+                uploaded = client.put(
+                    f"/api/upload/{upload_id}/{index}",
+                    content=payload,
+                    headers={"X-Chunk-Offset": "0"},
+                )
+                self.assertEqual(uploaded.status_code, 200)
+
+            response = client.post(f"/api/upload/{upload_id}/aov-preflight")
+            self.assertEqual(response.status_code, 200)
+            report = response.json()
+            self.assertFalse(report["ready_to_merge"])
+            self.assertEqual(report["role_counts"]["aov_skin_mod_container_candidate"], 2)
+            self.assertEqual(report["actor_asset_ids"], ["593", "595"])
+            self.assertIn(upload_id, main.UPLOAD_SESSIONS)
+
+            session = main.UPLOAD_SESSIONS.pop(upload_id, None)
+            if session:
+                main.shutil.rmtree(session["workdir"], ignore_errors=True)
 
     def test_http_merge_rejects_incomplete_upload_without_discarding_session(self):
         payload = _zip_bytes("docs/readme.txt", b"hello")

@@ -5,7 +5,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from app.mod_pipeline import ModPipelineError, _archive_profile, _preflight_inputs, _select_adapter, merge_mod_archives
+from app.mod_pipeline import ModPipelineError, _archive_profile, _preflight_inputs, _select_adapter, analyze_aov_input_set, merge_mod_archives
 
 
 class ModPipelineTests(unittest.TestCase):
@@ -229,6 +229,58 @@ class ModPipelineTests(unittest.TestCase):
                 self.assertEqual(
                     archive.namelist(), ["validated-candidate.txt"]
                 )
+
+    def test_multi_mod_preflight_reports_multiple_wrappers_and_actor_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            mod9 = self._zip(folder, "9-skin.zip", {
+                "Resources.zip": b"9-skin nested resources",
+                "DanhSachSkin.txt": b"9 skin list",
+            })
+            mod10 = self._zip(folder, "10-skin.zip", {
+                "Resources.zip": b"10-skin nested resources",
+                "DanhSachSkin.txt": b"10 skin list",
+            })
+            tamyn = self._zip(folder, "tamyn.zip", {
+                "Resources/1.64.1/assetbundle/battle/hero/593_tamyn_battle.assetbundle": b"Actor 593",
+            })
+            vtk_ifix = self._zip(folder, "vtk-part1.zip", {
+                "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"VTK IFix",
+            })
+            vtk_asset = self._zip(folder, "vtk-part2.zip", {
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"Actor 595",
+            })
+
+            report = analyze_aov_input_set([mod9, mod10, tamyn, vtk_ifix, vtk_asset])
+
+            self.assertFalse(report["ready_to_merge"])
+            self.assertIsNone(report["selected_adapter"])
+            self.assertEqual(report["role_counts"]["aov_skin_mod_container_candidate"], 2)
+            self.assertEqual(report["actor_asset_ids"], ["593", "595"])
+            self.assertTrue(any("nhiều MOD wrapper" in item for item in report["blockers"]))
+            self.assertFalse(report["game_tested"])
+
+    def test_multi_source_preflight_accepts_existing_single_wrapper_plus_split_vtk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            wrapper = self._zip(folder, "10-skin.zip", {
+                "Resources.zip": b"nested resources",
+                "DanhSachSkin.txt": b"skin list",
+            })
+            vtk_ifix = self._zip(folder, "vtk-part1.zip", {
+                "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"VTK IFix",
+            })
+            vtk_asset = self._zip(folder, "vtk-part2.zip", {
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"Actor 595",
+            })
+
+            report = analyze_aov_input_set([wrapper, vtk_ifix, vtk_asset])
+
+            self.assertTrue(report["ready_to_merge"])
+            self.assertEqual(report["selected_adapter"], "aov_mod_to_mod_vtk_actor595_1.64.1")
+            self.assertEqual(report["role_counts"]["aov_skin_mod_container_candidate"], 1)
+            self.assertEqual(report["actor_asset_ids"], ["595"])
+            self.assertEqual(report["blockers"], [])
 
     def test_unknown_aov_resource_pack_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:

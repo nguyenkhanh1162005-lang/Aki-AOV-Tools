@@ -18,7 +18,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from .large_merger import MAX_FILES, MAX_INPUT_BYTES
-from .mod_pipeline import merge_mod_archives, ModPipelineError
+from .mod_pipeline import merge_mod_archives, ModPipelineError, analyze_aov_input_set
 from .aov_inspector import inspect_archives, InspectError
 from .drive_import import download_drive_zip, DriveImportError
 from .aov_merger import merge_aov_archives, AOVMergeError
@@ -463,6 +463,21 @@ async def inspect_chunked_upload(upload_id: str, keep_session: bool = Query(Fals
             _remove_upload_session_metadata(session)
             shutil.rmtree(session["workdir"], ignore_errors=True)
             UPLOAD_SESSIONS.pop(upload_id, None)
+
+
+@app.post("/api/upload/{upload_id}/aov-preflight")
+async def preflight_chunked_aov_upload(upload_id: str):
+    """Classify AoV MOD/VTK inputs and report merge adapter blockers without writing output."""
+    session = _get_upload_session(upload_id)
+    if any(item["received"] != item["size"] for item in session["files"]):
+        raise HTTPException(400, "File chưa tải lên đầy đủ.")
+    try:
+        report = await run_in_threadpool(analyze_aov_input_set, session["paths"])
+        session["created"] = time.time()
+        _persist_upload_session(upload_id, session)
+        return report
+    except ModPipelineError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.post("/api/upload/{upload_id}/compatibility")

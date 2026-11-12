@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import stat
 import tempfile
 import zlib
@@ -127,11 +128,16 @@ def _archive_profile(path: str) -> dict[str, Any]:
         or (has_resource_tree and extensions.intersection(AOV_EXTENSIONS))
     )
 
-    # This is a user-supplied 10-skin MOD container (Resources.zip + skin list),
-    # not a request to use or inject the official game package.
-    has_mod_skin_container = (
-        "resources.zip" in leaves and "danhsachskin.txt" in leaves
+    # A user-supplied wrapper must contain exactly one Resources.zip and one
+    # skin list. Multiple wrapper candidates are kept visible to preflight but
+    # are not silently collapsed into a single base archive.
+    resources_zip_count = sum(
+        PurePosixPath(name).name.casefold() == "resources.zip" for name in names
     )
+    skin_list_count = sum(
+        PurePosixPath(name).name.casefold() == "danhsachskin.txt" for name in names
+    )
+    has_mod_skin_container = resources_zip_count == 1 and skin_list_count == 1
     has_vtk_ifix = "heroskin_2.bytes" in leaves
     has_base_ifix = "heroskin_1.bytes" in leaves
     kpm_mod_prefix = "Resources/1.64.1/Mod_by_Youtube_KHAM-PHA-MOBILE/KPM_MOD_"
@@ -147,7 +153,16 @@ def _archive_profile(path: str) -> dict[str, Any]:
             "Resources/1.64.1/assetbundle/resourcepackerinfosetall.assetbundle".casefold()
         ) for name in names)
     )
-    has_595_assets = any(
+    actor_asset_ids: set[str] = set()
+    for name in names:
+        if PurePosixPath(name).suffix.lower() != ".assetbundle":
+            continue
+        leaf = PurePosixPath(name).name
+        actor_asset_ids.update(
+            match.group(1)
+            for match in re.finditer(r"(?:^|[_-])(\d{3})(?=[_.-]|$)", leaf)
+        )
+    has_595_assets = "595" in actor_asset_ids or any(
         "595_" in PurePosixPath(name).name.lower()
         or "595" in PurePosixPath(name).name.lower()
         for name in names
@@ -172,6 +187,9 @@ def _archive_profile(path: str) -> dict[str, Any]:
         "looks_like_aov": looks_like_aov,
         "source_role": source_role,
         "has_mod_skin_container": has_mod_skin_container,
+        "resources_zip_count": resources_zip_count,
+        "skin_list_count": skin_list_count,
+        "actor_asset_ids": sorted(actor_asset_ids),
         "has_vtk_ifix": has_vtk_ifix,
         "has_base_ifix": has_base_ifix,
         "has_kpm_mod_payloads": has_kpm_mod_payloads,
@@ -234,6 +252,96 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
             "parser, serializer và quy tắc tương thích riêng."
         )
     return "generic_zip"
+
+
+def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
+    """Read-only preflight for a multi-ZIP AoV source set.
+
+    This reports source roles and adapter blockers without mutating any archive
+    or implying that an unsupported multi-MOD set can be merged.
+    """
+    total_input_bytes = _preflight_inputs(archive_paths)
+    profiles = [_archive_profile(path) for path in archive_paths]
+    total_entries = sum(item["entries"] for item in profiles)
+    if total_entries > MAX_PROFILE_ENTRIES:
+        raise ModPipelineError("Tổng số mục trong các ZIP vượt quá 20.000.")
+    total_uncompressed = sum(item["uncompressed_bytes"] for item in profiles)
+    if total_uncompressed > MAX_PROFILE_UNCOMPRESSED:
+        raise ModPipelineError("Tổng dung lượng giải nén của các ZIP vượt quá 1 GiB.")
+
+    role_counts: dict[str, int] = {}
+    for item in profiles:
+        role = str(item["source_role"])
+        role_counts[role] = role_counts.get(role, 0) + 1
+
+    wrapper_profiles = [item for item in profiles if item.get("has_mod_skin_container")]
+    actor_ids = sorted({
+        actor_id
+        for item in profiles
+        for actor_id in item.get("actor_asset_ids", [])
+    })
+    blockers: list[str] = []
+    selected_adapter: str | None = None
+    try:
+        selected_adapter = _select_adapter(profiles)
+    except ModPipelineError as exc:
+        blockers.append(str(exc))
+
+    if len(wrapper_profiles) > 1:
+        blockers.insert(
+            0,
+            "Có nhiều MOD wrapper chứa Resources.zip + DanhSachSkin.txt "
+            f"({len(wrapper_profiles)} gói). Adapter hiện tại chỉ hỗ trợ một wrapper nền; "
+            "chưa có quy tắc đã xác minh để hợp nhất nhiều Resources.zip.",
+        )
+
+    malformed_wrappers = [
+        item for item in profiles
+        if (
+            item.get("resources_zip_count", 0)
+            or item.get("skin_list_count", 0)
+        ) and not item.get("has_mod_skin_container")
+    ]
+    for item in malformed_wrappers:
+        blockers.append(
+            f"{item['name']}: cấu trúc wrapper không rõ ràng "
+            f"(Resources.zip={item.get('resources_zip_count', 0)}, "
+            f"DanhSachSkin.txt={item.get('skin_list_count', 0)}); "
+            "cần đúng một file mỗi loại."
+        )
+
+    supported_aov_adapters = {
+        "aov_kpm100_vtk_actor595_1.64.1",
+        "aov_mod_to_mod_vtk_actor595_1.64.1",
+    }
+    if selected_adapter == "generic_zip":
+        blockers.append(
+            "Không phát hiện nguồn AoV. Bộ này chỉ phù hợp với chức năng ghép ZIP thông thường, "
+            "không phải bộ ghép MOD Liên Quân."
+        )
+
+    ready = selected_adapter in supported_aov_adapters and not blockers
+    return {
+        "schema_version": 1,
+        "mode": "read_only_aov_preflight",
+        "ready_to_merge": ready,
+        "selected_adapter": selected_adapter,
+        "source_count": len(profiles),
+        "total_input_bytes": total_input_bytes,
+        "total_uncompressed_bytes": total_uncompressed,
+        "role_counts": role_counts,
+        "actor_asset_ids": actor_ids,
+        "profiles": profiles,
+        "blockers": blockers,
+        "game_tested": False,
+        "note": (
+            "Đạt bước chọn adapter theo cấu trúc; bộ ghép vẫn tự xác minh phiên bản, "
+            "schema, checksum và dependency trước khi xuất ZIP."
+            if ready else
+            "Chỉ là báo cáo phân loại. Không tạo ZIP và không tự chọn file nền khi có "
+            "nhiều MOD. Các tài nguyên AoV trùng đường dẫn cần quy tắc hợp nhất riêng."
+        ),
+    }
 
 
 def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, Any]:
