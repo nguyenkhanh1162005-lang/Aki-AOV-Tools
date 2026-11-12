@@ -137,6 +137,35 @@ class ModPipelineTests(unittest.TestCase):
                 "aov_mod_to_mod_vtk_actor595_1.64.1",
             )
 
+    def test_actor595_overlay_evidence_can_span_all_three_vtk_parts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            mod_pack = self._zip(folder, "10-skin-mod.zip", {
+                "Resources.zip": b"nested mod resources",
+                "DanhSachSkin.txt": b"skin mod list",
+            })
+            part1 = self._zip(folder, "Part1.zip", {
+                "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"VTK IFix part 1",
+            })
+            part2 = self._zip(folder, "Part2.zip", {
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"Actor 595 main",
+            })
+            part3 = self._zip(folder, "Part3.zip", {
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base_low.assetbundle": b"Actor 595 low",
+            })
+            profiles = [
+                _archive_profile(path)
+                for path in (mod_pack, part1, part2, part3)
+            ]
+            self.assertEqual(
+                [item["source_part_number"] for item in profiles[1:]],
+                [1, 2, 3],
+            )
+            self.assertEqual(
+                _select_adapter(profiles),
+                "aov_mod_to_mod_vtk_actor595_1.64.1",
+            )
+
     def test_vtk_adapter_rejects_mixed_p9_p10_or_tm_overlays(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
