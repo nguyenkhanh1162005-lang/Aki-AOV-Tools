@@ -462,12 +462,14 @@ aovPreflightBtn.addEventListener('click',async()=>{
         lines.push('','ĐƯỜNG DẪN TRÙNG / CẦN KIỂM TRA (tối đa 80):');
         for(const item of resourceAnalysis.important_paths.slice(0,80)){
           lines.push('['+item.status+'] '+item.path);
+          if(item.priority_group)lines.push('  Nhóm ưu tiên (gợi ý theo path): '+item.priority_group);
           lines.push('  Nguồn: '+(item.sources||[]).join(', ')+' | format: '+(item.formats||[]).join(', '));
           for(const reason of (item.reasons||[]))lines.push('  '+reason);
           if(item.missing_dependencies?.length)lines.push('  Thiếu dependency: '+item.missing_dependencies.join(', '));
           if(item.dependency_inventory_complete===false)lines.push('  Dependency AssetBundle chưa kiểm kê đầy đủ.');
         }
       }
+      if(resourceAnalysis.priority_note)lines.push('',resourceAnalysis.priority_note);
       if(resourceAnalysis.details_truncated)lines.push('  Còn đường dẫn cần kiểm tra chưa hiển thị hết.');
     }else if(resourceAnalysis.error){
       lines.push('','Không lập được kiểm kê sâu: '+resourceAnalysis.error);
