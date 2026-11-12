@@ -91,6 +91,16 @@ class ChunkedUploadEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("b" * 32, restored)
         self.assertFalse(workdir.exists())
 
+    async def test_upload_start_advertises_four_mib_chunk_size(self):
+        result = await main.start_chunked_upload({
+            "files": [{"name": "large-mod.zip", "size": 9 * 1024 * 1024}]
+        })
+        self.assertEqual(result["chunk_size"], 4 * 1024 * 1024)
+        upload_id = result["upload_id"]
+        session = main.UPLOAD_SESSIONS.pop(upload_id, None)
+        if session:
+            main.shutil.rmtree(session["workdir"], ignore_errors=True)
+
     async def test_chunk_is_written_and_offset_is_updated(self):
         result = await main.upload_chunk(
             self.upload_id, 0, make_request(b"zipdata!"), 0

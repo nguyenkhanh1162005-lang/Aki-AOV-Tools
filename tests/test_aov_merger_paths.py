@@ -8,10 +8,59 @@ from app.aov_merger import (
     _assert_archive_inventory,
     _find_outer_entries,
     _normalise_vtk_path,
+    _merge_nested_zip_package,
     _publish_staged_archive,
     _validate_archive_paths,
     _zip_entry_sha256,
 )
+
+
+class NestedPackageMergeTests(unittest.TestCase):
+    @staticmethod
+    def _zip(entries: dict[str, bytes]) -> bytes:
+        import io
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, payload in entries.items():
+                archive.writestr(name, payload)
+        return buffer.getvalue()
+
+    def test_nested_zip_merge_keeps_unique_entries_and_identical_duplicates(self):
+        from unittest.mock import patch
+
+        base = self._zip({
+            "Lua/base.lua": b"base",
+            "Shared/config.txt": b"same",
+        })
+        overlay = self._zip({
+            "Lua/vtk.lua": b"vtk",
+            "Shared/config.txt": b"same",
+        })
+        with patch("app.aov_merger._decode", side_effect=lambda data, name: (data, "test")):
+            with patch("app.aov_merger._encode", side_effect=lambda data, name, mode: data):
+                merged, report = _merge_nested_zip_package(base, overlay, "KernelLua.pkg.bytes")
+
+        self.assertTrue(report["verified"])
+        self.assertEqual(report["added_entries"], 1)
+        self.assertEqual(report["identical_duplicates"], 1)
+        with zipfile.ZipFile(__import__("io").BytesIO(merged)) as archive:
+            self.assertEqual(
+                set(archive.namelist()),
+                {"Lua/base.lua", "Shared/config.txt", "Lua/vtk.lua"},
+            )
+            self.assertIsNone(archive.testzip())
+            self.assertEqual(archive.read("Lua/vtk.lua"), b"vtk")
+
+    def test_nested_zip_merge_fails_closed_on_different_inner_payload(self):
+        import io
+        from unittest.mock import patch
+
+        base = self._zip({"Lua/shared.lua": b"base version"})
+        overlay = self._zip({"Lua/shared.lua": b"overlay version"})
+        with patch("app.aov_merger._decode", side_effect=lambda data, name: (data, "test")):
+            with patch("app.aov_merger._encode", side_effect=lambda data, name, mode: data):
+                with self.assertRaisesRegex(AOVMergeError, "Lua/shared.lua"):
+                    _merge_nested_zip_package(base, overlay, "StableSystems_3.pkg.bytes")
 
 
 class AOVArchivePathTests(unittest.TestCase):

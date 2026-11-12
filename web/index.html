@@ -4,22 +4,187 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101522"><title>Aki AOV Tools</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#101522;color:#eef2ff;font:16px system-ui,sans-serif;min-height:100vh;display:grid;place-items:center;padding:20px}.card{width:min(100%,620px);background:#1a2334;border:1px solid #34435d;border-radius:22px;padding:26px;box-shadow:0 18px 60px #0006}h1{margin:0 0 8px;font-size:28px}.muted{color:#aab7cc;line-height:1.55}.drop{display:block;border:2px dashed #60789e;border-radius:16px;padding:28px 16px;text-align:center;margin:22px 0;cursor:pointer}.drop input{display:none}button{width:100%;border:0;border-radius:12px;background:#7c9cff;color:#101522;font-weight:800;font-size:16px;padding:15px;cursor:pointer}button:disabled{opacity:.5}textarea{width:100%;min-height:90px;background:#101522;color:#eef2ff;border:1px solid #60789e;border-radius:12px;padding:12px;font:14px system-ui;margin-top:8px}#files{margin:12px 0;color:#cbd5e1;overflow-wrap:anywhere}#status{min-height:26px;margin-top:14px;color:#cbd5e1}.warning{background:#342b1b;border:1px solid #776039;border-radius:12px;padding:13px;margin-top:20px;color:#f4d9a2;font-size:13px;line-height:1.5}.capabilities{margin-top:18px;padding:14px;border:1px solid #34435d;border-radius:14px;background:#141d2c}.capabilities h2{font-size:16px;margin:0 0 6px}.capabilities ul{padding-left:20px;margin:10px 0}.capabilities li{margin:9px 0;color:#dbe5f5}.capabilities small{display:block;color:#aab7cc;line-height:1.45;margin-top:2px}
+:root{color-scheme:dark;--bg:#080d18;--panel:#111b2d;--panel2:#142139;--line:#243752;--muted:#9aabc4;--ink:#edf4ff;--blue:#75a8ff;--cyan:#63e2dc;--mint:#92e5bf;--gold:#f3ce88;--danger:#ff9f9f}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;padding:28px 18px 44px;background:radial-gradient(ellipse at 8% 0%,#15335b 0,transparent 38%),radial-gradient(ellipse at 92% 14%,#153c43 0,transparent 30%),var(--bg);color:var(--ink);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.app-shell{width:min(1120px,100%);margin:0 auto}
+.topbar{display:flex;align-items:center;gap:13px;margin-bottom:28px}
+.brand-mark{width:43px;height:43px;display:grid;place-items:center;border-radius:14px;background:linear-gradient(135deg,#8ab8ff,#66e3d8);color:#071321;font-size:23px;font-weight:900;box-shadow:0 8px 28px #57c8d455}
+.brand-copy{font-size:15px;font-weight:900;letter-spacing:.16em}
+.brand-copy small{display:block;color:var(--muted);font-size:9px;letter-spacing:.27em;font-weight:700}
+.top-pill{margin-left:auto;border:1px solid #31536a;background:#102a39;color:#9cece0;border-radius:999px;padding:7px 12px;font-size:11px;font-weight:800;letter-spacing:.11em}
+.hero{position:relative;overflow:hidden;display:flex;align-items:center;justify-content:space-between;gap:24px;padding:30px 32px;margin-bottom:20px;border:1px solid #315071;border-radius:24px;background:linear-gradient(115deg,#172d49 0%,#17243b 54%,#173a40 100%);box-shadow:0 20px 55px #0004}
+.hero:after{content:"";position:absolute;width:300px;height:300px;right:-85px;top:-160px;border:1px solid #83dcdb36;border-radius:50%;box-shadow:0 0 0 28px #83dcdb0b,0 0 0 58px #83dcdb08}
+.eyebrow{color:#9de6dc;font-size:11px;font-weight:900;letter-spacing:.18em;text-transform:uppercase}
+h1{margin:8px 0 8px;font-size:clamp(27px,4vw,39px);line-height:1.08;letter-spacing:-.035em}
+.hero p{max-width:650px;margin:0;color:#bfcee1;font-size:14px}
+.hero-stat{z-index:1;display:grid;gap:8px;min-width:180px;padding:15px 18px;border:1px solid #6ba7b254;border-radius:17px;background:#08182577}
+.hero-stat strong{font-size:18px;color:#b8fff0}
+.hero-stat span{color:#b4c5d8;font-size:11px}
+.main-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(300px,.9fr);gap:18px;align-items:start}
+.panel{min-width:0;border:1px solid var(--line);border-radius:21px;background:linear-gradient(160deg,#121f33f2,#0e1828f5);box-shadow:0 12px 36px #0003}
+.panel-inner{padding:23px}
+.section-title{display:flex;align-items:center;gap:10px;margin:0 0 5px;font-size:17px;font-weight:850;letter-spacing:-.01em}
+.section-number{display:inline-grid;place-items:center;width:27px;height:27px;border-radius:9px;background:#1e3858;color:#9cc8ff;font-size:12px}
+.section-sub{margin:0 0 17px;color:var(--muted);font-size:12px}
+.drop{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:190px;padding:25px 18px;border:1.5px dashed #527eab;border-radius:17px;background:linear-gradient(135deg,#152b45,#122a36);text-align:center;cursor:pointer;transition:border-color .18s,transform .18s,background .18s}
+.drop:hover{border-color:#8de4dc;transform:translateY(-1px);background:linear-gradient(135deg,#1a3554,#153c42)}
+.drop input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.drop-icon{display:grid;place-items:center;width:48px;height:48px;margin-bottom:10px;border-radius:15px;background:#83b8ff1c;color:#9bcaff;font-size:25px}
+.drop strong{font-size:15px}
+.drop p{margin:5px 0 12px;color:var(--muted);font-size:12px}
+.pick-cta{padding:8px 13px;border-radius:10px;background:#88baff;color:#081526;font-size:12px;font-weight:900}
+#files{min-height:22px;margin:13px 0 3px;color:#c4d3e7;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.progress-wrap{padding:13px 14px;margin:12px 0 17px;border:1px solid #223b55;border-radius:13px;background:#0b1625}
+.progress-head{display:flex;justify-content:space-between;gap:10px;margin-bottom:9px;color:#aebfd4;font-size:11px}
+.progress-head strong{color:#91e7d7}
+.progress-track{height:7px;overflow:hidden;border-radius:99px;background:#24364c}
+.progress-fill{width:0;height:100%;border-radius:99px;background:linear-gradient(90deg,#76aaff,#69e0d2);transition:width .16s}
+.drive-box{padding:16px;border:1px solid #253c55;border-radius:15px;background:#0d1929}
+.field-label{display:block;margin:0 0 7px;color:#d9e8fa;font-size:12px;font-weight:800}
+textarea{width:100%;min-height:76px;resize:vertical;padding:11px 12px;border:1px solid #35516f;border-radius:11px;background:#081321;color:var(--ink);font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+textarea:focus{outline:2px solid #73d8d3;outline-offset:1px}
+.button{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:43px;margin-top:9px;padding:11px 13px;border:1px solid transparent;border-radius:12px;font-family:inherit;font-size:12px;font-weight:800;line-height:1.25;cursor:pointer;transition:filter .15s,transform .15s,border-color .15s}
+.button:hover:not(:disabled){filter:brightness(1.08);transform:translateY(-1px)}
+.button:disabled{opacity:.42;cursor:not-allowed}
+.button-primary{background:linear-gradient(110deg,#8fbaff,#76e0d4);color:#071625}
+.button-secondary{border-color:#35516f;background:#192b43;color:#dcecff}
+.button-warm{border-color:#7b6644;background:#302b22;color:#ffe2ad}
+.button-violet{border-color:#514a7b;background:#262444;color:#dfd8ff}
+.button-rose{border-color:#6f4651;background:#32232c;color:#ffc6d0}
+.button-sky{border-color:#3e657c;background:#183243;color:#bce6ff}
+.action-stack{display:grid;gap:10px}
+.action-card{padding:13px 14px;border:1px solid #263e59;border-radius:14px;background:#0c1726}
+.action-card h3{margin:0 0 3px;font-size:13px}
+.action-card p{margin:0;color:var(--muted);font-size:11px}
+.action-card .button{margin-top:10px}
+.action-pair{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.action-pair .button{margin-top:9px}
+.note-box{margin-top:13px;padding:12px 13px;border:1px solid #675537;border-radius:13px;background:#272317;color:#f0d49b;font-size:11px;line-height:1.5}
+.results-panel{margin-top:18px}
+#status{min-height:23px;margin-bottom:10px;color:#a9eadd;font-size:12px;overflow-wrap:anywhere}
+#report{min-height:30px;max-height:580px;overflow:auto;margin:0;padding:14px;border:1px solid #263b54;border-radius:13px;background:#081321;color:#c9d8ea;font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.capabilities{margin-top:18px}
+.capability-list{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.capability-item{padding:13px;border:1px solid #263d58;border-radius:13px;background:#0d1929}
+.capability-item strong{display:block;color:#d8e9ff;font-size:11px}
+.capability-item small{display:block;margin-top:4px;color:#95a9c3;font-size:10px;line-height:1.5}
+#capabilityList{padding-left:18px;color:#d3e1f1;font-size:12px}
+#capabilityList li{margin:8px 0}
+#capabilityNote{margin:12px 0 0;color:var(--muted);font-size:11px;line-height:1.5}
+footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spacing:.05em}
+@media(max-width:820px){.main-grid{grid-template-columns:1fr}.hero{align-items:flex-start;flex-direction:column;padding:24px}.hero-stat{display:flex;align-items:center;gap:10px;min-width:0}.hero-stat strong{font-size:15px}.hero-stat span{font-size:10px}}
+@media(max-width:520px){body{padding:18px 12px 30px}.topbar{margin-bottom:18px}.top-pill{font-size:9px;padding:6px 9px}.hero{padding:21px 19px;border-radius:19px}.hero-stat{width:100%;justify-content:space-between}.panel-inner{padding:17px}.drop{min-height:170px}.capability-list{grid-template-columns:1fr}.action-pair{grid-template-columns:1fr 1fr}}
 </style></head>
-<body><main class="card">
-<h1>⚡ Aki AOV Tools</h1><p class="muted">Công cụ kiểm tra cấu trúc và ghép tài nguyên Liên Quân iOS theo phiên bản.</p>
-<label class="drop"><strong>📦 Chọn các file ZIP</strong><p class="muted">Nhấn để chọn tối đa 10 file</p><input id="upload" type="file" accept=".zip,application/zip" multiple></label>
-<div id="files">Chưa chọn file nào.</div><div style="margin-top:18px"><strong>Hoặc nhập link Google Drive</strong><p class="muted" style="margin:6px 0">Có thể chọn ZIP từ thiết bị ở trên rồi dán thêm link ZIP từ Drive tại đây. Mỗi dòng một link; cần bật quyền “Bất kỳ ai có đường liên kết”. Tổng tối đa 500 MB.</p><textarea id="driveLinks" placeholder="https://drive.google.com/file/d/..."></textarea><button id="driveImport" style="margin-top:10px;background:#f0c987">Tải ZIP từ Google Drive</button><button id="driveMerge" disabled style="display:none;margin-top:10px;background:#9ed8c5">Ghép mod AOV từ Drive</button></div><button id="compatibility" disabled style="margin-top:10px;background:#b7a6f6">Đối chiếu tài nguyên và xung đột (chỉ đọc)</button><button id="aovPreflight" disabled style="margin-top:10px;background:#b8d8ee">Phân loại bộ MOD + VTK trước khi ghép (chỉ đọc)</button><button id="decodeBytes" disabled style="margin-top:10px;background:#c6a6f6">Giải mã tài nguyên .bytes đã hỗ trợ</button><button id="noticeScan" disabled style="margin-top:10px;background:#e7b3a5">Quét thông báo khởi động (chỉ đọc)</button><button id="downloadNoticeReport" disabled style="margin-top:10px;background:#94c9da">Tải báo cáo quét thông báo (.json)</button><button id="inspect" disabled style="margin-top:10px;background:#9ed8c5">Kiểm tra cấu trúc ZIP</button><button id="go" disabled style="margin-top:10px">Ghép ZIP thông thường</button><button id="aovMerge" disabled style="margin-top:10px;background:#f0c987">Ghép AOV (10 skin / KPM100) + Vấn Tâm Kiếm</button><pre id="report" style="white-space:pre-wrap;overflow-wrap:anywhere;color:#cbd5e1"></pre><div id="status" role="status"></div>
-<div class="warning"><b>Lưu ý:</b> Web có hai bộ ghép giới hạn phiên bản: (1) MOD wrapper 10 skin gồm <code>Resources.zip</code> + <code>DanhSachSkin.txt</code> kết hợp các ZIP phần VTK iOS Vấn Tâm Kiếm Actor 595; (2) KPM100 ZIP trực tiếp kết hợp VTK. Bộ wrapper kiểm tra cấu trúc nền 1.64.1.12, VTK 1.64.1.11, đủ 10 AssetBundle Actor 595, IFix, MSES, CommonActions và metadata phụ thuộc. ZIP sai phiên bản, thiếu/thừa tài nguyên bắt buộc hoặc xung đột chưa có quy tắc sẽ bị từ chối. Không hỗ trợ gộp tùy ý mọi mod. Kiểm tra cấu trúc không phải test trong game: hiệu ứng, biến về, thông báo hạ, nút bấm và âm thanh vẫn cần thử trên Liên Quân iOS. Nút quét thông báo là chỉ đọc, không tự xóa tài nguyên.</div>
-<section class="capabilities" aria-labelledby="capabilityTitle">
-<h2 id="capabilityTitle">Phạm vi xử lý hiện tại</h2>
-<p class="muted" style="margin:0">Danh sách được tải trực tiếp từ máy chủ, phân biệt rõ định dạng chỉ kiểm tra với adapter thực sự có thể ghép.</p>
-<ul id="capabilityList"><li>Đang tải danh sách hỗ trợ...</li></ul>
-<p id="capabilityNote" class="muted" style="font-size:12px;margin:0"></p>
+<body>
+<div class="app-shell">
+<header class="topbar">
+  <div class="brand-mark">⚡</div>
+  <div class="brand-copy">AKI <small>AOV TOOLS</small></div>
+  <div class="top-pill">iOS MOD WORKBENCH</div>
+</header>
+<section class="hero">
+  <div>
+    <div class="eyebrow">MOD SKIN MERGER · RESOURCE WORKFLOW</div>
+    <h1>Ghép MOD thông minh.<br>Giữ nguyên tài nguyên.</h1>
+    <p>Kiểm tra, đối chiếu và hợp nhất tài nguyên Liên Quân iOS theo adapter. Ưu tiên giữ hiệu ứng kỹ năng, biến về, thông báo hạ gục, giao diện và âm thanh; xung đột chưa có quy tắc sẽ được báo rõ thay vì tự ghi đè.</p>
+  </div>
+  <div class="hero-stat"><strong>500 MB</strong><span>Tổng ZIP · tải theo khối 4 MB · tự tiếp tục khi mạng gián đoạn</span></div>
 </section>
-</main><script>
+
+<div class="main-grid">
+  <section class="panel">
+    <div class="panel-inner">
+      <h2 class="section-title"><span class="section-number">01</span> Nạp bộ MOD</h2>
+      <p class="section-sub">Chọn tối đa 10 ZIP từ iPhone. Có thể chọn nhiều MOD và các phần VTK trong cùng lượt.</p>
+      <label class="drop">
+        <input id="upload" type="file" accept=".zip,application/zip" multiple>
+        <span class="drop-icon">⇧</span>
+        <strong>Chạm để chọn file ZIP</strong>
+        <p>MOD skin · VTK Part 1–3 · Tamyn · các gói tài nguyên khác</p>
+        <span class="pick-cta">CHỌN FILE TỪ IPHONE</span>
+      </label>
+      <div id="files">Chưa chọn file nào.</div>
+      <div class="progress-wrap">
+        <div class="progress-head"><span id="transferLabel">SẴN SÀNG TẢI LÊN</span><strong id="transferPct">0%</strong></div>
+        <div class="progress-track"><div class="progress-fill" id="transferBar"></div></div>
+      </div>
+      <div class="drive-box">
+        <label class="field-label" for="driveLinks">Hoặc nhập link Google Drive công khai</label>
+        <textarea id="driveLinks" placeholder="Mỗi dòng một link Google Drive"></textarea>
+        <button id="driveImport" class="button button-secondary">☁️ Tải ZIP từ Google Drive</button>
+        <button id="driveMerge" class="button button-primary" style="display:none">Ghép MOD từ Drive</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-inner">
+      <h2 class="section-title"><span class="section-number">02</span> Phân tích & xử lý</h2>
+      <p class="section-sub">Chạy kiểm tra trước, sau đó mới chọn bộ ghép phù hợp với định dạng và phiên bản.</p>
+      <div class="action-stack">
+        <div class="action-card">
+          <h3>Hợp nhất MOD Liên Quân</h3>
+          <p>Chỉ bật khi nguồn khớp adapter đã có parser và quy tắc xác minh.</p>
+          <button id="aovMerge" class="button button-primary" disabled>⚙️ Ghép AOV chuyên sâu</button>
+        </div>
+        <div class="action-card">
+          <h3>Nhận diện bộ nguồn nhiều MOD</h3>
+          <p>Phân loại 9 skin, 10 skin, Tamyn, VTK và Actor ID; phát hiện nhiều gói nền.</p>
+          <button id="aovPreflight" class="button button-sky" disabled>⌕ Phân loại bộ MOD + VTK</button>
+        </div>
+        <div class="action-card">
+          <h3>Đối chiếu & kiểm tra tài nguyên</h3>
+          <p>Hiển thị đường dẫn trùng, khác nội dung và tương thích phiên bản.</p>
+          <div class="action-pair">
+            <button id="compatibility" class="button button-violet" disabled>Đối chiếu xung đột</button>
+            <button id="inspect" class="button button-secondary" disabled>Kiểm tra ZIP</button>
+          </div>
+        </div>
+        <div class="action-card">
+          <h3>Công cụ phân tích nâng cao</h3>
+          <p>Đọc dữ liệu hỗ trợ và tìm chuỗi thông báo khởi động ở chế độ chỉ đọc.</p>
+          <div class="action-pair">
+            <button id="decodeBytes" class="button button-violet" disabled>Giải mã .bytes</button>
+            <button id="noticeScan" class="button button-rose" disabled>Quét thông báo</button>
+          </div>
+          <button id="downloadNoticeReport" class="button button-secondary" disabled>Tải báo cáo thông báo (.json)</button>
+        </div>
+        <div class="action-card">
+          <h3>Ghép ZIP thông thường</h3>
+          <p>Chỉ áp dụng cho ZIP không chứa tài nguyên AoV xung đột.</p>
+          <button id="go" class="button button-warm" disabled>Ghép ZIP thường</button>
+        </div>
+      </div>
+      <div class="note-box"><strong>Ưu tiên an toàn:</strong> không thay file bytes, AssetBundle, soundbank hoặc package chỉ vì trùng tên. Kiểm tra cấu trúc không đồng nghĩa đã test trong game; cần thử trên Liên Quân iOS để xác nhận hiệu ứng, biến về, thông báo hạ gục, nút bấm và âm thanh.</div>
+    </div>
+  </section>
+</div>
+
+<section class="panel results-panel">
+  <div class="panel-inner">
+    <h2 class="section-title"><span class="section-number">03</span> Kết quả phân tích</h2>
+    <p class="section-sub">Trạng thái xử lý và báo cáo chi tiết sẽ hiển thị tại đây.</p>
+    <div id="status" role="status">Chờ chọn ZIP để bắt đầu.</div>
+    <pre id="report"></pre>
+  </div>
+</section>
+
+<section class="panel capabilities">
+  <div class="panel-inner">
+    <h2 class="section-title"><span class="section-number">04</span> Phạm vi adapter</h2>
+    <p class="section-sub">Danh sách năng lực được lấy trực tiếp từ máy chủ; nhận diện định dạng không tự động đồng nghĩa có thể ghép.</p>
+    <ul id="capabilityList"><li>Đang tải danh sách hỗ trợ...</li></ul>
+    <p id="capabilityNote"></p>
+  </div>
+</section>
+<footer>AKI AOV TOOLS · INPUT FILES ARE KEPT SEPARATE UNTIL VALIDATION PASSES</footer>
+</div>
+<script>
 const driveLinks=document.querySelector('#driveLinks'),driveImport=document.querySelector('#driveImport'),driveMerge=document.querySelector('#driveMerge');let driveUploadId=null,localAovUploadId=null;let aovAdapterEnabled=false;const input=document.querySelector('#upload'),go=document.querySelector('#go'),aovMerge=document.querySelector('#aovMerge'),decodeBytesBtn=document.querySelector('#decodeBytes'),noticeScanBtn=document.querySelector('#noticeScan'),downloadNoticeReportBtn=document.querySelector('#downloadNoticeReport'),compatibilityBtn=document.querySelector('#compatibility'),aovPreflightBtn=document.querySelector('#aovPreflight'),inspectBtn=document.querySelector('#inspect'),report=document.querySelector('#report'),list=document.querySelector('#files'),status=document.querySelector('#status');
-const CHUNK_BYTES=1*1024*1024;let noticeScanReport=null;
+const CHUNK_BYTES=4*1024*1024,UPLOAD_CONCURRENCY=2;let noticeScanReport=null;
+const transferBar=document.querySelector('#transferBar'),transferPct=document.querySelector('#transferPct'),transferLabel=document.querySelector('#transferLabel');
+function setTransferProgress(done,total,label){const pct=total?Math.min(100,done/total*100):0;transferBar.style.width=pct.toFixed(1)+'%';transferPct.textContent=Math.round(pct)+'%';transferLabel.textContent=label||'TẢI LÊN';}
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const capabilityList=document.querySelector('#capabilityList'),capabilityNote=document.querySelector('#capabilityNote');
 async function loadCapabilities(){
@@ -67,14 +232,18 @@ const UPLOAD_STATE_KEY='aki-aov-upload-session-v1';
 loadCapabilities();
 async function uploadFingerprint(files){
   const fingerprints=[];
+  const total=files.reduce((sum,file)=>sum+file.size,0);
+  let hashed=0;
+  setTransferProgress(0,total,'ĐANG KIỂM TRA SHA-256');
   for(const file of files){
-    // Hash every byte in bounded chunks, avoiding a full-file ArrayBuffer on iOS.
     const chunkHashes=[];
     for(let offset=0;offset<file.size;offset+=CHUNK_BYTES){
       const part=await file.slice(offset,Math.min(offset+CHUNK_BYTES,file.size)).arrayBuffer();
       const digest=await crypto.subtle.digest('SHA-256',part);
       chunkHashes.push([...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,'0')).join(''));
-      status.textContent='Đang xác minh nội dung '+file.name+': '+Math.min(offset+part.byteLength,file.size)+' / '+file.size+' byte';
+      hashed+=part.byteLength;
+      setTransferProgress(hashed,total,'ĐANG KIỂM TRA SHA-256');
+      status.textContent='Đang kiểm tra '+file.name+' · '+(hashed/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB';
     }
     fingerprints.push({name:file.name,size:file.size,lastModified:file.lastModified||0,content_chunk_sha256:chunkHashes});
   }
@@ -108,20 +277,36 @@ async function uploadInChunks(files){
     const data=await start.json();uploadId=data.upload_id;offsets=files.map(()=>0);
     saveUploadState({fingerprint,upload_id:uploadId});
   }
-  const total=files.reduce((s,f)=>s+f.size,0);
-  let sent=offsets.reduce((s,n)=>s+n,0);
-  for(let i=0;i<files.length;i++){
-    const file=files[i];
-    for(let offset=offsets[i];offset<file.size;offset+=CHUNK_BYTES){
+  const total=files.reduce((sum,file)=>sum+file.size,0);
+  let sent=offsets.reduce((sum,value)=>sum+value,0);
+  setTransferProgress(sent,total,'ĐANG TẢI LÊN');
+  let nextFileIndex=0;
+  async function uploadFile(index){
+    const file=files[index];
+    for(let offset=offsets[index];offset<file.size;offset+=CHUNK_BYTES){
       const part=file.slice(offset,Math.min(offset+CHUNK_BYTES,file.size));
-      const r=await fetchWithRetry('/api/upload/'+uploadId+'/'+i,{method:'PUT',headers:{'Content-Type':'application/octet-stream','X-Chunk-Offset':String(offset)},body:part});
-      const result=await r.json();
+      const response=await fetchWithRetry('/api/upload/'+uploadId+'/'+index,{
+        method:'PUT',
+        headers:{'Content-Type':'application/octet-stream','X-Chunk-Offset':String(offset)},
+        body:part
+      });
+      const ack=await response.json();
       const expected=Math.min(offset+part.size,file.size);
-      if(result.received!==expected)throw Error('Máy chủ xác nhận sai vị trí khối tải lên.');
+      if(ack.received!==expected)throw Error('Máy chủ xác nhận sai vị trí khối tải lên.');
       sent+=part.size;
-      status.textContent='Đang tải lên '+file.name+': '+(sent/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB';
+      setTransferProgress(sent,total,'ĐANG TẢI LÊN · '+file.name);
+      status.textContent='Đang tải '+file.name+' · '+(sent/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB';
     }
   }
+  async function worker(){
+    while(true){
+      const index=nextFileIndex++;
+      if(index>=files.length)return;
+      await uploadFile(index);
+    }
+  }
+  await Promise.all(Array.from({length:Math.min(UPLOAD_CONCURRENCY,files.length)},()=>worker()));
+  setTransferProgress(total,total,'TẢI LÊN HOÀN TẤT');
   return uploadId;
 }
 async function withUploadSession(files, action){
@@ -143,9 +328,9 @@ async function withUploadSession(files, action){
   throw Error('Không thể khôi phục phiên tải ZIP.');
 }
 driveImport.addEventListener('click',async()=>{const links=driveLinks.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);if(!links.length){status.textContent='Hãy dán ít nhất một link Google Drive.';return;}driveImport.disabled=true;go.disabled=true;inspectBtn.disabled=true;driveMerge.disabled=true;driveMerge.style.display='none';driveUploadId=null;report.textContent='';try{let uploadId=localAovUploadId;if(input.files.length&&!uploadId){status.textContent='Đang tải ZIP đã chọn từ thiết bị lên máy chủ...';uploadId=await uploadInChunks([...input.files]);localAovUploadId=uploadId;}status.textContent='Máy chủ đang tải ZIP trực tiếp từ Google Drive. File lớn có thể mất vài phút...';const payload={links};if(uploadId)payload.upload_id=uploadId;const r=await fetchWithRetry('/api/drive/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await r.json();driveUploadId=data.upload_id;localAovUploadId=null;driveMerge.style.display='block';driveMerge.disabled=!aovAdapterEnabled;aovPreflightBtn.disabled=false;status.textContent='Đã tải '+data.files.length+' ZIP về máy chủ: '+data.files.map(f=>f.name+' ('+(f.size/1048576).toFixed(1)+' MB)').join(', ')+'. Đang kiểm tra cấu trúc...';const checked=await fetchWithRetry('/api/upload/'+data.upload_id+'/inspect?keep_session=true',{method:'POST'});report.textContent=await checked.text();status.textContent='Đã kiểm tra xong ZIP từ Drive. Có thể chạy bộ ghép AOV chuyên sâu.';}catch(e){status.textContent='Lỗi: '+e.message;}finally{driveImport.disabled=false;go.disabled=!input.files.length;inspectBtn.disabled=!input.files.length;}});
-driveMerge.addEventListener('click',async()=>{if(!driveUploadId)return;driveMerge.disabled=true;status.textContent='Đang giải mã và ghép tài nguyên AOV trên máy chủ...';try{const r=await fetchWithRetry('/api/upload/'+driveUploadId+'/aov-merge',{method:'POST'});if(r.headers.get('X-AOV-Validation')!=='passed')throw Error('Máy chủ chưa xác nhận đầy đủ các bước kiểm tra AOV; không tải file như bản đã xác minh.');const base=r.headers.get('X-AOV-Base-Version')||'không rõ',vtk=r.headers.get('X-AOV-VTK-Version')||'không rõ',bundles=r.headers.get('X-AOV-AssetBundles')||'?',added=r.headers.get('X-AOV-New-Files')||'?',adapter=r.headers.get('X-AOV-Adapter')||'';const isWrapper=adapter==='aov_mod_to_mod_vtk_actor595_1.64.1';const mode=isWrapper?'10 skin + VTK':'KPM100 + VTK';const fileName=isWrapper?'Aki-AOV-10Skin-VanTamKiem.zip':'Aki-AOV-KPM100-VTK.zip';const tested=r.headers.get('X-AOV-Game-Tested')==='true';const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);driveUploadId=null;clearUploadState();driveMerge.style.display='none';status.textContent='Đã tạo ZIP '+mode+'. Kiểm tra cấu trúc máy chủ: ĐẠT; nền '+base+'; VTK '+vtk+'; AssetBundle '+bundles+'; tài nguyên thêm '+added+'. '+(tested?'Đã xác nhận test trong game.':'Chưa test trong Liên Quân iOS, nên cần thử hiệu ứng trực tiếp trên thiết bị.');}catch(e){status.textContent='Lỗi ghép: '+e.message;driveMerge.disabled=false;}});
+driveMerge.addEventListener('click',async()=>{if(!driveUploadId)return;driveMerge.disabled=true;status.textContent='Đang giải mã và ghép tài nguyên AOV trên máy chủ...';try{const r=await fetchWithRetry('/api/upload/'+driveUploadId+'/aov-merge',{method:'POST'});if(r.headers.get('X-AOV-Validation')!=='passed')throw Error('Máy chủ chưa xác nhận đầy đủ các bước kiểm tra AOV; không tải file như bản đã xác minh.');const base=r.headers.get('X-AOV-Base-Version')||'không rõ',vtk=r.headers.get('X-AOV-VTK-Version')||'không rõ',bundles=r.headers.get('X-AOV-AssetBundles')||'?',added=r.headers.get('X-AOV-New-Files')||'?',nested=r.headers.get('X-AOV-Nested-Packages')||'0',nestedAdded=r.headers.get('X-AOV-Nested-Package-Added-Entries')||'0',adapter=r.headers.get('X-AOV-Adapter')||'';const isWrapper=adapter==='aov_mod_to_mod_vtk_actor595_1.64.1';const mode=isWrapper?'10 skin + VTK':'KPM100 + VTK';const fileName=isWrapper?'Aki-AOV-10Skin-VanTamKiem.zip':'Aki-AOV-KPM100-VTK.zip';const tested=r.headers.get('X-AOV-Game-Tested')==='true';const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);driveUploadId=null;clearUploadState();driveMerge.style.display='none';status.textContent='Đã tạo ZIP '+mode+'. Kiểm tra cấu trúc máy chủ: ĐẠT; nền '+base+'; VTK '+vtk+'; AssetBundle '+bundles+'; tài nguyên thêm '+added+'; package lồng đã hợp nhất '+nested+' (thêm '+nestedAdded+' mục). '+(tested?'Đã xác nhận test trong game.':'Chưa test trong Liên Quân iOS, nên cần thử hiệu ứng trực tiếp trên thiết bị.');}catch(e){status.textContent='Lỗi ghép: '+e.message;driveMerge.disabled=false;}});
 
-input.addEventListener('change',()=>{localAovUploadId=null;driveUploadId=null;const fs=[...input.files];list.textContent=fs.length?fs.map(f=>f.name+' ('+(f.size/1048576).toFixed(1)+' MB)').join('\n'):'Chưa chọn file nào.';go.disabled=!fs.length||fs.length>10;aovMerge.disabled=!aovAdapterEnabled||fs.length<2||fs.length>10;inspectBtn.disabled=!fs.length||fs.length>10;compatibilityBtn.disabled=!fs.length||fs.length>10;aovPreflightBtn.disabled=!fs.length||fs.length>10;decodeBytesBtn.disabled=!fs.length||fs.length>10;noticeScanBtn.disabled=!fs.length||fs.length>10;noticeScanReport=null;downloadNoticeReportBtn.disabled=true;report.textContent='';status.textContent=fs.length>10?'Chỉ được chọn tối đa 10 file.':'';});
+input.addEventListener('change',()=>{localAovUploadId=null;driveUploadId=null;const fs=[...input.files];list.textContent=fs.length?fs.map(f=>f.name+' ('+(f.size/1048576).toFixed(1)+' MB)').join('\n'):'Chưa chọn file nào.';go.disabled=!fs.length||fs.length>10;aovMerge.disabled=!aovAdapterEnabled||fs.length<2||fs.length>10;inspectBtn.disabled=!fs.length||fs.length>10;compatibilityBtn.disabled=!fs.length||fs.length>10;aovPreflightBtn.disabled=!fs.length||fs.length>10;decodeBytesBtn.disabled=!fs.length||fs.length>10;noticeScanBtn.disabled=!fs.length||fs.length>10;noticeScanReport=null;downloadNoticeReportBtn.disabled=true;report.textContent='';status.textContent=fs.length>10?'Chỉ được chọn tối đa 10 file.':'';setTransferProgress(0,1,fs.length?'SẴN SÀNG TẢI LÊN':'CHƯA CHỌN FILE');});
 
 
 downloadNoticeReportBtn.addEventListener('click',()=>{
@@ -327,6 +512,6 @@ compatibilityBtn.addEventListener('click',async()=>{
 });
 
 inspectBtn.addEventListener('click',async()=>{inspectBtn.disabled=true;noticeScanBtn.disabled=true;decodeBytesBtn.disabled=true;compatibilityBtn.disabled=true;go.disabled=true;status.textContent='Đang khởi tạo tải lên theo khối 4 MB...';report.textContent='';try{const files=[...input.files];status.textContent='Đang phân tích ZIP trên máy chủ...';const r=await withUploadSession(files,uploadId=>fetchWithRetry(`/api/upload/${uploadId}/inspect?keep_session=true`,{method:'POST'}));report.textContent=await r.text();status.textContent='Đã kiểm tra xong. Phiên tải được giữ lại để ghép AOV mà không phải tải file lần nữa. Báo cáo này chưa xác nhận tương thích trong game.';}catch(e){status.textContent='Lỗi: '+e.message;}finally{inspectBtn.disabled=!input.files.length||input.files.length>10;noticeScanBtn.disabled=!input.files.length||input.files.length>10;decodeBytesBtn.disabled=!input.files.length||input.files.length>10;compatibilityBtn.disabled=!input.files.length||input.files.length>10;go.disabled=!input.files.length||input.files.length>10;aovMerge.disabled=!aovAdapterEnabled||input.files.length<2||input.files.length>10;}});
-aovMerge.addEventListener('click',async()=>{const files=[...input.files];if(files.length<2||files.length>10){status.textContent='Chọn ZIP nền 10 skin hoặc KPM100 cùng các ZIP phần VTK iOS đúng phiên bản.';return;}aovMerge.disabled=true;go.disabled=true;inspectBtn.disabled=true;noticeScanBtn.disabled=true;decodeBytesBtn.disabled=true;compatibilityBtn.disabled=true;try{status.textContent='Đang ghép tài nguyên AOV và kiểm tra các bảng dữ liệu...';const r=await withUploadSession(files,uploadId=>fetchWithRetry('/api/upload/'+uploadId+'/aov-merge',{method:'POST'}));if(r.headers.get('X-AOV-Validation')!=='passed')throw Error('Máy chủ chưa xác nhận đầy đủ các bước kiểm tra AOV; không tải file như bản đã xác minh.');const base=r.headers.get('X-AOV-Base-Version')||'không rõ',vtk=r.headers.get('X-AOV-VTK-Version')||'không rõ',bundles=r.headers.get('X-AOV-AssetBundles')||'?',added=r.headers.get('X-AOV-New-Files')||'?',adapter=r.headers.get('X-AOV-Adapter')||'';const isWrapper=adapter==='aov_mod_to_mod_vtk_actor595_1.64.1';const mode=isWrapper?'10 skin + VTK':'KPM100 + VTK';const fileName=isWrapper?'Aki-AOV-10Skin-VanTamKiem.zip':'Aki-AOV-KPM100-VTK.zip';const tested=r.headers.get('X-AOV-Game-Tested')==='true';const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);localAovUploadId=null;clearUploadState();status.textContent='Đã tạo ZIP '+mode+'. Kiểm tra cấu trúc máy chủ: ĐẠT; nền '+base+'; VTK '+vtk+'; AssetBundle '+bundles+'; tài nguyên thêm '+added+'. '+(tested?'Đã xác nhận test trong game.':'Chưa test trong Liên Quân iOS, nên cần thử hiệu ứng trực tiếp trên thiết bị.');}catch(e){status.textContent='Lỗi ghép AOV: '+e.message+' File đã tải vẫn được giữ trên máy chủ; bấm lại để thử mà không tải lại.';}finally{aovMerge.disabled=!aovAdapterEnabled||input.files.length<2;go.disabled=!input.files.length;inspectBtn.disabled=!input.files.length;noticeScanBtn.disabled=!input.files.length||input.files.length>10;decodeBytesBtn.disabled=!input.files.length||input.files.length>10;compatibilityBtn.disabled=!input.files.length||input.files.length>10;}});
+aovMerge.addEventListener('click',async()=>{const files=[...input.files];if(files.length<2||files.length>10){status.textContent='Chọn ZIP nền 10 skin hoặc KPM100 cùng các ZIP phần VTK iOS đúng phiên bản.';return;}aovMerge.disabled=true;go.disabled=true;inspectBtn.disabled=true;noticeScanBtn.disabled=true;decodeBytesBtn.disabled=true;compatibilityBtn.disabled=true;try{status.textContent='Đang ghép tài nguyên AOV và kiểm tra các bảng dữ liệu...';const r=await withUploadSession(files,uploadId=>fetchWithRetry('/api/upload/'+uploadId+'/aov-merge',{method:'POST'}));if(r.headers.get('X-AOV-Validation')!=='passed')throw Error('Máy chủ chưa xác nhận đầy đủ các bước kiểm tra AOV; không tải file như bản đã xác minh.');const base=r.headers.get('X-AOV-Base-Version')||'không rõ',vtk=r.headers.get('X-AOV-VTK-Version')||'không rõ',bundles=r.headers.get('X-AOV-AssetBundles')||'?',added=r.headers.get('X-AOV-New-Files')||'?',nested=r.headers.get('X-AOV-Nested-Packages')||'0',nestedAdded=r.headers.get('X-AOV-Nested-Package-Added-Entries')||'0',adapter=r.headers.get('X-AOV-Adapter')||'';const isWrapper=adapter==='aov_mod_to_mod_vtk_actor595_1.64.1';const mode=isWrapper?'10 skin + VTK':'KPM100 + VTK';const fileName=isWrapper?'Aki-AOV-10Skin-VanTamKiem.zip':'Aki-AOV-KPM100-VTK.zip';const tested=r.headers.get('X-AOV-Game-Tested')==='true';const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);localAovUploadId=null;clearUploadState();status.textContent='Đã tạo ZIP '+mode+'. Kiểm tra cấu trúc máy chủ: ĐẠT; nền '+base+'; VTK '+vtk+'; AssetBundle '+bundles+'; tài nguyên thêm '+added+'; package lồng đã hợp nhất '+nested+' (thêm '+nestedAdded+' mục). '+(tested?'Đã xác nhận test trong game.':'Chưa test trong Liên Quân iOS, nên cần thử hiệu ứng trực tiếp trên thiết bị.');}catch(e){status.textContent='Lỗi ghép AOV: '+e.message+' File đã tải vẫn được giữ trên máy chủ; bấm lại để thử mà không tải lại.';}finally{aovMerge.disabled=!aovAdapterEnabled||input.files.length<2;go.disabled=!input.files.length;inspectBtn.disabled=!input.files.length;noticeScanBtn.disabled=!input.files.length||input.files.length>10;decodeBytesBtn.disabled=!input.files.length||input.files.length>10;compatibilityBtn.disabled=!input.files.length||input.files.length>10;}});
 go.addEventListener('click',async()=>{const files=[...input.files];if(!files.length||files.length>10){status.textContent='Chọn từ 1 đến 10 file ZIP.';return;}const total=files.reduce((s,f)=>s+f.size,0);if(total>500*1024*1024){status.textContent='Tổng dung lượng vượt quá 500 MB.';return;}go.disabled=true;inspectBtn.disabled=true;aovMerge.disabled=true;noticeScanBtn.disabled=true;decodeBytesBtn.disabled=true;compatibilityBtn.disabled=true;status.textContent='Đang tải ZIP lên theo từng khối 4 MB...';try{status.textContent='Đang kiểm tra và ghép ZIP trên máy chủ...';const r=await withUploadSession(files,uploadId=>fetchWithRetry('/api/upload/'+uploadId+'/merge',{method:'POST'}));const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='aki-merged.zip';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);localAovUploadId=null;clearUploadState();status.textContent='Đã tạo file ZIP và bắt đầu tải xuống.';}catch(e){status.textContent='Lỗi ghép ZIP: '+e.message;}finally{go.disabled=!input.files.length;inspectBtn.disabled=!input.files.length||input.files.length>10;aovMerge.disabled=!aovAdapterEnabled||input.files.length<2||input.files.length>10;noticeScanBtn.disabled=!input.files.length||input.files.length>10;decodeBytesBtn.disabled=!input.files.length||input.files.length>10;compatibilityBtn.disabled=!input.files.length||input.files.length>10;}});
 </script></body></html>
