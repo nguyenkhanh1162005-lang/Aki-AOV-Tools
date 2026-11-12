@@ -31,7 +31,7 @@ from .aov_bytes_archive import AOVBytesArchiveError, decode_archive_resources
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
 CHUNK_SIZE = 1024 * 1024
-UPLOAD_CHUNK_BYTES = 1 * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 UPLOAD_SESSIONS: dict[str, dict] = {}
 UPLOAD_TTL_SECONDS = 3600
 MAX_ACTIVE_UPLOAD_SESSIONS = 8
@@ -327,7 +327,7 @@ async def upload_chunk(upload_id: str, file_index: int, request: Request, chunk_
     async for part in request.stream():
         chunk_buffer.extend(part)
         if len(chunk_buffer) > UPLOAD_CHUNK_BYTES:
-            raise HTTPException(413, "Mỗi khối tải lên không được vượt quá 1 MB.")
+            raise HTTPException(413, f"Mỗi khối tải lên không được vượt quá {UPLOAD_CHUNK_BYTES // (1024 * 1024)} MB.")
     chunk = bytes(chunk_buffer)
     if not chunk:
         raise HTTPException(400, "Kích thước khối tải lên không hợp lệ.")
