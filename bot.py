@@ -18,6 +18,7 @@ from app.large_merger import merge_zip_files, MergeError
 from app.aov_inspector import inspect_archives, InspectError
 from app.url_downloader import download_zip_from_url, DownloadError
 from app.access_control import is_allowed_user
+from app.aov_bytes_archive import AOVBytesArchiveError, decode_archive_resources
 from app.mod_pipeline import (
     ModPipelineError,
     analyze_aov_input_set,
@@ -75,6 +76,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/files xem danh sách ZIP đã nhận\n"
         "/inspect xuất báo cáo cấu trúc ZIP dạng TXT\n"
         "/preflight phân loại MOD AoV và kiểm tra adapter trước khi ghép\n"
+        "/notice-scan dò ứng viên thông báo khởi động (chỉ đọc, không xóa)\n"
         "/merge kiểm tra, ghép và xác minh lại dữ liệu đầu ra\n"
         "/clear xóa danh sách file"
     )
@@ -255,6 +257,61 @@ async def inspect(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Kiểm tra thất bại: {type(exc).__name__}. ZIP gốc vẫn được giữ."
         )
 
+
+
+
+async def notice_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _authorized(update):
+        return
+    files = context.user_data.get("zips", [])
+    if not files:
+        await update.effective_message.reply_text("Chưa có ZIP nào. Gửi file trước nhé.")
+        return
+
+    folder = _workdir(context)
+    report_path = folder / "aki-aov-notice-scan.json"
+    status_message = await update.effective_message.reply_text(
+        "Đang giải mã các .bytes được hỗ trợ và dò chuỗi thông báo trong Lua/XML/JSON/config cùng metadata AssetBundle. Chế độ chỉ đọc..."
+    )
+    try:
+        report = await asyncio.to_thread(
+            decode_archive_resources,
+            [path for _, path in files],
+            "",
+            scan_only=True,
+        )
+        report_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        candidates = report.get("notice_candidates", [])
+        lines = [
+            f"Đã quét {report.get('notice_scan_files', 0)} mục.",
+            f"Tìm thấy {len(candidates)} ứng viên từ khóa.",
+            f"AssetBundle đã quét: {report.get('notice_assetbundles_scanned', 0)}; bỏ qua: {report.get('notice_assetbundles_skipped', 0)}.",
+        ]
+        for item in candidates[:8]:
+            lines.append(
+                f"\n• {item.get('path', '(không rõ đường dẫn)')} "
+                f"[{item.get('keyword_group', 'keyword')}] "
+                f"{item.get('matched_text', '')}\n  {item.get('excerpt', '')}"
+            )
+        lines.append(
+            "\nĐây chỉ là ứng viên theo từ khóa, không chứng minh đó là popup đang hiển thị. "
+            "Bot không tự xóa hoặc ghi đè tài nguyên."
+        )
+        await status_message.edit_text("\n".join(lines))
+        await update.effective_message.reply_document(
+            document=FSInputFile(str(report_path), filename="aki-aov-notice-scan.json"),
+            read_timeout=120,
+            write_timeout=120,
+        )
+    except AOVBytesArchiveError as exc:
+        await status_message.edit_text(f"Không quét được tài nguyên: {exc}")
+    except Exception as exc:
+        await status_message.edit_text(
+            f"Quét thất bại: {type(exc).__name__}. ZIP nguồn vẫn được giữ nguyên."
+        )
 
 
 async def preflight(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -471,6 +528,7 @@ def main():
     app.add_handler(CommandHandler("merge", merge))
     app.add_handler(CommandHandler("inspect", inspect))
     app.add_handler(CommandHandler("preflight", preflight))
+    app.add_handler(CommandHandler("notice-scan", notice_scan))
     app.add_handler(MessageHandler(filters.Document.ALL, receive))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_link))
     app.run_polling()
