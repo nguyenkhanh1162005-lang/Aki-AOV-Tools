@@ -452,8 +452,73 @@ async def upload_chunk(
             raise HTTPException(400, "Kích thước khối tải lên không đúng.")
         if actual_chunk_sha256 != chunk_sha256:
             raise HTTPException(422, "SHA-256 khối tải lên không khớp; hãy gửi lại khối.")
-    offset = item["received"]
     chunk_hashes = item.get("chunk_sha256", [])
+    if session.get("upload_protocol") == "chunk_map_v2":
+        if chunk_offset % UPLOAD_CHUNK_BYTES != 0:
+            raise HTTPException(400, "Vị trí khối tải lên không đúng ranh giới.")
+        chunk_index = chunk_offset // UPLOAD_CHUNK_BYTES
+        expected_length = min(UPLOAD_CHUNK_BYTES, item["size"] - chunk_offset)
+        if expected_length <= 0 or len(chunk) != expected_length:
+            raise HTTPException(400, "Kích thước khối tải lên không đúng.")
+        if chunk_hashes:
+            if chunk_index >= len(chunk_hashes):
+                raise HTTPException(400, "Không tìm thấy SHA-256 của khối.")
+            if actual_chunk_sha256 != chunk_hashes[chunk_index]:
+                raise HTTPException(422, "SHA-256 khối tải lên không khớp; hãy gửi lại khối.")
+
+        chunk_map = item.setdefault("received_chunks", {})
+        chunk_key = str(chunk_index)
+        existing_digest = chunk_map.get(chunk_key)
+        upload_path = Path(session["paths"][file_index])
+        workdir = Path(session["workdir"])
+        part_path = _chunk_part_path(workdir, file_index, chunk_index)
+        if existing_digest is not None:
+            if existing_digest != actual_chunk_sha256:
+                raise HTTPException(409, "Khối gửi lại khác dữ liệu đã nhận.")
+            if upload_path.is_file() and upload_path.stat().st_size == item["size"]:
+                existing_ok = _sha256_file_range(upload_path, chunk_offset, expected_length) == actual_chunk_sha256
+            else:
+                existing_ok = (part_path.is_file() and part_path.stat().st_size == expected_length
+                               and _sha256_file_range(part_path, 0, expected_length) == actual_chunk_sha256)
+            if existing_ok:
+                session["created"] = time.time()
+                _persist_upload_session(upload_id, session)
+                return {"received": item["received"], "size": item["size"], "chunk_index": chunk_index,
+                        "chunk_received": True, "received_chunks": len(chunk_map),
+                        "total_chunks": (item["size"] + UPLOAD_CHUNK_BYTES - 1) // UPLOAD_CHUNK_BYTES}
+            chunk_map.pop(chunk_key, None)
+
+        temporary_part = part_path.with_suffix(".part.tmp")
+        try:
+            with temporary_part.open("wb") as target:
+                target.write(chunk)
+                target.flush()
+                os.fsync(target.fileno())
+            os.replace(temporary_part, part_path)
+        finally:
+            temporary_part.unlink(missing_ok=True)
+        chunk_map[chunk_key] = actual_chunk_sha256
+        expected_chunks = (item["size"] + UPLOAD_CHUNK_BYTES - 1) // UPLOAD_CHUNK_BYTES
+        received, contiguous_hashes = _contiguous_chunk_bytes(chunk_map, item["size"])
+        item["received"] = received
+        item["received_chunk_sha256"] = contiguous_hashes
+        assembled = len(chunk_map) == expected_chunks
+        if assembled:
+            try:
+                _assemble_parallel_chunks(workdir, upload_path, item["size"], chunk_map, file_index)
+            except (OSError, ValueError) as exc:
+                raise HTTPException(500, "Không thể ghép các khối tải lên thành file hoàn chỉnh.") from exc
+            item["received"] = item["size"]
+            item["received_chunk_sha256"] = [chunk_map[str(index)] for index in range(expected_chunks)]
+        session["created"] = time.time()
+        _persist_upload_session(upload_id, session)
+        if assembled:
+            for index in range(expected_chunks):
+                _chunk_part_path(workdir, file_index, index).unlink(missing_ok=True)
+        return {"received": item["received"], "size": item["size"], "chunk_index": chunk_index,
+                "chunk_received": True, "received_chunks": len(chunk_map), "total_chunks": expected_chunks}
+
+    offset = item["received"]
     if chunk_hashes:
         if chunk_offset % UPLOAD_CHUNK_BYTES != 0:
             raise HTTPException(400, "Vị trí khối không đúng ranh giới SHA-256.")
