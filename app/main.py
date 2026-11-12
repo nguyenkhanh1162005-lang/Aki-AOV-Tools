@@ -584,7 +584,7 @@ async def merge_aov_chunked_upload(upload_id: str):
     session = _get_upload_session(upload_id)
     if any(item["received"] != item["size"] for item in session["files"]):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
-    output_path = Path(session["workdir"]) / "Aki-AOV-KPM100-VTK.zip"
+    output_path = Path(session["workdir"]) / "aov-merged.zip"
     try:
         report = await run_in_threadpool(
             merge_mod_archives, session["paths"], str(output_path)
@@ -601,6 +601,12 @@ async def merge_aov_chunked_upload(upload_id: str):
         new_file_count = len(report.get("added_resources") or [])
     else:
         new_file_count = int(report.get("new_files", 0) or 0)
+    adapter_id = str(report.get("adapter", ""))
+    download_name = (
+        "Aki-AOV-10Skin-VanTamKiem.zip"
+        if adapter_id == "aov_mod_to_mod_vtk_actor595_1.64.1"
+        else "Aki-AOV-KPM100-VTK.zip"
+    )
     result_headers = {
         "X-AOV-Validation": "passed" if report.get("validation") else "incomplete",
         "X-AOV-Game-Tested": "true" if report.get("game_tested") else "false",
@@ -614,7 +620,7 @@ async def merge_aov_chunked_upload(upload_id: str):
     return FileResponse(
         path=output_path,
         media_type="application/zip",
-        filename="Aki-AOV-KPM100-VTK.zip",
+        filename=download_name,
         headers=result_headers,
         background=BackgroundTask(shutil.rmtree, session["workdir"], ignore_errors=True),
     )
