@@ -594,6 +594,15 @@ async def merge_aov_chunked_upload(upload_id: str):
         )
     except ModPipelineError as exc:
         raise HTTPException(400, str(exc)) from exc
+    if report.get("adapter") not in {
+        "aov_kpm100_vtk_actor595_1.64.1",
+        "aov_mod_to_mod_vtk_actor595_1.64.1",
+    }:
+        output_path.unlink(missing_ok=True)
+        raise HTTPException(
+            400,
+            "Nút ghép AOV chỉ nhận bộ KPM100 hoặc MOD wrapper 10 skin đúng phiên bản cùng VTK Actor 595.",
+        )
     _remove_upload_session_metadata(session)
     UPLOAD_SESSIONS.pop(upload_id, None)
     packer_report = report.get("packer", {})
