@@ -607,6 +607,20 @@ def build(args: argparse.Namespace) -> dict:
     vtk_outer.close()
     return report
 
+def merge_kpm100_vtk_archives(base_path: str, vtk_path: str, output_path: str) -> dict:
+    """Run the pinned KPM100 + VTK adapter without leaving a sidecar report."""
+    from types import SimpleNamespace
+
+    with tempfile.TemporaryDirectory(prefix="kpm100-vtk-report-") as report_dir:
+        report_path = Path(report_dir) / "report.json"
+        return build(SimpleNamespace(
+            base=base_path,
+            vtk=vtk_path,
+            output=output_path,
+            report=str(report_path),
+        ))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Selective KPM100 + VTK Actor595 iOS merge")
     parser.add_argument("--base", required=True)
