@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.mod_pipeline import merge_mod_archives
+from app.mod_pipeline import merge_mod_archives, _archive_profile, _select_adapter
 
 
 def main() -> int:
@@ -20,6 +20,11 @@ def main() -> int:
         if not Path(path).is_file():
             raise SystemExit(f"Missing integration input: {path}")
 
+    profiles = [_archive_profile(base_path), _archive_profile(vtk_path)]
+    print(json.dumps({
+        "source_profiles": profiles,
+        "selected_adapter": _select_adapter(profiles),
+    }, ensure_ascii=False, indent=2), flush=True)
     report = merge_mod_archives([base_path, vtk_path], output_path)
     if report.get("adapter") != "aov_kpm100_vtk_actor595_1.64.1":
         raise SystemExit(f"Wrong adapter selected for pinned KPM100/VTK pair: {report.get('adapter')}")
