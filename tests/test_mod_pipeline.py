@@ -2,7 +2,6 @@ import hashlib
 import io
 import tempfile
 import unittest
-import io
 import zipfile
 from xml.etree import ElementTree as ET
 from pathlib import Path
@@ -678,11 +677,11 @@ class ModPipelineTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
-            p9 = self._zip(folder, "P9.zip", {
+            p9 = self._zip(folder, "Actor593-source.zip", {
                 "Resources.zip": resources_zip(common_package("59300", "recall-593")),
                 "DanhSachSkin.txt": b"P9",
             })
-            p10 = self._zip(folder, "P10.zip", {
+            p10 = self._zip(folder, "Actor595-source.zip", {
                 "Resources.zip": resources_zip(common_package("59500", "recall-595")),
                 "DanhSachSkin.txt": b"P10",
             })
