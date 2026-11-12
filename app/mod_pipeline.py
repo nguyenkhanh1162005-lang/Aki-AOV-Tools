@@ -236,11 +236,17 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
     return "generic_zip"
 
 
-def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, Any]:
+def merge_mod_archives(
+    archive_paths: list[str],
+    output_path: str,
+    *,
+    allow_wrapper_adapter: bool = False,
+) -> dict[str, Any]:
     """Select a verified adapter and merge transactionally.
 
-    AoV packs without a dedicated parser/serializer fail closed. The supported
-    Actor 595 route is mod-to-mod and never uses the official game package.
+    The 10-skin wrapper adapter is opt-in for the web endpoint. Existing
+    non-web callers (including the Telegram bot) keep it disabled by default.
+    AoV packs without a dedicated parser/serializer fail closed.
     """
     total_input_bytes = _preflight_inputs(archive_paths)
     profiles = [_archive_profile(path) for path in archive_paths]
@@ -251,6 +257,13 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
     if total_uncompressed > MAX_PROFILE_UNCOMPRESSED:
         raise ModPipelineError("Tổng dung lượng giải nén của các ZIP vượt quá 1 GiB.")
     adapter = _select_adapter(profiles)
+    if (
+        adapter == "aov_mod_to_mod_vtk_actor595_1.64.1"
+        and not allow_wrapper_adapter
+    ):
+        raise ModPipelineError(
+            "Adapter MOD wrapper 10 skin + VTK hiện chỉ được bật qua API web."
+        )
     capability = next(
         (
             item for item in get_adapter_capabilities()["adapters"]
