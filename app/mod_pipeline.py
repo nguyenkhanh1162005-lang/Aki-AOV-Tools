@@ -226,16 +226,102 @@ def _archive_profile(path: str) -> dict[str, Any]:
             bad = archive.testzip()
             if bad:
                 raise ModPipelineError(f"ZIP lỗi CRC tại {bad}: {Path(path).name}")
+
+            # Read only the directory metadata of one nested Resources.zip.
+            # A spool file avoids keeping large nested archives entirely in RAM.
+            nested_resource_names: list[str] = []
+            resource_archives = [
+                info for info in entries
+                if not info.is_dir()
+                and PurePosixPath(info.filename.replace("\\\\", "/")).name.casefold() == "resources.zip"
+            ]
+            nested_resource_entries = 0
+            if len(resource_archives) == 1:
+                resource_info = resource_archives[0]
+                if resource_info.file_size > MAX_PROFILE_ENTRY:
+                    raise ModPipelineError(
+                        f"Resources.zip vượt giới hạn 512 MiB: {Path(path).name}"
+                    )
+                with tempfile.SpooledTemporaryFile(
+                    max_size=16 * 1024 * 1024, mode="w+b"
+                ) as nested_stream:
+                    with archive.open(resource_info, "r") as source_stream:
+                        while True:
+                            chunk = source_stream.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            nested_stream.write(chunk)
+                    nested_stream.seek(0)
+                    try:
+                        with zipfile.ZipFile(nested_stream, "r") as nested:
+                            nested_entries = nested.infolist()
+                            nested_resource_entries = len(nested_entries)
+                            if nested_resource_entries > MAX_PROFILE_ENTRIES:
+                                raise ModPipelineError(
+                                    f"Resources.zip có quá nhiều mục (tối đa {MAX_PROFILE_ENTRIES})."
+                                )
+                            nested_total = sum(item.file_size for item in nested_entries)
+                            if nested_total > MAX_PROFILE_UNCOMPRESSED:
+                                raise ModPipelineError(
+                                    "Resources.zip vượt giới hạn giải nén 1 GiB."
+                                )
+                            nested_seen: set[str] = set()
+                            for inner in nested_entries:
+                                normalized = inner.filename.replace("\\\\", "/")
+                                candidate = normalized.rstrip("/") if inner.is_dir() else normalized
+                                pure = PurePosixPath(candidate)
+                                raw_parts = candidate.split("/")
+                                mode = (inner.external_attr >> 16) & 0xFFFF
+                                if (
+                                    not candidate
+                                    or pure.is_absolute()
+                                    or any(part in {"", ".", ".."} for part in raw_parts)
+                                    or "\\x00" in normalized
+                                    or (pure.parts and pure.parts[0].endswith(":"))
+                                    or stat.S_ISLNK(mode)
+                                ):
+                                    raise ModPipelineError(
+                                        f"Đường dẫn trong Resources.zip không an toàn: {inner.filename}"
+                                    )
+                                canonical = pure.as_posix()
+                                if canonical in nested_seen:
+                                    raise ModPipelineError(
+                                        f"Resources.zip có đường dẫn trùng lặp: {canonical}"
+                                    )
+                                nested_seen.add(canonical)
+                                if inner.is_dir():
+                                    continue
+                                if inner.flag_bits & 1:
+                                    raise ModPipelineError(
+                                        f"Không hỗ trợ mục mã hóa mật khẩu trong Resources.zip: {inner.filename}"
+                                    )
+                                if inner.file_size > MAX_PROFILE_ENTRY:
+                                    raise ModPipelineError(
+                                        f"Mục Resources.zip vượt giới hạn 512 MiB: {inner.filename}"
+                                    )
+                                nested_resource_names.append(canonical)
+                            nested_bad = nested.testzip()
+                            if nested_bad:
+                                raise ModPipelineError(
+                                    f"Resources.zip lỗi CRC tại {nested_bad}: {Path(path).name}"
+                                )
+                    except ModPipelineError:
+                        raise
+                    except (OSError, zipfile.BadZipFile, RuntimeError, zlib.error) as exc:
+                        raise ModPipelineError(
+                            f"Không đọc được Resources.zip bên trong: {Path(path).name}"
+                        ) from exc
     except ModPipelineError:
         raise
     except (OSError, zipfile.BadZipFile, RuntimeError, zlib.error) as exc:
         raise ModPipelineError(f"Không đọc được ZIP: {Path(path).name}") from exc
 
-    leaves = {PurePosixPath(name).name.lower() for name in names}
-    extensions = {PurePosixPath(name).suffix.lower() for name in names}
+    resource_names = names + nested_resource_names
+    leaves = {PurePosixPath(name).name.lower() for name in resource_names}
+    extensions = {PurePosixPath(name).suffix.lower() for name in resource_names}
     has_resource_tree = any(
         name.lower().startswith(("resources/", "databin/", "ages/", "thanos/", "assetbundle/"))
-        for name in names
+        for name in resource_names
     )
     looks_like_aov = bool(
         leaves.intersection(AOV_MARKERS)
@@ -268,7 +354,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
         ) for name in names)
     )
     actor_asset_ids: set[str] = set()
-    for name in names:
+    for name in resource_names:
         if PurePosixPath(name).suffix.lower() != ".assetbundle":
             continue
         leaf = PurePosixPath(name).name
@@ -279,11 +365,11 @@ def _archive_profile(path: str) -> dict[str, Any]:
     has_595_assets = "595" in actor_asset_ids or any(
         "595_" in PurePosixPath(name).name.lower()
         or "595" in PurePosixPath(name).name.lower()
-        for name in names
+        for name in resource_names
         if PurePosixPath(name).suffix.lower() == ".assetbundle"
     )
     actor_action_ids: set[str] = set()
-    for name in names:
+    for name in resource_names:
         match = re.search(
             r"(?:^|/)Actor[_-](\d{3})[_-]Actions\.pkg\.bytes$",
             name,
@@ -325,6 +411,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
         "skin_list_count": skin_list_count,
         "actor_asset_ids": sorted(actor_asset_ids),
         "actor_action_ids": sorted(actor_action_ids),
+        "nested_resource_entries": nested_resource_entries,
         "has_actor593_content": has_actor593_content,
         "source_family_hint": source_family_hint,
         "source_family_basis": source_family_basis,
