@@ -459,18 +459,38 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
         mod_containers = [
             item for item in profiles if item["has_mod_skin_container"]
         ]
+        # VTK may be split over several ZIPs, but every non-wrapper input must
+        # itself look like a VTK/Actor595 part. A P9/P10/TM archive must never
+        # become an overlay merely because another input contains Actor 595.
+        vtk_parts = [item for item in profiles if item not in mod_containers]
+        forbidden_families = {"P9", "P10", "TM"}
+        allowed_vtk_families = {
+            "VTK", "PART_1_CANDIDATE", "PART_2_CANDIDATE",
+            "PART_3_CANDIDATE", None,
+        }
+        vtk_parts_are_scoped = bool(vtk_parts) and all(
+            item.get("looks_like_aov")
+            and not item.get("has_mod_skin_container")
+            and item.get("source_family_hint") not in forbidden_families
+            and item.get("source_family_hint") in allowed_vtk_families
+            and set(item.get("actor_asset_ids", [])) <= {"595"}
+            and set(item.get("actor_action_ids", [])) <= {"595"}
+            for item in vtk_parts
+        )
         # VTK is often distributed as multiple ZIP parts. Its IFix payload
         # and Actor 595 AssetBundles may therefore be in different input files.
-        # Validate the evidence across the complete overlay set, then let the
-        # specialist merger verify the exact required asset list and versions.
+        # The specialist merger still verifies the exact bundle inventory,
+        # versions, dependencies and checksums before publishing an output.
         has_actor595_overlay = (
-            any(item["has_vtk_ifix"] for item in profiles)
-            and any(item["has_595_assets"] for item in profiles)
+            any(item["has_vtk_ifix"] for item in vtk_parts)
+            and any(item["has_595_assets"] for item in vtk_parts)
+            and not any(item.get("has_actor593_content") for item in vtk_parts)
         )
-        # The supported route is user-supplied mod pack + user-supplied mod
-        # overlay. The 10-skin archive is a mod container, not the official game.
+        # The supported route is one user-supplied mod container plus only
+        # user-supplied VTK Actor 595 parts, never a mixed set of other MODs.
         supported_pair = (
             len(mod_containers) == 1
+            and vtk_parts_are_scoped
             and has_actor595_overlay
             and all(item["looks_like_aov"] for item in profiles)
         )
