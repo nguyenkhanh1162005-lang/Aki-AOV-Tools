@@ -150,7 +150,7 @@ class ModPipelineTests(unittest.TestCase):
             })
             profiles = [_archive_profile(base), _archive_profile(vtk)]
             self.assertEqual(profiles[0]["source_role"], "aov_kpm100_direct_base_candidate")
-            self.assertEqual(profiles[0]["kpm_mod_payload_count"], 70)
+            self.assertEqual(profiles[0]["kpm_mod_payload_count"], 75)
             self.assertTrue(profiles[0]["has_vtk_ifix"])
             self.assertTrue(profiles[0]["has_595_assets"])
             self.assertEqual(profiles[1]["source_role"], "aov_actor595_mod_candidate")
