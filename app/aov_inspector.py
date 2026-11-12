@@ -93,6 +93,7 @@ def inspect_archives(paths: list[str]) -> str:
     mses_tables: list[tuple[str, str, int, int, int]] = []
     package_entries: list[tuple[str, str]] = []
     legacy_paths: dict[str, list[tuple[str, int, int]]] = {}
+    nested_debug: list[str] = []
 
     def normalized_resource_path(name: str) -> str:
         value = name.replace("\\", "/").lstrip("/")
@@ -218,6 +219,9 @@ def inspect_archives(paths: list[str]) -> str:
         for child_info in nested.infolist():
             if child_info.is_dir():
                 continue
+            nested_debug.append(
+                f"{source_label}!{child_info.filename}: {child_info.file_size} bytes"
+            )
             total_entries += 1
             total_uncompressed += child_info.file_size
             if total_entries > MAX_ENTRIES:
@@ -301,6 +305,9 @@ def inspect_archives(paths: list[str]) -> str:
                                 shutil.copyfileobj(source, spool, length=1024 * 1024)
                                 spool.seek(0)
                                 with zipfile.ZipFile(spool, "r") as nested:
+                                    nested_debug.append(
+                                        f"{outer_name}: entries={len(nested.infolist())}, signature={signature.hex()}"
+                                    )
                                     nested_archives.append(
                                         f"{Path(path).name} :: {outer_name} ({outer_info.file_size:,} byte)"
                                     )
@@ -717,6 +724,7 @@ def inspect_archives(paths: list[str]) -> str:
         f"- Trùng đường dẫn nhưng khác kích thước hoặc CRC32: {len(different_metadata)}"
     )
 
+    lines.extend(["", "DEBUG NESTED", *nested_debug[:20]])
     lines.extend(["", "DẤU HIỆU CẦN KIỂM TRA THÊM"])
     lines.append(f"- Mục có tên gợi ý thông báo/khởi động/popup: {len(suspicious_files)}")
     lines.extend(f"  • {item}" for item in suspicious_files[:80])
