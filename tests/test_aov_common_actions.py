@@ -123,6 +123,33 @@ class CommonActionsMergeTests(unittest.TestCase):
         self.assertEqual(len(report["appended_tracks"]), 2)
 
 
+
+    def test_actor_overlay_does_not_import_unrequested_skin_ids(self):
+        name = "commonresource/Back.xml"
+        base = encode_aov_resource(action_xml("BackTrack"), name, "zstd")
+        overlay_root = ET.Element("Project")
+        overlay_action = ET.SubElement(overlay_root, "Action")
+        track = ET.SubElement(overlay_action, "Track", {
+            "trackName": "0_BackTrack",
+            "eventType": "TriggerParticleTick",
+            "enabled": "true",
+        })
+        ET.SubElement(track, "SkinOrAvatarList", {"id": "59300"})
+        ET.SubElement(track, "SkinOrAvatarList", {"id": "59400"})
+        overlay = encode_aov_resource(ET.tostring(overlay_root), name, "zstd")
+
+        merged, report = merge_action_xml(
+            base, overlay, name, special_ids={"59300"}
+        )
+        decoded, _ = decode_aov_resource(merged, name)
+        result_track = ET.fromstring(decoded).find("Action").find("Track")
+        ids = {
+            node.attrib["id"]
+            for node in result_track.findall("SkinOrAvatarList")
+        }
+        self.assertEqual(ids, {"59300"})
+        self.assertEqual(report["special_ids"], ["59300"])
+
     def test_merges_multiple_actor_id_groups_without_losing_tracks(self):
         path = "commonresource/Back.xml"
         base = package({
