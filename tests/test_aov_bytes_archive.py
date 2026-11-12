@@ -177,7 +177,7 @@ class AOVBytesArchiveTests(unittest.TestCase):
             )
 
             report = decode_archive_resources(
-                [wrapper], str(folder / "decoded.zip")
+                [wrapper], str(folder / "scan-only.zip"), scan_only=True
             )
 
             self.assertGreater(report["notice_scan_files"], 0)
@@ -192,6 +192,8 @@ class AOVBytesArchiveTests(unittest.TestCase):
                 "Text-like Lua/XML/JSON/TXT/config/CSV and decoded non-MSES .bytes only",
             )
             self.assertFalse(report["game_tested"])
+            self.assertTrue(report["scan_only"])
+            self.assertFalse((folder / "scan-only.zip").exists())
 
 
     def test_expands_zip_inside_decoded_pkg_bytes(self):
