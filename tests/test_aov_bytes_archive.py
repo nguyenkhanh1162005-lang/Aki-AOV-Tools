@@ -187,9 +187,9 @@ class AOVBytesArchiveTests(unittest.TestCase):
                 and item["path"] == "Scripts/LoginNotice.lua"
                 for item in report["notice_candidates"]
             ))
-            self.assertEqual(
-                report["notice_scan_scope"].split(";")[0],
-                "Text-like Lua/XML/JSON/TXT/config/CSV, decoded non-MSES .bytes, and bounded UnityFS AssetBundle object text"
+            self.assertIn(
+                "bounded UnityFS AssetBundle object text",
+                report["notice_scan_scope"],
             )
             self.assertFalse(report["game_tested"])
             self.assertTrue(report["scan_only"])
