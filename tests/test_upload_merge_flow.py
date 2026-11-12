@@ -209,7 +209,8 @@ class EnabledWrapperMergeRouteTests(unittest.TestCase):
         payloads = [wrapper, ifix_part, assets_part]
         names = ["10-skin.zip", "vtk-ifix.zip", "vtk-assets.zip"]
 
-        def fake_merge(_merge_function, _paths, output_path):
+        def fake_merge(_merge_function, _paths, output_path, **kwargs):
+            self.assertTrue(kwargs.get("allow_wrapper_adapter"))
             with zipfile.ZipFile(output_path, "w") as archive:
                 archive.writestr("validated-candidate.txt", b"structural fixture")
             return {
