@@ -320,6 +320,55 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             "không phải bộ ghép MOD Liên Quân."
         )
 
+    resource_analysis: dict[str, Any]
+    try:
+        # Reuse the existing nested-resource manifest and compatibility planner.
+        # This is advisory only: it classifies collisions but does not grant merge
+        # permission or change the adapter selection above.
+        from .compatibility_planner import (
+            CompatibilityPlanError,
+            plan_resource_compatibility,
+        )
+        from .resource_manifest import ResourceManifestError, build_resource_manifest
+
+        manifest = build_resource_manifest(archive_paths)
+        plan = plan_resource_compatibility(manifest["resources"])
+        critical_statuses = {"VERSION_CONFLICT", "NEEDS_RULE", "UNSUPPORTED"}
+        details = [
+            item for item in plan["resources"]
+            if item["status"] in critical_statuses
+            or item["status"] == "IDENTICAL_DUPLICATE"
+        ]
+        details.sort(
+            key=lambda item: (
+                0 if item["status"] == "VERSION_CONFLICT" else
+                1 if item["status"] == "NEEDS_RULE" else
+                2 if item["status"] == "UNSUPPORTED" else 3,
+                item["path"],
+            )
+        )
+        resource_analysis = {
+            "available": True,
+            "advisory_only": True,
+            "merge_authorized": False,
+            "resource_count": manifest["resource_count"],
+            "path_count": plan["path_count"],
+            "unique_path_count": sum(
+                1 for item in plan["resources"] if len(item["sources"]) == 1
+            ),
+            "summary": plan["summary"],
+            "source_compatibility": plan["source_compatibility"],
+            "important_paths": details[:200],
+            "details_truncated": len(details) > 200,
+        }
+    except (ResourceManifestError, CompatibilityPlanError) as exc:
+        resource_analysis = {
+            "available": False,
+            "advisory_only": True,
+            "merge_authorized": False,
+            "error": str(exc),
+        }
+
     ready = selected_adapter in supported_aov_adapters and not blockers
     return {
         "schema_version": 1,
@@ -333,6 +382,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
         "actor_asset_ids": actor_ids,
         "profiles": profiles,
         "blockers": blockers,
+        "resource_analysis": resource_analysis,
         "game_tested": False,
         "note": (
             "Đạt bước chọn adapter theo cấu trúc; bộ ghép vẫn tự xác minh phiên bản, "
