@@ -141,7 +141,7 @@ class ModPipelineTests(unittest.TestCase):
             }
             base_entries.update({
                 f"Resources/1.64.1/Mod_by_Youtube_KHAM-PHA-MOBILE/KPM_MOD_{index:016X}": b"payload"
-                for index in range(75)
+                for index in range(70)
             })
             base = self._zip(folder, "kpm100.zip", base_entries)
             vtk = self._zip(folder, "vtk.zip", {
@@ -171,7 +171,7 @@ class ModPipelineTests(unittest.TestCase):
             }
             base_entries.update({
                 f"Resources/1.64.1/Mod_by_Youtube_KHAM-PHA-MOBILE/KPM_MOD_{index:016X}": b"payload"
-                for index in range(75)
+                for index in range(70)
             })
             base = self._zip(folder, "kpm100.zip", base_entries)
             vtk = self._zip(folder, "vtk.zip", {
