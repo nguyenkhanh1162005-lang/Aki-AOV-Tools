@@ -26,6 +26,10 @@ MAX_SCAN_DECODED_BYTES = 256 * 1024 * 1024
 MAX_NESTED_ZIP_DEPTH = 2
 MAX_NOTICE_CANDIDATES = 100
 MAX_NOTICE_SNIPPET = 180
+MAX_NOTICE_ASSETBUNDLE_BYTES = 64 * 1024 * 1024
+MAX_NOTICE_ASSETBUNDLE_OBJECTS = 500
+MAX_NOTICE_ASSETBUNDLE_NODES = 20000
+MAX_NOTICE_ASSETBUNDLE_TEXT_CHARS = 200000
 NOTICE_TEXT_EXTENSIONS = {
     ".lua", ".txt", ".xml", ".json", ".json5", ".ini", ".cfg", ".csv", ".bytes",
 }
@@ -86,6 +90,23 @@ def _notice_text_view(data: bytes) -> tuple[str, str] | None:
     return encoding, decoded
 
 
+def _scan_notice_text_view(decoded: str, path: str, encoding: str) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    for label, expression in NOTICE_PATTERNS:
+        for match in list(re.finditer(expression, decoded, flags=re.IGNORECASE))[:2]:
+            start = max(0, match.start() - 70)
+            end = min(len(decoded), match.end() + 110)
+            excerpt = " ".join(decoded[start:end].split())
+            findings.append({
+                "keyword_group": label,
+                "path": path,
+                "matched_text": match.group(0)[:48],
+                "encoding": encoding,
+                "excerpt": excerpt[:MAX_NOTICE_SNIPPET],
+            })
+    return findings
+
+
 def _scan_notice_text(data: bytes, path: str) -> list[dict[str, str]]:
     """Find likely notice/startup tokens in text-like resources, without editing them."""
     suffix = PurePosixPath(path.lower()).suffix
@@ -98,19 +119,132 @@ def _scan_notice_text(data: bytes, path: str) -> list[dict[str, str]]:
     if view is None:
         return []
     encoding, decoded = view
+    return _scan_notice_text_view(decoded, path, encoding)
+
+
+def _collect_bounded_strings(value: Any) -> tuple[list[str], bool]:
+    """Collect bounded string keys/values from a Unity typetree without editing it."""
+    stack = [value]
+    strings: list[str] = []
+    nodes = 0
+    chars = 0
+    truncated = False
+    while stack:
+        node = stack.pop()
+        nodes += 1
+        if nodes > MAX_NOTICE_ASSETBUNDLE_NODES:
+            truncated = True
+            break
+        if isinstance(node, dict):
+            for key, child in node.items():
+                if isinstance(key, str) and key:
+                    strings.append(key)
+                    chars += len(key)
+                stack.append(child)
+        elif isinstance(node, (list, tuple)):
+            stack.extend(node)
+        elif isinstance(node, str) and node:
+            strings.append(node)
+            chars += len(node)
+        if chars >= MAX_NOTICE_ASSETBUNDLE_TEXT_CHARS:
+            truncated = True
+            break
+    if chars > MAX_NOTICE_ASSETBUNDLE_TEXT_CHARS:
+        remaining = MAX_NOTICE_ASSETBUNDLE_TEXT_CHARS
+        bounded = []
+        for item in strings:
+            if remaining <= 0:
+                break
+            bounded.append(item[:remaining])
+            remaining -= len(bounded[-1])
+        strings = bounded
+    return strings, truncated
+
+
+def _scan_notice_assetbundle(data: bytes, path: str) -> dict[str, Any]:
+    """Bounded, read-only scan of Unity object names and text fields."""
+    signatures = (b"UnityFS\\x00", b"UnityRaw\\x00", b"UnityWeb\\x00")
+    payload = data
+    if not payload.startswith(signatures):
+        if _expected_decoded_size(payload) is None:
+            return {"scanned": False, "findings": [], "reason": "not_unity_or_aov_wrapped"}
+        try:
+            payload, _ = decode_aov_resource(payload, path)
+        except AOVBytesError as exc:
+            return {"scanned": False, "findings": [], "reason": f"decode_failed: {exc}"}
+    if not payload.startswith(signatures):
+        return {"scanned": False, "findings": [], "reason": "decoded_payload_is_not_unity"}
+    if len(payload) > MAX_NOTICE_ASSETBUNDLE_BYTES:
+        return {"scanned": False, "findings": [], "reason": "assetbundle_over_64_mib"}
+
+    try:
+        from .assetbundle_inspector import _load_unitypy_aov
+        UnityPy_AOV = _load_unitypy_aov()
+        env = UnityPy_AOV.load(payload)
+    except Exception as exc:
+        return {
+            "scanned": False, "findings": [],
+            "reason": f"assetbundle_parse_failed: {type(exc).__name__}",
+        }
+
     findings: list[dict[str, str]] = []
-    for label, expression in NOTICE_PATTERNS:
-        for match in list(re.finditer(expression, decoded, flags=re.IGNORECASE))[:2]:
-            start = max(0, match.start() - 70)
-            end = min(len(decoded), match.end() + 110)
-            excerpt = " ".join(decoded[start:end].split())
-            findings.append({
-                "keyword_group": label,
-                "matched_text": match.group(0)[:48],
-                "encoding": encoding,
-                "excerpt": excerpt[:MAX_NOTICE_SNIPPET],
-            })
-    return findings
+    inspected_objects = 0
+    text_truncated = False
+    object_scan_errors = 0
+    for asset_file in (getattr(env, "assets", []) or []):
+        objects = getattr(asset_file, "objects", {}) or {}
+        for obj in list(objects.values())[:MAX_NOTICE_ASSETBUNDLE_OBJECTS]:
+            object_type = getattr(getattr(obj, "type", None), "name", "")
+            if object_type not in {"MonoBehaviour", "TextAsset", "ScriptableObject"}:
+                continue
+            inspected_objects += 1
+            object_path = (
+                f"{path}::{getattr(asset_file, 'name', 'assets')}"
+                f"#{getattr(obj, 'path_id', '?')}"
+            )
+            try:
+                if object_type == "TextAsset":
+                    parsed = obj.read()
+                    name = getattr(parsed, "m_Name", "")
+                    script = getattr(parsed, "m_Script", "")
+                    if isinstance(script, bytes):
+                        view = _notice_text_view(script)
+                        strings = [name]
+                        if view:
+                            strings.append(view[1])
+                    else:
+                        strings = [name, str(script or "")]
+                    truncated = False
+                else:
+                    tree = obj.read_typetree()
+                    strings, truncated = _collect_bounded_strings(tree)
+                text_truncated = text_truncated or truncated
+                text = "\\n".join(item for item in strings if item)
+                if not text:
+                    continue
+                object_name = next(
+                    (item for item in strings if "name" in item.lower()),
+                    "",
+                )
+                label_path = f"{object_path}/{object_name}" if object_name else object_path
+                findings.extend(
+                    _scan_notice_text_view(text, label_path, "unity-typetree")
+                )
+                if len(findings) >= MAX_NOTICE_CANDIDATES:
+                    findings = findings[:MAX_NOTICE_CANDIDATES]
+                    text_truncated = True
+                    break
+            except Exception:
+                object_scan_errors += 1
+        if len(findings) >= MAX_NOTICE_CANDIDATES:
+            break
+    return {
+        "scanned": True,
+        "findings": findings,
+        "objects_inspected": inspected_objects,
+        "object_scan_errors": object_scan_errors,
+        "truncated": text_truncated,
+    }
 
 
 def _inspect_decoded_payload(data: bytes) -> dict[str, Any]:
