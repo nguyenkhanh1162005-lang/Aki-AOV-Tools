@@ -17,6 +17,13 @@ class ModPipelineTests(unittest.TestCase):
                 archive.writestr(entry, payload)
         return str(path)
 
+    def _nested_zip(self, entries: dict[str, bytes]) -> bytes:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for entry, payload in entries.items():
+                archive.writestr(entry, payload)
+        return buffer.getvalue()
+
     def test_rejects_more_than_ten_inputs_before_opening_files(self):
         with self.assertRaisesRegex(ModPipelineError, "tối đa 10"):
             _preflight_inputs([f"missing-{index}.zip" for index in range(11)])
@@ -242,9 +249,13 @@ class ModPipelineTests(unittest.TestCase):
                 "Resources.zip": b"nested resources",
                 "DanhSachSkin.txt": b"ten skins",
             })
+            resources_zip = self._nested_zip({
+                "Ages/Prefab_Characters/Prefab_Hero/Actor_593_Actions.pkg.bytes": b"actor actions",
+                "assetbundle/battle/hero/593_machao_battle_base.assetbundle": b"actor bundle",
+            })
             tamyn = self._zip(folder, "TM Tamyn Robot.zip", {
-                "Resources/1.64.1/Ages/Prefab_Characters/Prefab_Hero/Actor_593_Actions.pkg.bytes": b"actor actions",
-                "Resources/1.64.1/assetbundle/battle/hero/593_machao_battle_base.assetbundle": b"actor bundle",
+                "Resources.zip": resources_zip,
+                "DanhSachSkin.txt": b"Tamyn Robot",
             })
 
             p9_profile = _archive_profile(p9)
@@ -257,7 +268,10 @@ class ModPipelineTests(unittest.TestCase):
             self.assertEqual(tm_profile["source_family_hint"], "TM")
             self.assertEqual(tm_profile["source_family_basis"], "resource_signature")
             self.assertEqual(tm_profile["actor_action_ids"], ["593"])
-            self.assertEqual(tm_profile["source_role"], "aov_actor593_mod_candidate")
+            self.assertEqual(tm_profile["actor_asset_ids"], ["593"])
+            self.assertEqual(tm_profile["nested_resource_entries"], 2)
+            self.assertIsNone(tm_profile["nested_resource_scan_warning"])
+            self.assertEqual(tm_profile["source_role"], "aov_skin_mod_container_candidate")
 
     def test_requested_six_archive_set_groups_three_vtk_parts_but_never_authorizes_merge(self):
         with tempfile.TemporaryDirectory() as tmp:
