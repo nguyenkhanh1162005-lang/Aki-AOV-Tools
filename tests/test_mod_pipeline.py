@@ -383,6 +383,13 @@ class ModPipelineTests(unittest.TestCase):
         self.assertEqual(mses["adapter_state"], "version_locked_schema")
         self.assertIn("allowlist", mses["next_action"])
 
+        billboard = _resource_merge_guidance(
+            "Databin/Client/Huanhua/ResKillBillboardCfg.bytes"
+        )
+        self.assertEqual(billboard["adapter_state"], "version_locked_schema")
+        self.assertIn("0x253", billboard["next_action"])
+        self.assertIn("ZIP nền", billboard["next_action"])
+
         nested = _resource_merge_guidance("KernelLua.pkg.bytes")
         self.assertEqual(nested["adapter_state"], "nested_package_union_only")
         self.assertIn("SHA-256", nested["next_action"])

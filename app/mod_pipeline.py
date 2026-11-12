@@ -517,6 +517,24 @@ def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
         }
 
     if leaf in {
+        "resbillboardcfg.bytes",
+        "resbillboardskincfg.bytes",
+        "reskillbillboardcfg.bytes",
+    }:
+        return {
+            "adapter_state": "version_locked_schema",
+            "next_action": (
+                "Có parser/serializer MSES v7 cho bảng Huanhua billboard trong "
+                "adapter iOS 10 skin + VTK Actor 595 đã khóa phiên bản. Chỉ nhận "
+                "khóa Actor 595 0x253 và chỉ khi bảng tương ứng đã có trong ZIP nền."
+            ),
+            "safety_rule": (
+                "Không thêm bảng MSES khi thiếu schema nền; khóa 0x253 đã tồn tại "
+                "nhưng khác payload hoặc có khóa mới ngoài allowlist thì phải dừng."
+            ),
+        }
+
+    if leaf in {
         "resskinseniorlabelcfg.bytes", "battlebank.bytes",
         "lobbybank.bytes", "skillcombine.bytes",
     }:

@@ -33,6 +33,11 @@ MAX_TOTAL_INPUT_BYTES = 500 * 1024 * 1024
 MAX_TOTAL_OUTPUT_BYTES = 1024 * 1024 * 1024
 
 COMMON_ACTIONS_PATH = "Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes"
+HUANHUA_TABLE_PATHS = (
+    "Databin/Client/Huanhua/ResBillboardCfg.bytes",
+    "Databin/Client/Huanhua/ResBillboardSkinCfg.bytes",
+    "Databin/Client/Huanhua/ResKillBillboardCfg.bytes",
+)
 HERO_SKIN_BASE_PATH = "Thanos/HeroSkin_1.bytes"
 HERO_SKIN_VTK_PATH = "Thanos/HeroSkin_2.bytes"
 RES_SKIN_PATH = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
@@ -497,6 +502,48 @@ def _merge_verification_metadata(base_data: bytes, vtk_data: bytes,
     return merged, sorted(updated_paths), sorted(retained_version_drift)
 
 
+def _merge_huanhua_billboard_tables(
+    base_resources: dict[str, bytes],
+    overlay_resources: dict[str, bytes],
+) -> tuple[dict[str, bytes], dict[str, dict[str, Any]]]:
+    """Merge the three Actor 595 billboard MSES tables by the pinned key allowlist.
+
+    The table-specific MSES adapter admits only source-verified key 0x253.
+    These resources must already exist in the base wrapper; adding a standalone
+    table without its base schema/dependency context is not considered safe.
+    """
+    unknown_paths = set(overlay_resources) - set(HUANHUA_TABLE_PATHS)
+    if unknown_paths:
+        raise AOVMergeError(
+            "VTK chứa bảng Huanhua chưa có adapter: "
+            + ", ".join(sorted(unknown_paths))
+        )
+
+    replacements: dict[str, bytes] = {}
+    reports: dict[str, dict[str, Any]] = {}
+    for relative, overlay_data in sorted(overlay_resources.items()):
+        if relative not in base_resources:
+            raise AOVMergeError(
+                f"{relative}: VTK có bảng billboard Actor 595 nhưng ZIP nền thiếu bảng; "
+                "không thể thêm MSES độc lập khi chưa có schema nền."
+            )
+        try:
+            merged, report = merge_aov_mses_resource(
+                base_resources[relative],
+                overlay_data,
+                relative,
+            )
+        except AOVResourceMergeError as exc:
+            raise AOVMergeError(str(exc)) from exc
+        if not report.get("verified"):
+            raise AOVMergeError(
+                f"{relative}: bộ kiểm tra MSES không xác nhận được bảng billboard sau ghép."
+            )
+        replacements[relative] = merged
+        reports[relative] = report
+    return replacements, reports
+
+
 def _assert_archive_inventory(
     archive: zipfile.ZipFile,
     expected_names: set[str],
@@ -680,6 +727,22 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                         raise AOVMergeError(f"ZIP nền thiếu file {relative}") from exc
 
                 replacements: dict[str, bytes] = {}
+                base_huanhua_resources = {
+                    relative: read_base(relative)
+                    for relative in HUANHUA_TABLE_PATHS
+                    if BASE_PREFIX + relative in base_names
+                }
+                vtk_huanhua_resources = {
+                    relative: read_vtk(relative)
+                    for relative in HUANHUA_TABLE_PATHS
+                    if relative in vtk_sources
+                }
+                huanhua_replacements, huanhua_reports = _merge_huanhua_billboard_tables(
+                    base_huanhua_resources,
+                    vtk_huanhua_resources,
+                )
+                replacements.update(huanhua_replacements)
+
                 replacements[HERO_SKIN_BASE_PATH], fix_count, method_count = _merge_ifix(
                     read_base(HERO_SKIN_BASE_PATH), read_vtk(HERO_SKIN_VTK_PATH)
                 )
@@ -712,6 +775,7 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                     COMMON_ACTIONS_PATH, RES_SKIN_PATH, BATTLE_BANK_PATH,
                     LOBBY_BANK_PATH, SKILL_COMBINE_PATH,
                 }
+                skip_vtk.update(huanhua_reports)
                 for name in vtk_sources:
                     if name.startswith("Sound/Android/"):
                         skip_vtk.add(name)
@@ -721,7 +785,7 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                 ) | set(nested_pkg_reports) | {
                     COMMON_ACTIONS_PATH, RES_SKIN_PATH, BATTLE_BANK_PATH,
                     LOBBY_BANK_PATH, SKILL_COMBINE_PATH,
-                }
+                } | set(huanhua_reports)
 
                 (replacements[PACKER_PATH], packer_replaced, packer_added,
                  packer_entry_count) = _merge_packer_metadata(
@@ -833,6 +897,7 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                     "common_actions_tracks": common_tracks,
                     "common_actions_report": common_report,
                     "mses_reports": mses_reports,
+                    "huanhua_billboard_reports": huanhua_reports,
                     "nested_pkg_reports": nested_pkg_reports,
                     "assetbundles": len(asset_paths),
                     "new_files": len(added_files),
