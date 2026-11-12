@@ -252,8 +252,8 @@ class CommonActionsMergeTests(unittest.TestCase):
             return package({path: payload})
 
         report = analyze_common_actions_overlay_set([
-            ("TM.zip", overlay("recall-a")),
-            ("P9.zip", overlay("recall-b")),
+            ("Actor593-source-a.zip", overlay("recall-a")),
+            ("Actor593-source-b.zip", overlay("recall-b")),
         ])
 
         self.assertEqual(report["state"], "BLOCKED")
