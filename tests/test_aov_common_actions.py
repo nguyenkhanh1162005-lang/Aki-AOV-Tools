@@ -262,6 +262,36 @@ class CommonActionsMergeTests(unittest.TestCase):
         self.assertFalse(report["full_merge_authorized"])
         self.assertTrue(report["output_discarded"])
 
+
+    def test_multi_overlay_analysis_lists_opaque_path_conflicts(self):
+        path = "commonresource/Back.xml"
+        opaque = "commonresource/HasteE1_leave.xml"
+
+        def overlay(skin_id, opaque_payload):
+            root = ET.Element("Project")
+            action = ET.SubElement(root, "Action")
+            track = ET.SubElement(action, "Track", {
+                "trackName": "0_RecallTrack",
+                "eventType": "TriggerParticleTick",
+                "enabled": "true",
+            })
+            ET.SubElement(track, "SkinOrAvatarList", {"id": skin_id})
+            payload = encode_aov_resource(ET.tostring(root), path, "zstd")
+            return package({path: payload, opaque: opaque_payload})
+
+        report = analyze_common_actions_overlay_set([
+            ("P9-source.zip", overlay("59300", b"opaque-a")),
+            ("VTK-source.zip", overlay("59500", b"opaque-b")),
+        ])
+
+        self.assertEqual(report["state"], "BLOCKED")
+        self.assertEqual(report["unsupported_path_conflict_count"], 1)
+        self.assertEqual(
+            report["unsupported_path_conflicts"][0]["path"], opaque
+        )
+        self.assertFalse(report["merge_authorized"])
+        self.assertTrue(report["output_discarded"])
+
     def test_multi_overlay_merge_rejects_conflicting_same_actor_track_conditions(self):
         path = "commonresource/Back.xml"
 
