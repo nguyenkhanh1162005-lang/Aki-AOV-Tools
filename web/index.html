@@ -264,7 +264,7 @@ aovPreflightBtn.addEventListener('click',async()=>{
       for(const blocker of data.blockers)lines.push('- '+blocker);
     }
     lines.push('',data.note||'Báo cáo chỉ đọc; không tạo hoặc sửa ZIP.');
-    report.textContent=lines.join('\\n');
+    report.textContent=lines.join('\n');
     status.textContent=data.ready_to_merge
       ?'Đã phân loại. Bộ nguồn khớp adapter có giới hạn; có thể thử Ghép AOV để máy chủ xác minh payload.'
       :'Đã phân loại nhưng chưa có adapter an toàn cho tổ hợp này. Phiên tải vẫn được giữ để chạy báo cáo xung đột.';
