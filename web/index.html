@@ -373,6 +373,27 @@ function renderPreflightDashboard(data){
       ].join(' · ')));
       commonCard.append(line);
     }
+
+    const opaqueConflicts=commonActions.unsupported_path_conflicts||[];
+    if(opaqueConflicts.length){
+      commonCard.append(dashboardElement('p','danger',
+        opaqueConflicts.length+' đường dẫn ngoài parser có payload khác nhau. Chưa có luật để ghép các mục này:'
+      ));
+      for(const conflict of opaqueConflicts.slice(0,10)){
+        const item=dashboardElement('div','preflight-resource');
+        item.append(dashboardElement('strong','',conflict.path));
+        item.append(dashboardElement('p','',
+          (conflict.sources||[]).map(source=>
+            source.source+' · '+source.size_bytes+' bytes · SHA-256 '+(source.sha256||'').slice(0,16)
+          ).join(' | ')
+        ));
+        commonCard.append(item);
+      }
+      if(opaqueConflicts.length>10)commonCard.append(dashboardElement('p','',
+        'Còn '+(opaqueConflicts.length-10)+' đường dẫn trong báo cáo JSON.'
+      ));
+    }
+
     if(commonActions.reason)commonCard.append(dashboardElement('p','',commonActions.reason));
     commonCard.append(dashboardElement('p','',
       'Chỉ kiểm tra sáu XML CommonActions và xung đột điều kiện actor. Bản ZIP mô phỏng đã bị loại bỏ; kết quả không cấp quyền ghép toàn bộ MOD và chưa được kiểm tra trong game.'
