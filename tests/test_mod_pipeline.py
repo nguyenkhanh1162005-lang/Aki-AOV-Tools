@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from app.mod_pipeline import ModPipelineError, _archive_profile, _preflight_inputs, _select_adapter, analyze_aov_input_set, merge_mod_archives
+from app.mod_pipeline import ModPipelineError, _archive_profile, _preflight_inputs, _resource_priority_hint, _select_adapter, analyze_aov_input_set, merge_mod_archives
 
 
 class ModPipelineTests(unittest.TestCase):
@@ -282,6 +282,24 @@ class ModPipelineTests(unittest.TestCase):
             self.assertEqual(report["role_counts"]["aov_skin_mod_container_candidate"], 1)
             self.assertEqual(report["actor_asset_ids"], ["595"])
             self.assertEqual(report["blockers"], [])
+
+    def test_priority_hints_put_kill_notifications_before_effects_ui_and_audio(self):
+        self.assertEqual(
+            _resource_priority_hint("Databin/Client/Huanhua/ResKillBillboardCfg.bytes"),
+            ("Thông báo hạ gục / billboard", 0),
+        )
+        self.assertEqual(
+            _resource_priority_hint("Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes"),
+            ("Hiệu ứng / hoạt ảnh / biến về", 1),
+        )
+        self.assertEqual(
+            _resource_priority_hint("Resources/1.64.1/assetbundle/uisystem/battle/battleotherui.assetbundle"),
+            ("Giao diện / nút bấm / biểu tượng", 2),
+        )
+        self.assertEqual(
+            _resource_priority_hint("Sound/iOS/Hero_LiXin_Skin_C_VO.bnk"),
+            ("Âm thanh", 3),
+        )
 
     def test_multi_mod_preflight_reports_exact_nested_resource_conflicts(self):
         with tempfile.TemporaryDirectory() as tmp:
