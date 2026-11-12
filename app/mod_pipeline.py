@@ -295,7 +295,32 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             "chưa có quy tắc đã xác minh để hợp nhất nhiều Resources.zip.",
         )
 
-    ready = selected_adapter is not None and not blockers
+    malformed_wrappers = [
+        item for item in profiles
+        if (
+            item.get("resources_zip_count", 0)
+            or item.get("skin_list_count", 0)
+        ) and not item.get("has_mod_skin_container")
+    ]
+    for item in malformed_wrappers:
+        blockers.append(
+            f"{item['name']}: cấu trúc wrapper không rõ ràng "
+            f"(Resources.zip={item.get('resources_zip_count', 0)}, "
+            f"DanhSachSkin.txt={item.get('skin_list_count', 0)}); "
+            "cần đúng một file mỗi loại."
+        )
+
+    supported_aov_adapters = {
+        "aov_kpm100_vtk_actor595_1.64.1",
+        "aov_mod_to_mod_vtk_actor595_1.64.1",
+    }
+    if selected_adapter == "generic_zip":
+        blockers.append(
+            "Không phát hiện nguồn AoV. Bộ này chỉ phù hợp với chức năng ghép ZIP thông thường, "
+            "không phải bộ ghép MOD Liên Quân."
+        )
+
+    ready = selected_adapter in supported_aov_adapters and not blockers
     return {
         "schema_version": 1,
         "mode": "read_only_aov_preflight",
