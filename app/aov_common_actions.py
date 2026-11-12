@@ -634,6 +634,50 @@ def _inspect_common_actions_overlay(
     }
 
 
+
+
+def _common_actions_opaque_path_conflicts(
+    overlays: list[tuple[str, bytes]],
+) -> tuple[list[dict], int]:
+    """List non-parser package paths whose contents differ across sources."""
+    by_path: dict[str, list[dict]] = {}
+    for source_name, package_bytes in overlays:
+        try:
+            archive = zipfile.ZipFile(io.BytesIO(package_bytes), "r")
+        except zipfile.BadZipFile as exc:
+            raise CommonActionsMergeError(
+                f"{source_name}: CommonActions.pkg.bytes không phải ZIP hợp lệ."
+            ) from exc
+        try:
+            for info in archive.infolist():
+                if info.is_dir() or info.filename in _COMMON_ACTIONS_MERGE_CANDIDATES:
+                    continue
+                digest = hashlib.sha256(archive.read(info)).hexdigest()
+                by_path.setdefault(info.filename, []).append({
+                    "source": source_name,
+                    "size_bytes": info.file_size,
+                    "sha256": digest,
+                })
+        finally:
+            archive.close()
+
+    conflicts = []
+    identical_duplicates = 0
+    for path, contributors in sorted(by_path.items()):
+        if len(contributors) < 2:
+            continue
+        unique_hashes = {item["sha256"] for item in contributors}
+        if len(unique_hashes) > 1:
+            conflicts.append({
+                "path": path,
+                "source_count": len(contributors),
+                "sources": contributors,
+            })
+        else:
+            identical_duplicates += 1
+    return conflicts, identical_duplicates
+
+
 def _empty_common_actions_package() -> bytes:
     """Build a parser-only baseline; its output is never used as a game resource."""
     root = ET.Element("Project")
@@ -680,13 +724,25 @@ def analyze_common_actions_overlay_set(
             if skin_ids:
                 parser_overlays.append((package_bytes, skin_ids))
 
+        opaque_conflicts, identical_duplicate_paths = (
+            _common_actions_opaque_path_conflicts(overlays)
+        )
+
         if not parser_overlays:
             return {
                 "available": True,
-                "state": "NO_ACTOR_GATED_TRACKS",
+                "state": "BLOCKED" if opaque_conflicts else "NO_ACTOR_GATED_TRACKS",
                 "overlay_count": 0,
                 "source_package_count": len(overlays),
                 "packages": package_reports,
+                "unsupported_path_conflicts": opaque_conflicts,
+                "unsupported_path_conflict_count": len(opaque_conflicts),
+                "identical_duplicate_path_count": identical_duplicate_paths,
+                "reason": (
+                    f"Có {len(opaque_conflicts)} đường dẫn CommonActions ngoài parser "
+                    "bị khác nội dung giữa các nguồn."
+                    if opaque_conflicts else None
+                ),
                 "merge_authorized": False,
                 "full_merge_authorized": False,
                 "output_discarded": True,
@@ -740,6 +796,9 @@ def analyze_common_actions_overlay_set(
                 item["actor_gate_condition_count"] for item in active_reports
             ),
             "packages": package_reports,
+            "unsupported_path_conflicts": opaque_conflicts,
+            "unsupported_path_conflict_count": len(opaque_conflicts),
+            "identical_duplicate_path_count": identical_duplicate_paths,
             "parser_verified": bool(dry_run_report["verified"]),
             "merge_authorized": False,
             "full_merge_authorized": False,
@@ -758,6 +817,12 @@ def analyze_common_actions_overlay_set(
             "source_package_count": len(overlays),
             "overlay_count": len(parser_overlays),
             "packages": package_reports,
+            "unsupported_path_conflicts": opaque_conflicts
+            if "opaque_conflicts" in locals() else [],
+            "unsupported_path_conflict_count": len(opaque_conflicts)
+            if "opaque_conflicts" in locals() else 0,
+            "identical_duplicate_path_count": identical_duplicate_paths
+            if "identical_duplicate_paths" in locals() else 0,
             "reason": str(exc),
             "merge_authorized": False,
             "full_merge_authorized": False,
