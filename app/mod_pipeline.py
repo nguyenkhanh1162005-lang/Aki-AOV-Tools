@@ -254,6 +254,31 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
     return "generic_zip"
 
 
+def _resource_priority_hint(resource_path: str) -> tuple[str, int]:
+    """Heuristic UI grouping only; names do not prove a resource's runtime role."""
+    path = resource_path.replace("\\", "/").casefold()
+    if any(token in path for token in (
+        "reskillbillboard", "resbillboard", "commercializenotify",
+        "resskinseniorlabelcfg",
+    )):
+        return "Thông báo hạ gục / billboard", 0
+    if any(token in path for token in (
+        "commonactions", "heroskin_", "_actions.pkg", "resskinmotion",
+        "assetbundle/battle/hero/", "assetbundle/show/hero/",
+    )):
+        return "Hiệu ứng / hoạt ảnh / biến về", 1
+    if any(token in path for token in (
+        "assetbundle/uisystem/", "assetrefs/", "headimage",
+        "assetbundle/icon/", "battleotherui", "battlecommon_raw",
+    )):
+        return "Giao diện / nút bấm / biểu tượng", 2
+    if any(token in path for token in (
+        "/sound/", "bank.bytes", "sound.bytes", ".bnk", ".wem",
+    )):
+        return "Âm thanh", 3
+    return "Tài nguyên khác", 4
+
+
 def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
     """Read-only preflight for a multi-ZIP AoV source set.
 
@@ -339,8 +364,14 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             if item["status"] in critical_statuses
             or item["status"] == "IDENTICAL_DUPLICATE"
         ]
+        for item in details:
+            priority_group, priority_rank = _resource_priority_hint(item["path"])
+            item["priority_group"] = priority_group
+            item["priority_rank"] = priority_rank
+            item["priority_hint_only"] = True
         details.sort(
             key=lambda item: (
+                item["priority_rank"],
                 0 if item["status"] == "VERSION_CONFLICT" else
                 1 if item["status"] == "NEEDS_RULE" else
                 2 if item["status"] == "UNSUPPORTED" else 3,
@@ -360,6 +391,10 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             "source_compatibility": plan["source_compatibility"],
             "important_paths": details[:200],
             "details_truncated": len(details) > 200,
+            "priority_note": (
+                "Nhóm ưu tiên được gợi ý từ tên đường dẫn để sắp xếp báo cáo; "
+                "không thay thế việc parse payload hoặc xác nhận chức năng trong game."
+            ),
         }
     except (ResourceManifestError, CompatibilityPlanError) as exc:
         resource_analysis = {
