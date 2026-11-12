@@ -33,7 +33,7 @@ _ADAPTERS = (
         "status": "merge_supported_version_locked",
         "formats": ["AoV MOD wrapper 10 skin", "IFix", "MSES v7", "CommonActions", "Unity AssetBundle", "Wwise iOS sound resources"],
         "scope": "Chỉ nhận MOD wrapper iOS có Resources.zip + DanhSachSkin.txt; Resources.zip phải có đúng cấu trúc nền 1.64.1.12 và các bảng đã kiểm tra. VTK iOS phải là bộ Actor 595 1.64.1.11 có đủ đúng 10 AssetBundle bắt buộc.",
-        "merge_policy": "Ghép IFix, MSES v7 theo allowlist từng bảng, CommonActions XML/track và metadata Packer/Verification; thêm tài nguyên Actor 595 cùng sound iOS. Kiểm tra checksum, CRC và inventory; từ chối sai phiên bản, thiếu/thừa bundle hoặc xung đột ngoài quy tắc.",
+        "merge_policy": "Ghép IFix, MSES v7 theo allowlist từng bảng, CommonActions XML/track, metadata Packer/Verification và ZIP lồng KernelLua/StableSystems bằng union theo SHA-256; chỉ thêm mục mới, bỏ bản trùng giống hệt và từ chối xung đột nội bộ khác payload. Kiểm tra checksum, CRC và inventory; từ chối sai phiên bản, thiếu/thừa bundle hoặc xung đột ngoài quy tắc.",
         "game_compatibility": "structurally_validated; not_game_tested",
     },
     {
