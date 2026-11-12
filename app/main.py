@@ -109,6 +109,7 @@ def _persist_upload_session(upload_id: str, session: dict) -> None:
     workdir = Path(session["workdir"])
     payload = {
         "schema_version": 1,
+        "upload_protocol": session.get("upload_protocol", "sequential_v1"),
         "upload_id": upload_id,
         "created": session["created"],
         "files": session["files"],
@@ -155,8 +156,10 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
             created = payload["created"]
             files = payload["files"]
             path_names = payload["paths"]
+            upload_protocol = payload.get("upload_protocol", "sequential_v1")
             if (
-                payload.get("schema_version") != 1
+                upload_protocol not in {"sequential_v1", "chunk_map_v2"}
+                or payload.get("schema_version") != 1
                 or not isinstance(upload_id, str)
                 or len(upload_id) != 32
                 or any(ch not in "0123456789abcdef" for ch in upload_id)
@@ -261,6 +264,7 @@ def _load_persistent_upload_sessions(storage_dir: Path) -> dict[str, dict]:
                 raise ValueError("invalid upload session size or id")
             session = {
                 "created": created,
+                "upload_protocol": upload_protocol,
                 "workdir": str(workdir),
                 "files": clean_files,
                 "paths": safe_paths,
@@ -360,13 +364,17 @@ async def start_chunked_upload(payload: dict = Body(...)):
             "name": name, "size": size, "received": 0,
             "chunk_sha256": chunk_hashes,
             "received_chunk_sha256": [],
+            "received_chunks": {},
         })
     if total > MAX_INPUT_BYTES:
         raise HTTPException(413, "Tổng dung lượng ZIP vượt quá 500 MB.")
     upload_id = uuid.uuid4().hex
     workdir = _new_upload_workdir("aki-aov-chunks-")
     UPLOAD_SESSIONS[upload_id] = {
-        "created": time.time(), "workdir": str(workdir), "files": clean_files,
+        "created": time.time(),
+        "upload_protocol": "chunk_map_v2",
+        "workdir": str(workdir),
+        "files": clean_files,
         "paths": [str(workdir / f"{i}_{item['name']}") for i, item in enumerate(clean_files, 1)]
     }
     try:
