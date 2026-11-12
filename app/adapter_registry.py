@@ -37,6 +37,15 @@ _ADAPTERS = (
         "game_compatibility": "blocked_before_merge",
     },
     {
+        "id": "aov_kpm100_direct_to_vtk_actor595_1.64.1",
+        "name": "KPM100 iOS trực tiếp + Vấn Tâm Kiếm Actor 595",
+        "status": "merge_supported_version_locked",
+        "formats": ["KPM_MOD payloads", "IFix", "MSES", "CommonActions", "Unity AssetBundle", "Wwise BNK"],
+        "scope": "Chỉ đúng cặp ZIP nguồn KPM100 1.64.1.12_KPM và VTK iOS 1.64.1.11 đã ghim SHA-256. KPM100 là ZIP cây Resources trực tiếp, gồm 70 KPM_MOD payload; không phải wrapper Resources.zip.",
+        "merge_policy": "Giữ nguyên mọi đường dẫn KPM100; thay đúng payload Lý Tín Actor595, ghép IFix/MSES/CommonActions, cập nhật Packer/Verification, thêm bundle và soundbank iOS đã kiểm tra. Từ chối nguồn khác hash hoặc sai cấu trúc.",
+        "game_compatibility": "structural_validation_only; ios_game_test_pending",
+    },
+    {
         "id": "aov_wrapper_inspection",
         "name": "AoV AES / Zstandard wrapper",
         "status": "inspect_only",
