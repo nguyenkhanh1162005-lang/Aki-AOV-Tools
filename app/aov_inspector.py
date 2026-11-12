@@ -7,7 +7,7 @@ from collections import Counter
 from pathlib import Path, PurePosixPath
 
 from .aov_format_detector import detect_resource_format, summarize_formats
-from .wwise_bnk import WwiseBNKError, inspect_wwise_bnk
+from .wwise_bnk import WwiseBNKError, compare_wwise_bnk, inspect_wwise_bnk
 from .assetbundle_inspector import (
     AssetBundleInspectError,
     compare_assetbundle_overlays,
@@ -19,6 +19,7 @@ MAX_FILES = 10
 MAX_ENTRIES = 20000
 MAX_TOTAL_UNCOMPRESSED = 1024 * 1024 * 1024
 MAX_BNK_INSPECT_BYTES = 64 * 1024 * 1024
+MAX_BNK_INSPECT_COUNT = 40
 MAX_ASSETBUNDLE_INSPECT_BYTES = 64 * 1024 * 1024
 IMPORTANT_NAMES = (
     "battlebank.bytes",
@@ -76,6 +77,8 @@ def inspect_archives(paths: list[str]) -> str:
     bank_files: list[tuple[str, int, int]] = []
     detected_formats: list[tuple[str, str]] = []
     wwise_reports: list[tuple[str, dict | str]] = []
+    wwise_comparisons: list[tuple[str, dict | str]] = []
+    wwise_inventory: list[dict] = []
     assetbundle_reports: list[tuple[str, dict | str]] = []
     assetbundle_comparisons: list[tuple[str, dict | str]] = []
 
@@ -114,9 +117,22 @@ def inspect_archives(paths: list[str]) -> str:
                     label = Path(path).name + " :: " + name
                     if info.file_size > MAX_BNK_INSPECT_BYTES:
                         wwise_reports.append((label, "Bỏ qua phân tích sâu: BNK vượt quá 64 MiB."))
+                    elif len(wwise_inventory) >= MAX_BNK_INSPECT_COUNT:
+                        wwise_reports.append((label, "Bỏ qua phân tích sâu: đã đạt giới hạn 40 BNK mỗi lượt kiểm tra."))
                     else:
                         try:
-                            wwise_reports.append((label, inspect_wwise_bnk(archive.read(info))))
+                            bank_data = archive.read(info)
+                            bank_report = inspect_wwise_bnk(bank_data)
+                            wwise_reports.append((label, bank_report))
+                            wwise_inventory.append({
+                                "label": label,
+                                "archive_path": path,
+                                "info": info,
+                                "size": info.file_size,
+                                "sha256": hashlib.sha256(bank_data).hexdigest(),
+                                "version": bank_report["version"],
+                                "bank_id": bank_report["bank_id"],
+                            })
                         except (WwiseBNKError, RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
                             wwise_reports.append((label, f"BNK không hợp lệ hoặc chưa hỗ trợ: {exc}"))
                 if Path(name).suffix.lower() == ".assetbundle" and header.startswith((b"UnityFS\x00", b"UnityRaw\x00", b"UnityWeb\x00")):
@@ -143,6 +159,69 @@ def inspect_archives(paths: list[str]) -> str:
                 )
 
         inventories.append((Path(path).name, files, extensions, important))
+
+    # Compare a small number of same-path Wwise banks across input ZIPs.
+    compared_banks = 0
+    for name, sources in collisions.items():
+        if compared_banks >= 10 or Path(name).suffix.lower() != ".bnk":
+            continue
+        unique_sources = []
+        seen_archives = set()
+        for filename, source_path, size, crc, info in sources:
+            if source_path not in seen_archives:
+                unique_sources.append((filename, source_path, size, info))
+                seen_archives.add(source_path)
+        if len(unique_sources) < 2:
+            continue
+        left, right = unique_sources[:2]
+        label = f"{name} [{left[0]} vs {right[0]}]"
+        if left[2] > MAX_BNK_INSPECT_BYTES or right[2] > MAX_BNK_INSPECT_BYTES:
+            wwise_comparisons.append((label, "Bỏ qua so sánh sâu: ít nhất một BNK vượt quá 64 MiB."))
+            compared_banks += 1
+            continue
+        try:
+            with zipfile.ZipFile(left[1], "r") as left_zip, zipfile.ZipFile(right[1], "r") as right_zip:
+                left_data = left_zip.read(left[3])
+                right_data = right_zip.read(right[3])
+            wwise_comparisons.append((label, compare_wwise_bnk(left_data, right_data)))
+        except (WwiseBNKError, RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
+            wwise_comparisons.append((label, f"Không thể so sánh an toàn: {exc}"))
+        compared_banks += 1
+
+    # Group SoundBanks by BKHD Bank ID even when their file paths differ.
+    bank_id_groups: dict[int, list[dict]] = {}
+    for item in wwise_inventory:
+        bank_id_groups.setdefault(item["bank_id"], []).append(item)
+    wwise_identity_groups: list[tuple[int, list[str], dict | str]] = []
+    for bank_id, items in sorted(bank_id_groups.items()):
+        if len(items) < 2 or len(wwise_identity_groups) >= 10:
+            continue
+        unique_payloads: dict[str, dict] = {}
+        for item in items:
+            unique_payloads.setdefault(item["sha256"], item)
+        labels = [item["label"] for item in items[:12]]
+        if len(unique_payloads) == 1:
+            result = {
+                "status": "IDENTICAL_BANK_PAYLOAD",
+                "bank_versions": sorted({item["version"] for item in items}),
+                "entry_count": len(items),
+                "unique_payload_count": 1,
+                "bank_id_match": True,
+                "advisory_only": True,
+            }
+        else:
+            payload_items = list(unique_payloads.values())
+            left, right = payload_items[0], payload_items[1]
+            try:
+                with zipfile.ZipFile(left["archive_path"], "r") as left_zip, zipfile.ZipFile(right["archive_path"], "r") as right_zip:
+                    left_data = left_zip.read(left["info"])
+                    right_data = right_zip.read(right["info"])
+                result = compare_wwise_bnk(left_data, right_data)
+                result["entry_count"] = len(items)
+                result["unique_payload_count"] = len(unique_payloads)
+            except (WwiseBNKError, RuntimeError, zipfile.BadZipFile, OSError, zlib.error) as exc:
+                result = f"Không thể đối chiếu Bank ID {bank_id} an toàn: {exc}"
+        wwise_identity_groups.append((bank_id, labels, result))
 
     # Compare only a small number of same-path AssetBundles across input ZIPs.
     # This is a structural report, not an authorization to merge their objects.
@@ -221,6 +300,57 @@ def inspect_archives(paths: list[str]) -> str:
     else:
         lines.append("- Không tìm thấy Wwise BNK có chữ ký BKHD để phân tích.")
     lines.append("- Chỉ kiểm tra cấu trúc và chỉ mục; chưa chỉnh sửa hoặc hợp nhất SoundBank.")
+    lines.extend(["", "ĐỐI CHIẾU WWISE BNK TRÙNG ĐƯỜNG DẪN"])
+    if wwise_comparisons:
+        for name, result in wwise_comparisons:
+            lines.append(f"- {name}")
+            if isinstance(result, str):
+                lines.append(f"  • {result}")
+            else:
+                lines.append(
+                    f"  • Trạng thái: {result['status']} | "
+                    f"Version khớp: {result['bank_versions_match']}"
+                )
+                lines.append(
+                    f"  • Media ID trùng: {len(result['media']['shared_ids'])} | "
+                    f"payload đổi: {len(result['media']['changed_payload_ids'])} | "
+                    f"ID mới: {len(result['media']['new_overlay_ids'])}"
+                )
+                lines.append(
+                    f"  • HIRC ID trùng: {len(result['hirc']['shared_ids'])} | "
+                    f"payload đổi: {len(result['hirc']['changed_payload_ids'])} | "
+                    f"ID mới: {len(result['hirc']['new_overlay_ids'])}"
+                )
+                lines.append("  • " + result["scope"])
+    else:
+        lines.append("- Không có cặp BNK trùng đường dẫn giữa các ZIP để đối chiếu.")
+    lines.append("- Đối chiếu chỉ mang tính tư vấn; không giải mã HIRC reference graph hoặc cấp quyền ghép BNK.")
+
+    lines.extend(["", "ĐỐI CHIẾU WWISE THEO BANK ID (KHÔNG PHỤ THUỘC TÊN FILE)"])
+    if wwise_identity_groups:
+        for bank_id, labels, result in wwise_identity_groups:
+            lines.append(f"- Bank ID {bank_id}: " + " | ".join(labels))
+            if isinstance(result, str):
+                lines.append(f"  • {result}")
+            elif result["status"] == "IDENTICAL_BANK_PAYLOAD":
+                lines.append(
+                    f"  • {result['entry_count']} đường dẫn, chỉ 1 payload SHA-256 duy nhất; "
+                    "các bản này là bản sao nội dung."
+                )
+                lines.append("  • Version: " + ", ".join(str(value) for value in result["bank_versions"]))
+            else:
+                lines.append(
+                    f"  • Trạng thái: {result['status']} | "
+                    f"Version khớp: {result['bank_versions_match']} | "
+                    f"Bank ID khớp: {result['bank_id_match']}"
+                )
+                lines.append(
+                    f"  • Media payload đổi: {len(result['media']['changed_payload_ids'])} | "
+                    f"HIRC payload đổi: {len(result['hirc']['changed_payload_ids'])}"
+                )
+    else:
+        lines.append("- Không phát hiện Bank ID xuất hiện ở nhiều đường dẫn trong phạm vi đã phân tích.")
+    lines.append("- Nhóm Bank ID chỉ phát hiện bản sao/xung đột identity; không tự động gộp hoặc thay thế SoundBank.")
 
     lines.extend(["", "KIỂM TRA CẤU TRÚC VÀ PHỤ THUỘC ASSETBUNDLE"])
     if assetbundle_reports:

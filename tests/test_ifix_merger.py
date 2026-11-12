@@ -32,6 +32,31 @@ class IFixMergerTests(unittest.TestCase):
         encoded = serialize_ifix_patch(patch)
         self.assertEqual(serialize_ifix_patch(parse_ifix_patch(encoded)), encoded)
 
+    def test_canonical_ifix_opcode_operand_kinds(self):
+        from app.ifix_merger import _operand_kind
+
+        # Cross-check the two opcodes encountered in the pinned VTK patch:
+        self.assertEqual(_operand_kind(89), "type")       # Newarr, InlineType
+        self.assertEqual(_operand_kind(175), "none")      # Stelem_Ref, InlineNone
+        self.assertEqual(_operand_kind(162), "method")    # Ldvirtftn, InlineMethod
+        self.assertEqual(_operand_kind(146), "stack")       # AoV custom StackSpace pseudo-op
+
+    def test_opcode_89_newarr_type_operand_is_remapped_and_roundtrips(self):
+        base = make_patch("BaseFix", "BaseType", "base-string", "baseField")
+        incoming = make_patch("IncomingFix", "IncomingType", "incoming-string", "incomingField")
+        incoming["methods"][0]["inst"] = [
+            (89, 0),   # Newarr, InlineType operand (verified in tools/ifix_parse.py)
+            (103, 0),  # Ret
+        ]
+
+        merged = merge_ifix_patches(base, incoming)
+        self.assertEqual(merged["methods"][1]["inst"], [(89, 1), (103, 0)])
+
+        encoded = serialize_ifix_patch(merged)
+        reparsed = parse_ifix_patch(encoded)
+        self.assertEqual(serialize_ifix_patch(reparsed), encoded)
+        self.assertEqual(reparsed["methods"][1]["inst"], [(89, 1), (103, 0)])
+
     def test_merge_remaps_all_referenced_tables(self):
         base = make_patch("BaseFix", "BaseType", "base-string", "baseField")
         incoming = make_patch("IncomingFix", "IncomingType", "incoming-string", "incomingField")

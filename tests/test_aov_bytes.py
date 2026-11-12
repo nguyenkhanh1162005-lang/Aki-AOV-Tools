@@ -9,6 +9,8 @@ from app.aov_bytes import (
     encrypt_aes_resource,
     encrypt_aes_zstd_resource,
     encode_aov_resource,
+    _compress_frame,
+    _decompress_frame,
 )
 
 
@@ -58,6 +60,38 @@ class AOVBytesTests(unittest.TestCase):
         self.assertEqual(len(decoded), 2205)
         rebuilt = encode_aov_resource(decoded, "Independent_lua.bytes", mode)
         self.assertEqual(decode_aov_resource(rebuilt, "Independent_lua.bytes")[0], decoded)
+
+    def test_streaming_zstd_decompression_enforces_output_limit(self):
+        import app.aov_bytes as aov_bytes
+        from unittest.mock import patch
+
+        with patch.object(aov_bytes, "MAX_DECODED_RESOURCE", 64):
+            self.assertEqual(_decompress_frame(_compress_frame(b"A" * 64)), b"A" * 64)
+            with self.assertRaisesRegex(AOVBytesError, "vượt giới hạn 256 MiB"):
+                _decompress_frame(_compress_frame(b"A" * 65))
+
+    def test_rejects_noncanonical_zstd_wrapper_flag(self):
+        payload = b"payload"
+        malformed = b"\x22\x4a\x01\xef" + len(payload).to_bytes(4, "little") + _compress_frame(payload)
+        with self.assertRaisesRegex(AOVBytesError, "header AoV Zstandard"):
+            decompress_aov_bytes(malformed)
+
+    def test_rejects_zstd_frame_outside_expected_wrapper_offset(self):
+        payload = b"payload"
+        malformed = (
+            b"\x22\x4a\x00\xef"
+            + len(payload).to_bytes(4, "little")
+            + b"\x00"
+            + _compress_frame(payload)
+        )
+        with self.assertRaisesRegex(AOVBytesError, "không nằm đúng vị trí"):
+            decompress_aov_bytes(malformed)
+
+    def test_validates_declared_size_for_empty_and_nonempty_payloads(self):
+        self.assertEqual(decompress_aov_bytes(compress_aov_bytes(b"")), b"")
+        malformed = b"\x22\x4a\x00\xef" + (0).to_bytes(4, "little") + _compress_frame(b"x")
+        with self.assertRaisesRegex(AOVBytesError, "không khớp header"):
+            decompress_aov_bytes(malformed)
 
     def test_rejects_unknown_header(self):
         with self.assertRaises(AOVBytesError):

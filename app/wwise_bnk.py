@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import struct
 from dataclasses import dataclass
 from typing import Any
@@ -97,7 +98,13 @@ def inspect_wwise_bnk(data: bytes) -> dict[str, Any]:
             if media_size:
                 intervals.append((media_offset, end, media_id))
             seen_media.add(media_id)
-            media.append({"id": media_id, "offset": media_offset, "size": media_size})
+            media_payload = data[audio_data.offset + media_offset:audio_data.offset + end]
+            media.append({
+                "id": media_id,
+                "offset": media_offset,
+                "size": media_size,
+                "sha256": hashlib.sha256(media_payload).hexdigest(),
+            })
         intervals.sort()
         for previous, current in zip(intervals, intervals[1:]):
             if current[0] < previous[1]:
@@ -119,12 +126,19 @@ def inspect_wwise_bnk(data: bytes) -> dict[str, Any]:
         cursor = hirc.offset + 4
         end = hirc.offset + hirc.size
         seen_objects: set[int] = set()
+        # Wwise bank versions <= 48 encode HIRC object type as u32;
+        # newer versions use u8. The size field and body follow that type.
+        object_type_width = 4 if version <= 48 else 1
+        object_header_size = object_type_width + 4
         for index in range(count):
-            if cursor + 5 > end:
+            if cursor + object_header_size > end:
                 raise WwiseBNKError(f"HIRC object {index} bị cắt cụt.")
-            object_type = data[cursor]
-            object_size = _u32(data, cursor + 1)
-            body_start = cursor + 5
+            if object_type_width == 4:
+                object_type = _u32(data, cursor)
+            else:
+                object_type = data[cursor]
+            object_size = _u32(data, cursor + object_type_width)
+            body_start = cursor + object_header_size
             body_end = body_start + object_size
             if object_size < 4 or body_end > end:
                 raise WwiseBNKError(f"Kích thước HIRC object {index} không hợp lệ.")
@@ -134,6 +148,7 @@ def inspect_wwise_bnk(data: bytes) -> dict[str, Any]:
             seen_objects.add(object_id)
             hirc_objects.append({
                 "type": object_type, "id": object_id, "size": object_size,
+                "sha256": hashlib.sha256(data[cursor:body_end]).hexdigest(),
             })
             cursor = body_end
         if cursor != end:
@@ -152,4 +167,100 @@ def inspect_wwise_bnk(data: bytes) -> dict[str, Any]:
         "hirc_objects": hirc_objects,
         "media_count": len(media),
         "hirc_object_count": len(hirc_objects),
+    }
+
+
+def compare_wwise_bnk(base_data: bytes, overlay_data: bytes) -> dict[str, Any]:
+    """Compare BNK identities and payload collisions without rewriting either bank.
+
+    HIRC object references and event/action semantics are not decoded here, so this
+    report is strictly advisory and can never authorize a SoundBank merge.
+    """
+    base = inspect_wwise_bnk(base_data)
+    overlay = inspect_wwise_bnk(overlay_data)
+    base_media = {item["id"]: item for item in base["media"]}
+    overlay_media = {item["id"]: item for item in overlay["media"]}
+    shared_media = sorted(set(base_media) & set(overlay_media))
+    identical_media = [
+        media_id for media_id in shared_media
+        if base_media[media_id]["sha256"] == overlay_media[media_id]["sha256"]
+    ]
+    changed_media = [
+        media_id for media_id in shared_media
+        if base_media[media_id]["sha256"] != overlay_media[media_id]["sha256"]
+    ]
+
+    base_objects = {item["id"]: item for item in base["hirc_objects"]}
+    overlay_objects = {item["id"]: item for item in overlay["hirc_objects"]}
+    shared_objects = sorted(set(base_objects) & set(overlay_objects))
+    identical_objects = [
+        object_id for object_id in shared_objects
+        if base_objects[object_id]["sha256"] == overlay_objects[object_id]["sha256"]
+    ]
+    changed_objects = [
+        object_id for object_id in shared_objects
+        if base_objects[object_id]["sha256"] != overlay_objects[object_id]["sha256"]
+    ]
+    object_type_conflicts = [
+        object_id for object_id in shared_objects
+        if base_objects[object_id]["type"] != overlay_objects[object_id]["type"]
+    ]
+
+    version_match = base["version"] == overlay["version"]
+    bank_id_match = base["bank_id"] == overlay["bank_id"]
+    base_sha256 = hashlib.sha256(base_data).hexdigest()
+    overlay_sha256 = hashlib.sha256(overlay_data).hexdigest()
+    whole_bank_identical = base_sha256 == overlay_sha256
+    new_media_ids = sorted(set(overlay_media) - set(base_media))
+    new_hirc_ids = sorted(set(overlay_objects) - set(base_objects))
+    if not version_match:
+        status = "VERSION_CONFLICT"
+        reasons = ["Wwise SoundBank có version khác nhau."]
+    elif not bank_id_match:
+        status = "BANK_ID_CONFLICT"
+        reasons = ["Bank ID khác nhau; đây là hai SoundBank identity khác nhau, không được xem là cùng bank để thay thế trực tiếp."]
+    elif whole_bank_identical:
+        status = "IDENTICAL_BANK_PAYLOAD"
+        reasons = ["Toàn bộ BNK có SHA-256 giống nhau."]
+    else:
+        status = "NEEDS_RULE"
+        if changed_media or changed_objects or object_type_conflicts:
+            reasons = ["Có media ID hoặc HIRC object ID trùng nhưng payload khác nhau; cần remap và kiểm tra tham chiếu."]
+        elif new_media_ids or new_hirc_ids:
+            reasons = ["Có media ID hoặc HIRC object ID mới; cần giải quyết dependency và tham chiếu trước khi ghép."]
+        else:
+            reasons = ["Toàn bộ BNK khác SHA-256 nhưng phần khác biệt nằm ngoài các trường đã kiểm kê; cần adapter/kiểm tra sâu hơn."]
+
+    return {
+        "format": "Wwise BNK comparison",
+        "status": status,
+        "bank_versions_match": version_match,
+        "bank_id_match": bank_id_match,
+        "bank_payload_identical": whole_bank_identical,
+        "base_bank_sha256": base_sha256,
+        "overlay_bank_sha256": overlay_sha256,
+        "bank_ids": {"base": base["bank_id"], "overlay": overlay["bank_id"]},
+        "base_chunk_ids": [item["id"] for item in base["chunks"]],
+        "overlay_chunk_ids": [item["id"] for item in overlay["chunks"]],
+        "media": {
+            "base_count": len(base_media),
+            "overlay_count": len(overlay_media),
+            "shared_ids": shared_media[:200],
+            "identical_payload_ids": identical_media[:200],
+            "changed_payload_ids": changed_media[:200],
+            "new_overlay_ids": new_media_ids[:200],
+        },
+        "hirc": {
+            "base_count": len(base_objects),
+            "overlay_count": len(overlay_objects),
+            "shared_ids": shared_objects[:200],
+            "identical_payload_ids": identical_objects[:200],
+            "changed_payload_ids": changed_objects[:200],
+            "object_type_conflict_ids": object_type_conflicts[:200],
+            "new_overlay_ids": new_hirc_ids[:200],
+        },
+        "advisory_only": True,
+        "merge_authorized": False,
+        "scope": "BKHD version/bank ID, DIDX media payload hashes and HIRC object payload hashes only; no HIRC reference graph, event semantics, serializer or in-game validation",
+        "reasons": reasons,
     }

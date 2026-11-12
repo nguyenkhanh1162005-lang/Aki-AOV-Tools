@@ -66,6 +66,32 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertFalse(plan["ready"])
         self.assertEqual(plan["merged_externals"], [])
 
+    def test_external_file_id_plan_rejects_traversal_and_absolute_paths(self):
+        for unsafe in (
+            "../CAB-overlay",
+            "/CAB-overlay",
+            "archive:/../CAB-overlay",
+            "archive:/folder/../../CAB-overlay",
+            "archive:CAB-overlay",
+            "C:/CAB-overlay",
+        ):
+            with self.subTest(path=unsafe):
+                plan = build_external_file_id_remap_plan(
+                    ["archive:/CAB-base"], [unsafe]
+                )
+                self.assertFalse(plan["ready"])
+                self.assertEqual(plan["file_id_remap"], {})
+
+    def test_external_file_id_plan_preserves_valid_archive_scheme(self):
+        plan = build_external_file_id_remap_plan(
+            ["archive:/CAB-base"], ["archive:/CAB-overlay"]
+        )
+        self.assertTrue(plan["ready"])
+        self.assertEqual(
+            plan["merged_externals"],
+            ["archive:/CAB-base", "archive:/CAB-overlay"],
+        )
+
 
 
 
@@ -278,6 +304,22 @@ class AssetBundleInspectorTests(unittest.TestCase):
             local_target_path_ids=set(), external_target_path_ids={},
         )
         self.assertFalse(plan["ready"])
+
+    def test_pptr_remap_plan_preserves_null_pointer(self):
+        plan = build_pptr_remap_plan(
+            [{"file_id": 0, "path_id": 0}],
+            {},
+            {},
+            {},
+            local_target_path_ids=set(),
+            external_target_path_ids={},
+        )
+        self.assertTrue(plan["ready"])
+        self.assertEqual(
+            [(item["file_id"], item["path_id"], item["target"])
+             for item in plan["rewritten_references"]],
+            [(0, 0, "null")],
+        )
 
     def test_pptr_remap_plan_resolves_local_and_external_targets(self):
         plan = build_pptr_remap_plan(
@@ -902,6 +944,30 @@ class AssetBundleInspectorTests(unittest.TestCase):
         self.assertEqual(report["object_references"][0]["target_file"], "CAB-dependency.resS")
         self.assertEqual(report["object_references"][1]["target_file"], "local")
 
+    def test_scans_null_object_reference_without_marking_it_local(self):
+        source_obj = SimpleNamespace(
+            type=SimpleNamespace(name="GameObject"),
+            path_id=100,
+            read_typetree=lambda: {
+                "null": {"m_FileID": 0, "m_PathID": 0},
+            },
+        )
+        serialized = SimpleNamespace(
+            name="CAB-main",
+            unity_version="2022.3.0f1",
+            target_platform=SimpleNamespace(name="iOS"),
+            objects={100: source_obj},
+            externals=[],
+        )
+        env = SimpleNamespace(assets=[serialized], container={}, files={"bundle": object()})
+        fake_unity = SimpleNamespace(load=lambda data: env)
+        with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
+            report = inspect_assetbundle(b"UnityFS\x00fixture")
+        self.assertEqual(report["object_reference_count"], 1)
+        self.assertEqual(report["object_references"][0]["target_file"], "null")
+        self.assertEqual(report["reference_integrity"]["local_resolved"], 0)
+        self.assertEqual(report["reference_integrity"]["local_missing"], [])
+
     def test_resolves_local_and_loaded_external_cab_targets(self):
         source_obj = SimpleNamespace(
             type=SimpleNamespace(name="GameObject"),
@@ -953,6 +1019,175 @@ class AssetBundleInspectorTests(unittest.TestCase):
         with patch("app.assetbundle_inspector._load_unitypy_aov", return_value=fake_unity):
             with self.assertRaisesRegex(AssetBundleInspectError, "bad bundle"):
                 inspect_assetbundle(b"UnityFS\x00fixture")
+
+
+    def test_metadata_merge_rejects_malformed_base_and_overlay_inventory(self):
+        def metadata(prefix):
+            return {
+                "inspection_complete": True,
+                "assetbundle_name": "shared",
+                "preload_table_count": 1,
+                "preload_pointer_inventory": [{"file_id": 0, "path_id": 10, "source": "preload"}],
+                "container_record_inventory": [{
+                    "path": f"assets/{prefix}",
+                    "preload_index": 0,
+                    "preload_size": 1,
+                    "asset": {"file_id": 0, "path_id": 10},
+                }],
+                "main_asset": None,
+                "dependencies": [],
+            }
+
+        base = metadata("base")
+        overlay = metadata("overlay")
+        rewritten = {
+            "ready": True,
+            "rewritten": {
+                "preload": [{"file_id": 0, "path_id": 20}],
+                "container": [{"file_id": 0, "path_id": 20}],
+                "main_asset": None,
+            },
+        }
+
+        malformed_base = metadata("base")
+        malformed_base["preload_pointer_inventory"][0]["file_id"] = True
+        result = build_assetbundle_metadata_merge_plan(malformed_base, overlay, rewritten)
+        self.assertFalse(result["ready"])
+        self.assertIn("Base preload", result["reason"])
+
+        malformed_overlay = metadata("overlay")
+        malformed_overlay["container_record_inventory"][0]["path"] = ["not", "a", "path"]
+        result = build_assetbundle_metadata_merge_plan(base, malformed_overlay, rewritten)
+        self.assertFalse(result["ready"])
+        self.assertIn("Overlay Container", result["reason"])
+
+        malformed_overlay_pointer = metadata("overlay")
+        malformed_overlay_pointer["container_record_inventory"][0]["asset"]["path_id"] = True
+        result = build_assetbundle_metadata_merge_plan(base, malformed_overlay_pointer, rewritten)
+        self.assertFalse(result["ready"])
+        self.assertIn("Overlay Container", result["reason"])
+
+        malformed_remap = {
+            "ready": True,
+            "rewritten": {
+                "preload": [{"file_id": 0, "path_id": 1 << 63}],
+                "container": [{"file_id": 0, "path_id": 20}],
+                "main_asset": None,
+            },
+        }
+        result = build_assetbundle_metadata_merge_plan(base, overlay, malformed_remap)
+        self.assertFalse(result["ready"])
+        self.assertIn("remapped metadata", result["reason"])
+
+        overlay_with_main = metadata("overlay")
+        overlay_with_main["main_asset"] = {
+            "preload_index": 0,
+            "preload_size": 1,
+            "asset": {"file_id": 0, "path_id": 10},
+        }
+        invalid_main_remap = {
+            "ready": True,
+            "rewritten": {
+                "preload": [{"file_id": 0, "path_id": 20}],
+                "container": [{"file_id": 0, "path_id": 20}],
+                "main_asset": {"file_id": 0, "path_id": 1 << 63},
+            },
+        }
+        result = build_assetbundle_metadata_merge_plan(base, overlay_with_main, invalid_main_remap)
+        self.assertFalse(result["ready"])
+        self.assertIn("MainAsset", result["reason"])
+
+        missing_main_remap = {
+            "ready": True,
+            "rewritten": {
+                "preload": [{"file_id": 0, "path_id": 20}],
+                "container": [{"file_id": 0, "path_id": 20}],
+                "main_asset": None,
+            },
+        }
+        result = build_assetbundle_metadata_merge_plan(base, overlay_with_main, missing_main_remap)
+        self.assertFalse(result["ready"])
+        self.assertIn("remap is missing", result["reason"])
+
+        malformed_main_source = metadata("overlay")
+        malformed_main_source["main_asset"] = {
+            "preload_index": 0,
+            "preload_size": 1,
+            "asset": {"file_id": 0, "path_id": True},
+        }
+        result = build_assetbundle_metadata_merge_plan(base, malformed_main_source, invalid_main_remap)
+        self.assertFalse(result["ready"])
+        self.assertIn("source metadata", result["reason"])
+
+        result = build_assetbundle_metadata_merge_plan(base, overlay, rewritten)
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["preload_table"], [
+            {"file_id": 0, "path_id": 10},
+            {"file_id": 0, "path_id": 20},
+        ])
+
+
+    def test_metadata_merge_fails_closed_on_non_boolean_status_and_count_mismatch(self):
+        def metadata(prefix):
+            return {
+                "inspection_complete": True,
+                "assetbundle_name": "shared",
+                "preload_table_count": 1,
+                "container_entry_count": 1,
+                "preload_pointer_inventory": [
+                    {"file_id": 0, "path_id": 10, "source": "preload"}
+                ],
+                "container_record_inventory": [{
+                    "path": f"assets/{prefix}",
+                    "preload_index": 0,
+                    "preload_size": 1,
+                    "asset": {"file_id": 0, "path_id": 10},
+                }],
+                "main_asset": None,
+                "dependencies": [],
+            }
+
+        base = metadata("base")
+        overlay = metadata("overlay")
+        rewritten = {
+            "ready": True,
+            "rewritten": {
+                "preload": [{"file_id": 0, "path_id": 20}],
+                "container": [{"file_id": 0, "path_id": 20}],
+                "main_asset": None,
+            },
+        }
+
+        for bad_status in (1, "true", "yes"):
+            malformed = metadata("base")
+            malformed["inspection_complete"] = bad_status
+            result = build_assetbundle_metadata_merge_plan(malformed, overlay, rewritten)
+            self.assertFalse(result["ready"])
+            self.assertIn("incomplete", result["reason"])
+
+        malformed = metadata("base")
+        malformed["container_entry_count"] = 2
+        result = build_assetbundle_metadata_merge_plan(malformed, overlay, rewritten)
+        self.assertFalse(result["ready"])
+        self.assertIn("Container inventory count mismatch", result["reason"])
+
+        malformed = metadata("overlay")
+        malformed["container_entry_count"] = True
+        result = build_assetbundle_metadata_merge_plan(base, malformed, rewritten)
+        self.assertFalse(result["ready"])
+        self.assertIn("Container inventory count mismatch", result["reason"])
+
+        malformed = dict(rewritten)
+        malformed["ready"] = "true"
+        result = build_assetbundle_metadata_merge_plan(base, overlay, malformed)
+        self.assertFalse(result["ready"])
+        self.assertIn("remap validation", result["reason"])
+
+        malformed = metadata("overlay")
+        malformed["assetbundle_name"] = ["shared"]
+        result = build_assetbundle_metadata_merge_plan(base, malformed, rewritten)
+        self.assertFalse(result["ready"])
+        self.assertIn("name metadata", result["reason"])
 
 
 if __name__ == "__main__":

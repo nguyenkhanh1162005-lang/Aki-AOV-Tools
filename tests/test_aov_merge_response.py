@@ -21,28 +21,29 @@ class AOVMergeResponseTests(unittest.IsolatedAsyncioTestCase):
             def fake_merge(_paths, output_path):
                 Path(output_path).write_bytes(b"merged zip")
                 return {
-                    "validation": "ZIP/CRC and resource checks passed",
+                    "adapter": "aov_kpm100_vtk_actor595_1.64.1",
+                    "validation": {"outer_zip_crc": "passed"},
                     "game_tested": False,
-                    "base_version": "1.64.1.12",
+                    "base_version": "1.64.1.12_KPM",
                     "vtk_version": "1.64.1.11",
-                    "assetbundles": 10,
-                    "new_files": 24,
+                    "packer": {"actor_assets_from_vtk": [f"bundle-{i}" for i in range(10)]},
+                    "added_resources": [f"resource-{i}" for i in range(24)],
                 }
 
             try:
                 with patch(
                     "app.main.run_in_threadpool",
-                    new=AsyncMock(side_effect=lambda fn, *args: fake_merge(*args)),
+                    new=AsyncMock(side_effect=lambda fn, *args, **kwargs: fake_merge(*args)),
                 ):
                     response = await main.merge_aov_chunked_upload(upload_id)
 
                 self.assertEqual(response.headers["X-AOV-Validation"], "passed")
                 self.assertEqual(response.headers["X-AOV-Game-Tested"], "false")
-                self.assertEqual(response.headers["X-AOV-Base-Version"], "1.64.1.12")
+                self.assertEqual(response.headers["X-AOV-Base-Version"], "1.64.1.12_KPM")
                 self.assertEqual(response.headers["X-AOV-VTK-Version"], "1.64.1.11")
                 self.assertEqual(response.headers["X-AOV-AssetBundles"], "10")
                 self.assertEqual(response.headers["X-AOV-New-Files"], "24")
-                self.assertEqual(response.filename, "Aki-AOV-10Skin-VanTamKiem.zip")
+                self.assertEqual(response.filename, "Aki-AOV-KPM100-VTK.zip")
                 self.assertNotIn(upload_id, main.UPLOAD_SESSIONS)
             finally:
                 main.UPLOAD_SESSIONS.pop(upload_id, None)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import io
+import os
 import shutil
 import stat
 import sys
@@ -71,6 +72,16 @@ def _load_unitypy_aov():
     return UnityPy_AOV
 
 
+def _find_outer_entries(zf: zipfile.ZipFile, expected_basename: str) -> list[zipfile.ZipInfo]:
+    """Find one wrapper member by case-insensitive basename, independent of folder prefix."""
+    expected = expected_basename.casefold()
+    return [
+        info for info in zf.infolist()
+        if not info.is_dir()
+        and PurePosixPath(info.filename.replace("\\", "/")).name.casefold() == expected
+    ]
+
+
 def _validate_archive_paths(zf: zipfile.ZipFile, label: str) -> None:
     entries = zf.infolist()
     if len(entries) > MAX_ARCHIVE_ENTRIES:
@@ -78,41 +89,44 @@ def _validate_archive_paths(zf: zipfile.ZipFile, label: str) -> None:
     total_uncompressed = sum(info.file_size for info in entries)
     if total_uncompressed > MAX_TOTAL_UNCOMPRESSED:
         raise AOVMergeError(f"ZIP {label} vượt quá giới hạn giải nén 1 GiB.")
-    seen_files: set[str] = set()
+    seen_paths: set[str] = set()
     for info in entries:
         if info.file_size > MAX_SINGLE_ENTRY:
             raise AOVMergeError(
                 f"ZIP {label} có mục vượt quá 512 MiB: {info.filename}"
             )
         normalized = info.filename.replace("\\", "/")
-        path = PurePosixPath(normalized)
+        candidate = normalized[:-1] if info.is_dir() and normalized.endswith("/") else normalized
+        path = PurePosixPath(candidate)
+        raw_parts = candidate.split("/")
         mode = (info.external_attr >> 16) & 0xFFFF
         if (
-            not normalized
+            not candidate
             or path.is_absolute()
-            or ".." in path.parts
+            or any(part in {"", ".", ".."} for part in raw_parts)
             or "\x00" in normalized
             or (path.parts and path.parts[0].endswith(":"))
             or stat.S_ISLNK(mode)
         ):
             raise AOVMergeError(
-                f"ZIP {label} chứa đường dẫn hoặc mục không an toàn: {info.filename}"
+                f"ZIP {label} chứa đường dẫn hoặc mục không an toàn/không chuẩn hóa: {info.filename}"
             )
-        if not info.is_dir():
-            if normalized in seen_files:
-                raise AOVMergeError(
-                    f"ZIP {label} có đường dẫn tệp bị lặp, không rõ dữ liệu nào được ưu tiên: {normalized}"
-                )
-            seen_files.add(normalized)
+        canonical_path = path.as_posix()
+        if canonical_path in seen_paths:
+            raise AOVMergeError(
+                f"ZIP {label} có đường dẫn tệp bị lặp (trùng lặp) hoặc không phân biệt được: {canonical_path}"
+            )
+        seen_paths.add(canonical_path)
 
 
 def _normalise_vtk_path(name: str) -> str:
     name = name.replace("\\", "/")
     path = PurePosixPath(name)
+    raw_parts = name.split("/")
     if (
         not name
         or path.is_absolute()
-        or ".." in path.parts
+        or any(part in {"", ".", ".."} for part in raw_parts)
         or "\x00" in name
         or (path.parts and path.parts[0].endswith(":"))
     ):
@@ -178,13 +192,31 @@ def _merge_ifix(base_data: bytes, vtk_data: bytes) -> tuple[bytes, int, int]:
         raw = serialize_ifix_patch(merged)
     except IFixMergeError as exc:
         raise AOVMergeError(f"Không ghép được IFix HeroSkin: {exc}") from exc
-    if len(merged["fixes"]) != 17 or len(merged["methods"]) != 25:
-        raise AOVMergeError("Số FixInfo/method của HeroSkin sau ghép không đúng.")
+    expected_fixes = len(base_patch["fixes"]) + len(vtk_patch["fixes"])
+    expected_methods = len(base_patch["methods"]) + len(vtk_patch["methods"])
+    if (
+        len(merged["fixes"]) != expected_fixes
+        or len(merged["methods"]) != expected_methods
+    ):
+        raise AOVMergeError(
+            "IFix sau ghép bị mất bản ghi: "
+            f"FixInfo {len(merged['fixes'])}/{expected_fixes}, "
+            f"methods {len(merged['methods'])}/{expected_methods}."
+        )
     encoded = _encode(raw, "HeroSkin_1", base_mode)
     check, _ = _decode(encoded, "HeroSkin_1")
     parsed = parse_ifix_patch(check)
-    if len(parsed["fixes"]) != 17 or len(parsed["methods"]) != 25:
-        raise AOVMergeError("Không xác minh được IFix HeroSkin sau mã hóa.")
+    if serialize_ifix_patch(parsed) != raw:
+        raise AOVMergeError("IFix sau mã hóa không round-trip byte-for-byte.")
+    if (
+        len(parsed["fixes"]) != expected_fixes
+        or len(parsed["methods"]) != expected_methods
+    ):
+        raise AOVMergeError(
+            "IFix sau mã hóa bị mất bản ghi: "
+            f"FixInfo {len(parsed['fixes'])}/{expected_fixes}, "
+            f"methods {len(parsed['methods'])}/{expected_methods}."
+        )
     return encoded, len(parsed["fixes"]), len(parsed["methods"])
 
 
@@ -311,6 +343,44 @@ def _merge_verification_metadata(base_data: bytes, vtk_data: bytes,
     return merged, sorted(updated_paths), sorted(retained_version_drift)
 
 
+def _assert_archive_inventory(
+    archive: zipfile.ZipFile,
+    expected_names: set[str],
+    label: str,
+) -> None:
+    """Require an output ZIP to retain the exact expected path inventory."""
+    try:
+        _validate_archive_paths(archive, label)
+        actual_names = [info.filename for info in archive.infolist()]
+        if set(actual_names) != expected_names or len(actual_names) != len(expected_names):
+            missing = sorted(expected_names - set(actual_names))
+            unexpected = sorted(set(actual_names) - expected_names)
+            raise AOVMergeError(
+                f"{label} không giữ nguyên danh sách tài nguyên. "
+                f"Thiếu={missing[:20]}; thừa={unexpected[:20]}."
+            )
+        bad = archive.testzip()
+        if bad:
+            raise AOVMergeError(f"{label} lỗi CRC tại {bad}.")
+    except AOVMergeError:
+        raise
+    except (OSError, RuntimeError, zipfile.BadZipFile, EOFError) as exc:
+        raise AOVMergeError(f"Không thể xác minh cấu trúc {label}.") from exc
+
+
+def _publish_staged_archive(
+    staged_path: Path,
+    output_path: Path,
+    expected_names: set[str],
+) -> None:
+    """Validate a completed archive before atomically replacing the destination."""
+    if staged_path.stat().st_size > MAX_TOTAL_OUTPUT_BYTES:
+        raise AOVMergeError("ZIP kết quả vượt quá giới hạn 1 GiB.")
+    with zipfile.ZipFile(staged_path) as archive:
+        _assert_archive_inventory(archive, expected_names, "ZIP ngoài sau ghép")
+    os.replace(staged_path, output_path)
+
+
 def _copy_stream(source, destination) -> None:
     shutil.copyfileobj(source, destination, length=1024 * 1024)
 
@@ -365,10 +435,10 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
 
         base_candidates = []
         for path, zf in archives:
-            names = zf.namelist()
-            if any(name.endswith("/Resources.zip") or name == "Resources.zip" for name in names) and any(
-                (name.endswith("/danhsachskin.txt") or name == "danhsachskin.txt") for name in names
-            ):
+            # Mod containers in the wild use different casing and directory prefixes
+            # for these two wrapper files. Match by case-insensitive basename while
+            # still requiring exactly one of each before any payload is changed.
+            if _find_outer_entries(zf, "Resources.zip") and _find_outer_entries(zf, "DanhSachSkin.txt"):
                 base_candidates.append((path, zf))
         if len(base_candidates) != 1:
             raise AOVMergeError("Không xác định được duy nhất ZIP nền có Resources.zip và danhsachskin.txt.")
@@ -377,11 +447,8 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
         if not vtk_archives:
             raise AOVMergeError("Chưa có ZIP Vấn Tâm Kiếm.")
 
-        resources_entries = [
-            info for info in base_outer.infolist()
-            if info.filename.endswith("/Resources.zip") or info.filename == "Resources.zip"
-        ]
-        skin_entries = [info for info in base_outer.infolist() if info.filename.endswith("/danhsachskin.txt") or info.filename == "danhsachskin.txt"]
+        resources_entries = _find_outer_entries(base_outer, "Resources.zip")
+        skin_entries = _find_outer_entries(base_outer, "DanhSachSkin.txt")
         if len(resources_entries) != 1 or len(skin_entries) != 1:
             raise AOVMergeError("ZIP nền có cấu trúc Resources.zip không rõ ràng.")
         resources_info = resources_entries[0]
@@ -540,9 +607,10 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                         added_files.append(destination)
 
                 with zipfile.ZipFile(inner_output_path) as check_inner:
-                    bad = check_inner.testzip()
-                    if bad:
-                        raise AOVMergeError(f"Resources.zip sau ghép lỗi CRC tại {bad}")
+                    expected_inner_names = base_names | set(added_files)
+                    _assert_archive_inventory(
+                        check_inner, expected_inner_names, "Resources.zip sau ghép"
+                    )
                     final_names = set(check_inner.namelist())
                     for relative in replacements:
                         if BASE_PREFIX + relative not in final_names:
@@ -551,39 +619,49 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                         if BASE_PREFIX + asset_path not in final_names:
                             raise AOVMergeError(f"ZIP kết quả thiếu assetbundle: {asset_path}")
 
-                # Rebuild the original wrapper, retaining its folder layout and skin list.
+                # Write to a sibling temporary file and publish atomically only
+                # after every structural check succeeds. A failed merge must not
+                # leave a truncated ZIP at the caller's requested output path.
                 output_path_obj = Path(output_path)
                 output_path_obj.parent.mkdir(parents=True, exist_ok=True)
-                with zipfile.ZipFile(output_path_obj, "w") as out_outer:
-                    for info in base_outer.infolist():
-                        if info.is_dir():
-                            out_outer.writestr(info, b"")
-                        elif info.filename == resources_info.filename:
-                            with open(inner_output_path, "rb") as src, out_outer.open(
-                                info, "w", force_zip64=True
-                            ) as dst:
-                                _copy_stream(src, dst)
-                        elif info.filename == skin_info.filename:
-                            original = base_outer.read(info.filename).decode("utf-8-sig", errors="replace").rstrip()
-                            if "Vấn Tâm Kiếm" not in original:
-                                original += "\nLý Tín - Vấn Tâm Kiếm (Actor 595)"
-                            out_outer.writestr(info, (original + "\n").encode("utf-8"))
-                        else:
-                            with base_outer.open(info, "r") as src, out_outer.open(
-                                info, "w", force_zip64=True
-                            ) as dst:
-                                _copy_stream(src, dst)
+                fd, staged_name = tempfile.mkstemp(
+                    prefix=f".{output_path_obj.name}.",
+                    suffix=".tmp",
+                    dir=str(output_path_obj.parent),
+                )
+                os.close(fd)
+                staged_output = Path(staged_name)
+                try:
+                    with zipfile.ZipFile(staged_output, "w") as out_outer:
+                        for info in base_outer.infolist():
+                            if info.is_dir():
+                                out_outer.writestr(info, b"")
+                            elif info.filename == resources_info.filename:
+                                with open(inner_output_path, "rb") as src, out_outer.open(
+                                    info, "w", force_zip64=True
+                                ) as dst:
+                                    _copy_stream(src, dst)
+                            elif info.filename == skin_info.filename:
+                                original = base_outer.read(info.filename).decode("utf-8-sig", errors="replace").rstrip()
+                                if "Vấn Tâm Kiếm" not in original:
+                                    original += "\nLý Tín - Vấn Tâm Kiếm (Actor 595)"
+                                out_outer.writestr(info, (original + "\n").encode("utf-8"))
+                            else:
+                                with base_outer.open(info, "r") as src, out_outer.open(
+                                    info, "w", force_zip64=True
+                                ) as dst:
+                                    _copy_stream(src, dst)
 
-                if output_path_obj.stat().st_size > MAX_TOTAL_OUTPUT_BYTES:
-                    output_path_obj.unlink(missing_ok=True)
-                    raise AOVMergeError("ZIP kết quả vượt quá giới hạn 1 GiB.")
-                with zipfile.ZipFile(output_path_obj) as check_outer:
-                    bad = check_outer.testzip()
-                    if bad:
-                        raise AOVMergeError(f"ZIP ngoài sau ghép lỗi CRC tại {bad}")
-
-                packer_env = _load_unitypy_aov().load(replacements[PACKER_PATH])
-                _, packer_tree = _find_mono_behaviour(packer_env, "ResourcePackerInfoSetXML")
+                    # Validate the serialized packer metadata before publishing.
+                    packer_env = _load_unitypy_aov().load(replacements[PACKER_PATH])
+                    _, packer_tree = _find_mono_behaviour(packer_env, "ResourcePackerInfoSetXML")
+                    _publish_staged_archive(
+                        staged_output,
+                        output_path_obj,
+                        {info.filename for info in base_outer.infolist()},
+                    )
+                finally:
+                    staged_output.unlink(missing_ok=True)
                 return {
                     "output": str(output_path_obj),
                     "base_version": BASE_VERSION,

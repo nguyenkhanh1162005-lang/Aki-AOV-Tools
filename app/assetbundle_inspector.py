@@ -72,7 +72,12 @@ def _inspect_assetbundle_object(asset_file: Any, obj: Any) -> dict[str, Any]:
         file_id = int(getattr(pointer, "file_id", 0))
         path_id = int(getattr(pointer, "path_id", 0))
         result = {"source": source, "file_id": file_id, "path_id": path_id}
-        if file_id == 0:
+        # Unity uses PathID 0 for a null PPtr. It is a valid empty
+        # reference, not a missing local object (for example, scene
+        # AssetBundle container entries can intentionally use a null asset).
+        if path_id == 0:
+            result["target_file"] = "null"
+        elif file_id == 0:
             if path_id not in local_objects and len(missing_local_pointers) < MAX_REPORTED_REFERENCES:
                 missing_local_pointers.append(result)
             elif path_id not in local_objects:
@@ -351,7 +356,7 @@ def build_assetbundle_metadata_remap_plan(
 
     Preload indices and sizes are preserved. No table is combined or serialized.
     """
-    if not isinstance(metadata, dict) or not metadata.get("inspection_complete"):
+    if not isinstance(metadata, dict) or metadata.get("inspection_complete") is not True:
         return {"ready": False, "reason": "AssetBundle metadata inventory is incomplete.",
                 "rewritten": {}, "blocked_references": []}
     preload = metadata.get("preload_pointer_inventory")
@@ -444,7 +449,7 @@ def build_assetbundle_metadata_merge_plan(
     Conflicting Container keys or two MainAsset records are rejected conservatively.
     """
     for label, metadata in (("base", base_metadata), ("overlay", overlay_metadata)):
-        if not isinstance(metadata, dict) or not metadata.get("inspection_complete"):
+        if not isinstance(metadata, dict) or metadata.get("inspection_complete") is not True:
             return {"ready": False, "reason": f"{label} metadata inventory is incomplete."}
         if not isinstance(metadata.get("preload_pointer_inventory"), list):
             return {"ready": False, "reason": f"{label} preload inventory is unavailable."}
@@ -452,8 +457,16 @@ def build_assetbundle_metadata_merge_plan(
             return {"ready": False, "reason": f"{label} Container inventory is unavailable."}
         if metadata.get("preload_table_count") != len(metadata["preload_pointer_inventory"]):
             return {"ready": False, "reason": f"{label} preload inventory count mismatch."}
+        container_count = metadata.get("container_entry_count")
+        if container_count is not None and (
+            not isinstance(container_count, int)
+            or isinstance(container_count, bool)
+            or container_count < 0
+            or container_count != len(metadata["container_record_inventory"])
+        ):
+            return {"ready": False, "reason": f"{label} Container inventory count mismatch."}
 
-    if not isinstance(overlay_rewritten, dict) or not overlay_rewritten.get("ready"):
+    if not isinstance(overlay_rewritten, dict) or overlay_rewritten.get("ready") is not True:
         return {"ready": False, "reason": "Overlay metadata pointers have not passed remap validation."}
     rewritten = overlay_rewritten.get("rewritten")
     if not isinstance(rewritten, dict):
@@ -461,6 +474,8 @@ def build_assetbundle_metadata_merge_plan(
 
     base_name = base_metadata.get("assetbundle_name", "")
     overlay_name = overlay_metadata.get("assetbundle_name", "")
+    if not isinstance(base_name, str) or not isinstance(overlay_name, str):
+        return {"ready": False, "reason": "AssetBundle name metadata must be text."}
     if base_name and overlay_name and base_name != overlay_name:
         return {"ready": False, "reason": "AssetBundle names differ; metadata ownership is ambiguous."}
 
@@ -469,30 +484,109 @@ def build_assetbundle_metadata_merge_plan(
     base_containers = base_metadata["container_record_inventory"]
     overlay_containers = overlay_metadata["container_record_inventory"]
     rewritten_containers = rewritten.get("container")
+    def valid_pointer(pointer: Any) -> bool:
+        return (
+            isinstance(pointer, dict)
+            and isinstance(pointer.get("file_id"), int)
+            and not isinstance(pointer.get("file_id"), bool)
+            and pointer["file_id"] >= 0
+            and isinstance(pointer.get("path_id"), int)
+            and not isinstance(pointer.get("path_id"), bool)
+            and -(1 << 63) <= pointer["path_id"] < (1 << 63)
+        )
+
     if not all(isinstance(value, list) for value in (overlay_preload, rewritten_containers)):
         return {"ready": False, "reason": "Overlay preload or Container remap inventory is incomplete."}
     if len(overlay_preload) != len(overlay_metadata["preload_pointer_inventory"]):
         return {"ready": False, "reason": "Overlay preload remap count mismatch."}
     if len(rewritten_containers) != len(overlay_containers):
         return {"ready": False, "reason": "Overlay Container remap count mismatch."}
-    for pointer in list(overlay_preload) + list(rewritten_containers):
-        if (not isinstance(pointer, dict)
-                or not isinstance(pointer.get("file_id"), int)
-                or isinstance(pointer.get("file_id"), bool)
-                or pointer["file_id"] < 0
-                or not isinstance(pointer.get("path_id"), int)
-                or isinstance(pointer.get("path_id"), bool)):
-            return {"ready": False, "reason": "Overlay remapped metadata contains an invalid PPtr."}
-    for record in base_containers:
-        start = record.get("preload_index") if isinstance(record, dict) else None
-        size = record.get("preload_size") if isinstance(record, dict) else None
-        if (not isinstance(start, int) or not isinstance(size, int)
-                or start < 0 or size < 0 or start + size > len(base_preload)
-                or not isinstance(record.get("asset"), dict)):
-            return {"ready": False, "reason": "Base Container preload range or pointer is invalid."}
+    if not all(valid_pointer(pointer) for pointer in overlay_preload + rewritten_containers):
+        return {"ready": False, "reason": "Overlay remapped metadata contains an invalid PPtr."}
 
     base_main = base_metadata.get("main_asset")
+    # Validate every base pointer too. Previously the overlay was checked,
+    # but malformed base inventory entries could pass through into a plan
+    # marked ready and later fail in a serializer.
+    if not all(valid_pointer(pointer) for pointer in base_preload):
+        return {"ready": False, "reason": "Base preload inventory contains an invalid PPtr."}
+    for record in base_containers:
+        if (
+            not isinstance(record, dict)
+            or not isinstance(record.get("path"), str)
+            or not record["path"].strip()
+            or not valid_pointer(record.get("asset"))
+        ):
+            return {"ready": False, "reason": "Base Container inventory contains an invalid path or PPtr."}
+        start, size = record.get("preload_index"), record.get("preload_size")
+        if (
+            not isinstance(start, int) or isinstance(start, bool)
+            or not isinstance(size, int) or isinstance(size, bool)
+            or start < 0 or size < 0 or start + size > len(base_preload)
+        ):
+            return {"ready": False, "reason": "Base Container preload range is invalid."}
+
+    for record in overlay_containers:
+        if (
+            not isinstance(record, dict)
+            or not isinstance(record.get("path"), str)
+            or not record["path"].strip()
+            or not valid_pointer(record.get("asset"))
+        ):
+            return {"ready": False, "reason": "Overlay Container inventory contains an invalid path or source PPtr."}
+        start, size = record.get("preload_index"), record.get("preload_size")
+        if (
+            not isinstance(start, int) or isinstance(start, bool)
+            or not isinstance(size, int) or isinstance(size, bool)
+            or start < 0 or size < 0 or start + size > len(overlay_metadata["preload_pointer_inventory"])
+        ):
+            return {"ready": False, "reason": "Overlay Container preload range is invalid."}
+
+    if base_main is not None and (
+        not isinstance(base_main, dict)
+        or not valid_pointer(base_main.get("asset"))
+    ):
+        return {"ready": False, "reason": "Base MainAsset contains an invalid PPtr."}
+    if base_main is not None:
+        start, size = base_main.get("preload_index"), base_main.get("preload_size")
+        if (
+            not isinstance(start, int) or isinstance(start, bool)
+            or not isinstance(size, int) or isinstance(size, bool)
+            or start < 0 or size < 0 or start + size > len(base_preload)
+        ):
+            return {"ready": False, "reason": "Base MainAsset preload range is invalid."}
+
+    base_dependencies = base_metadata.get("dependencies", [])
+    overlay_dependencies = overlay_metadata.get("dependencies", [])
+    if (
+        not isinstance(base_dependencies, list)
+        or not isinstance(overlay_dependencies, list)
+        or any(not isinstance(value, str) or not value for value in base_dependencies + overlay_dependencies)
+    ):
+        return {"ready": False, "reason": "Dependency inventory is invalid."}
+
+    overlay_main_record = overlay_metadata.get("main_asset")
     overlay_main = rewritten.get("main_asset")
+    if overlay_main_record is not None:
+        if (
+            not isinstance(overlay_main_record, dict)
+            or not valid_pointer(overlay_main_record.get("asset"))
+        ):
+            return {"ready": False, "reason": "Overlay MainAsset source metadata contains an invalid PPtr."}
+        source_start = overlay_main_record.get("preload_index")
+        source_size = overlay_main_record.get("preload_size")
+        if (
+            not isinstance(source_start, int) or isinstance(source_start, bool)
+            or not isinstance(source_size, int) or isinstance(source_size, bool)
+            or source_start < 0 or source_size < 0
+            or source_start + source_size > len(overlay_metadata["preload_pointer_inventory"])
+        ):
+            return {"ready": False, "reason": "Overlay MainAsset source preload range is invalid."}
+        if overlay_main is None:
+            return {"ready": False, "reason": "Overlay MainAsset pointer remap is missing."}
+    elif overlay_main is not None:
+        return {"ready": False, "reason": "Overlay MainAsset remap has no source metadata."}
+
     if base_main is not None and overlay_main is not None:
         return {"ready": False, "reason": "Both bundles define MainAsset; automatic selection is unsafe."}
     if base_main is not None:
@@ -502,14 +596,7 @@ def build_assetbundle_metadata_merge_plan(
                 or start < 0 or size < 0 or start + size > len(base_preload)
                 or not isinstance(base_main.get("asset"), dict)):
             return {"ready": False, "reason": "Base MainAsset preload range or pointer is invalid."}
-    if overlay_main is not None and (
-        not isinstance(overlay_main, dict)
-        or not isinstance(overlay_main.get("file_id"), int)
-        or isinstance(overlay_main.get("file_id"), bool)
-        or overlay_main["file_id"] < 0
-        or not isinstance(overlay_main.get("path_id"), int)
-        or isinstance(overlay_main.get("path_id"), bool)
-    ):
+    if overlay_main is not None and not valid_pointer(overlay_main):
         return {"ready": False, "reason": "Overlay remapped MainAsset pointer is invalid."}
 
     base_keys = [record.get("path") for record in base_containers if isinstance(record, dict)]
@@ -524,7 +611,13 @@ def build_assetbundle_metadata_merge_plan(
                 "container_path_collisions": collisions[:MAX_REPORTED_REFERENCES]}
 
     preload_offset = len(base_preload)
-    merged_preload = list(base_preload) + list(overlay_preload)
+    merged_preload = [
+        {"file_id": pointer["file_id"], "path_id": pointer["path_id"]}
+        for pointer in base_preload
+    ] + [
+        {"file_id": pointer["file_id"], "path_id": pointer["path_id"]}
+        for pointer in overlay_preload
+    ]
     merged_containers = []
     for record in base_containers:
         merged_containers.append({
@@ -554,9 +647,6 @@ def build_assetbundle_metadata_merge_plan(
             "asset": dict(base_main["asset"]),
         }
     elif overlay_main is not None:
-        overlay_main_record = overlay_metadata.get("main_asset")
-        if not isinstance(overlay_main_record, dict):
-            return {"ready": False, "reason": "Overlay MainAsset source metadata is missing."}
         start = overlay_main_record.get("preload_index")
         size = overlay_main_record.get("preload_size")
         if (not isinstance(start, int) or not isinstance(size, int)
@@ -854,10 +944,12 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
                         try:
                             file_id = int(node["m_FileID"])
                             path_id = int(node["m_PathID"])
-                            target = "local" if file_id == 0 else (
-                                external_names[file_id - 1]
-                                if 0 < file_id <= len(external_names)
-                                else "invalid-external-index"
+                            target = "null" if path_id == 0 else (
+                                "local" if file_id == 0 else (
+                                    external_names[file_id - 1]
+                                    if 0 < file_id <= len(external_names)
+                                    else "invalid-external-index"
+                                )
                             )
                             object_references.append({
                                 "from_file": file_name,
@@ -968,6 +1060,10 @@ def inspect_assetbundle(data: bytes, label: str = "AssetBundle") -> dict[str, An
         source_file = serialized_by_exact_name.get(reference["from_file"])
         file_id = reference["file_id"]
         path_id = reference["path_id"]
+        # A null PPtr is intentionally unresolved and must not count as a
+        # missing local object or an external dependency.
+        if path_id == 0:
+            continue
         if file_id == 0:
             if source_file is not None and path_id in (getattr(source_file, "objects", {}) or {}):
                 reference_integrity["local_resolved"] += 1
@@ -1290,6 +1386,25 @@ def build_external_file_id_remap_plan(
         normalized = value.strip().replace(chr(92), "/")
         while "//" in normalized:
             normalized = normalized.replace("//", "/")
+        # Unity external paths commonly use the archive:/ scheme. Preserve
+        # that prefix, but reject traversal, absolute paths and malformed
+        # scheme/path combinations before assigning file IDs.
+        if ":/" in normalized:
+            scheme, relative = normalized.split(":/", 1)
+            if (
+                len(scheme) < 2
+                or not all(char.isalnum() or char in "._-" for char in scheme)
+                or not relative
+                or relative.startswith("/")
+            ):
+                return None
+            parts = relative.split("/")
+        else:
+            if normalized.startswith("/") or ":" in normalized:
+                return None
+            parts = normalized.split("/")
+        if any(part in ("", ".", "..") for part in parts):
+            return None
         return normalized
 
     base_paths = [normalize(value) for value in base_externals]
@@ -1379,6 +1494,17 @@ def build_pptr_remap_plan(
         path_id = reference.get("path_id")
         if not isinstance(file_id, int) or isinstance(file_id, bool) or file_id < 0 or not valid_path_id(path_id):
             blocked.append({"index": index, "reason": "PPtr file_id or PathID is invalid"})
+            continue
+
+        # PathID 0 is Unity's null PPtr sentinel. Preserve it without
+        # requiring a target object or external-table entry.
+        if path_id == 0:
+            rewritten.append({
+                "index": index,
+                "file_id": file_id,
+                "path_id": 0,
+                "target": "null",
+            })
             continue
 
         if file_id == 0:

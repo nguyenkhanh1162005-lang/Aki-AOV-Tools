@@ -78,6 +78,8 @@ def merge_mses_rows(
     *,
     override_keys: set[int] | None = None,
     allow_schema_mismatch: bool = False,
+    allow_new_rows_across_schema_mismatch: bool = False,
+    allowed_new_keys: set[int] | None = None,
     verify_base_checksum: bool = True,
     verify_overlay_checksum: bool = True,
 ) -> tuple[bytes, dict]:
@@ -114,12 +116,41 @@ def merge_mses_rows(
     common = set(base_map).intersection(overlay_map)
     differing_common = {key for key in common if base_map[key] != overlay_map[key]}
     overrides = set(override_keys or ())
+    if any(type(key) is not int or not 0 <= key <= 0xFFFFFFFF for key in overrides):
+        raise MSESError("Khóa ghi đè MSES phải là uint32 hợp lệ.")
     missing_override_keys = overrides - set(overlay_map)
     if missing_override_keys:
         formatted = ", ".join(f"0x{key:08x}" for key in sorted(missing_override_keys))
         raise MSESError(
             f"Khóa ghi đè MSES không tồn tại trong overlay: {formatted}."
         )
+
+    new_keys = set(overlay_map) - set(base_map)
+    if allowed_new_keys is not None and any(
+        type(key) is not int or not 0 <= key <= 0xFFFFFFFF for key in allowed_new_keys
+    ):
+        raise MSESError("Danh sách khóa MSES mới cho phép phải là uint32 hợp lệ.")
+    if new_keys:
+        if allowed_new_keys is None:
+            if base.field_count != overlay.field_count:
+                raise MSESError(
+                    "Schema MSES khác nhau và overlay có bản ghi mới chưa được "
+                    "chứng minh tương thích; cần adapter theo từng bảng."
+                )
+            raise MSESError(
+                "Overlay có khóa mới nhưng chưa có allowlist theo bảng."
+            )
+        if not new_keys.issubset(allowed_new_keys):
+            unexpected = sorted(new_keys - allowed_new_keys)
+            formatted = ", ".join(f"0x{key:08x}" for key in unexpected)
+            raise MSESError(
+                "Overlay có khóa mới ngoài allowlist theo bảng: " + formatted + "."
+            )
+        if base.field_count != overlay.field_count and not allow_new_rows_across_schema_mismatch:
+            raise MSESError(
+                "Schema MSES khác nhau và bản ghi mới chưa được bật cho phép "
+                "theo adapter bảng cụ thể."
+            )
 
     if base.field_count != overlay.field_count:
         unsafe_differing_common = differing_common - overrides

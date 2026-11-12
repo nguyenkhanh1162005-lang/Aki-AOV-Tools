@@ -11,6 +11,8 @@ from typing import Any
 
 from .large_merger import MergeError, merge_zip_files
 from .aov_merger import AOVMergeError, merge_aov_archives
+from .kpm100_vtk_merger import merge_kpm100_vtk_archives
+from .adapter_registry import get_adapter_capabilities
 
 MAX_PROFILE_ENTRIES = 20_000
 MAX_PROFILE_UNCOMPRESSED = 1024 * 1024 * 1024
@@ -72,27 +74,40 @@ def _archive_profile(path: str) -> dict[str, Any]:
                     f"ZIP vượt giới hạn giải nén 1 GiB: {Path(path).name}"
                 )
             names = []
+            seen_entry_paths: set[str] = set()
             for info in entries:
                 normalized = info.filename.replace("\\", "/")
-                pure = PurePosixPath(normalized)
+                # ZIP directory records conventionally end in one slash. Strip
+                # that marker before validating segments, but reject ambiguous
+                # separators and dot segments for both files and directories.
+                candidate = normalized.rstrip("/") if info.is_dir() else normalized
+                pure = PurePosixPath(candidate)
+                raw_parts = candidate.split("/")
                 mode = (info.external_attr >> 16) & 0xFFFF
                 if (
-                    pure.is_absolute()
-                    or ".." in pure.parts
+                    not candidate
+                    or pure.is_absolute()
+                    or any(part in {"", ".", ".."} for part in raw_parts)
                     or "\x00" in normalized
                     or (pure.parts and pure.parts[0].endswith(":"))
                     or stat.S_ISLNK(mode)
                 ):
-                    raise ModPipelineError(f"Đường dẫn ZIP không an toàn: {info.filename}")
+                    raise ModPipelineError(f"Đường dẫn ZIP không an toàn hoặc không chuẩn hóa: {info.filename}")
+                canonical_name = pure.as_posix()
+                if canonical_name in seen_entry_paths:
+                    raise ModPipelineError(
+                        f"ZIP chứa đường dẫn trùng lặp hoặc không phân biệt được: {canonical_name}"
+                    )
+                seen_entry_paths.add(canonical_name)
                 if info.is_dir():
                     continue
                 if info.flag_bits & 1:
                     raise ModPipelineError(f"Không hỗ trợ ZIP mã hóa mật khẩu: {info.filename}")
                 if info.file_size > MAX_PROFILE_ENTRY:
                     raise ModPipelineError(
-                        f"Mục ZIP vượt giới hạn 512 MiB: {info.filename}"
+                        f"ZIP vượt giới hạn giải nén 512 MiB: {info.filename}"
                     )
-                names.append(normalized)
+                names.append(canonical_name)
             bad = archive.testzip()
             if bad:
                 raise ModPipelineError(f"ZIP lỗi CRC tại {bad}: {Path(path).name}")
@@ -118,6 +133,20 @@ def _archive_profile(path: str) -> dict[str, Any]:
         "resources.zip" in leaves and "danhsachskin.txt" in leaves
     )
     has_vtk_ifix = "heroskin_2.bytes" in leaves
+    has_base_ifix = "heroskin_1.bytes" in leaves
+    kpm_mod_prefix = "Resources/1.64.1/Mod_by_Youtube_KHAM-PHA-MOBILE/KPM_MOD_"
+    kpm_mod_payload_count = sum(
+        name.casefold().startswith(kpm_mod_prefix.casefold())
+        for name in names
+    )
+    has_kpm_mod_payloads = kpm_mod_payload_count > 0
+    has_kpm100_direct_base = (
+        has_base_ifix
+        and kpm_mod_payload_count >= 70
+        and any(name.casefold() == (
+            "Resources/1.64.1/assetbundle/resourcepackerinfosetall.assetbundle".casefold()
+        ) for name in names)
+    )
     has_595_assets = any(
         "595_" in PurePosixPath(name).name.lower()
         or "595" in PurePosixPath(name).name.lower()
@@ -129,6 +158,8 @@ def _archive_profile(path: str) -> dict[str, Any]:
         source_role = "ordinary_zip"
     elif has_mod_skin_container:
         source_role = "aov_skin_mod_container_candidate"
+    elif has_kpm100_direct_base:
+        source_role = "aov_kpm100_direct_base_candidate"
     elif has_vtk_ifix and has_595_assets:
         source_role = "aov_actor595_mod_candidate"
     else:
@@ -142,6 +173,10 @@ def _archive_profile(path: str) -> dict[str, Any]:
         "source_role": source_role,
         "has_mod_skin_container": has_mod_skin_container,
         "has_vtk_ifix": has_vtk_ifix,
+        "has_base_ifix": has_base_ifix,
+        "has_kpm_mod_payloads": has_kpm_mod_payloads,
+        "kpm_mod_payload_count": kpm_mod_payload_count,
+        "has_kpm100_direct_base": has_kpm100_direct_base,
         "has_595_assets": has_595_assets,
         "extensions": sorted(extensions),
     }
@@ -149,6 +184,25 @@ def _archive_profile(path: str) -> dict[str, Any]:
 
 def _select_adapter(profiles: list[dict[str, Any]]) -> str:
     if any(item["looks_like_aov"] for item in profiles):
+        kpm_bases = [
+            item for item in profiles
+            if item.get("has_kpm100_direct_base")
+        ]
+        vtk_overlays = [
+            item for item in profiles
+            if item.get("source_role") == "aov_actor595_mod_candidate"
+            and not item.get("has_kpm100_direct_base")
+            and item.get("has_vtk_ifix")
+            and item.get("has_595_assets")
+        ]
+        if (
+            len(profiles) == 2
+            and len(kpm_bases) == 1
+            and len(vtk_overlays) == 1
+            and all(item["looks_like_aov"] for item in profiles)
+        ):
+            return "aov_kpm100_vtk_actor595_1.64.1"
+
         mod_containers = [
             item for item in profiles if item["has_mod_skin_container"]
         ]
@@ -182,11 +236,17 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
     return "generic_zip"
 
 
-def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, Any]:
+def merge_mod_archives(
+    archive_paths: list[str],
+    output_path: str,
+    *,
+    allow_wrapper_adapter: bool = False,
+) -> dict[str, Any]:
     """Select a verified adapter and merge transactionally.
 
-    AoV packs without a dedicated parser/serializer fail closed. The supported
-    Actor 595 route is mod-to-mod and never uses the official game package.
+    The 10-skin wrapper adapter is opt-in for the web endpoint. Existing
+    non-web callers (including the Telegram bot) keep it disabled by default.
+    AoV packs without a dedicated parser/serializer fail closed.
     """
     total_input_bytes = _preflight_inputs(archive_paths)
     profiles = [_archive_profile(path) for path in archive_paths]
@@ -197,6 +257,27 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
     if total_uncompressed > MAX_PROFILE_UNCOMPRESSED:
         raise ModPipelineError("Tổng dung lượng giải nén của các ZIP vượt quá 1 GiB.")
     adapter = _select_adapter(profiles)
+    if (
+        adapter == "aov_mod_to_mod_vtk_actor595_1.64.1"
+        and not allow_wrapper_adapter
+    ):
+        raise ModPipelineError(
+            "Adapter MOD wrapper 10 skin + VTK hiện chỉ được bật qua API web."
+        )
+    capability = next(
+        (
+            item for item in get_adapter_capabilities()["adapters"]
+            if item["id"] == adapter
+        ),
+        None,
+    )
+    allowed_statuses = {"merge_supported", "merge_supported_version_locked"}
+    if capability is None or capability["status"] not in allowed_statuses:
+        status = capability["status"] if capability else "unregistered"
+        raise ModPipelineError(
+            f"Adapter {adapter} chưa được cấp quyền ghép (status={status}). "
+            "Bộ xử lý sẽ không bỏ qua khóa an toàn."
+        )
 
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -208,7 +289,20 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
     temporary.unlink(missing_ok=True)
 
     try:
-        if adapter == "aov_mod_to_mod_vtk_actor595_1.64.1":
+        if adapter == "aov_kpm100_vtk_actor595_1.64.1":
+            base_path = next(
+                path for path, profile in zip(archive_paths, profiles)
+                if profile.get("has_kpm100_direct_base")
+            )
+            vtk_path = next(
+                path for path, profile in zip(archive_paths, profiles)
+                if profile.get("source_role") == "aov_actor595_mod_candidate"
+                and not profile.get("has_kpm100_direct_base")
+                and profile.get("has_vtk_ifix")
+                and profile.get("has_595_assets")
+            )
+            result = merge_kpm100_vtk_archives(base_path, vtk_path, str(temporary))
+        elif adapter == "aov_mod_to_mod_vtk_actor595_1.64.1":
             result = merge_aov_archives(archive_paths, str(temporary))
         else:
             size = merge_zip_files(archive_paths, str(temporary))
@@ -236,7 +330,9 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
             "output_sha256": _sha256_file(str(destination)),
         })
         return result
-    except (MergeError, AOVMergeError) as exc:
+    except (MergeError, AOVMergeError, ValueError) as exc:
+        if isinstance(exc, ModPipelineError):
+            raise
         raise ModPipelineError(str(exc)) from exc
     finally:
         temporary.unlink(missing_ok=True)
