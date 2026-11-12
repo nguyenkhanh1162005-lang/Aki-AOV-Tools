@@ -123,10 +123,30 @@ def merge_action_xml(
     merged_into_existing = []
 
     for source_track in overlay_tracks:
+        source_skin_nodes = list(source_track.iter("SkinOrAvatarList"))
+        if not source_skin_nodes:
+            continue
         if not _is_special_track(source_track, target_ids):
             continue
-        name = _normalized_track_name(source_track)
-        key = _track_key(source_track)
+        # The supported track schema keeps SkinOrAvatarList as direct children.
+        # Refuse an unknown nested layout instead of moving nodes to a different
+        # event location during the merge.
+        direct_skin_nodes = source_track.findall("SkinOrAvatarList")
+        if len(direct_skin_nodes) != len(source_skin_nodes):
+            raise CommonActionsMergeError(
+                f"{resource_name}: track {_normalized_track_name(source_track)} "
+                "có SkinOrAvatarList lồng ở vị trí chưa được hỗ trợ."
+            )
+        # Only import IDs explicitly assigned to this overlay. Some packs can
+        # contain shared/common track metadata for other actors as well.
+        filtered_track = copy.deepcopy(source_track)
+        for node in list(filtered_track.findall("SkinOrAvatarList")):
+            if node.attrib.get("id") not in target_ids:
+                filtered_track.remove(node)
+        if not filtered_track.findall("SkinOrAvatarList"):
+            continue
+        name = _normalized_track_name(filtered_track)
+        key = _track_key(filtered_track)
         candidates = index.get(key, [])
         if candidates:
             target = candidates[0]
@@ -136,7 +156,7 @@ def merge_action_xml(
                 for node in target.findall("SkinOrAvatarList")
             }
             changed = False
-            for source_node in source_track.findall("SkinOrAvatarList"):
+            for source_node in filtered_track.findall("SkinOrAvatarList"):
                 skin_id = source_node.attrib.get("id")
                 current = existing_nodes.get(skin_id)
                 cloned = copy.deepcopy(source_node)
@@ -164,7 +184,7 @@ def merge_action_xml(
                 already_present.append(name)
             continue
 
-        addition = copy.deepcopy(source_track)
+        addition = filtered_track
         original_name = addition.attrib.get("trackName", "")
         addition.attrib["trackName"] = _unique_track_name(original_name, used_names, next_index)
         addition.attrib.setdefault(
@@ -211,7 +231,34 @@ def merge_action_xml(
     try:
         output = encode_aov_resource(output_xml, resource_name, base_mode)
         verify_decoded, verify_mode = decode_aov_resource(output, resource_name)
-        ET.fromstring(verify_decoded)
+        verified_root = ET.fromstring(verify_decoded)
+        verified_action = verified_root.find("Action")
+        if verified_action is None:
+            raise CommonActionsMergeError(
+                f"{resource_name}: Action node biến mất sau encode/decode."
+            )
+        verified_by_key: dict[tuple[str, str, str], set[str]] = {}
+        for track in verified_action.iter("Track"):
+            key = _track_key(track)
+            verified_by_key.setdefault(key, set()).update(
+                node.attrib.get("id")
+                for node in track.iter("SkinOrAvatarList")
+                if node.attrib.get("id") in target_ids
+            )
+        for source_track in overlay_action.iter("Track"):
+            source_ids = {
+                node.attrib.get("id")
+                for node in source_track.iter("SkinOrAvatarList")
+                if node.attrib.get("id") in target_ids
+            }
+            if not source_ids:
+                continue
+            key = _track_key(source_track)
+            if not source_ids.issubset(verified_by_key.get(key, set())):
+                raise CommonActionsMergeError(
+                    f"{resource_name}: IDs {sorted(source_ids - verified_by_key.get(key, set()))} "
+                    f"không còn sau round-trip tại track {key[0]}."
+                )
     except (AOVBytesError, ET.ParseError) as exc:
         raise CommonActionsMergeError(f"{resource_name}: không xác minh được XML sau ghép: {exc}") from exc
 
