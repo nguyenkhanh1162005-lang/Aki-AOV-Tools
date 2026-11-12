@@ -167,6 +167,9 @@ noticeScanBtn.addEventListener('click',async()=>{
       'BÁO CÁO QUÉT THÔNG BÁO (CHỈ ĐỌC)',
       'Số file/phần nội dung đã quét: '+(data.scan_files||0),
       'Số tài nguyên .bytes giải mã được: '+(data.decoded_resources||0),
+      'Dung lượng đã giải mã: '+((data.decoded_bytes||0)/1048576).toFixed(1)+' / 256 MB',
+      'Unity AssetBundle đã quét: '+(data.notice_assetbundles_scanned||0),
+      'Unity AssetBundle bỏ qua: '+(data.notice_assetbundles_skipped||0),
       'Package ZIP lồng đã bung để quét: '+(data.nested_packages_expanded||0),
       'Số mục chưa giải mã được: '+(data.unsupported_resources||0),
       'Ứng viên tìm thấy: '+((data.candidates||[]).length)+(data.truncated?' (đã giới hạn kết quả)':''),
@@ -178,6 +181,7 @@ noticeScanBtn.addEventListener('click',async()=>{
       lines.push('  '+item.excerpt);
     }
     if(!(data.candidates||[]).length)lines.push('Chưa tìm thấy từ khóa phù hợp trong phần văn bản đã quét.');
+    for(const item of (data.notice_assetbundle_scan_errors||[]))lines.push('BỎ QUA AssetBundle: '+(item.path||'?')+' | '+(item.reason||('object errors: '+(item.object_errors||0))));
     lines.push('',data.scope||'',data.warning||'Quét heuristic, không sửa tài nguyên.');
     report.textContent=lines.join('\n');
     status.textContent='Đã quét xong. File nguồn vẫn được giữ nguyên. Kiểm tra các đường dẫn ứng viên trước khi quyết định chỉnh sửa.';
