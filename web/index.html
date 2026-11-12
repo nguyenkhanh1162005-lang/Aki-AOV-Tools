@@ -327,7 +327,7 @@ async function uploadInChunks(files){
     }
   }
   if(!uploadId){
-    const start=await fetchWithRetry('/api/upload/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:files.map(file=>({name:file.name,size:file.size,chunk_sha256:[]}))})});
+    const start=await fetchWithRetry('/api/upload/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({upload_protocol:"chunk_map_v2",files:files.map(file=>({name:file.name,size:file.size,chunk_sha256:[]}))})});
     const data=await start.json();uploadId=data.upload_id;protocol=data.upload_protocol||'sequential_v1';
     offsets=files.map(()=>0);chunkMaps=files.map(()=>[]);
     saveUploadState({fingerprint,upload_id:uploadId});
