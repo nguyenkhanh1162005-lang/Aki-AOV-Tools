@@ -9,6 +9,7 @@ Công cụ web tiếng Việt để tải, kiểm tra cấu trúc, đối chiế
 - Web API `/api/capabilities`: công bố registry adapter, phân biệt định dạng chỉ kiểm tra với định dạng có bộ ghép đã xác minh; mặc định fail-closed.
 - Web API `POST /api/upload/{upload_id}/aov-preflight`: phân loại từng ZIP AoV theo vai trò (MOD wrapper, VTK/Actor 595, KPM100, chưa phân loại), trích Actor ID từ tên AssetBundle và liệt kê blocker của adapter. Chỉ đọc, giữ phiên upload; không tạo ZIP và không cấp quyền ghép cho nhiều MOD wrapper.
 - AOV preflight còn lập manifest một tầng `Resources.zip`, nhóm các tài nguyên theo đường dẫn chuẩn hóa và báo SHA-256 duplicate, xung đột payload, phiên bản/platform và dependency AssetBundle; chi tiết chỉ mang tính tư vấn và không cấp quyền ghi/ghép.
+- Danh sách xung đột trong preflight có gợi ý ưu tiên theo đường dẫn (billboard/thông báo hạ gục, hiệu ứng/hoạt ảnh/biến về, UI/nút bấm, âm thanh); đây là heuristic để sắp xếp báo cáo, không phải nhận diện chức năng runtime.
 - Bộ kiểm tra `/inspect` và `/api/inspect` đọc chữ ký 32 byte đầu mỗi mục để phân loại sơ bộ AoV AES/Zstandard, Unity AssetBundle, ZIP lồng, Wwise, ảnh, XML/JSON và dữ liệu chưa nhận diện; chỉ đọc, không sửa tài nguyên.
 - Web API `/api/drive/import`: tải ZIP từ link Google Drive công khai trực tiếp về máy chủ, tối đa 10 link và tổng 500 MB.
 - Web API `/api/upload/{upload_id}/aov-merge`: tự chọn adapter theo cấu trúc ZIP; hỗ trợ hai đường ghép có giới hạn: KPM100 ZIP trực tiếp + VTK, hoặc MOD wrapper 10 skin + các ZIP phần VTK iOS.
