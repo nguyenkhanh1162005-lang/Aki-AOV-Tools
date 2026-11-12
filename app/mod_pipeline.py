@@ -529,7 +529,7 @@ def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
             "safety_rule": "Khác payload ở cùng khóa hoặc khóa mới ngoài allowlist phải chặn ghép.",
         }
 
-    if leaf in {"kernel lua.pkg.bytes".replace(" ", ""), "stablesystems_3.pkg.bytes"}:
+    if leaf in {"kernellua.pkg.bytes", "stablesystems_3.pkg.bytes"}:
         return {
             "adapter_state": "nested_package_union_only",
             "next_action": (
