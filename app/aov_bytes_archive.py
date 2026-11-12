@@ -325,9 +325,12 @@ def decode_archive_resources(
         "nested_packages_expanded": 0,
         "nested_packages_not_expanded": [],
         "notice_scan_files": 0,
+        "notice_assetbundles_scanned": 0,
+        "notice_assetbundles_skipped": 0,
+        "notice_assetbundle_scan_errors": [],
         "notice_candidates": [],
         "notice_candidates_truncated": False,
-        "notice_scan_scope": "Text-like Lua/XML/JSON/TXT/config/CSV and decoded non-MSES .bytes only; Unity AssetBundle and opaque binary are not scanned.",
+        "notice_scan_scope": "Text-like Lua/XML/JSON/TXT/config/CSV, decoded non-MSES .bytes, and bounded UnityFS AssetBundle object text (MonoBehaviour/TextAsset/ScriptableObject, up to 64 MiB and 500 objects per bundle). Opaque binary remains unscanned.",
         "advisory_only": True,
         "merge_authorized": False,
         "game_tested": False,
@@ -369,6 +372,39 @@ def decode_archive_resources(
                         process_archive(nested, f"{prefix}/{path}", depth + 1)
                 except zipfile.BadZipFile:
                     report["ignored_files"] += 1
+                continue
+
+            if PurePosixPath(path.lower()).suffix == ".assetbundle":
+                report["ignored_files"] += 1
+                bundle_scan = _scan_notice_assetbundle(raw, path)
+                if bundle_scan.get("scanned"):
+                    report["notice_assetbundles_scanned"] += 1
+                    report["notice_scan_files"] += int(bundle_scan.get("objects_inspected", 0))
+                    if bundle_scan.get("truncated"):
+                        report["notice_candidates_truncated"] = True
+                    if bundle_scan.get("object_scan_errors"):
+                        report["notice_assetbundle_scan_errors"].append({
+                            "source": prefix,
+                            "path": path,
+                            "object_errors": bundle_scan["object_scan_errors"],
+                        })
+                    for finding in bundle_scan.get("findings", []):
+                        if len(report["notice_candidates"]) >= MAX_NOTICE_CANDIDATES:
+                            report["notice_candidates_truncated"] = True
+                            break
+                        report["notice_candidates"].append({
+                            "source": prefix,
+                            **finding,
+                        })
+                else:
+                    report["notice_assetbundles_skipped"] += 1
+                    reason = bundle_scan.get("reason", "")
+                    if reason and reason not in {"not_unity_or_aov_wrapped"}:
+                        report["notice_assetbundle_scan_errors"].append({
+                            "source": prefix,
+                            "path": path,
+                            "reason": reason,
+                        })
                 continue
 
             if not path.lower().endswith(".bytes"):
