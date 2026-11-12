@@ -69,7 +69,6 @@ def _resource_inventory(wrapper_path: Path, output_path: Path) -> dict[str, Any]
 def run(wrapper_path: Path, vtk_path: Path, output_dir: Path) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "Aki-AOV-10Skin-VanTamKiem-candidate.zip"
-    scan_zip_path = output_dir / ".notice-scan-temporary.zip"
     report_path = output_dir / "wrapper-vtk-audit-report.json"
     report: dict[str, Any] = {
         "audit_type": "user_mod_wrapper_plus_vtk",
@@ -95,10 +94,11 @@ def run(wrapper_path: Path, vtk_path: Path, output_dir: Path) -> dict[str, Any]:
 
     try:
         scan = decode_archive_resources(
-            [str(wrapper_path), str(vtk_path)], str(scan_zip_path)
+            [str(wrapper_path), str(vtk_path)], "", scan_only=True
         )
         report["notice_scan"] = {
             "scanned_files": scan.get("notice_scan_files", 0),
+            "decoded_bytes": scan.get("decoded_bytes", 0),
             "candidate_count": len(scan.get("notice_candidates", [])),
             "candidates": scan.get("notice_candidates", []),
             "truncated": scan.get("notice_candidates_truncated", False),
@@ -110,8 +110,6 @@ def run(wrapper_path: Path, vtk_path: Path, output_dir: Path) -> dict[str, Any]:
             "candidate_count": 0,
             "candidates": [],
         }
-    finally:
-        scan_zip_path.unlink(missing_ok=True)
 
     try:
         merge_report = merge_aov_archives(
