@@ -180,6 +180,147 @@ def _encode(data: bytes, resource_name: str, mode: str) -> bytes:
         raise AOVMergeError(f"Không mã hóa lại được tài nguyên {resource_name}: {exc}") from exc
 
 
+def _merge_nested_zip_package(
+    base_data: bytes,
+    overlay_data: bytes,
+    resource_name: str,
+) -> tuple[bytes, dict[str, Any]]:
+    """Union a nested ZIP package without dropping conflicting inner resources.
+
+    Entries unique to the overlay are retained. Duplicate paths are discarded
+    only when SHA-256 matches; different payloads at the same inner path fail
+    closed because no semantic parser is available for that member.
+    """
+    base_raw, base_mode = _decode(base_data, resource_name)
+    overlay_raw, overlay_mode = _decode(overlay_data, resource_name)
+    if base_mode != overlay_mode:
+        raise AOVMergeError(
+            f"{resource_name}: hai package dùng kiểu bọc khác nhau "
+            f"({base_mode} / {overlay_mode})."
+        )
+
+    try:
+        base_buffer = io.BytesIO(base_raw)
+        overlay_buffer = io.BytesIO(overlay_raw)
+        base_zip = zipfile.ZipFile(base_buffer, "r")
+        overlay_zip = zipfile.ZipFile(overlay_buffer, "r")
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise AOVMergeError(
+            f"{resource_name}: payload sau giải mã không phải ZIP hợp lệ."
+        ) from exc
+
+    try:
+        _validate_archive_paths(base_zip, f"{resource_name} nền")
+        _validate_archive_paths(overlay_zip, f"{resource_name} overlay")
+        bad_base = base_zip.testzip()
+        bad_overlay = overlay_zip.testzip()
+        if bad_base or bad_overlay:
+            raise AOVMergeError(
+                f"{resource_name}: CRC package lỗi "
+                f"(nền={bad_base or 'OK'}, overlay={bad_overlay or 'OK'})."
+            )
+
+        base_entries = {
+            info.filename: info for info in base_zip.infolist() if not info.is_dir()
+        }
+        overlay_entries = {
+            info.filename: info for info in overlay_zip.infolist() if not info.is_dir()
+        }
+        base_digests = {
+            name: _zip_entry_sha256(base_zip, info)
+            for name, info in base_entries.items()
+        }
+        added_names: list[str] = []
+        identical_names: list[str] = []
+        for name, info in overlay_entries.items():
+            if name not in base_entries:
+                added_names.append(name)
+                continue
+            digest = _zip_entry_sha256(overlay_zip, info)
+            if digest == base_digests[name]:
+                identical_names.append(name)
+                continue
+            raise AOVMergeError(
+                f"{resource_name}: xung đột package bên trong tại '{name}'. "
+                "Cùng đường dẫn nhưng nội dung khác; chưa có parser chuyên biệt "
+                "nên không thể chọn bản ghi an toàn."
+            )
+
+        output_buffer = io.BytesIO()
+        try:
+            with zipfile.ZipFile(
+                output_buffer, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True
+            ) as merged_zip:
+                for source_zip, entries in (
+                    (base_zip, base_entries),
+                    (overlay_zip, {name: overlay_entries[name] for name in added_names}),
+                ):
+                    for name, source_info in entries.items():
+                        target = zipfile.ZipInfo(name, date_time=source_info.date_time)
+                        target.compress_type = zipfile.ZIP_DEFLATED
+                        target.external_attr = source_info.external_attr
+                        target.create_system = source_info.create_system
+                        with source_zip.open(source_info, "r") as source, merged_zip.open(
+                            target, "w", force_zip64=True
+                        ) as destination:
+                            _copy_stream(source, destination)
+        except (OSError, RuntimeError, zipfile.BadZipFile, EOFError) as exc:
+            raise AOVMergeError(
+                f"{resource_name}: không đóng gói lại được ZIP lồng."
+            ) from exc
+
+        merged_raw = output_buffer.getvalue()
+        encoded = _encode(merged_raw, resource_name, base_mode)
+        check_raw, check_mode = _decode(encoded, resource_name)
+        if check_mode != base_mode:
+            raise AOVMergeError(
+                f"{resource_name}: kiểu bọc thay đổi sau khi mã hóa lại."
+            )
+        with zipfile.ZipFile(io.BytesIO(check_raw), "r") as check_zip:
+            _validate_archive_paths(check_zip, f"{resource_name} sau ghép")
+            bad = check_zip.testzip()
+            actual = {
+                info.filename: info
+                for info in check_zip.infolist()
+                if not info.is_dir()
+            }
+            expected_names = set(base_entries) | set(added_names)
+            if bad or set(actual) != expected_names:
+                raise AOVMergeError(
+                    f"{resource_name}: ZIP lồng sau ghép không giữ đủ inventory "
+                    f"(CRC={bad or 'OK'})."
+                )
+            for name, info in actual.items():
+                expected_source = (
+                    base_zip if name in base_entries else overlay_zip
+                )
+                expected_info = (
+                    base_entries[name] if name in base_entries else overlay_entries[name]
+                )
+                expected_digest = _zip_entry_sha256(expected_source, expected_info)
+                if _zip_entry_sha256(check_zip, info) != expected_digest:
+                    raise AOVMergeError(
+                        f"{resource_name}: SHA-256 package sau ghép không khớp: {name}."
+                    )
+
+        return encoded, {
+            "verified": True,
+            "base_entries": len(base_entries),
+            "overlay_entries": len(overlay_entries),
+            "added_entries": len(added_names),
+            "identical_duplicates": len(identical_names),
+            "added_paths": sorted(added_names),
+            "identical_paths": sorted(identical_names),
+            "conflicts": 0,
+            "encoding": base_mode,
+        }
+    finally:
+        base_zip.close()
+        overlay_zip.close()
+        base_buffer.close()
+        overlay_buffer.close()
+
+
 def _merge_ifix(base_data: bytes, vtk_data: bytes) -> tuple[bytes, int, int]:
     base_raw, base_mode = _decode(base_data, "HeroSkin_1")
     vtk_raw, _ = _decode(vtk_data, "HeroSkin_2")
@@ -536,6 +677,13 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                 except CommonActionsMergeError as exc:
                     raise AOVMergeError(f"CommonActions: {exc}") from exc
 
+                nested_pkg_reports: dict[str, dict[str, Any]] = {}
+                for relative in ("KernelLua.pkg.bytes", "StableSystems_3.pkg.bytes"):
+                    if relative in vtk_sources and BASE_PREFIX + relative in base_names:
+                        replacements[relative], nested_pkg_reports[relative] = _merge_nested_zip_package(
+                            read_base(relative), read_vtk(relative), relative
+                        )
+
                 mses_reports = {}
                 for relative in (RES_SKIN_PATH, BATTLE_BANK_PATH, LOBBY_BANK_PATH, SKILL_COMBINE_PATH):
                     try:
@@ -548,16 +696,16 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
 
                 skip_vtk = {
                     PACKER_PATH, VERIFICATION_PATH, HERO_SKIN_VTK_PATH,
-                    "KernelLua.pkg.bytes", "StableSystems_3.pkg.bytes",
                     COMMON_ACTIONS_PATH, RES_SKIN_PATH, BATTLE_BANK_PATH,
                     LOBBY_BANK_PATH, SKILL_COMBINE_PATH,
                 }
                 for name in vtk_sources:
                     if name.startswith("Sound/Android/"):
                         skip_vtk.add(name)
+                skip_vtk.update(nested_pkg_reports)
                 verification_included_paths = (
                     set(vtk_sources) - skip_vtk
-                ) | {
+                ) | set(nested_pkg_reports) | {
                     COMMON_ACTIONS_PATH, RES_SKIN_PATH, BATTLE_BANK_PATH,
                     LOBBY_BANK_PATH, SKILL_COMBINE_PATH,
                 }
@@ -672,6 +820,7 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                     "common_actions_tracks": common_tracks,
                     "common_actions_report": common_report,
                     "mses_reports": mses_reports,
+                    "nested_pkg_reports": nested_pkg_reports,
                     "assetbundles": len(asset_paths),
                     "new_files": len(added_files),
                     "packer_entries": packer_entry_count,
