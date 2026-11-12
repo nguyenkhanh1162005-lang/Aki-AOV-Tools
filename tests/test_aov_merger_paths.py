@@ -51,6 +51,35 @@ class NestedPackageMergeTests(unittest.TestCase):
             self.assertIsNone(archive.testzip())
             self.assertEqual(archive.read("Lua/vtk.lua"), b"vtk")
 
+    def test_nested_zip_merge_accepts_raw_pkg_zip_payloads(self):
+        import io
+
+        base = self._zip({
+            "Lua/base.lua": b"base",
+            "Shared/config.txt": b"same",
+        })
+        overlay = self._zip({
+            "Lua/vtk.lua": b"vtk",
+            "Shared/config.txt": b"same",
+        })
+
+        merged, report = _merge_nested_zip_package(
+            base, overlay, "KernelLua.pkg.bytes"
+        )
+
+        self.assertTrue(report["verified"])
+        self.assertEqual(report["encoding"], "raw_zip")
+        self.assertEqual(report["overlay_encoding"], "raw_zip")
+        self.assertEqual(report["added_entries"], 1)
+        self.assertEqual(report["identical_duplicates"], 1)
+        with zipfile.ZipFile(io.BytesIO(merged)) as archive:
+            self.assertEqual(
+                set(archive.namelist()),
+                {"Lua/base.lua", "Shared/config.txt", "Lua/vtk.lua"},
+            )
+            self.assertEqual(archive.read("Lua/vtk.lua"), b"vtk")
+            self.assertIsNone(archive.testzip())
+
     def test_nested_zip_merge_fails_closed_on_different_inner_payload(self):
         import io
         from unittest.mock import patch
