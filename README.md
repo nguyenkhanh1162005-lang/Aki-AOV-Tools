@@ -81,7 +81,7 @@ docker compose -f docker-compose.local-bot-api.yml up -d --build
 Đọc [hướng dẫn triển khai Local Bot API](docs/telegram-local-api.md) trước khi chuyển bot từ máy chủ Telegram mặc định. Phải dừng worker cũ và gọi `logOut` đúng quy trình; không chạy hai polling worker cùng một bot. Không đưa file `.env` lên GitHub.
 
 ## Nhập ZIP từ Google Drive
-- Dán link gói MOD 10 skin và link các phần gói MOD Vấn Tâm Kiếm, mỗi link một dòng. Không cần link bộ cài game gốc.
+- Để ghép AOV qua web hoặc Telegram, dùng đúng 2 ZIP KPM100 iOS 1.64.1.12 và VTK iOS 1.64.1.11 đã ghim SHA-256. Wrapper MOD 10 skin có `Resources.zip` + `DanhSachSkin.txt` vẫn bị khóa; không gửi nhầm bộ đó để ghép.
 - File phải bật quyền “Bất kỳ ai có đường liên kết”.
 - Chỉ nhận link `drive.google.com` hoặc `docs.google.com`; máy chủ tự tải file, giới hạn 500 MB mỗi ZIP và tổng 500 MB.
 - Sau khi tải và kiểm tra, dùng nút ghép AOV chuyên sâu trước khi phiên upload hết hạn (1 giờ).
