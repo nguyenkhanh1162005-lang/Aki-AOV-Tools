@@ -587,7 +587,10 @@ async def merge_aov_chunked_upload(upload_id: str):
     output_path = Path(session["workdir"]) / "aov-merged.zip"
     try:
         report = await run_in_threadpool(
-            merge_mod_archives, session["paths"], str(output_path)
+            merge_mod_archives,
+            session["paths"],
+            str(output_path),
+            allow_wrapper_adapter=True,
         )
     except ModPipelineError as exc:
         raise HTTPException(400, str(exc)) from exc
