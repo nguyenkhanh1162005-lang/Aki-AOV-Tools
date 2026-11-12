@@ -485,6 +485,40 @@ async def inspect_chunked_compatibility(upload_id: str):
         raise HTTPException(400, str(exc)) from exc
 
 
+@app.post("/api/upload/{upload_id}/notice-scan")
+async def scan_chunked_aov_notices(upload_id: str):
+    """Read-only heuristic search for startup/announcement text in decoded packages."""
+    session = _get_upload_session(upload_id)
+    if any(item["received"] != item["size"] for item in session["files"]):
+        raise HTTPException(400, "File chưa tải lên đầy đủ.")
+    output_path = Path(session["workdir"]) / ".aki-aov-notice-scan.zip"
+    try:
+        report = await run_in_threadpool(
+            decode_archive_resources, session["paths"], str(output_path)
+        )
+    except AOVBytesArchiveError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    finally:
+        output_path.unlink(missing_ok=True)
+    session["created"] = time.time()
+    _persist_upload_session(upload_id, session)
+    return {
+        "scan_files": report.get("notice_scan_files", 0),
+        "candidates": report.get("notice_candidates", []),
+        "truncated": report.get("notice_candidates_truncated", False),
+        "decoded_resources": len(report.get("decoded", [])),
+        "unsupported_resources": len(report.get("unsupported", [])),
+        "nested_packages_expanded": report.get("nested_packages_expanded", 0),
+        "scope": report.get("notice_scan_scope", ""),
+        "warning": (
+            "Đây là quét từ khóa chỉ đọc, không chứng minh chuỗi tìm được là popup "
+            "đang hiển thị. Không có kết quả không có nghĩa là không tồn tại thông báo: "
+            "AssetBundle, payload nhị phân opaque và định dạng chưa giải mã không được quét. "
+            "Không xóa hoặc ghi đè tài nguyên chỉ dựa trên từ khóa."
+        ),
+    }
+
+
 @app.post("/api/upload/{upload_id}/decode-bytes")
 async def decode_chunked_aov_bytes(upload_id: str):
     """Extract supported decoded AoV .bytes resources without modifying source ZIPs."""
