@@ -6,6 +6,7 @@ from pathlib import Path
 from app.aov_merger import (
     AOVMergeError,
     _assert_archive_inventory,
+    _find_outer_entries,
     _normalise_vtk_path,
     _publish_staged_archive,
     _validate_archive_paths,
@@ -14,6 +15,20 @@ from app.aov_merger import (
 
 
 class AOVArchivePathTests(unittest.TestCase):
+    def test_finds_wrapper_files_case_insensitively_with_directory_prefix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "wrapper.zip"
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("mod/Payload/rEsOuRcEs.ZIP", b"resources")
+                archive.writestr("mod/dAnHsAcHsKiN.TxT", b"skin list")
+            with zipfile.ZipFile(path) as archive:
+                resources = _find_outer_entries(archive, "Resources.zip")
+                skins = _find_outer_entries(archive, "DanhSachSkin.txt")
+            self.assertEqual(len(resources), 1)
+            self.assertEqual(resources[0].filename, "mod/Payload/rEsOuRcEs.ZIP")
+            self.assertEqual(len(skins), 1)
+            self.assertEqual(skins[0].filename, "mod/dAnHsAcHsKiN.TxT")
+
     def test_normalizes_supported_vtk_prefix(self):
         self.assertEqual(
             _normalise_vtk_path("Resources/1.64.1/Thanos/HeroSkin_2.bytes"),
