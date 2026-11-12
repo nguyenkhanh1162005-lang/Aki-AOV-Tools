@@ -124,6 +124,26 @@ class CommonActionsMergeTests(unittest.TestCase):
 
 
 
+
+    def test_rejects_unknown_nested_skin_id_layout(self):
+        name = "commonresource/Back.xml"
+        base = encode_aov_resource(action_xml("BackTrack"), name, "zstd")
+        overlay_root = ET.Element("Project")
+        action = ET.SubElement(overlay_root, "Action")
+        track = ET.SubElement(action, "Track", {
+            "trackName": "0_BackTrack",
+            "eventType": "TriggerParticleTick",
+        })
+        event = ET.SubElement(track, "Event", {
+            "eventName": "TriggerParticleTick",
+            "time": "0.000",
+            "isDuration": "false",
+        })
+        ET.SubElement(event, "SkinOrAvatarList", {"id": "59300"})
+        overlay = encode_aov_resource(ET.tostring(overlay_root), name, "zstd")
+        with self.assertRaises(CommonActionsMergeError):
+            merge_action_xml(base, overlay, name, special_ids={"59300"})
+
     def test_actor_overlay_does_not_import_unrequested_skin_ids(self):
         name = "commonresource/Back.xml"
         base = encode_aov_resource(action_xml("BackTrack"), name, "zstd")
