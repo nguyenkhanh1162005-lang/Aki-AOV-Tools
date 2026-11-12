@@ -354,9 +354,9 @@ def decode_archive_resources(input_paths: list[str], output_path: str) -> dict[s
                     process_archive(archive, label, 0)
             except zipfile.BadZipFile as exc:
                 raise AOVBytesArchiveError(f"File đầu vào không phải ZIP hợp lệ: {Path(input_path).name}") from exc
-        if not report["decoded"]:
+        if not report["decoded"] and not report["notice_candidates"]:
             raise AOVBytesArchiveError(
-                "Không tìm thấy tài nguyên .bytes nào giải mã thành công trong các ZIP đã tải lên."
+                "Không tìm thấy tài nguyên .bytes giải mã được hoặc chuỗi thông báo trong các ZIP đã tải lên."
             )
         with zipfile.ZipFile(output, "a", compression=zipfile.ZIP_DEFLATED) as target:
             target.writestr(
