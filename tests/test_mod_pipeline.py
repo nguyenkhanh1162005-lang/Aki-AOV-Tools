@@ -397,7 +397,7 @@ class ModPipelineTests(unittest.TestCase):
 
         sound = _resource_merge_guidance("Sound/iOS/ZMOD_MaChao_SFX.bnk")
         self.assertEqual(sound["adapter_state"], "inspect_only")
-        self.assertIn("không nối byte", sound["safety_rule"])
+        self.assertIn("không nối byte", sound["safety_rule"].casefold())
 
         actor_actions = _resource_merge_guidance(
             "Ages/Prefab_Characters/Prefab_Hero/Actor_593_Actions.pkg.bytes"
