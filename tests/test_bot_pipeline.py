@@ -11,12 +11,12 @@ class TelegramPipelineTests(unittest.TestCase):
             node for node in tree.body
             if isinstance(node, ast.AsyncFunctionDef) and node.name == "aovmerge"
         )
-        calls = [
-            node.func.id for node in ast.walk(handler)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        referenced_names = [
+            node.id for node in ast.walk(handler)
+            if isinstance(node, ast.Name)
         ]
-        self.assertIn("merge_mod_archives", calls)
-        self.assertNotIn("merge_aov_archives", calls)
+        self.assertIn("merge_mod_archives", referenced_names)
+        self.assertNotIn("merge_aov_archives", referenced_names)
 
 
 if __name__ == "__main__":
