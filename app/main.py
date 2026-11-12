@@ -510,9 +510,9 @@ async def scan_chunked_aov_notices(upload_id: str):
         "scope": report.get("notice_scan_scope", ""),
         "warning": (
             "Đây là quét từ khóa chỉ đọc, không chứng minh chuỗi tìm được là popup "
-            "đang hiển thị. Không có kết quả không có nghĩa là không tồn tại thông báo: "
-            "AssetBundle, payload nhị phân opaque và định dạng chưa giải mã không được quét. "
-            "Chế độ quét giới hạn 256 MiB dữ liệu đã giải mã và không ghi ZIP tạm. "
+            "đang hiển thị. AssetBundle UnityFS được quét metadata có giới hạn; bundle quá lớn, "
+            "payload nhị phân opaque và định dạng chưa giải mã có thể bị bỏ qua. "
+            "Chế độ quét giới hạn 256 MiB dữ liệu .bytes đã giải mã và không ghi ZIP tạm. "
             "Không xóa hoặc ghi đè tài nguyên chỉ dựa trên từ khóa."
         ),
     }
