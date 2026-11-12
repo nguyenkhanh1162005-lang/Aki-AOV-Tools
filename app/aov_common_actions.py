@@ -19,9 +19,9 @@ class CommonActionsMergeError(ValueError):
     pass
 
 
-def _is_595_track(track: ET.Element) -> bool:
+def _is_special_track(track: ET.Element, special_ids: set[str]) -> bool:
     return any(
-        node.tag == "SkinOrAvatarList" and node.attrib.get("id") in SPECIAL_IDS
+        node.tag == "SkinOrAvatarList" and node.attrib.get("id") in special_ids
         for node in track.iter()
     )
 
@@ -77,8 +77,15 @@ def merge_action_xml(
     base_bytes: bytes,
     overlay_bytes: bytes,
     resource_name: str,
+    *,
+    special_ids: set[str] | None = None,
 ) -> tuple[bytes, dict]:
-    """Merge VTK-gated tracks by full event signature without dropping same-name variants."""
+    """Merge actor-gated tracks by full event signature without dropping same-name variants."""
+    target_ids = {str(value) for value in (SPECIAL_IDS if special_ids is None else special_ids)}
+    if not target_ids or any(not value.isdigit() for value in target_ids):
+        raise CommonActionsMergeError(
+            f"{resource_name}: special skin IDs phải là tập không rỗng gồm chuỗi số."
+        )
     try:
         base_decoded, base_mode = decode_aov_resource(base_bytes, resource_name)
         overlay_decoded, overlay_mode = decode_aov_resource(overlay_bytes, resource_name)
@@ -116,14 +123,14 @@ def merge_action_xml(
     merged_into_existing = []
 
     for source_track in overlay_tracks:
-        if not _is_595_track(source_track):
+        if not _is_special_track(source_track, target_ids):
             continue
         name = _normalized_track_name(source_track)
         key = _track_key(source_track)
         candidates = index.get(key, [])
         if candidates:
             target = candidates[0]
-            was_special = _is_595_track(target)
+            was_special = _is_special_track(target, target_ids)
             existing_nodes = {
                 node.attrib.get("id"): node
                 for node in target.findall("SkinOrAvatarList")
@@ -183,16 +190,16 @@ def merge_action_xml(
         output_by_key.setdefault(key, set()).update(
             node.attrib.get("id")
             for node in track.iter("SkinOrAvatarList")
-            if node.attrib.get("id") in SPECIAL_IDS
+            if node.attrib.get("id") in target_ids
         )
     for source_track in overlay_action.iter("Track"):
-        if not _is_595_track(source_track):
+        if not _is_special_track(source_track, target_ids):
             continue
         key = _track_key(source_track)
         source_ids = {
             node.attrib.get("id")
             for node in source_track.iter("SkinOrAvatarList")
-            if node.attrib.get("id") in SPECIAL_IDS
+            if node.attrib.get("id") in target_ids
         }
         if not source_ids.issubset(output_by_key.get(key, set())):
             raise CommonActionsMergeError(
@@ -209,6 +216,7 @@ def merge_action_xml(
         raise CommonActionsMergeError(f"{resource_name}: không xác minh được XML sau ghép: {exc}") from exc
 
     return output, {
+        "special_ids": sorted(target_ids),
         "base_encoding": base_mode,
         "overlay_encoding": overlay_mode,
         "output_encoding": verify_mode,
@@ -220,8 +228,14 @@ def merge_action_xml(
     }
 
 
-def merge_common_actions_pkg(base_package: bytes, overlay_package: bytes) -> tuple[bytes, dict]:
-    """Retain the base package and selectively merge VTK-gated common action tracks."""
+def merge_common_actions_pkg(
+    base_package: bytes,
+    overlay_package: bytes,
+    *,
+    special_ids: set[str] | None = None,
+    strict_conflicts: bool = False,
+) -> tuple[bytes, dict]:
+    """Retain the base package and selectively merge actor-gated common action tracks."""
     try:
         base_zip = zipfile.ZipFile(io.BytesIO(base_package), "r")
         overlay_zip = zipfile.ZipFile(io.BytesIO(overlay_package), "r")
@@ -241,6 +255,15 @@ def merge_common_actions_pkg(base_package: bytes, overlay_package: bytes) -> tup
     output_buffer = io.BytesIO()
     merged_files = {}
     appended_files = []
+    if strict_conflicts:
+        for name in set(base_entries) & set(overlay_entries):
+            if name in merge_candidates:
+                continue
+            if base_zip.read(base_entries[name]) != overlay_zip.read(overlay_entries[name]):
+                raise CommonActionsMergeError(
+                    f"{name}: xung đột tệp CommonActions ngoài danh sách XML có parser; "
+                    "không tự chọn bản nền hoặc bản overlay."
+                )
 
     try:
         with zipfile.ZipFile(output_buffer, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as out:
@@ -251,6 +274,7 @@ def merge_common_actions_pkg(base_package: bytes, overlay_package: bytes) -> tup
                         base_data,
                         overlay_zip.read(overlay_entries[name]),
                         name,
+                        special_ids=special_ids,
                     )
                     base_data = merged
                     merged_files[name] = report
@@ -290,5 +314,40 @@ def merge_common_actions_pkg(base_package: bytes, overlay_package: bytes) -> tup
         "output_entries": len(base_entries) + len(appended_files),
         "merged_files": merged_files,
         "appended_files": appended_files,
+        "special_ids": sorted({str(value) for value in (SPECIAL_IDS if special_ids is None else special_ids)}),
+        "strict_conflicts": strict_conflicts,
         "verified": True,
+    }
+
+
+def merge_common_actions_packages(
+    base_package: bytes,
+    overlays: list[tuple[bytes, set[str]]],
+) -> tuple[bytes, dict]:
+    """Sequentially merge several actor-scoped overlays into one CommonActions package.
+
+    Each overlay carries the exact SkinOrAvatarList IDs that its actor pack is
+    allowed to contribute. Non-parser files that collide with an existing path
+    must be byte-identical. This routine does not infer actor IDs from filenames.
+    """
+    if not overlays:
+        raise CommonActionsMergeError("Cần ít nhất một overlay CommonActions.")
+    current = base_package
+    reports = []
+    for index, (overlay_package, special_ids) in enumerate(overlays, start=1):
+        current, report = merge_common_actions_pkg(
+            current,
+            overlay_package,
+            special_ids=set(special_ids),
+            strict_conflicts=True,
+        )
+        reports.append({
+            "overlay_index": index,
+            "special_ids": sorted({str(value) for value in special_ids}),
+            "report": report,
+        })
+    return current, {
+        "overlay_count": len(overlays),
+        "overlay_reports": reports,
+        "verified": all(item["report"]["verified"] for item in reports),
     }
