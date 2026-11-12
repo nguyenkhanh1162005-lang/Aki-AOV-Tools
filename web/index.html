@@ -475,6 +475,7 @@ aovPreflightBtn.addEventListener('click',async()=>{
         'Resources: '+(resourceAnalysis.resource_count||0)+' | Đường dẫn: '+(resourceAnalysis.path_count||0)+' | Đường dẫn riêng: '+(resourceAnalysis.unique_path_count||0),
         'Cùng byte: '+(counts.IDENTICAL_DUPLICATE||0)+' | Cần quy tắc: '+(counts.NEEDS_RULE||0)+' | Chưa hỗ trợ: '+(counts.UNSUPPORTED||0)+' | Lệch phiên bản: '+(counts.VERSION_CONFLICT||0),
         'Tương thích nguồn: '+(sourceCheck.status||'không rõ'),
+        'Nhóm adapter theo đường dẫn: '+Object.entries(resourceAnalysis.merge_guidance_counts||{}).map(([key,value])=>key+'='+value).join(' | '),
         'Lưu ý: đây là kiểm kê chỉ đọc, không cấp quyền ghi hoặc ghép payload.'
       );
       for(const reason of (sourceCheck.reasons||[]))lines.push('  CẢNH BÁO NGUỒN: '+reason);
@@ -483,6 +484,9 @@ aovPreflightBtn.addEventListener('click',async()=>{
         for(const item of resourceAnalysis.important_paths.slice(0,80)){
           lines.push('['+item.status+'] '+item.path);
           if(item.priority_group)lines.push('  Nhóm ưu tiên (gợi ý theo path): '+item.priority_group);
+          if(item.adapter_state)lines.push('  Mức hỗ trợ adapter: '+item.adapter_state);
+          if(item.next_action)lines.push('  Bước xử lý tiếp: '+item.next_action);
+          if(item.safety_rule)lines.push('  Quy tắc chặn ghi: '+item.safety_rule);
           lines.push('  Nguồn: '+(item.sources||[]).join(', ')+' | format: '+(item.formats||[]).join(', '));
           for(const reason of (item.reasons||[]))lines.push('  '+reason);
           if(item.missing_dependencies?.length)lines.push('  Thiếu dependency: '+item.missing_dependencies.join(', '));
