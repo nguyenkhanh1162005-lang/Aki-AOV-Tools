@@ -38,7 +38,7 @@ class AOVMergeResponseTests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(response.headers["X-AOV-Validation"], "passed")
                 self.assertEqual(response.headers["X-AOV-Game-Tested"], "false")
-                self.assertEqual(response.headers["X-AOV-Base-Version"], "1.64.1.12")
+                self.assertEqual(response.headers["X-AOV-Base-Version"], "1.64.1.12_KPM")
                 self.assertEqual(response.headers["X-AOV-VTK-Version"], "1.64.1.11")
                 self.assertEqual(response.headers["X-AOV-AssetBundles"], "10")
                 self.assertEqual(response.headers["X-AOV-New-Files"], "24")

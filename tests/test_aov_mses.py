@@ -2,105 +2,135 @@ import hashlib
 import struct
 import unittest
 
-from app.aov_mses import MSESError, merge_aov_mses_resource, merge_mses, parse_mses
-from app.aov_crypto import decode_aov_resource, encrypt_aov_resource
-from app.aov_zstd import encode_aov_bytes
+from app.aov_mses import MSESError, MSESTable, build_mses, merge_mses_rows, parse_mses
 
 
-def make_mses(fields, rows):
-    serialized = b"".join(struct.pack("<I", len(row)) + row for row in rows)
-    header = bytearray(140)
+def make_table(field_count, rows):
+    header = bytearray(0x8C)
     header[:4] = b"MSES"
-    struct.pack_into("<III", header, 4, 7, fields, len(rows))
-    struct.pack_into("<I", header, 132, 140)
-    header[96:128] = hashlib.md5(serialized).hexdigest().encode("ascii")
-    return bytes(header) + serialized
+    body = b"".join(struct.pack("<I", len(row)) + row for row in rows)
+    struct.pack_into("<III", header, 4, 7, field_count, len(rows))
+    header[0x60:0x80] = hashlib.md5(body).hexdigest().encode("ascii")
+    return bytes(header) + body
 
 
-def row(key, payload):
-    return struct.pack("<I", key) + payload
+class MSESTests(unittest.TestCase):
+    def test_parse_and_rebuild_round_trip(self):
+        original = make_table(4, [struct.pack("<I", 1) + b"one", struct.pack("<I", 2) + b"two"])
+        parsed = parse_mses(original)
+        self.assertEqual(parsed.field_count, 4)
+        self.assertEqual(len(parsed.rows), 2)
+        self.assertEqual(build_mses(parsed, parsed.rows), original)
 
-
-class MSESMergeTests(unittest.TestCase):
-    def test_merges_only_target_hero_rows_and_recomputes_header(self):
-        base_rows = [
-            row(123001, b"unrelated-base"),
-            row(5950001, b"old-sfx"),
-            row(5950002, b"old-voice"),
-        ]
-        incoming_rows = [
-            row(123002, b"unrelated-incoming"),
-            row(5950001, b"new-sfx"),
-            row(5950003, b"new-recall"),
-        ]
-        base = make_mses(69, base_rows)
-        incoming = make_mses(63, incoming_rows)
-
-        merged, report = merge_mses(
-            base, incoming, target_prefixes=("595",)
+    def test_merge_appends_new_and_preserves_base_conflict(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base", struct.pack("<I", 2) + b"same"])
+        overlay = make_table(3, [struct.pack("<I", 1) + b"base", struct.pack("<I", 2) + b"same", struct.pack("<I", 3) + b"new"])
+        output, report = merge_mses_rows(
+            base, overlay, allow_schema_mismatch=True,
+            allow_new_rows_across_schema_mismatch=True,
+            allowed_new_keys={3},
         )
-        parsed = parse_mses(merged)
-        by_key = {struct.unpack_from("<I", r, 0)[0]: r for r in parsed.rows}
+        parsed = parse_mses(output)
+        self.assertEqual(parsed.field_count, 4)
+        self.assertEqual([row[4:] for row in parsed.rows], [b"base", b"same", b"new"])
+        self.assertEqual(report["appended_keys"], ["0x00000003"])
+        self.assertEqual(report["retained_base_conflicts"], [])
 
-        self.assertEqual(parsed.field_count, 69)
-        self.assertEqual(parsed.row_count, 4)
-        self.assertEqual(by_key[123001], base_rows[0])
-        self.assertNotIn(123002, by_key)
-        self.assertEqual(by_key[5950001], incoming_rows[1])
-        self.assertEqual(by_key[5950002], base_rows[2])
-        self.assertEqual(by_key[5950003], incoming_rows[2])
-        self.assertEqual(report.rows_added, 1)
-        self.assertEqual(report.rows_replaced, 1)
-        self.assertEqual(report.final_rows, 4)
-        self.assertEqual(
-            merged[96:128],
-            hashlib.md5(merged[140:]).hexdigest().encode("ascii"),
-        )
+    def test_keeps_base_row_when_same_schema_conflicts(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(4, [struct.pack("<I", 1) + b"overlay"])
+        output, report = merge_mses_rows(base, overlay)
+        self.assertEqual(parse_mses(output).rows[0][4:], b"base")
+        self.assertEqual(report["retained_base_conflicts"], ["0x00000001"])
 
-    def test_rejects_duplicate_keys_and_corrupt_lengths(self):
-        duplicate = make_mses(2, [row(595001, b"a"), row(595001, b"b")])
-        with self.assertRaises(MSESError):
-            parse_mses(duplicate)
-
-        corrupt = bytearray(make_mses(2, [row(595001, b"a")]))
-        corrupt[140:144] = (9999).to_bytes(4, "little")
-        with self.assertRaises(MSESError):
-            parse_mses(bytes(corrupt))
-
-    def test_requires_target_prefix(self):
-        table = make_mses(1, [row(595001, b"one")])
-        with self.assertRaises(MSESError):
-            merge_mses(table, table, target_prefixes=())
-
-
-    def test_resource_pipeline_merges_aes_base_with_zstd_incoming(self):
-        resource_name = "Databin/Client/Sound/BattleBank.bytes"
-        base_plain = make_mses(59, [
-            row(5950001, b"old-sfx"),
-            row(1230001, b"keep-base"),
+    def test_rejects_new_opaque_row_across_schema_mismatch(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(3, [
+            struct.pack("<I", 1) + b"base",
+            struct.pack("<I", 2) + b"new-row-with-unknown-schema",
         ])
-        incoming_plain = make_mses(59, [
-            row(5950001, b"new-sfx"),
-            row(5950002, b"new-voice"),
-        ])
-        base_wrapped = encrypt_aov_resource(resource_name, base_plain)
-        incoming_wrapped = encode_aov_bytes(incoming_plain)
+        with self.assertRaisesRegex(MSESError, "bản ghi mới chưa được chứng minh tương thích"):
+            merge_mses_rows(base, overlay, allow_schema_mismatch=True)
 
-        merged_wrapped, report = merge_aov_mses_resource(
-            resource_name,
-            base_wrapped,
-            incoming_wrapped,
-            target_prefixes=("595",),
+    def test_rejects_new_key_outside_explicit_allowlist(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(3, [
+            struct.pack("<I", 1) + b"base",
+            struct.pack("<I", 2) + b"approved-looking",
+            struct.pack("<I", 3) + b"unrelated",
+        ])
+        with self.assertRaisesRegex(MSESError, "ngoài allowlist theo bảng"):
+            merge_mses_rows(
+                base, overlay,
+                allow_schema_mismatch=True,
+                allow_new_rows_across_schema_mismatch=True,
+                allowed_new_keys={2},
+            )
+
+    def test_rejects_non_uint32_override_keys(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(4, [struct.pack("<I", 1) + b"overlay"])
+        for key in (-1, 0x1_0000_0000, True):
+            with self.subTest(key=key):
+                with self.assertRaisesRegex(MSESError, "uint32"):
+                    merge_mses_rows(base, overlay, override_keys={key})
+
+    def test_rejects_schema_mismatch_with_changed_shared_row(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(3, [struct.pack("<I", 1) + b"overlay"])
+        with self.assertRaises(MSESError):
+            merge_mses_rows(base, overlay, allow_schema_mismatch=True)
+
+    def test_merge_explicitly_overrides_selected_key(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(4, [struct.pack("<I", 1) + b"overlay"])
+        output, report = merge_mses_rows(base, overlay, override_keys={1})
+        self.assertEqual(parse_mses(output).rows[0][4:], b"overlay")
+        self.assertEqual(report["replaced_keys"], ["0x00000001"])
+
+    def test_rejects_override_key_missing_from_overlay(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(4, [struct.pack("<I", 1) + b"overlay"])
+        with self.assertRaisesRegex(MSESError, "không tồn tại trong overlay"):
+            merge_mses_rows(base, overlay, override_keys={2})
+
+    def test_rejects_unapproved_conflict_when_schemas_differ(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(3, [struct.pack("<I", 1) + b"overlay"])
+        with self.assertRaisesRegex(MSESError, "bản ghi chung không được cho phép ghi đè"):
+            merge_mses_rows(base, overlay, allow_schema_mismatch=True)
+
+    def test_allows_explicit_override_for_selected_row_across_schema_drift(self):
+        base = make_table(4, [struct.pack("<I", 1) + b"base"])
+        overlay = make_table(3, [struct.pack("<I", 1) + b"overlay"])
+        output, report = merge_mses_rows(
+            base,
+            overlay,
+            override_keys={1},
+            allow_schema_mismatch=True,
         )
-        self.assertTrue(merged_wrapped.startswith(bytes.fromhex("22 4a 67 00")))
-        merged_plain = decode_aov_resource(resource_name, merged_wrapped)
-        parsed = parse_mses(merged_plain)
-        by_key = {struct.unpack_from("<I", r, 0)[0]: r for r in parsed.rows}
-        self.assertEqual(by_key[5950001], row(5950001, b"new-sfx"))
-        self.assertEqual(by_key[5950002], row(5950002, b"new-voice"))
-        self.assertEqual(by_key[1230001], row(1230001, b"keep-base"))
-        self.assertEqual(report.rows_added, 1)
-        self.assertEqual(report.rows_replaced, 1)
+        self.assertEqual(parse_mses(output).rows[0][4:], b"overlay")
+        self.assertEqual(report["replaced_keys"], ["0x00000001"])
+
+    def test_rejects_bad_checksum(self):
+        original = bytearray(make_table(4, [struct.pack("<I", 1) + b"one"]))
+        original[-1] ^= 1
+        with self.assertRaises(MSESError):
+            parse_mses(bytes(original))
+
+    def test_rejects_oversized_row_length_before_reading_payload(self):
+        header = bytearray(0x8C)
+        header[:4] = b"MSES"
+        struct.pack_into("<III", header, 4, 7, 1, 1)
+        oversized = 64 * 1024 * 1024 + 1
+        payload = bytes(header) + struct.pack("<I", oversized)
+        with self.assertRaisesRegex(MSESError, "Độ dài bản ghi MSES"):
+            parse_mses(payload, verify_checksum=False)
+
+    def test_rejects_trailing_bytes(self):
+        original = make_table(4, [struct.pack("<I", 1) + b"one"]) + b"x"
+        with self.assertRaises(MSESError):
+            parse_mses(original)
 
 
 if __name__ == "__main__":
