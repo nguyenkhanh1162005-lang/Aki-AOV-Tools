@@ -4,7 +4,7 @@ Công cụ web và Telegram bot riêng tư bằng tiếng Việt để tải, ki
 
 ## Tính năng
 - Web UI tiếng Việt, dùng được trên điện thoại.
-- Web: tải tối đa 10 ZIP theo khối 4 MiB có SHA-256 từng khối, truyền tối đa hai file song song, khôi phục phiên tải và hiển thị tiến trình; kiểm tra cấu trúc, lập manifest và đối chiếu xung đột; ZIP thường chỉ ghép khi không có xung đột.
+- Web: tải tối đa 10 ZIP theo khối 4 MiB, băm SHA-256 ngay khi gửi và xác minh ở máy chủ, tối đa ba file song song, kiểm tra hash các khối đã tải trước khi tiếp tục phiên; hiển thị tiến trình, dung lượng và tốc độ trung bình. Không còn phải đọc/băm toàn bộ 500 MB trước khi bắt đầu truyền. Kiểm tra cấu trúc, lập manifest và đối chiếu xung đột; ZIP thường chỉ ghép khi không có xung đột.
 - Web API `/api/inspect`: liệt kê phần mở rộng, tên có dấu hiệu là tài nguyên game và so sánh SHA-256 các đường dẫn trùng để phân biệt nội dung giống hệt với xung đột thật (tối đa 80 đường dẫn trùng được hiển thị chi tiết).
 - Web API `/api/capabilities`: công bố registry adapter, phân biệt định dạng chỉ kiểm tra với định dạng có bộ ghép đã xác minh; mặc định fail-closed.
 - Web API `POST /api/upload/{upload_id}/aov-preflight`: phân loại từng ZIP AoV theo vai trò (MOD wrapper, VTK/Actor 595, KPM100, chưa phân loại), trích Actor ID từ tên AssetBundle và liệt kê blocker của adapter. Chỉ đọc, giữ phiên upload; không tạo ZIP và không cấp quyền ghép cho nhiều MOD wrapper.
