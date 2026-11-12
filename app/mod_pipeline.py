@@ -134,14 +134,18 @@ def _archive_profile(path: str) -> dict[str, Any]:
     )
     has_vtk_ifix = "heroskin_2.bytes" in leaves
     has_base_ifix = "heroskin_1.bytes" in leaves
-    has_kpm_mod_payloads = any(
-        PurePosixPath(name).name.upper().startswith("KPM_MOD_")
+    kpm_mod_prefix = "Resources/1.64.1/Mod_by_Youtube_KHAM-PHA-MOBILE/KPM_MOD_"
+    kpm_mod_payload_count = sum(
+        name.casefold().startswith(kpm_mod_prefix.casefold())
         for name in names
     )
+    has_kpm_mod_payloads = kpm_mod_payload_count > 0
     has_kpm100_direct_base = (
         has_base_ifix
-        and has_kpm_mod_payloads
-        and any(name.lower().startswith("resources/1.64.1/") for name in names)
+        and kpm_mod_payload_count == 70
+        and any(name.casefold() == (
+            "Resources/1.64.1/assetbundle/resourcepackerinfosetall.assetbundle".casefold()
+        ) for name in names)
     )
     has_595_assets = any(
         "595_" in PurePosixPath(name).name.lower()
@@ -171,6 +175,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
         "has_vtk_ifix": has_vtk_ifix,
         "has_base_ifix": has_base_ifix,
         "has_kpm_mod_payloads": has_kpm_mod_payloads,
+        "kpm_mod_payload_count": kpm_mod_payload_count,
         "has_kpm100_direct_base": has_kpm100_direct_base,
         "has_595_assets": has_595_assets,
         "extensions": sorted(extensions),
@@ -185,7 +190,10 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
         ]
         vtk_overlays = [
             item for item in profiles
-            if item.get("has_vtk_ifix") and item.get("has_595_assets")
+            if item.get("source_role") == "aov_actor595_mod_candidate"
+            and not item.get("has_kpm100_direct_base")
+            and item.get("has_vtk_ifix")
+            and item.get("has_595_assets")
         ]
         if (
             len(profiles) == 2
@@ -275,7 +283,10 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
             )
             vtk_path = next(
                 path for path, profile in zip(archive_paths, profiles)
-                if profile.get("has_vtk_ifix") and profile.get("has_595_assets")
+                if profile.get("source_role") == "aov_actor595_mod_candidate"
+                and not profile.get("has_kpm100_direct_base")
+                and profile.get("has_vtk_ifix")
+                and profile.get("has_595_assets")
             )
             result = merge_kpm100_vtk_archives(base_path, vtk_path, str(temporary))
         elif adapter == "aov_mod_to_mod_vtk_actor595_1.64.1":
