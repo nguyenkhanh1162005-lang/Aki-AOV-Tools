@@ -8,11 +8,19 @@ class AOVResourceMergeError(ValueError):
     pass
 
 
+_HUANHUA_TABLE_KEYS = {
+    "Databin/Client/Huanhua/ResBillboardCfg.bytes": {0x00000253},
+    "Databin/Client/Huanhua/ResBillboardSkinCfg.bytes": {0x00000253},
+    "Databin/Client/Huanhua/ResKillBillboardCfg.bytes": {0x00000253},
+}
+_SKILLCOMBINE_KEYS = {0x000915A7, 0x000915A8, 0x000915A9, 0x000915AA, 0x000915AB}
+
 _SUPPORTED_MSES_TABLES = {
     "Databin/Client/Sound/BattleBank.bytes",
     "Databin/Client/Sound/LobbyBank.bytes",
     "Databin/Client/Skill/skillcombine.bytes",
     "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes",
+    *_HUANHUA_TABLE_KEYS,
 }
 
 
@@ -73,6 +81,68 @@ def merge_aov_mses_resource(
             )
         override_keys = {int.from_bytes(row[:4], "little") for row in marker_rows}
         allowed_new_keys = override_keys
+    elif normalized_name in _HUANHUA_TABLE_KEYS:
+        allowed_new_keys = set(_HUANHUA_TABLE_KEYS[normalized_name])
+        overlay_keys = {int.from_bytes(row[:4], "little") for row in overlay_table.rows}
+        base_rows_by_key = {
+            int.from_bytes(row[:4], "little"): row for row in base_table.rows
+        }
+        overlay_rows_by_key = {
+            int.from_bytes(row[:4], "little"): row for row in overlay_table.rows
+        }
+        if not allowed_new_keys.issubset(overlay_rows_by_key):
+            raise AOVResourceMergeError(
+                f"{resource_name}: overlay thiếu khóa billboard đã xác minh "
+                + ", ".join(f"0x{key:08x}" for key in sorted(allowed_new_keys - set(overlay_rows_by_key)))
+                + "."
+            )
+        for key in allowed_new_keys & set(base_rows_by_key):
+            if base_rows_by_key[key] != overlay_rows_by_key[key]:
+                raise AOVResourceMergeError(
+                    f"{resource_name}: khóa billboard 0x{key:08x} đã tồn tại "
+                    "nhưng payload khác; chưa có quy tắc ghi đè an toàn."
+                )
+        unexpected = overlay_keys - set(base_rows_by_key) - allowed_new_keys
+        if unexpected:
+            raise AOVResourceMergeError(
+                f"{resource_name}: overlay có khóa mới ngoài allowlist billboard: "
+                + ", ".join(f"0x{key:08x}" for key in sorted(unexpected))
+                + "."
+            )
+    elif normalized_name == "Databin/Client/Skill/skillcombine.bytes":
+        allowed_new_keys = set(_SKILLCOMBINE_KEYS)
+        overlay_rows_by_key = {
+            int.from_bytes(row[:4], "little"): row for row in overlay_table.rows
+        }
+        base_rows_by_key = {
+            int.from_bytes(row[:4], "little"): row for row in base_table.rows
+        }
+        missing = allowed_new_keys - set(overlay_rows_by_key)
+        if missing:
+            raise AOVResourceMergeError(
+                f"{resource_name}: overlay thiếu key skillcombine đã xác minh: "
+                + ", ".join(f"0x{key:08x}" for key in sorted(missing))
+                + "."
+            )
+        conflicts = {
+            key for key in allowed_new_keys & set(base_rows_by_key)
+            if base_rows_by_key[key] != overlay_rows_by_key[key]
+        }
+        if conflicts:
+            raise AOVResourceMergeError(
+                f"{resource_name}: key skillcombine đã tồn tại nhưng payload khác: "
+                + ", ".join(f"0x{key:08x}" for key in sorted(conflicts))
+                + "."
+            )
+        unexpected = {
+            int.from_bytes(row[:4], "little") for row in overlay_table.rows
+        } - set(base_rows_by_key) - allowed_new_keys
+        if unexpected:
+            raise AOVResourceMergeError(
+                f"{resource_name}: overlay có key skillcombine ngoài allowlist: "
+                + ", ".join(f"0x{key:08x}" for key in sorted(unexpected))
+                + "."
+            )
     elif normalized_name == "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes":
         allowed_new_keys = {59500}
         base_rows_by_key = {
@@ -96,9 +166,8 @@ def merge_aov_mses_resource(
                 f"{resource_name}: key 59500 đã tồn tại nhưng payload khác; "
                 "chưa có quy tắc ghi đè an toàn."
             )
-    # skillcombine has no proven row-key allowlist yet. Shared identical rows
-    # can be retained, but every overlay-only key is rejected by the generic
-    # MSES merger rather than guessed from the first four opaque bytes.
+    # New opaque rows are admitted only for the exact source-observed keys above;
+    # all other overlay-only keys remain rejected by merge_mses_rows.
 
     try:
         merged_decoded, report = merge_mses_rows(
