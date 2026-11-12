@@ -557,17 +557,23 @@ async def merge_aov_chunked_upload(upload_id: str):
         raise HTTPException(400, str(exc)) from exc
     _remove_upload_session_metadata(session)
     UPLOAD_SESSIONS.pop(upload_id, None)
+    packer_report = report.get("packer", {})
+    bundle_count = len(packer_report.get("actor_assets_from_vtk", []))
+    if not bundle_count:
+        bundle_count = int(report.get("assetbundles", 0) or 0)
+    if "added_resources" in report:
+        new_file_count = len(report.get("added_resources") or [])
+    else:
+        new_file_count = int(report.get("new_files", 0) or 0)
     result_headers = {
         "X-AOV-Validation": "passed" if report.get("validation") else "incomplete",
         "X-AOV-Game-Tested": "true" if report.get("game_tested") else "false",
         "X-AOV-Base-Version": str(report.get("base_version", "unknown")),
         "X-AOV-VTK-Version": str(report.get("vtk_version", "unknown")),
-        "X-AOV-AssetBundles": str(len(
-            report.get("packer", {}).get("actor_assets_from_vtk", [])
-        )),
-        "X-AOV-New-Files": str(len(report.get("added_resources", []))),
+        "X-AOV-AssetBundles": str(bundle_count),
+        "X-AOV-New-Files": str(new_file_count),
         "X-AOV-Adapter": str(report.get("adapter", "unknown")),
-        "X-AOV-Output-Bytes": str(report.get("output_bytes", 0)),
+        "X-AOV-Output-Bytes": str(report.get("output_bytes", report.get("output_size", 0))),
     }
     return FileResponse(
         path=output_path,
