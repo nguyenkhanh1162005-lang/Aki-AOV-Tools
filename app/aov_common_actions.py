@@ -294,6 +294,16 @@ def merge_common_actions_pkg(
     except zipfile.BadZipFile as exc:
         raise CommonActionsMergeError("CommonActions.pkg.bytes không phải ZIP hợp lệ.") from exc
 
+    try:
+        # This is the production path used by the version-locked Actor 595
+        # adapter as well as the multi-overlay helper. Check the overlay itself
+        # before any target XML can be modified.
+        _overlay_actor_track_signatures(overlay_package, target_ids)
+    except CommonActionsMergeError:
+        base_zip.close()
+        overlay_zip.close()
+        raise
+
     merge_candidates = {
         "commonresource/Back.xml",
         "commonresource/BackFast.xml",
