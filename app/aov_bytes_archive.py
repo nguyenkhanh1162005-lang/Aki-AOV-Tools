@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import stat
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -28,10 +29,10 @@ NOTICE_TEXT_EXTENSIONS = {
     ".lua", ".txt", ".xml", ".json", ".json5", ".ini", ".cfg", ".csv", ".bytes",
 }
 NOTICE_PATTERNS = (
-    ("startup_notice", r"\\b(?:startup|first[_\\s-]?login|on[_\\s-]?game[_\\s-]?start|game[_\\s-]?start)[_\\s-]?(?:notice|popup|message)?\\b"),
-    ("login_notice", r"\\b(?:show[_\\s-]?)?(?:login[_\\s-]?)?notice\\b"),
-    ("announcement", r"\\b(?:announcement|notification|notify|toast|popup)\\b"),
-    ("vietnamese_notice", r"thông\\s*báo|khởi\\s*động|vào\\s*game"),
+    ("startup_notice", r"\b(?:startup|first[_\s-]?login|on[_\s-]?game[_\s-]?start|game[_\s-]?start)[_\s-]?(?:notice|popup|message)?\b"),
+    ("login_notice", r"\b(?:show[_\s-]?)?(?:login[_\s-]?)?notice\b"),
+    ("announcement", r"\b(?:announcement|notification|notify|toast|popup)\b"),
+    ("vietnamese_notice", r"thông\s*báo|khởi\s*động|vào\s*game"),
     ("cjk_notice", r"公告|通知|提示|弹窗|登录公告|登入公告"),
 )
 
@@ -59,6 +60,56 @@ def _expected_decoded_size(data: bytes) -> int | None:
     if len(data) < 8 or data[:2] != b"\x22\x4a":
         return None
     return int.from_bytes(data[4:8], "little")
+
+
+def _notice_text_view(data: bytes) -> tuple[str, str] | None:
+    """Decode bounded text members without treating arbitrary binary as source code."""
+    sample = data[:2 * 1024 * 1024]
+    candidates: list[tuple[float, str, str]] = []
+    for encoding in ("utf-8-sig", "utf-16-le", "utf-16-be"):
+        try:
+            decoded = sample.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        if not decoded:
+            continue
+        printable = sum(ch.isprintable() or ch in "\r\n\t" for ch in decoded)
+        ratio = printable / max(1, len(decoded))
+        candidates.append((ratio, encoding, decoded.replace("\x00", "")))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], item[1] == "utf-8-sig"), reverse=True)
+    ratio, encoding, decoded = candidates[0]
+    if ratio < 0.82 or len(decoded) < 8:
+        return None
+    return encoding, decoded
+
+
+def _scan_notice_text(data: bytes, path: str) -> list[dict[str, str]]:
+    """Find likely notice/startup tokens in text-like resources, without editing them."""
+    suffix = PurePosixPath(path.lower()).suffix
+    if suffix not in NOTICE_TEXT_EXTENSIONS or data.startswith(b"MSES"):
+        return []
+    stream = io.BytesIO(data)
+    if data.startswith(b"PK") and zipfile.is_zipfile(stream):
+        return []
+    view = _notice_text_view(data)
+    if view is None:
+        return []
+    encoding, decoded = view
+    findings: list[dict[str, str]] = []
+    for label, expression in NOTICE_PATTERNS:
+        for match in list(re.finditer(expression, decoded, flags=re.IGNORECASE))[:2]:
+            start = max(0, match.start() - 70)
+            end = min(len(decoded), match.end() + 110)
+            excerpt = " ".join(decoded[start:end].split())
+            findings.append({
+                "keyword_group": label,
+                "matched_text": match.group(0)[:48],
+                "encoding": encoding,
+                "excerpt": excerpt[:MAX_NOTICE_SNIPPET],
+            })
+    return findings
 
 
 def _inspect_decoded_payload(data: bytes) -> dict[str, Any]:
