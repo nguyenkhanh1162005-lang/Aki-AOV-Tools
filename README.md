@@ -1,16 +1,48 @@
 # Aki AOV Tools
 
-Công cụ web và Telegram bot dùng chung bộ xử lý ZIP trên ổ đĩa, kèm chức năng kiểm kê cấu trúc gói tài nguyên AOV (chỉ đọc).
+Công cụ web tiếng Việt để tải, kiểm tra cấu trúc, đối chiếu tương thích và xử lý các gói tài nguyên Liên Quân iOS theo adapter đã xác minh. Tài liệu này tập trung vào web; Telegram bot nằm ngoài phạm vi triển khai hiện tại.
 
 ## Tính năng
 - Web UI tiếng Việt, dùng được trên điện thoại.
-- Web: chọn tối đa 10 ZIP để kiểm tra cấu trúc hoặc ghép ZIP thông thường.
-- Web API `/api/inspect` và Telegram `/inspect`: quét ZIP ngoài, `Resources.zip` lồng bên trong và các `.pkg.bytes` có cấu trúc ZIP.
-- Nhận diện header AES AoV `22 4A 67 xx`, đọc header MSES v7 (version, số field, số record) theo tên tài nguyên.
-- Chuẩn hóa đường dẫn `Resources/<version>/` để đối chiếu xung đột giữa gói mod lồng và ZIP tài nguyên rời.
-- Telegram bot: gửi ZIP nhỏ trực tiếp hoặc link HTTPS tải ZIP trực tiếp; `/files` liệt kê file, `/merge` ghép ZIP thường, `/clear` xóa danh sách, `/status` xem giới hạn.
-- Web `/api/merge` và Telegram `/merge` đều chặn ghép ZIP thường khi phát hiện cấu trúc AOV lồng hoặc bảng MSES, tránh tạo gói sai do ghi đè/không xử lý phụ thuộc.
-- Bot xử lý ZIP theo luồng trên ổ đĩa tạm, tránh giữ toàn bộ file lớn trong RAM.
+- Web: tải tối đa 10 ZIP theo khối 1 MiB có SHA-256 từng khối, khôi phục phiên tải, kiểm tra cấu trúc, lập manifest và đối chiếu xung đột; ZIP thường chỉ ghép khi không có xung đột.
+- Web API `/api/inspect`: liệt kê phần mở rộng, tên có dấu hiệu là tài nguyên game và so sánh SHA-256 các đường dẫn trùng để phân biệt nội dung giống hệt với xung đột thật (tối đa 80 đường dẫn trùng được hiển thị chi tiết).
+- Web API `/api/capabilities`: công bố registry adapter, phân biệt định dạng chỉ kiểm tra với định dạng có bộ ghép đã xác minh; mặc định fail-closed.
+- Bộ kiểm tra `/inspect` và `/api/inspect` đọc chữ ký 32 byte đầu mỗi mục để phân loại sơ bộ AoV AES/Zstandard, Unity AssetBundle, ZIP lồng, Wwise, ảnh, XML/JSON và dữ liệu chưa nhận diện; chỉ đọc, không sửa tài nguyên.
+- Web API `/api/drive/import`: tải ZIP từ link Google Drive công khai trực tiếp về máy chủ, tối đa 10 link và tổng 500 MB.
+- Web API `/api/upload/{upload_id}/aov-merge`: tự chọn adapter theo cấu trúc ZIP; hỗ trợ hai đường ghép có giới hạn: KPM100 ZIP trực tiếp + VTK, hoặc MOD wrapper 10 skin + các ZIP phần VTK iOS.
+- Web API `/api/upload/{upload_id}/decode-bytes`: giải mã các tài nguyên `.bytes` AoV AES/Zstandard đã nhận diện từ ZIP đã tải lên; hỗ trợ ZIP `Resources.zip` lồng nhau và bung tiếp ZIP bên trong `.pkg.bytes` đã giải mã (tối đa hai tầng), xuất ZIP riêng cùng `decode-report.json`, không sửa ZIP gốc và không ghép tài nguyên.
+- Web API `/api/upload/{upload_id}/notice-scan`: quét chỉ đọc các chuỗi liên quan thông báo trong Lua/XML/JSON/TXT/config/CSV và `.bytes` đã giải mã; trả đường dẫn, từ khóa, đoạn trích ngắn; giữ nguyên phiên tải và file gốc.
+
+## Giải mã tài nguyên AoV `.bytes` trên web
+
+Chọn ZIP rồi bấm **Giải mã tài nguyên .bytes đã hỗ trợ**. Web gọi bộ giải mã AES-CBC/Zstandard hiện có, nhận diện theo header và tên tài nguyên, giải nén các mục `.bytes` hỗ trợ ra một ZIP riêng. Có thể đọc ZIP `Resources.zip` lồng nhau và tiếp tục bung các package `.pkg.bytes` sau giải mã nếu payload bên trong là ZIP, tối đa hai tầng lồng. ZIP nguồn không bị thay đổi; báo cáo `decode-report.json` ghi chế độ giải mã, kích thước, file chưa hỗ trợ và đường dẫn đầu ra. Payload MSES được phân tích thêm version, số field, số row, trạng thái checksum, inventory prefix 4 byte đầu từng row (giới hạn 4.096 row), kích thước row, marker `Hero_LiXin_Skin_C` và prefix trùng; prefix được ghi rõ là dữ liệu thô, không khẳng định đó là khóa ngữ nghĩa; `HeroSkin_1/2.bytes` được thử parse IFix để báo số FixInfo/method/type/string/field; payload `.pkg.bytes` dạng ZIP được bung tiếp và ghi số entry.
+
+Bộ lõi MSES v7 có parser, serializer, kiểm tra checksum và ghép theo khóa. Mọi khóa row mới phải nằm trong allowlist riêng của bảng. Soundbank chỉ nhận row có marker `Hero_LiXin_Skin_C`; `ResSkinSeniorLabelCfg` chỉ nhận key 59500 và từ chối nếu key này đã tồn tại với payload khác; `skillcombine` chỉ nhận đúng năm key Actor 595 đã xác minh (0x000915A7–0x000915AB). Không nối byte hoặc ghi đè bảng khi thiếu quy tắc theo schema.
+
+Giới hạn: tối đa 20.000 entry, 1 GiB dữ liệu giải nén, 256 MiB mỗi entry và 256 MiB kích thước giải mã khai báo cho mỗi tài nguyên. Chức năng này chỉ trích xuất payload đã giải mã để kiểm tra/phân tích; không sửa MSES/IFix, không giải mã Unity AssetBundle hoặc Wwise BNK, không ghép skin và không tạo ZIP có thể cài vào game.
+
+## Quét thông báo khởi động (chỉ đọc)
+
+Trên web dùng nút **Quét thông báo khởi động**; sau khi quét, có thể tải riêng `aki-aov-notice-scan-report.json`. Bộ quét chỉ đọc, giải mã các `.bytes` đã hỗ trợ, bung ZIP package lồng nhau và dò từ khóa trong Lua/XML/JSON/TXT/INI/CFG/CSV cùng metadata object của UnityFS AssetBundle (MonoBehaviour, TextAsset, ScriptableObject; giới hạn 64 MiB/bundle và 500 object). Chế độ quét không tạo ZIP tạm, giới hạn 256 MiB dữ liệu đã giải mã và giữ nguyên ZIP nguồn.
+
+Đây là quét heuristic để tìm ứng viên, không chứng minh chuỗi tìm được là popup đang hiển thị. Bundle vượt giới hạn, payload nhị phân opaque và định dạng không giải mã được có thể bị bỏ qua; báo cáo nêu rõ số AssetBundle đã quét/bỏ qua và lý do. Không tự xóa hoặc ghi đè tài nguyên chỉ vì một từ khóa xuất hiện. Cần đối chiếu object/script và kiểm tra trong game trước khi tạo bản sửa.
+## Bộ ghép KPM100 iOS + Vấn Tâm Kiếm VTK
+
+Adapter này nhận đúng KPM100 iOS MOD 1.64.1.12_KPM dạng ZIP trực tiếp (cây `Resources/1.64.1/`, 70 `KPM_MOD_*` payload) cùng VTK iOS Vấn Tâm Kiếm Actor 595 phiên bản 1.64.1.11. Bộ xử lý kiểm tra hash và cấu trúc của cặp nguồn KPM100 đã được tích hợp riêng; không nhận ZIP khác chỉ vì tên file giống nhau.
+
+## Bộ ghép MOD wrapper 10 skin + Vấn Tâm Kiếm VTK
+
+Adapter này nhận một ZIP MOD wrapper có đúng một `Resources.zip` và một `DanhSachSkin.txt`, cộng với một hoặc nhiều ZIP phần VTK (tối đa 10 ZIP tổng). `Resources.zip` bên trong phải có các tài nguyên nền đúng schema iOS 1.64.1.12; bộ VTK phải đúng phiên bản 1.64.1.11 và có đủ chính xác 10 AssetBundle Actor 595 bắt buộc. VTK chia thành Part1/Part2/Part3 được hỗ trợ; đường dẫn được chuẩn hóa trước khi ghép và các file trùng giữa các phần chỉ được bỏ qua khi nội dung giống hệt.
+
+Bộ ghép không thay cả file trùng một cách mù quáng. Nó dùng adapter riêng cho IFix, MSES v7 theo allowlist, CommonActions XML/track, ResourcePackerInfoSet, ResourceVerificationInfoSet, AssetBundle và sound iOS. Nó kiểm tra CRC ZIP đầu vào/đầu ra, checksum bảng, inventory đường dẫn nền và metadata phụ thuộc; thiếu/thừa AssetBundle, sai phiên bản, checksum không hợp lệ hoặc xung đột chưa có quy tắc sẽ dừng và không xuất file hoàn chỉnh. Không cần đưa ZIP wrapper lên GitHub Release; có thể tải trực tiếp các ZIP nguồn lên web.
+
+Trên bộ nguồn 10 skin + ba phần VTK đã được tích hợp trước đó, báo cáo ghi nhận ZIP ứng viên 150,793,052 byte, giữ 59/59 đường dẫn nền, thêm 24 tài nguyên VTK, 10/10 AssetBundle Actor 595 có thể đọc và các bước IFix, CommonActions, MSES, Packer/Verification đều qua kiểm tra cấu trúc. Đây là **xác minh cấu trúc**, không phải test trong Liên Quân iOS. Hiệu ứng, biến về, thông báo hạ, nút bấm, âm thanh và khả năng vào trận vẫn phải thử trên thiết bị; không có cam kết tương thích 100% trước bước đó.
+
+**Giới hạn chung:** chỉ hỗ trợ đúng schema iOS 1.64.1.12 + VTK 1.64.1.11 và bộ Actor 595 nêu trên. Không tải, không yêu cầu và không chèn tài nguyên từ bộ cài game gốc. Các ZIP AoV khác tiếp tục bị từ chối hoặc chỉ kiểm kê cho tới khi có adapter riêng.
+
+## Phạm vi kiểm tra Wwise BNK
+
+Bộ đọc BNK hiện kiểm tra chunk, DIDX/DATA, hash media và inventory HIRC. Phần framing HIRC chọn độ rộng trường object type theo bank version: 4 byte với version <= 48 và 1 byte từ version 49. Payload của từng loại HIRC vẫn được giữ opaque; chưa giải mã đồ thị Event/Action/Container, chưa giải quyết tham chiếu WEM/HIRC và chưa có serializer. So sánh BNK chỉ mang tính tư vấn, không cấp quyền ghép hoặc thay thế SoundBank.
 
 ## Chạy web
 ```bash
@@ -19,29 +51,52 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 Mở http://localhost:8000
 
-## Chạy Telegram bot
-Thiết lập `BOT_TOKEN` và `ALLOWED_USER_IDS` trong phần Environment/Secrets của nền tảng triển khai. `ALLOWED_USER_IDS` là danh sách Telegram ID dạng số, phân cách bằng dấu phẩy; toàn bộ bot sẽ từ chối tài khoản nếu biến này để trống. Không commit token hoặc ID vào GitHub.
-```bash
-python bot.py
-```
+## Nhập ZIP từ Google Drive
+- Trên web, để ghép MOD wrapper 10 skin, chọn ZIP có `Resources.zip` + `DanhSachSkin.txt` cùng các ZIP phần VTK iOS (Part1/Part2/Part3). Hoặc chọn KPM100 ZIP trực tiếp + VTK. Máy chủ tự nhận dạng adapter; cả hai chỉ nhận đúng phiên bản/schema.
+- File phải bật quyền “Bất kỳ ai có đường liên kết”.
+- Chỉ nhận link `drive.google.com` hoặc `docs.google.com`; máy chủ tự tải file, giới hạn 500 MB mỗi ZIP và tổng 500 MB.
+- Sau khi tải và kiểm tra, dùng nút ghép AOV chuyên sâu trước khi phiên upload hết hạn (1 giờ).
 
-### Giới hạn file Telegram
-- Nếu gửi tệp đính kèm qua Bot API mặc định: bot chỉ tải được file tối đa 20 MB; code sẽ báo rõ giới hạn này.
-- Phương án miễn phí tạm thời: gửi cho bot một **liên kết HTTPS tải trực tiếp tới file ZIP công khai**. Bot tải theo luồng xuống ổ đĩa tạm, kiểm tra ZIP và giới hạn tổng link là 500 MB. Link trang xem trước của Drive/Dropbox có thể không phải link tải trực tiếp và có thể bị từ chối.
-- Với Bot API mặc định, bot chỉ gửi ZIP kết quả tối đa 50 MB. Nếu kết quả lớn hơn, bot giữ file nguồn và báo cần Local Bot API hoặc một kho lưu trữ kết quả riêng. Vì vậy link intake chưa thay thế hoàn toàn Local Bot API.
-- Để nhận ZIP tới 500 MB và gửi ZIP kết quả lớn, cần tự chạy **Local Bot API Server** với cờ `--local`.
-- Khi đã có Local Bot API Server, thêm hai biến môi trường vào dịch vụ bot:
-  - `TELEGRAM_API_BASE_URL=http://<host-noi-bo>:8081/bot`
-  - `TELEGRAM_FILE_BASE_URL=http://<host-noi-bo>:8081/file/bot`
-- Cả hai URL phải trỏ tới Local Bot API Server có thể truy cập được từ bot. Không dùng URL ví dụ ở trên nếu chưa triển khai server.
-- Local Bot API Server cần `TELEGRAM_API_ID` và `TELEGRAM_API_HASH` lấy từ https://my.telegram.org. Không đưa các giá trị này lên GitHub.
-- Trước khi chuyển bot từ máy chủ Telegram chính thức sang Local Bot API Server, phải gọi phương thức `logOut` trên Bot API chính thức, dừng worker cũ, rồi mới đổi URL và khởi động worker mới. Làm đúng thứ tự để tránh hai máy chủ cùng nhận updates.
-- Mức giới hạn của code hiện tại khi bật Local Bot API: tối đa 500 MB mỗi ZIP, tổng file đầu vào 500 MB, tối đa 10 ZIP; ZIP đầu ra tối đa 1 GB. Máy chủ triển khai vẫn cần đủ RAM và dung lượng ổ đĩa tạm.
+## Triển khai web
+- Build bằng Dockerfile hiện có; ứng dụng FastAPI lắng nghe cổng `8000`.
+- Health check: `GET /health`.
+- Kiểm tra phạm vi adapter trước khi dùng: `GET /api/capabilities`.
+- Phiên tải mặc định nằm trên filesystem tạm và bộ nhớ tiến trình. Nếu bật persistent disk, đặt `AOV_UPLOAD_STORAGE_DIR` theo mount path có quyền ghi; ứng dụng hiện yêu cầu một Uvicorn worker để giữ session nhất quán.
+- Không bật adapter chỉ dựa vào CI xanh. `game_tested` chỉ được true sau khi có xác nhận thử nghiệm thật trong Liên Quân iOS.
 
-## Triển khai
-- Web: triển khai riêng bằng Dockerfile hiện có.
-- Telegram bot: triển khai như worker riêng, lệnh chạy `python bot.py`, có biến `BOT_TOKEN`.
-- Local Bot API Server: là dịch vụ riêng, cần Docker và ổ đĩa lưu trữ đủ lớn. Worker bot phải truy cập được server qua mạng nội bộ hoặc URL riêng an toàn.
+## Giới hạn và xác minh
+- CI chạy unit tests và kiểm tra cú pháp Python.
+- Bộ ghép kiểm tra CRC ZIP, checksum MSES, IFix index, XML CommonActions và cấu trúc PackerInfo.
+- Chưa có xác nhận chạy thực tế trong Liên Quân iOS. ZIP kết quả phải được thử trong game; không xem kiểm tra cấu trúc là bảo đảm tương thích 100%.
+- Chỉ hỗ trợ hai cặp nguồn/schema và phiên bản nêu trên. Không tự áp dụng cho bản game/skin khác.
 
-## Giới hạn về Liên Quân
-Phần ghép hiện tại chỉ hợp nhất ZIP thông thường: giữ tệp trùng nội dung một lần và báo lỗi nếu cùng đường dẫn nhưng nội dung khác nhau. Bộ kiểm tra có thể giải mã header AES và nhận diện MSES v7, nhưng **chưa** có bộ parser/serializer record MSES, bộ ghép IFix, CommonActions XML nén Zstandard, hoặc bộ cập nhật đồng bộ ResourcePacker/ResourceVerification cho mọi gói AOV. Vì vậy các gói AOV có tài nguyên lồng/MSES sẽ bị chặn khỏi đường ghép ZIP thường thay vì tạo ra file có nguy cơ mất skin, hiệu ứng hoặc âm thanh. Chưa xem bất kỳ ZIP nào là bản mod đã xác nhận chạy trong game.
+### Lập kế hoạch tương thích tài nguyên (chỉ tư vấn)
+
+API `POST /api/compatibility/plan` nhận manifest JSON dạng `{"resources":[...]}`. Mỗi mục cần `path`, `sha256` (64 ký tự hex) và `format`; có thể thêm `source`, `game_version`, `platform`, `actor_id`, `skin_id`, `is_aov_resource` và `dependencies`.
+
+API phân loại từng đường dẫn thành `SAFE_MERGE`, `IDENTICAL_DUPLICATE`, `NEEDS_RULE`, `UNSUPPORTED` hoặc `VERSION_CONFLICT`. Đây là báo cáo tư vấn từ metadata được gửi lên, không phải bộ phân tích ZIP tự động, không xác thực payload và tuyệt đối không cấp quyền cho bộ ghép bỏ qua adapter. Chỉ executor với adapter đã xác minh mới được tạo ZIP đầu ra.
+
+API `POST /api/compatibility/inspect` nhận nhiều ZIP qua multipart field `files`, tự lập manifest chỉ đọc (đường dẫn, định dạng chữ ký, SHA-256, kích thước, CRC32, nguồn) rồi chạy compatibility planner. Giới hạn hiện tại: tối đa 10 ZIP, 500 MB tổng đầu vào, 20.000 resource và 1 GiB tổng dữ liệu giải nén. API không giải mã AoV AES, không suy diễn dependency Unity/Wwise từ tên file và không sửa payload. Các resource AoV được đánh dấu cần adapter riêng; kết quả không phải quyền ghép.
+
+Với mục AssetBundle UnityFS có kích thước không quá 64 MiB, manifest còn thử đọc metadata AssetBundle để lấy danh sách `m_Dependencies` và external CAB paths ở chế độ chỉ đọc. Kết quả có cờ `dependency_inventory_complete`; nếu parser lỗi, dữ liệu vượt giới hạn hoặc quét tham chiếu chưa đầy đủ thì dependency được đánh dấu chưa hoàn chỉnh. Đây chưa phải xác minh mọi dependency đã được đóng gói, và không tạo ra quyền sửa hoặc ghép bundle.
+
+Compatibility planner giữ riêng các trường `unity_dependencies`, `unity_external_paths` và `dependency_inventory_complete` trong báo cáo cho từng AssetBundle. Các tham chiếu Unity này không bị ép thành đường dẫn ZIP thông thường để tránh kết luận sai về dependency còn thiếu.
+
+Trong báo cáo tương thích, `SAFE_MERGE` chỉ dành cho tệp văn bản tài liệu không thuộc tài nguyên AoV (ví dụ `.txt`, `.md`, `.rst`, `.license`) và chỉ có nghĩa là có thể thêm đường dẫn ở cấp ZIP. Ảnh, âm thanh, JSON cấu hình, bundle và các tệp có thể được game sử dụng vẫn cần quy tắc riêng; không được hiểu `SAFE_MERGE` là bảo đảm chạy trong Liên Quân.
+
+Với ZIP dạng wrapper có chứa `Resources.zip`, manifest kiểm tra thêm đúng một tầng ZIP lồng nhau ở chế độ chỉ đọc. Báo cáo giữ `container_path` để phân biệt tệp trong ZIP ngoài và tài nguyên bên trong, đồng thời tính giới hạn số entry/dung lượng trên cả hai tầng. ZIP lồng sâu hơn không được tự động bung.
+
+Manifest cũng suy luận phiên bản game/nền tảng từ tên ZIP khi đường dẫn tài nguyên bên trong không chứa metadata đó. Compatibility planner tổng hợp phiên bản và nền tảng trên toàn bộ từng ZIP đầu vào, không chỉ các đường dẫn bị trùng; vì vậy hai ZIP có phiên bản iOS khác nhau vẫn được cảnh báo dù chúng chứa các đường dẫn tài nguyên riêng biệt. Đây là cảnh báo dựa trên tên archive/đường dẫn, không phải xác thực phiên bản nhị phân; nếu không tìm thấy metadata thì báo cáo ghi không xác định và không tự kết luận tương thích.
+
+Bộ kiểm tra Wwise BNK đọc tối đa 40 SoundBank mỗi lượt, mỗi file không quá 64 MiB. Ngoài so sánh các file trùng đường dẫn, báo cáo còn nhóm theo `BKHD Bank ID` để phát hiện các bản sao cùng identity dù tên file khác nhau; nếu cùng Bank ID nhưng payload khác, công cụ đối chiếu SHA-256 của media `DIDX/DATA` và HIRC object payload để đánh dấu `NEEDS_RULE`. Đây chỉ là inventory/xung đột identity: chưa giải mã HIRC reference graph, Event/Action semantics hoặc tạo SoundBank mới, và không cấp quyền ghép.
+
+
+### Persistent upload sessions (optional)
+
+By default, upload sessions and temporary ZIP files live in the instance's temporary filesystem and in-memory session registry. To restore interrupted uploads after an application restart, set `AOV_UPLOAD_STORAGE_DIR` to a writable persistent mount path. The application writes each upload session's metadata atomically beside its uploaded ZIP chunks and validates the files before restoring a session. The web service must run with a single Uvicorn worker: active session state is held in that worker's memory, so multiple worker processes would not share upload IDs or chunk offsets. The repository Dockerfile starts one worker by default; do not add `--workers` unless session state is moved to a shared backend.
+
+For a Render service using a persistent disk, a typical configuration is:
+- Disk mount path: `/var/data`
+- Environment variable: `AOV_UPLOAD_STORAGE_DIR=/var/data/aki-aov-uploads`
+
+Render persistent disks require a paid service and restrict the service to one instance; they also disable zero-downtime deploys. Leave the variable unset to retain the existing ephemeral-storage behavior. A persistent disk does not provide shared storage for multiple service instances. See the [Render persistent disk documentation](https://render.com/docs/disks).

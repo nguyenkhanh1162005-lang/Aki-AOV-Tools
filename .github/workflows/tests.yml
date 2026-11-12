@@ -2,20 +2,49 @@ name: Tests
 
 on:
   push:
-    branches:
-      - main
-      - feature/universal-aov-inspection
+    branches: ["**"]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  unit-tests:
+  python-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install dependencies
-        run: python -m pip install -r requirements.txt
-      - name: Run unit tests
-        run: python -m unittest discover -s tests -v
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python -m compileall -q app bot.py tools
+      - name: Check web JavaScript syntax
+        run: python -c "import re,pathlib; h=pathlib.Path('web/index.html').read_text(); pathlib.Path('/tmp/aki-web.js').write_text('\\n'.join(re.findall(r'<script>(.*?)</script>',h,re.S)))" && node --check /tmp/aki-web.js
+      - name: Build deployment Docker image
+        run: docker build --pull -t aki-aov-tools:ci .
+      - name: Smoke-test Docker container health endpoint
+        run: |
+          container_id="$(docker run -d --rm -p 8000:8000 aki-aov-tools:ci)"
+          trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error http://127.0.0.1:8000/health -o /tmp/aki-health.json; then
+              python -c 'import json; data=json.load(open("/tmp/aki-health.json")); assert data == {"status":"ok","service":"Aki AOV Tools"}, data'
+              curl --fail --silent --show-error http://127.0.0.1:8000/api/capabilities -o /tmp/aki-capabilities.json
+              python -c 'import json; data=json.load(open("/tmp/aki-capabilities.json")); items={x["id"]:x for x in data["adapters"]}; assert data["policy"]=="fail_closed"; assert items["aov_kpm100_vtk_actor595_1.64.1"]["status"]=="merge_supported_version_locked"; assert items["aov_mod_to_mod_vtk_actor595_1.64.1"]["status"]=="merge_supported_version_locked"; assert data["summary"]["version_locked"]==2; assert data["summary"]["blocked"]==0; assert data["game_tested"] is False'
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$container_id"
+          exit 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ifix-parser-source
+          path: tools/ifix_parse.py
+      - name: Package app source for integration validation
+        run: zip -qr /tmp/aki-aov-app-source.zip app web bot.py requirements.txt -x '*/__pycache__/*' '*.pyc'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aki-aov-app-source
+          path: /tmp/aki-aov-app-source.zip
