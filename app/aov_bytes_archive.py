@@ -163,7 +163,7 @@ def _collect_bounded_strings(value: Any) -> tuple[list[str], bool]:
 
 def _scan_notice_assetbundle(data: bytes, path: str) -> dict[str, Any]:
     """Bounded, read-only scan of Unity object names and text fields."""
-    signatures = (b"UnityFS\\x00", b"UnityRaw\\x00", b"UnityWeb\\x00")
+    signatures = (b"UnityFS\x00", b"UnityRaw\x00", b"UnityWeb\x00")
     payload = data
     if not payload.startswith(signatures):
         if _expected_decoded_size(payload) is None:
@@ -219,7 +219,7 @@ def _scan_notice_assetbundle(data: bytes, path: str) -> dict[str, Any]:
                     tree = obj.read_typetree()
                     strings, truncated = _collect_bounded_strings(tree)
                 text_truncated = text_truncated or truncated
-                text = "\\n".join(item for item in strings if item)
+                text = "\n".join(item for item in strings if item)
                 if not text:
                     continue
                 object_name = next(
