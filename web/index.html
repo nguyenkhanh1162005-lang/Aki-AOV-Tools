@@ -84,6 +84,35 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
 .preserve-item{display:flex;align-items:center;gap:7px;padding:8px 9px;border:1px solid #29445a;border-radius:10px;background:#0b1928;color:#d6e9f2;font-size:10px;font-weight:750}
 .preserve-item b{font-size:14px}
 @media(max-width:520px){.preserve-item{font-size:9px;padding:7px}.preserve-grid{gap:6px}}
+ 
+.preflight-dashboard{display:grid;gap:13px;margin:12px 0 15px}
+.preflight-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.preflight-metric{padding:13px;border:1px solid #29415e;border-radius:13px;background:linear-gradient(145deg,#14263d,#0d1929)}
+.preflight-metric strong{display:block;font-size:20px;line-height:1.15;color:#e5f1ff;font-variant-numeric:tabular-nums}
+.preflight-metric span{display:block;margin-top:5px;color:#91a8c3;font-size:10px;font-weight:750;letter-spacing:.04em}
+.preflight-state{display:flex;align-items:flex-start;gap:11px;padding:14px;border:1px solid #38506b;border-radius:14px;background:#101e30}
+.preflight-state[data-ready="true"]{border-color:#397f73;background:linear-gradient(110deg,#102a2b,#112437)}
+.preflight-state[data-ready="false"]{border-color:#7a6541;background:linear-gradient(110deg,#2b2519,#1b2331)}
+.preflight-state-icon{display:grid;place-items:center;flex:0 0 34px;height:34px;border-radius:11px;background:#263d57;font-size:17px}
+.preflight-state strong{display:block;font-size:13px}
+.preflight-state p{margin:4px 0 0;color:#a8bad0;font-size:11px;line-height:1.55}
+.preflight-group{padding:13px;border:1px solid #263d58;border-radius:14px;background:#0c1828}
+.preflight-group h3{margin:0 0 10px;color:#dceaff;font-size:12px}
+.preflight-sources{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.preflight-source{min-width:0;padding:10px;border:1px solid #263c56;border-radius:11px;background:#101f32}
+.preflight-source strong{display:block;overflow-wrap:anywhere;color:#e1edfb;font-size:11px}
+.preflight-source span{display:block;margin-top:4px;color:#9bb0ca;font-size:10px;line-height:1.45}
+.preflight-resource-list{display:grid;gap:8px}
+.preflight-resource{padding:11px;border:1px solid #30465f;border-radius:11px;background:#101e30}
+.preflight-resource-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.preflight-resource-head strong{min-width:0;overflow-wrap:anywhere;color:#e2edf9;font-size:11px}
+.preflight-tag{flex:0 0 auto;padding:3px 7px;border:1px solid #465d79;border-radius:99px;color:#bdd2ec;font-size:9px;font-weight:800}
+.preflight-tag.danger{border-color:#8b5555;background:#3a2028;color:#ffc4c4}
+.preflight-tag.warning{border-color:#806b45;background:#352c1b;color:#f4d89b}
+.preflight-tag.safe{border-color:#39756a;background:#16332e;color:#adf0dc}
+.preflight-resource p{margin:5px 0 0;color:#9db0c7;font-size:10px;line-height:1.5}
+.preflight-blockers{margin:0;padding-left:18px;color:#f0d5a3;font-size:11px;line-height:1.6}
+@media(max-width:620px){.preflight-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.preflight-sources{grid-template-columns:1fr}.preflight-resource-head{flex-direction:column}}
 </style></head>
 <body>
 <div class="app-shell">
@@ -186,6 +215,7 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
     <h2 class="section-title"><span class="section-number">03</span> Kết quả phân tích</h2>
     <p class="section-sub">Trạng thái xử lý và báo cáo chi tiết sẽ hiển thị tại đây.</p>
     <div id="status" role="status">Chờ chọn ZIP để bắt đầu.</div>
+    <div id="preflightDashboard" class="preflight-dashboard" hidden aria-live="polite"></div>
     <pre id="report"></pre>
   </div>
 </section>
