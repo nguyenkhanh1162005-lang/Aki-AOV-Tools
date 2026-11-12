@@ -16,7 +16,6 @@ from telegram import FSInputFile
 
 from app.mod_pipeline import merge_mod_archives, ModPipelineError
 from app.aov_inspector import inspect_archives, InspectError
-from app.aov_merger import merge_aov_archives, AOVMergeError
 
 MIB = 1024 * 1024
 LOCAL_API = bool(
@@ -155,21 +154,22 @@ async def inspect(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def aovmerge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Compatibility alias that uses the same fail-closed production pipeline as web."""
     files = context.user_data.get("zips", [])
     if len(files) < 2:
         await update.effective_message.reply_text(
-            "Cần một gói MOD 10 skin và ít nhất một phần ZIP của MOD Vấn Tâm Kiếm trước khi dùng /aovmerge."
+            "Cần tải lên ít nhất hai ZIP thuộc cùng một bộ mod tương thích trước khi dùng /aovmerge."
         )
         return
 
     folder = _workdir(context)
-    output_path = folder / "Aki-AOV-10Skin-VanTamKiem.zip"
+    output_path = folder / "Aki-AOV-KPM100-VTK.zip"
     status_message = await update.effective_message.reply_text(
-        "Đang ghép tài nguyên AOV theo phiên bản. Quá trình này có thể mất vài phút..."
+        "Đang kiểm tra phiên bản, nguồn và SHA-256 rồi ghép bằng pipeline chung..."
     )
     try:
         report = await asyncio.to_thread(
-            merge_aov_archives,
+            merge_mod_archives,
             [path for _, path in files],
             str(output_path),
         )
@@ -183,29 +183,25 @@ async def aovmerge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         await status_message.edit_text(
-            "Đã ghép và kiểm tra cấu trúc nội bộ:\n"
-            f"Mod 10 skin {report['base_version']} + mod Vấn Tâm Kiếm {report['vtk_version']}\n"
-            f"IFix: {report['ifix_fixes']} FixInfo / {report['ifix_methods']} method\n"
-            f"CommonActions: {report['common_actions_files']} file XML, "
-            f"{report['common_actions_tracks']} track\n"
-            f"AssetBundle: {report['assetbundles']}\n"
-            "Chưa được xác nhận chạy trong Liên Quân iOS. Đang gửi ZIP..."
+            f"Đã ghép bằng adapter {report['adapter']} ({output_size / MIB:.1f} MB). "
+            "Đã kiểm tra cấu trúc ZIP và dữ liệu theo adapter; chưa xác nhận chạy trong game. "
+            "Đang gửi file..."
         )
         await update.effective_message.reply_document(
-            document=FSInputFile(str(output_path), filename="Aki-AOV-10Skin-VanTamKiem.zip"),
+            document=FSInputFile(str(output_path), filename="Aki-AOV-KPM100-VTK.zip"),
             read_timeout=1800,
             write_timeout=1800,
             connect_timeout=60,
             pool_timeout=60,
         )
         _cleanup(context)
-    except AOVMergeError as exc:
+    except ModPipelineError as exc:
         await status_message.edit_text(
-            f"Không ghép được AOV: {exc}\nCác file nguồn vẫn được giữ lại."
+            f"Không ghép được bằng pipeline an toàn: {exc}\nCác file nguồn vẫn được giữ lại."
         )
     except Exception as exc:
         await status_message.edit_text(
-            f"Ghép hoặc gửi thất bại: {type(exc).__name__}. "
+            f"Gửi hoặc xử lý thất bại: {type(exc).__name__}. "
             "Các file nguồn vẫn được giữ lại; có thể dùng /aovmerge để thử lại."
         )
 
