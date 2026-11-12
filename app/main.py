@@ -491,15 +491,12 @@ async def scan_chunked_aov_notices(upload_id: str):
     session = _get_upload_session(upload_id)
     if any(item["received"] != item["size"] for item in session["files"]):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
-    output_path = Path(session["workdir"]) / ".aki-aov-notice-scan.zip"
     try:
         report = await run_in_threadpool(
-            decode_archive_resources, session["paths"], str(output_path)
+            decode_archive_resources, session["paths"], "", scan_only=True
         )
     except AOVBytesArchiveError as exc:
         raise HTTPException(400, str(exc)) from exc
-    finally:
-        output_path.unlink(missing_ok=True)
     session["created"] = time.time()
     _persist_upload_session(upload_id, session)
     return {
@@ -507,6 +504,7 @@ async def scan_chunked_aov_notices(upload_id: str):
         "candidates": report.get("notice_candidates", []),
         "truncated": report.get("notice_candidates_truncated", False),
         "decoded_resources": len(report.get("decoded", [])),
+        "decoded_bytes": report.get("decoded_bytes", 0),
         "unsupported_resources": len(report.get("unsupported", [])),
         "nested_packages_expanded": report.get("nested_packages_expanded", 0),
         "scope": report.get("notice_scan_scope", ""),
@@ -514,6 +512,7 @@ async def scan_chunked_aov_notices(upload_id: str):
             "Đây là quét từ khóa chỉ đọc, không chứng minh chuỗi tìm được là popup "
             "đang hiển thị. Không có kết quả không có nghĩa là không tồn tại thông báo: "
             "AssetBundle, payload nhị phân opaque và định dạng chưa giải mã không được quét. "
+            "Chế độ quét giới hạn 256 MiB dữ liệu đã giải mã và không ghi ZIP tạm. "
             "Không xóa hoặc ghi đè tài nguyên chỉ dựa trên từ khóa."
         ),
     }
