@@ -415,11 +415,14 @@ async def start_chunked_upload(payload: dict = Body(...)):
         })
     if total > MAX_INPUT_BYTES:
         raise HTTPException(413, "Tổng dung lượng ZIP vượt quá 500 MB.")
+    upload_protocol = payload.get("upload_protocol", "sequential_v1")
+    if upload_protocol not in {"sequential_v1", "chunk_map_v2"}:
+        raise HTTPException(400, "Giao thức tải lên không hợp lệ.")
     upload_id = uuid.uuid4().hex
     workdir = _new_upload_workdir("aki-aov-chunks-")
     UPLOAD_SESSIONS[upload_id] = {
         "created": time.time(),
-        "upload_protocol": "chunk_map_v2",
+        "upload_protocol": upload_protocol,
         "workdir": str(workdir),
         "files": clean_files,
         "paths": [str(workdir / f"{i}_{item['name']}") for i, item in enumerate(clean_files, 1)]
@@ -439,20 +442,26 @@ async def chunked_upload_status(upload_id: str):
     session = _get_upload_session(upload_id)
     session["created"] = time.time()
     _persist_upload_session(upload_id, session)
+    protocol = session.get("upload_protocol", "sequential_v1")
+    status_files = []
+    for item in session["files"]:
+        file_status = {
+            "name": item["name"],
+            "size": item["size"],
+            "received": item["received"],
+            "received_chunk_sha256": item.get("received_chunk_sha256", []),
+        }
+        if protocol == "chunk_map_v2":
+            file_status["received_chunks"] = [
+                {"index": int(key), "sha256": digest}
+                for key, digest in sorted(item.get("received_chunks", {}).items(), key=lambda pair: int(pair[0]))
+            ]
+        status_files.append(file_status)
     return {
         "upload_id": upload_id,
-        "upload_protocol": session.get("upload_protocol", "sequential_v1"),
+        "upload_protocol": protocol,
         "chunk_size": UPLOAD_CHUNK_BYTES,
-        "files": [
-            {
-                "name": item["name"],
-                "size": item["size"],
-                "received": item["received"],
-                "received_chunk_sha256": item.get("received_chunk_sha256", []),
-                "received_chunks": [{"index": int(k), "sha256": v} for k, v in sorted(item.get("received_chunks", {}).items(), key=lambda pair: int(pair[0]))],
-            }
-            for item in session["files"]
-        ],
+        "files": status_files,
         "expires_in_seconds": UPLOAD_TTL_SECONDS,
     }
 
