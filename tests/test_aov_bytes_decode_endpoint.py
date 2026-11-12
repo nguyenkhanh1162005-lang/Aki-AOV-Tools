@@ -2,6 +2,8 @@ import io
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 import zipfile
 from pathlib import Path
 
@@ -71,6 +73,28 @@ class AOVBytesDecodeEndpointTests(unittest.IsolatedAsyncioTestCase):
             resources_buffer = io.BytesIO()
             with zipfile.ZipFile(resources_buffer, "w") as resources:
                 resources.writestr("KernelLua.pkg.bytes", encoded_package)
+                resources.writestr(
+                    "assetbundle/ui/startup.assetbundle",
+                    b"UnityFS\x00fake-unity-bundle",
+                )
+
+            class FakeObject:
+                type = SimpleNamespace(name="MonoBehaviour")
+                path_id = 27
+
+                def read_typetree(self):
+                    return {
+                        "m_Name": "LoginNoticeController",
+                        "m_Message": "ShowLoginNotice",
+                    }
+
+            fake_asset = SimpleNamespace(
+                name="resources.assets",
+                objects={27: FakeObject()},
+            )
+            fake_unitypy = SimpleNamespace(
+                load=lambda payload: SimpleNamespace(assets=[fake_asset])
+            )
             with zipfile.ZipFile(source, "w") as wrapper:
                 wrapper.writestr("Resources.zip", resources_buffer.getvalue())
 
@@ -87,14 +111,25 @@ class AOVBytesDecodeEndpointTests(unittest.IsolatedAsyncioTestCase):
             }
 
             try:
-                result = await main.scan_chunked_aov_notices(upload_id)
+                with patch(
+                    "app.assetbundle_inspector._load_unitypy_aov",
+                    return_value=fake_unitypy,
+                ):
+                    result = await main.scan_chunked_aov_notices(upload_id)
                 self.assertGreater(result["scan_files"], 0)
+                self.assertEqual(result["notice_assetbundles_scanned"], 1)
                 self.assertTrue(any(
                     item["keyword_group"] == "login_notice"
                     and item["path"] == "Scripts/LoginNotice.lua"
                     for item in result["candidates"]
                 ))
+                self.assertTrue(any(
+                    item["keyword_group"] == "login_notice"
+                    and "LoginNoticeController" in item["path"]
+                    for item in result["candidates"]
+                ))
                 self.assertIn("AssetBundle", result["warning"])
+                self.assertEqual(result["notice_assetbundle_scan_errors"], [])
                 self.assertIn(upload_id, main.UPLOAD_SESSIONS)
                 self.assertTrue(source.exists())
                 self.assertFalse((workdir / ".aki-aov-notice-scan.zip").exists())
