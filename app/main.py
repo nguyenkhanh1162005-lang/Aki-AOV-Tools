@@ -430,7 +430,7 @@ async def start_chunked_upload(payload: dict = Body(...)):
         UPLOAD_SESSIONS.pop(upload_id, None)
         shutil.rmtree(workdir, ignore_errors=True)
         raise HTTPException(507, "Không thể lưu phiên tải lên trên ổ đĩa.") from exc
-    return {"upload_id": upload_id, "chunk_size": UPLOAD_CHUNK_BYTES}
+    return {"upload_id": upload_id, "upload_protocol": "chunk_map_v2", "chunk_size": UPLOAD_CHUNK_BYTES}
 
 
 @app.get("/api/upload/{upload_id}/status")
