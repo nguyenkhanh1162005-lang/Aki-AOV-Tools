@@ -520,7 +520,7 @@ class ModPipelineTests(unittest.TestCase):
         self.assertEqual(by_id["kill_notifications"]["path_count"], 222)
         self.assertEqual(by_id["kill_notifications"]["unresolved_count"], 221)
         self.assertEqual(by_id["kill_notifications"]["identical_duplicate_count"], 1)
-        self.assertTrue(by_id["kill_notifications"]["details_truncated"] is False)
+        self.assertTrue(by_id["kill_notifications"]["details_truncated"])
         self.assertEqual(by_id["effects_recall"]["unresolved_count"], 1)
         self.assertEqual(by_id["ui_buttons"]["unresolved_count"], 1)
         self.assertEqual(by_id["audio"]["unresolved_count"], 1)
