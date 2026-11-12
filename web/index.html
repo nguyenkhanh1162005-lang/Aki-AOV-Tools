@@ -130,7 +130,7 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
         </div>
         <div class="action-card">
           <h3>Nhận diện bộ nguồn nhiều MOD</h3>
-          <p>Phân loại 9 skin, 10 skin, Tamyn, VTK và Actor ID; phát hiện nhiều gói nền.</p>
+          <p>Nhận diện riêng P9, P10, TM Tamyn - Robot và VTK Part 1–3; báo rõ file nào còn thiếu.</p>
           <button id="aovPreflight" class="button button-sky" disabled>⌕ Phân loại bộ MOD + VTK</button>
         </div>
         <div class="action-card">
@@ -427,22 +427,40 @@ aovPreflightBtn.addEventListener('click',async()=>{
       aov_skin_mod_container_candidate:'MOD wrapper (Resources.zip + DanhSachSkin.txt)',
       aov_kpm100_direct_base_candidate:'KPM100 direct base',
       aov_actor595_mod_candidate:'Nguồn có dấu hiệu VTK Actor 595',
+      aov_actor593_mod_candidate:'Nguồn có dấu hiệu TM / Actor 593',
       aov_mod_unclassified:'MOD AoV chưa phân loại'
     };
     const lines=[
       'BÁO CÁO PHÂN LOẠI BỘ NGUỒN AOV (CHỈ ĐỌC)',
       'Số ZIP: '+data.source_count+' | Dung lượng: '+(data.total_input_bytes/1048576).toFixed(1)+' MB',
       'Vai trò: '+Object.entries(data.role_counts||{}).map(([role,count])=>(roleNames[role]||role)+' = '+count).join(' | '),
-      'Actor ID phát hiện trong tên AssetBundle: '+((data.actor_asset_ids||[]).join(', ')||'không phát hiện'),
+      'Actor ID phát hiện trong AssetBundle hoặc Actions package: '+((data.actor_asset_ids||[]).join(', ')||'không phát hiện'),
       'Adapter phù hợp: '+(data.selected_adapter||'chưa có'),
       'Có thể chạy bộ ghép hiện tại: '+(data.ready_to_merge?'CÓ, vẫn phải qua kiểm tra chuyên sâu':'CHƯA'),
       '',
       'CHI TIẾT TỪNG FILE:'
     ];
+    const targetSet=data.target_set||{};
+    if(targetSet.sources){
+      lines.push(
+        '',
+        'ĐỐI CHIẾU BỘ MỤC TIÊU P9 + P10 + TM + VTK',
+        'Số file đã nạp: '+targetSet.detected_archive_count+' / '+targetSet.expected_archive_count,
+        'Nhận diện đủ đúng 6 vai trò nguồn: '+(targetSet.input_set_complete?'CÓ':'CHƯA'),
+        'Đã xác minh adapter ghép cả bốn nhóm: KHÔNG'
+      );
+      for(const source of targetSet.sources){
+        lines.push('- '+source.label+': '+source.state+(source.files?.length?' | '+source.files.join(', '):''));
+      }
+      for(const note of (targetSet.blockers||[]))lines.push('  BLOCKER: '+note);
+      lines.push('  Cơ sở nhận diện: '+(targetSet.evidence_note||'chỉ là gợi ý, cần kiểm tra cấu trúc nguồn.'));
+    }
     for(const item of (data.profiles||[])){
       lines.push('- '+item.name+' | '+(roleNames[item.source_role]||item.source_role)+' | '+item.entries+' entries | '+(item.uncompressed_bytes/1048576).toFixed(1)+' MB giải nén');
+      if(item.source_family_hint)lines.push('  Nhóm nguồn gợi ý: '+item.source_family_hint+' | cơ sở: '+(item.source_family_basis||'không rõ'));
       if(item.resources_zip_count||item.skin_list_count)lines.push('  Resources.zip: '+item.resources_zip_count+' | DanhSachSkin.txt: '+item.skin_list_count);
-      if(item.actor_asset_ids?.length)lines.push('  Actor ID: '+item.actor_asset_ids.join(', '));
+      if(item.actor_asset_ids?.length)lines.push('  Actor ID AssetBundle: '+item.actor_asset_ids.join(', '));
+      if(item.actor_action_ids?.length)lines.push('  Actor ID Actions package: '+item.actor_action_ids.join(', '));
       if(item.has_vtk_ifix)lines.push('  Có HeroSkin_2.bytes');
     }
     const resourceAnalysis=data.resource_analysis||{};
