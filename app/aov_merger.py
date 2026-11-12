@@ -180,6 +180,21 @@ def _encode(data: bytes, resource_name: str, mode: str) -> bytes:
         raise AOVMergeError(f"Không mã hóa lại được tài nguyên {resource_name}: {exc}") from exc
 
 
+def _decode_nested_package(data: bytes, resource_name: str) -> tuple[bytes, str]:
+    """Accept either a raw ZIP/PKG payload or a supported AoV-wrapped payload."""
+    probe = io.BytesIO(data)
+    if zipfile.is_zipfile(probe):
+        return data, "raw_zip"
+    return _decode(data, resource_name)
+
+
+def _encode_nested_package(data: bytes, resource_name: str, mode: str) -> bytes:
+    """Preserve a raw ZIP payload or re-apply the original AoV wrapper."""
+    if mode == "raw_zip":
+        return data
+    return _encode(data, resource_name, mode)
+
+
 def _merge_nested_zip_package(
     base_data: bytes,
     overlay_data: bytes,
@@ -191,13 +206,8 @@ def _merge_nested_zip_package(
     only when SHA-256 matches; different payloads at the same inner path fail
     closed because no semantic parser is available for that member.
     """
-    base_raw, base_mode = _decode(base_data, resource_name)
-    overlay_raw, overlay_mode = _decode(overlay_data, resource_name)
-    if base_mode != overlay_mode:
-        raise AOVMergeError(
-            f"{resource_name}: hai package dùng kiểu bọc khác nhau "
-            f"({base_mode} / {overlay_mode})."
-        )
+    base_raw, base_mode = _decode_nested_package(base_data, resource_name)
+    overlay_raw, overlay_mode = _decode_nested_package(overlay_data, resource_name)
 
     try:
         base_buffer = io.BytesIO(base_raw)
@@ -270,8 +280,10 @@ def _merge_nested_zip_package(
             ) from exc
 
         merged_raw = output_buffer.getvalue()
-        encoded = _encode(merged_raw, resource_name, base_mode)
-        check_raw, check_mode = _decode(encoded, resource_name)
+        # Serialize using the base package's container mode. The overlay
+        # may be a raw ZIP even when the base package is AoV-wrapped, or vice versa.
+        encoded = _encode_nested_package(merged_raw, resource_name, base_mode)
+        check_raw, check_mode = _decode_nested_package(encoded, resource_name)
         if check_mode != base_mode:
             raise AOVMergeError(
                 f"{resource_name}: kiểu bọc thay đổi sau khi mã hóa lại."
@@ -313,6 +325,7 @@ def _merge_nested_zip_package(
             "identical_paths": sorted(identical_names),
             "conflicts": 0,
             "encoding": base_mode,
+            "overlay_encoding": overlay_mode,
         }
     finally:
         base_zip.close()
