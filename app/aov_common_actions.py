@@ -437,19 +437,25 @@ def _overlay_actor_track_signatures(
 
             for track in action.iter("Track"):
                 all_skin_nodes = list(track.iter("SkinOrAvatarList"))
-                if not all_skin_nodes:
+                target_skin_nodes = [
+                    node for node in all_skin_nodes
+                    if node.attrib.get("id") in special_ids
+                ]
+                if not target_skin_nodes:
                     continue
-                direct_skin_nodes = track.findall("SkinOrAvatarList")
-                if len(direct_skin_nodes) != len(all_skin_nodes):
+                direct_target_nodes = [
+                    node for node in track.findall("SkinOrAvatarList")
+                    if node.attrib.get("id") in special_ids
+                ]
+                if len(direct_target_nodes) != len(target_skin_nodes):
                     raise CommonActionsMergeError(
                         f"{name}: track {_normalized_track_name(track)} có "
-                        "SkinOrAvatarList lồng ở vị trí chưa được hỗ trợ."
+                        "SkinOrAvatarList của actor mục tiêu lồng ở vị trí "
+                        "chưa được hỗ trợ."
                     )
                 track_key = _track_key(track)
-                for node in direct_skin_nodes:
+                for node in direct_target_nodes:
                     skin_id = node.attrib.get("id")
-                    if skin_id not in special_ids:
-                        continue
                     key = (name, track_key, skin_id)
                     digest = hashlib.sha256(
                         ET.tostring(node, encoding="utf-8")
