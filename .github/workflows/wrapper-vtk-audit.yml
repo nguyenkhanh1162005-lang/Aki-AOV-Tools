@@ -1,0 +1,68 @@
+name: 10-skin wrapper + VTK source audit
+
+on:
+  push:
+    branches: ["feature/universal-mod-adapter-registry"]
+    paths:
+      - "tools/audit_wrapper_vtk_pair.py"
+      - "app/aov_merger.py"
+      - "app/aov_bytes_archive.py"
+      - ".github/workflows/wrapper-vtk-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-wrapper-pair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download user-supplied wrapper and VTK MOD archives
+        id: sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          wrapper_url="https://github.com/nguyenkhanh1162005-lang/Aki-AOV-Tools/releases/download/aov-upload-01/IOS-Pack-10Skin-Cam30.zip"
+          vtk_url="https://github.com/nguyenkhanh1162005-lang/Aki-AOV-Tools/releases/download/aov-upload-01/VTK.IOS.VIP.zip"
+          if ! curl --fail --location --silent --show-error "$wrapper_url" --output /tmp/10skin-wrapper.zip; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Upload the user MOD ZIP as IOS-Pack-10Skin-Cam30.zip to release aov-upload-01, then run this workflow again."
+            exit 0
+          fi
+          if ! curl --fail --location --silent --show-error "$vtk_url" --output /tmp/vtk-ios.zip; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::VTK.IOS.VIP.zip was not found in release aov-upload-01."
+            exit 0
+          fi
+          sha256sum /tmp/10skin-wrapper.zip /tmp/vtk-ios.zip
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install merger dependencies
+        if: steps.sources.outputs.ready == 'true'
+        run: python -m pip install -r requirements.txt
+
+      - name: Audit wrapper merge and scan notice candidates
+        id: audit
+        if: steps.sources.outputs.ready == 'true'
+        continue-on-error: true
+        run: |
+          python tools/audit_wrapper_vtk_pair.py \
+            /tmp/10skin-wrapper.zip \
+            /tmp/vtk-ios.zip \
+            /tmp/aov-wrapper-audit
+
+      - name: Upload audit report and structural candidate
+        if: always() && steps.sources.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aov-10skin-wrapper-vtk-audit
+          path: /tmp/aov-wrapper-audit/
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Fail when wrapper integration did not validate
+        if: steps.sources.outputs.ready == 'true' && steps.audit.outcome != 'success'
+        run: exit 1
