@@ -10,13 +10,18 @@ class AdapterRegistryTests(unittest.TestCase):
         self.assertFalse(result["merge_any_mod_claim"])
         self.assertFalse(result["game_tested"])
 
-    def test_only_generic_zip_is_merge_enabled_until_ifix_opcode_89_is_supported(self):
+    def test_pinned_kpm100_vtk_adapter_is_enabled_but_wrapper_adapter_stays_blocked(self):
         result = get_adapter_capabilities()
         adapters = {item["id"]: item for item in result["adapters"]}
         self.assertEqual(adapters["generic_zip"]["status"], "merge_supported")
-        vtk = adapters["aov_mod_to_mod_vtk_actor595_1.64.1"]
-        self.assertEqual(vtk["status"], "blocked_pending_ifix_opcode_89")
-        self.assertIn("opcode 89", vtk["scope"])
+        direct = adapters["aov_kpm100_vtk_actor595_1.64.1"]
+        self.assertEqual(direct["status"], "merge_supported_version_locked")
+        self.assertIn("70 KPM_MOD payload", direct["merge_policy"])
+        self.assertEqual(
+            adapters["aov_mod_to_mod_vtk_actor595_1.64.1"]["status"],
+            "blocked_pending_wrapper_pair_integration",
+        )
+        self.assertEqual(result["summary"]["version_locked"], 1)
         self.assertEqual(result["summary"]["blocked"], 1)
         self.assertEqual(adapters["unity_assetbundle"]["status"], "inspect_only")
         self.assertEqual(adapters["wwise_bnk"]["status"], "inspect_only")
