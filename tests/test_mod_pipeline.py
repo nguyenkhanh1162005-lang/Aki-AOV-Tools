@@ -165,7 +165,9 @@ class ModPipelineTests(unittest.TestCase):
             folder = Path(tmp)
             base_entries = {
                 "Resources/1.64.1/Thanos/HeroSkin_1.bytes": b"base-ifix",
+                "Resources/1.64.1/Thanos/HeroSkin_2.bytes": b"legacy-base-ifix",
                 "Resources/1.64.1/assetbundle/resourcepackerinfosetall.assetbundle": b"packer-index",
+                "Resources/1.64.1/assetbundle/battle/hero/595_lixin_battle_base.assetbundle": b"legacy-base-actor595",
             }
             base_entries.update({
                 f"Resources/1.64.1/Mod_by_Youtube_KHAM-PHA-MOBILE/KPM_MOD_{index:016X}": b"payload"
