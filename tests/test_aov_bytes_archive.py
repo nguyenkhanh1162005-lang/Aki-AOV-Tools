@@ -189,12 +189,63 @@ class AOVBytesArchiveTests(unittest.TestCase):
             ))
             self.assertEqual(
                 report["notice_scan_scope"].split(";")[0],
-                "Text-like Lua/XML/JSON/TXT/config/CSV and decoded non-MSES .bytes only",
+                "Text-like Lua/XML/JSON/TXT/config/CSV, decoded non-MSES .bytes, and bounded UnityFS AssetBundle object text"
             )
             self.assertFalse(report["game_tested"])
             self.assertTrue(report["scan_only"])
             self.assertFalse((folder / "scan-only.zip").exists())
 
+
+    def test_scans_unity_assetbundle_typetree_strings_read_only(self):
+        from types import SimpleNamespace
+
+        class FakeObject:
+            type = SimpleNamespace(name="MonoBehaviour")
+            path_id = 17
+
+            def read_typetree(self):
+                return {
+                    "m_Name": "LoginNoticeController",
+                    "m_Message": "ShowLoginNotice",
+                }
+
+        fake_asset = SimpleNamespace(
+            name="resources.assets",
+            objects={17: FakeObject()},
+        )
+        fake_unitypy = SimpleNamespace(
+            load=lambda payload: SimpleNamespace(assets=[fake_asset])
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            original_bundle = b"UnityFS\\x00fake-unity-bundle"
+            source = self._archive(folder / "bundle.zip", {
+                "Resources/1.64.1/assetbundle/ui/startup.assetbundle": original_bundle,
+            })
+
+            with patch(
+                "app.assetbundle_inspector._load_unitypy_aov",
+                return_value=fake_unitypy,
+            ):
+                report = decode_archive_resources(
+                    [source], str(folder / "scan-only.zip"), scan_only=True
+                )
+
+            self.assertEqual(report["notice_assetbundles_scanned"], 1)
+            self.assertGreater(report["notice_scan_files"], 0)
+            self.assertTrue(any(
+                item["keyword_group"] == "login_notice"
+                and "LoginNoticeController" in item["path"]
+                for item in report["notice_candidates"]
+            ))
+            self.assertTrue(report["scan_only"])
+            self.assertFalse((folder / "scan-only.zip").exists())
+            with zipfile.ZipFile(source) as archive:
+                self.assertEqual(
+                    archive.read("Resources/1.64.1/assetbundle/ui/startup.assetbundle"),
+                    original_bundle,
+                )
 
     def test_expands_zip_inside_decoded_pkg_bytes(self):
         with tempfile.TemporaryDirectory() as tmp:
