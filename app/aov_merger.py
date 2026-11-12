@@ -192,13 +192,31 @@ def _merge_ifix(base_data: bytes, vtk_data: bytes) -> tuple[bytes, int, int]:
         raw = serialize_ifix_patch(merged)
     except IFixMergeError as exc:
         raise AOVMergeError(f"Không ghép được IFix HeroSkin: {exc}") from exc
-    if len(merged["fixes"]) != 17 or len(merged["methods"]) != 25:
-        raise AOVMergeError("Số FixInfo/method của HeroSkin sau ghép không đúng.")
+    expected_fixes = len(base_patch["fixes"]) + len(vtk_patch["fixes"])
+    expected_methods = len(base_patch["methods"]) + len(vtk_patch["methods"])
+    if (
+        len(merged["fixes"]) != expected_fixes
+        or len(merged["methods"]) != expected_methods
+    ):
+        raise AOVMergeError(
+            "IFix sau ghép bị mất bản ghi: "
+            f"FixInfo {len(merged['fixes'])}/{expected_fixes}, "
+            f"methods {len(merged['methods'])}/{expected_methods}."
+        )
     encoded = _encode(raw, "HeroSkin_1", base_mode)
     check, _ = _decode(encoded, "HeroSkin_1")
     parsed = parse_ifix_patch(check)
-    if len(parsed["fixes"]) != 17 or len(parsed["methods"]) != 25:
-        raise AOVMergeError("Không xác minh được IFix HeroSkin sau mã hóa.")
+    if serialize_ifix_patch(parsed) != raw:
+        raise AOVMergeError("IFix sau mã hóa không round-trip byte-for-byte.")
+    if (
+        len(parsed["fixes"]) != expected_fixes
+        or len(parsed["methods"]) != expected_methods
+    ):
+        raise AOVMergeError(
+            "IFix sau mã hóa bị mất bản ghi: "
+            f"FixInfo {len(parsed['fixes'])}/{expected_fixes}, "
+            f"methods {len(parsed['methods'])}/{expected_methods}."
+        )
     return encoded, len(parsed["fixes"]), len(parsed["methods"])
 
 
