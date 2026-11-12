@@ -192,8 +192,15 @@ def _scan_notice_assetbundle(data: bytes, path: str) -> dict[str, Any]:
     text_truncated = False
     object_scan_errors = 0
     for asset_file in (getattr(env, "assets", []) or []):
+        if inspected_objects >= MAX_NOTICE_ASSETBUNDLE_OBJECTS:
+            text_truncated = True
+            break
         objects = getattr(asset_file, "objects", {}) or {}
-        for obj in list(objects.values())[:MAX_NOTICE_ASSETBUNDLE_OBJECTS]:
+        remaining_objects = MAX_NOTICE_ASSETBUNDLE_OBJECTS - inspected_objects
+        selected_objects = list(objects.values())[:remaining_objects]
+        if len(objects) > remaining_objects:
+            text_truncated = True
+        for obj in selected_objects:
             object_type = getattr(getattr(obj, "type", None), "name", "")
             if object_type not in {"MonoBehaviour", "TextAsset", "ScriptableObject"}:
                 continue
@@ -217,15 +224,17 @@ def _scan_notice_assetbundle(data: bytes, path: str) -> dict[str, Any]:
                     truncated = False
                 else:
                     tree = obj.read_typetree()
+                    object_name = (
+                        str(tree.get("m_Name", "") or "")
+                        if isinstance(tree, dict) else ""
+                    )
                     strings, truncated = _collect_bounded_strings(tree)
+                if object_type == "TextAsset":
+                    object_name = str(name or "")
                 text_truncated = text_truncated or truncated
                 text = "\n".join(item for item in strings if item)
                 if not text:
                     continue
-                object_name = next(
-                    (item for item in strings if "name" in item.lower()),
-                    "",
-                )
                 label_path = f"{object_path}/{object_name}" if object_name else object_path
                 findings.extend(
                     _scan_notice_text_view(text, label_path, "unity-typetree")
