@@ -301,5 +301,37 @@ class CommonActionsMergeTests(unittest.TestCase):
         self.assertEqual(report["overlay_count"], 2)
         self.assertTrue(report["verified"])
 
+    def test_single_overlay_rejects_conflicting_duplicate_actor_conditions(self):
+        path = "commonresource/Back.xml"
+        base = package({
+            path: encode_aov_resource(action_xml("BaseBackTrack"), path, "zstd")
+        })
+        root = ET.Element("Project")
+        action = ET.SubElement(root, "Action")
+        track = ET.SubElement(action, "Track", {
+            "trackName": "0_BaseBackTrack",
+            "eventType": "TriggerParticleTick",
+            "enabled": "true",
+        })
+        ET.SubElement(track, "SkinOrAvatarList", {
+            "id": "59500",
+            "mode": "recall-a",
+        })
+        ET.SubElement(track, "SkinOrAvatarList", {
+            "id": "59500",
+            "mode": "recall-b",
+        })
+        overlay = package({
+            path: encode_aov_resource(ET.tostring(root), path, "zstd")
+        })
+
+        with self.assertRaisesRegex(
+            CommonActionsMergeError,
+            "một overlay tự khai báo nhiều điều kiện khác nhau",
+        ):
+            merge_common_actions_pkg(
+                base, overlay, special_ids={"59500"}
+            )
+
 if __name__ == "__main__":
     unittest.main()
