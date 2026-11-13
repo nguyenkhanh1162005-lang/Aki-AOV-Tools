@@ -872,13 +872,43 @@ noticeScanBtn.addEventListener('click',async()=>{
       'Unity AssetBundle bỏ qua: '+(data.notice_assetbundles_skipped||0),
       'Package ZIP lồng đã bung để quét: '+(data.nested_packages_expanded||0),
       'Số mục chưa giải mã được: '+(data.unsupported_resources||0),
-      'Ứng viên tìm thấy: '+((data.candidates||[]).length)+(data.truncated?' (đã giới hạn kết quả)':''),
-      ''
+      'Tổng ứng viên từ khóa: '+((data.candidates||[]).length)+(data.truncated?' (đã giới hạn kết quả)':''),
+      '',
+      '=== ỨNG VIÊN LUỒNG ĐĂNG NHẬP / KHỞI ĐỘNG ===',
+      'Số ứng viên cần kiểm tra chính xác: '+(data.startup_notice_candidate_count||0),
     ];
+    const startupCandidates=data.startup_notice_candidates||[];
+    if(startupCandidates.length){
+      for(const item of startupCandidates){
+        lines.push('['+item.keyword_group+'] '+item.source+'/'+item.path);
+        lines.push('  '+item.protection_reason);
+        lines.push('  '+item.excerpt);
+      }
+    }else{
+      lines.push('Không có ứng viên startup/login đủ điều kiện theo quy tắc đường dẫn hiện tại.');
+    }
+    lines.push(
+      '',
+      '=== THÔNG BÁO HẠ GỤC ĐƯỢC BẢO VỆ ===',
+      'Số vị trí: '+(data.protected_kill_notification_count||0)
+    );
+    for(const item of (data.protected_kill_notification_candidates||[])){
+      lines.push('GIỮ NGUYÊN: '+item.source+'/'+item.path+' | '+item.keyword_group);
+    }
+    lines.push(
+      '',
+      '=== BẢNG BILLBOARD ĐƯỢC BẢO VỆ ===',
+      'Số vị trí: '+(data.protected_billboard_count||0)
+    );
+    for(const item of (data.protected_billboard_candidates||[])){
+      lines.push('GIỮ NGUYÊN: '+item.source+'/'+item.path+' | '+item.keyword_group);
+    }
+    lines.push('', '=== CÁC KẾT QUẢ TỪ KHÓA KHÁC (CHỈ THAM KHẢO) ===');
     for(const item of (data.candidates||[])){
-      lines.push('['+item.keyword_group+'] '+item.source+'/'+item.path);
+      lines.push('['+(item.resource_role||'unclassified_notice_text')+'] ['+item.keyword_group+'] '+item.source+'/'+item.path);
       lines.push('  Từ khớp: '+item.matched_text+' | encoding: '+item.encoding);
       lines.push('  '+item.excerpt);
+      lines.push('  '+(item.protection_reason||'Giữ nguyên cho tới khi xác định đúng vai trò tài nguyên.'));
     }
     if(!(data.candidates||[]).length)lines.push('Chưa tìm thấy từ khóa phù hợp trong phần văn bản đã quét.');
     for(const item of (data.notice_assetbundle_scan_errors||[]))lines.push('BỎ QUA AssetBundle: '+(item.path||'?')+' | '+(item.reason||('object errors: '+(item.object_errors||0))));
