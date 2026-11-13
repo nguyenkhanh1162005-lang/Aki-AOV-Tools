@@ -151,8 +151,8 @@ def merge_aov_mses_resource(
             or overlay_table.field_count != 188
         ):
             raise AOVResourceMergeError(
-                f"{resource_name}: số trường/schema không hợp lệ; adapter chỉ xác minh "
-                f"188 trường, nhận {base_table.field_count}/{overlay_table.field_count}; chặn ghép."
+                f"{resource_name}: số trường khác chuẩn 188 hoặc schema không hợp lệ; "
+                f"nhận {base_table.field_count}/{overlay_table.field_count}; chặn ghép."
             )
 
         def rows_by_key(rows, label):
