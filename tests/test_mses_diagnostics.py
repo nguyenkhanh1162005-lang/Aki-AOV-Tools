@@ -50,7 +50,7 @@ class MSESDiagnosticsTests(unittest.TestCase):
             "resources/notaversion/thing.bytes",
         )
 
-    def test_compares_nested_encoded_mses_resources_and_never_authorizes_merge(self):
+    def test_compares_nested_aes_raw_and_zstd_mses_resources_without_authorizing_merge(self):
         name = "BattleBank.bytes"
         base_rows = [
             struct.pack("<I", 1) + b"shared-row",
@@ -64,7 +64,11 @@ class MSESDiagnosticsTests(unittest.TestCase):
         base_resource = encode_aov_resource(
             _mses_table(base_rows), name, "aes"
         )
-        overlay_resource = _mses_table(overlay_rows)
+        raw_overlay = bytearray(_mses_table(overlay_rows))
+        raw_overlay[0x60:0x80] = b"0" * 32
+        zstd_resource = encode_aov_resource(
+            _mses_table(base_rows), name, "zstd"
+        )
         nested_resources = _zip_bytes({
             "Resources/1.64.1/Databin/Client/Sound/BattleBank.bytes":
                 base_resource,
@@ -73,16 +77,19 @@ class MSESDiagnosticsTests(unittest.TestCase):
             folder = Path(tmp)
             wrapper = folder / "P9.zip"
             direct = folder / "Tamyn.zip"
+            vtk = folder / "VTK.zip"
             wrapper.write_bytes(_zip_bytes({"Resources.zip": nested_resources}))
             direct.write_bytes(_zip_bytes({
                 "Tamyn/Resources/1.64.1/Databin/Client/Sound/BattleBank.bytes":
-                    overlay_resource,
+                    bytes(raw_overlay),
+            }))
+            vtk.write_bytes(_zip_bytes({
+                "Databin/Client/Sound/BattleBank.bytes": zstd_resource,
             }))
 
-            manifest = build_resource_manifest([str(wrapper), str(direct)])
-            report = analyze_mses_overlaps(
-                [str(wrapper), str(direct)], manifest["resources"]
-            )
+            paths = [str(wrapper), str(direct), str(vtk)]
+            manifest = build_resource_manifest(paths)
+            report = analyze_mses_overlaps(paths, manifest["resources"])
 
         self.assertEqual(report["table_count"], 1)
         self.assertTrue(report["read_only"])
@@ -92,16 +99,28 @@ class MSESDiagnosticsTests(unittest.TestCase):
             table["canonical_path"],
             "databin/client/sound/battlebank.bytes",
         )
-        self.assertEqual(len(table["resources"]), 2)
-        comparison = table["comparisons"][0]
-        self.assertEqual(comparison["common_keys"], 2)
-        self.assertEqual(comparison["identical_common_rows"], 1)
-        self.assertEqual(comparison["differing_common_rows"], 1)
-        self.assertEqual(comparison["right_only_keys"], 1)
-        self.assertFalse(comparison["append_only_candidate"])
-        self.assertFalse(comparison["merge_authorized"])
-        self.assertTrue(comparison["checksums_valid"])
-        self.assertTrue(comparison["unique_row_keys"])
+        self.assertEqual(len(table["resources"]), 3)
+        self.assertEqual(
+            {resource["decode_mode"] for resource in table["resources"]},
+            {"aes", "raw_mses", "zstd"},
+        )
+
+        p9_vs_tm, p9_vs_vtk, tm_vs_vtk = table["comparisons"]
+        self.assertEqual(p9_vs_tm["common_keys"], 2)
+        self.assertEqual(p9_vs_tm["identical_common_rows"], 1)
+        self.assertEqual(p9_vs_tm["differing_common_rows"], 1)
+        self.assertEqual(p9_vs_tm["right_only_keys"], 1)
+        self.assertFalse(p9_vs_tm["checksums_valid"])
+        self.assertFalse(p9_vs_tm["append_only_candidate"])
+        self.assertFalse(p9_vs_tm["merge_authorized"])
+
+        self.assertEqual(p9_vs_vtk["differing_common_rows"], 0)
+        self.assertTrue(p9_vs_vtk["checksums_valid"])
+        self.assertTrue(p9_vs_vtk["append_only_candidate"])
+
+        self.assertEqual(tm_vs_vtk["differing_common_rows"], 1)
+        self.assertEqual(tm_vs_vtk["right_only_keys"], 1)
+        self.assertFalse(tm_vs_vtk["checksums_valid"])
 
 
 if __name__ == "__main__":
