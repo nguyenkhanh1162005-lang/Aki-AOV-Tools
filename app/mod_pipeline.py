@@ -619,12 +619,13 @@ def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
         "heroskin.bytes", "resskinmotionbasecfg.bytes",
         "heroskinshop.bytes", "skillmark.bytes",
         "lobbysound.bytes", "chatsound.bytes", "couplesound.bytes",
+        "herosound.bytes",
     }:
         return {
             "adapter_state": "source_pinned_actor_owned_mses_helper",
             "next_action": (
                 "Có helper cấp bảng đã kiểm chứng cho đúng cặp P9/P10 nguồn: "
-                "bốn bảng skin và năm bảng metadata âm thanh chọn hàng xung đột theo "
+                "bốn bảng skin và sáu bảng metadata âm thanh chọn hàng xung đột theo "
                 "Actor_Action inventory, SHA-256, schema và số hàng ghim. Helper hiện "
                 "chưa được nối vào bộ ghép ZIP nhiều wrapper; preflight chỉ báo khả năng xử lý."
             ),
@@ -657,17 +658,6 @@ def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
                 "khi SHA-256 thực tế trùng, không cần ghi đè."
             ),
             "safety_rule": "Nếu payload hoặc phiên bản khác, cần phân tích lại và chặn ghép.",
-        }
-
-    if leaf == "herosound.bytes":
-        return {
-            "adapter_state": "inspect_only_unresolved_actor_rows",
-            "next_action": (
-                "HeroSound P9/P10 có 485 hàng chung khác payload; 475 hàng ánh xạ được "
-                "theo Actor, còn 10 hàng chưa có chủ sở hữu trong Actor_Action inventory. "
-                "Chưa có quy tắc an toàn cho toàn bảng."
-            ),
-            "safety_rule": "Không bỏ qua 10 hàng chưa xác định và không tự chọn P9 hoặc P10.",
         }
 
     if leaf == "organskin.bytes":
