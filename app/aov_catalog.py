@@ -9,7 +9,12 @@ class AOVCatalogMergeError(ValueError):
     pass
 
 
-def merge_resource_packer_tree(base_tree: dict, overlay_tree: dict) -> tuple[dict, dict]:
+def merge_resource_packer_tree(
+    base_tree: dict,
+    overlay_tree: dict,
+    *,
+    prefer_overlay_paths: set[str] | None = None,
+) -> tuple[dict, dict]:
     """Merge ResourcePackerInfoSet* trees by PathInIFS and remap dependency edges."""
     if base_tree.get("m_Name") != overlay_tree.get("m_Name"):
         raise AOVCatalogMergeError("Tên ResourcePackerInfoSet không khớp.")
@@ -33,6 +38,8 @@ def merge_resource_packer_tree(base_tree: dict, overlay_tree: dict) -> tuple[dic
     appended = []
     merged_hashes = 0
     metadata_conflicts = []
+    metadata_overridden = []
+    preferred = prefer_overlay_paths or set()
     for overlay_index, candidate in enumerate(overlay_rows):
         path = candidate.get("PathInIFS")
         if not isinstance(path, str) or not path:
@@ -69,7 +76,11 @@ def merge_resource_packer_tree(base_tree: dict, overlay_tree: dict) -> tuple[dic
         target["ResourceInfos"] = base_resources
         target["Flags"] = int(target.get("Flags", 0)) | int(candidate.get("Flags", 0))
         if target.get("CrcXor") != candidate.get("CrcXor"):
-            metadata_conflicts.append(path)
+            if path in preferred:
+                target["CrcXor"] = candidate.get("CrcXor")
+                metadata_overridden.append(path)
+            else:
+                metadata_conflicts.append(path)
 
     base_edges = merged_tree.get("AllParentIdexToChild", [])
     overlay_edges = overlay_tree.get("AllParentIdexToChild", [])
@@ -112,6 +123,7 @@ def merge_resource_packer_tree(base_tree: dict, overlay_tree: dict) -> tuple[dic
         "output_edges": len(edges),
         "new_edges": added_edges,
         "crc_metadata_conflicts_kept_base": metadata_conflicts,
+        "crc_metadata_conflicts_overridden_with_overlay": metadata_overridden,
     }
 
 
@@ -223,13 +235,17 @@ def merge_aov_metadata_assetbundle(base_bytes: bytes, overlay_bytes: bytes, *, k
                     base_tree, overlay_tree, prefer_overlay_paths=prefer_overlay_paths
                 )
             else:
-                merged_tree, report = merge_fn(base_tree, overlay_tree)
+                merged_tree, report = merge_resource_packer_tree(
+                    base_tree, overlay_tree, prefer_overlay_paths=prefer_overlay_paths
+                )
             base_obj.save_typetree(merged_tree)
             reports[name] = report
         elif kind == "resource_verification" and (
             "AllZipVerificationInfo" in base_tree or "AllDatabinVerificationInfo" in base_tree
         ):
-            merged_tree, report = merge_fn(base_tree, overlay_tree)
+            merged_tree, report = merge_resource_verification_tree(
+                base_tree, overlay_tree, prefer_overlay_paths=prefer_overlay_paths
+            )
             base_obj.save_typetree(merged_tree)
             reports[name] = report
 
