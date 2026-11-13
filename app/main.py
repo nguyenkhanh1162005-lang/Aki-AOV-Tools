@@ -713,9 +713,10 @@ async def inspect_chunked_upload(upload_id: str, keep_session: bool = Query(Fals
             UPLOAD_SESSIONS.pop(upload_id, None)
 
 
+@app.post("/api/upload/{upload_id}/mods-preflight")
 @app.post("/api/upload/{upload_id}/aov-preflight")
 async def preflight_chunked_aov_upload(upload_id: str):
-    """Classify AoV MOD/VTK inputs and report merge adapter blockers without writing output."""
+    """Classify many MOD package types and report adapter blockers without writing output."""
     session = _get_upload_session(upload_id)
     if any(item["received"] != item["size"] for item in session["files"]):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")

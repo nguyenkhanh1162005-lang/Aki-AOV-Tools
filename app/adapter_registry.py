@@ -37,6 +37,25 @@ _ADAPTERS = (
         "game_compatibility": "structurally_validated; not_game_tested",
     },
     {
+        "id": "aov_multi_mod_intake",
+        "name": "Phân tích nhiều loại MOD AoV",
+        "status": "inspect_only",
+        "formats": [
+            "ZIP thông thường", "MOD wrapper", "Resources.zip lồng",
+            "AoV AES/Zstandard", "MSES", "IFix", "CommonActions",
+            "Unity AssetBundle", "Wwise BNK", "gói nhiều phần"
+        ],
+        "scope": (
+            "Nhận và kiểm kê MOD không phụ thuộc tên P9/P10/TM/VTK; đối chiếu cấu trúc, "
+            "đường dẫn, Actor ID, định dạng, phiên bản suy luận và xung đột tài nguyên."
+        ),
+        "merge_policy": (
+            "Chỉ phân tích. Không phải adapter ghép; MOD chưa có parser/serializer, "
+            "quy tắc tương thích và fixture vẫn bị chặn xuất ZIP."
+        ),
+        "game_compatibility": "inspection_only; not_game_tested",
+    },
+    {
         "id": "aov_wrapper_inspection",
         "name": "AoV AES / Zstandard wrapper",
         "status": "inspect_only",

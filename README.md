@@ -64,6 +64,14 @@ Chỉ sửa UTF text thuộc các phần mở rộng hỗ trợ và payload AoV 
 
 Adapter này nhận đúng KPM100 iOS MOD 1.64.1.12_KPM dạng ZIP trực tiếp (cây `Resources/1.64.1/`, 70 `KPM_MOD_*` payload) cùng VTK iOS Vấn Tâm Kiếm Actor 595 phiên bản 1.64.1.11. Bộ xử lý kiểm tra hash và cấu trúc của cặp nguồn KPM100 đã được tích hợp riêng; không nhận ZIP khác chỉ vì tên file giống nhau.
 
+## Phân tích nhiều loại MOD
+
+Web dùng luồng phân tích chung cho tối đa 10 ZIP, không giới hạn vào tên P9/P10/Tamyn/VTK. Báo cáo phân biệt ZIP thường, MOD wrapper, gói AoV trực tiếp, tài nguyên Actor, ZIP lồng `Resources.zip`, và các định dạng đọc được như MSES, IFix, CommonActions, Unity AssetBundle, Wwise BNK hoặc payload chưa rõ. Actor ID và tên nhóm nguồn chỉ là gợi ý nếu có bằng chứng trong đường dẫn/tài nguyên.
+
+API tổng quát: `POST /api/upload/{upload_id}/mods-preflight`; API cũ `aov-preflight` vẫn được giữ làm alias tương thích. Báo cáo có tổng quan nguồn, phân bố định dạng, kiểm kê xung đột, nhóm tài nguyên cần bảo toàn và adapter được chọn (nếu có).
+
+**Phạm vi này mở rộng nhận diện và kiểm tra, không tự biến mọi MOD mới thành gói có thể ghép.** Chỉ adapter có parser/serializer, quy tắc version/schema/dependency và fixture round-trip mới được phép xuất ZIP. MOD chưa có adapter vẫn hiện rõ trong báo cáo và bị chặn khi ghép.
+
 ## Phân loại bộ nguồn nhiều MOD trước khi ghép
 
 Chọn các ZIP 9 skin, 10 skin, Tamyn và các phần VTK rồi bấm **Phân loại bộ MOD + VTK trước khi ghép (chỉ đọc)**. API `/api/upload/{upload_id}/aov-preflight` báo vai trò từng file, số wrapper `Resources.zip`/`DanhSachSkin.txt`, Actor ID phát hiện trong tên AssetBundle và adapter hiện có có phù hợp hay không. Phiên upload được giữ lại để tiếp tục đối chiếu xung đột.

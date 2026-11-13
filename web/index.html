@@ -135,12 +135,12 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
   <section class="panel">
     <div class="panel-inner">
       <h2 class="section-title"><span class="section-number">01</span> Nạp bộ MOD</h2>
-      <p class="section-sub">Chọn tối đa 10 ZIP từ iPhone. Có thể chọn nhiều MOD và các phần VTK trong cùng lượt.</p>
+      <p class="section-sub">Chọn tối đa 10 ZIP từ iPhone. Có thể trộn nhiều kiểu MOD, nhiều nguồn và các gói ZIP chia phần trong cùng lượt.</p>
       <label class="drop">
         <input id="upload" type="file" accept=".zip,application/zip" multiple>
         <span class="drop-icon">⇧</span>
         <strong>Chạm để chọn file ZIP</strong>
-        <p>MOD skin · VTK Part 1–3 · Tamyn · các gói tài nguyên khác</p>
+        <p>MOD nhiều skin · ZIP lồng · tài nguyên AoV · các gói MOD khác</p>
         <span class="pick-cta">CHỌN FILE TỪ IPHONE</span>
       </label>
       <div id="files">Chưa chọn file nào.</div>
@@ -178,9 +178,9 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
           <button id="aovMerge" class="button button-primary" disabled>⚙️ Ghép AOV chuyên sâu</button>
         </div>
         <div class="action-card">
-          <h3>Nhận diện bộ nguồn nhiều MOD</h3>
-          <p>Nhận diện riêng P9, P10, TM Tamyn - Robot và VTK Part 1–3; báo rõ file nào còn thiếu.</p>
-          <button id="aovPreflight" class="button button-sky" disabled>⌕ Phân loại bộ MOD + VTK</button>
+          <h3>Phân tích nhiều loại MOD</h3>
+          <p>Phân tích mọi ZIP được nạp, kể cả MOD chưa từng gặp: cấu trúc wrapper, Resources.zip lồng, định dạng, Actor ID, phiên bản và xung đột.</p>
+          <button id="aovPreflight" class="button button-sky" disabled>⌕ Phân tích mọi loại MOD</button>
           <button id="downloadAovPreflightReport" class="button button-secondary" disabled>Tải báo cáo phân loại (.json)</button>
         </div>
         <div class="action-card">
@@ -292,6 +292,47 @@ function renderPreflightDashboard(data){
   }
   root.append(metrics);
 
+  const general=data.general_analysis||{};
+  const generalCard=dashboardElement('section','preflight-group');
+  generalCard.append(dashboardElement('h3','','TỔNG QUAN NHIỀU LOẠI MOD'));
+  generalCard.append(dashboardElement('p','',
+    'Phạm vi phân tích không giới hạn ở tên P9, P10, Tamyn hay VTK. Tên gói chỉ là gợi ý; kết quả dựa thêm trên cấu trúc và tài nguyên đọc được.'
+  ));
+  const packageTypes=general.source_package_types||{};
+  const packageLabels={
+    ordinary_zip:'ZIP thông thường',
+    aov_skin_mod_container_candidate:'MOD wrapper',
+    aov_kpm100_direct_base_candidate:'Gói tài nguyên AoV trực tiếp',
+    aov_actor595_mod_candidate:'MOD Actor 595',
+    aov_actor593_mod_candidate:'MOD Actor 593',
+    aov_mod_unclassified:'MOD AoV chưa phân loại'
+  };
+  for(const [type,count] of Object.entries(packageTypes)){
+    generalCard.append(dashboardElement('div','preflight-source',
+      (packageLabels[type]||type)+' · '+count+' file'
+    ));
+  }
+  const formats=general.resource_formats||{};
+  const detectedFormats=general.detected_formats||{};
+  const formatLine=Object.entries(formats).map(([name,count])=>name+'='+count).join(' · ');
+  const detectedLine=Object.entries(detectedFormats).map(([name,count])=>name+'='+count).join(' · ');
+  generalCard.append(dashboardElement('p','',
+    'Định dạng tài nguyên: '+(formatLine||'chưa đọc được')
+  ));
+  generalCard.append(dashboardElement('p','',
+    'Chữ ký/định dạng phát hiện: '+(detectedLine||'chưa đọc được')
+  ));
+  generalCard.append(dashboardElement('p','',
+    'Actor ID: '+((general.actor_ids||[]).join(', ')||'chưa phát hiện')+
+    ' · MOD AoV chưa phân loại: '+(general.unclassified_aov_source_count||0)
+  ));
+  generalCard.append(dashboardElement('p','',
+    general.merge_ready
+      ?'Đã khớp adapter có giới hạn: '+(general.selected_adapter||'không rõ')+'. Máy chủ vẫn kiểm tra sâu trước khi xuất.'
+      :'Đang ở chế độ phân tích. Những MOD chưa có adapter riêng sẽ không được xuất ZIP tự động.'
+  ));
+  root.append(generalCard);
+
   const preservation=dashboardElement('section','preflight-group');
   preservation.append(dashboardElement('h3','','BẢNG ƯU TIÊN BẢO TOÀN MOD'));
   const preservationGrid=dashboardElement('div','preflight-sources');
@@ -336,9 +377,13 @@ function renderPreflightDashboard(data){
   if(!sourceGrid.childElementCount)sourceGrid.append(dashboardElement('p','','Không có file nguồn.'));
   sources.append(sourceGrid);root.append(sources);
 
-  if(target.sources){
+  const showsKnownFamilies=(data.profiles||[]).some(item=>
+    ['P9','P10','TM','VTK'].includes(item.source_family_hint) ||
+    String(item.source_family_hint||'').startsWith('PART_')
+  );
+  if(target.sources && showsKnownFamilies){
     const targetCard=dashboardElement('section','preflight-group');
-    targetCard.append(dashboardElement('h3','','ĐỐI CHIẾU BỘ P9 + P10 + TM + VTK'));
+    targetCard.append(dashboardElement('h3','','NHẬN DIỆN THAM KHẢO P9 / P10 / TM / VTK'));
     const targetGrid=dashboardElement('div','preflight-sources');
     for(const item of target.sources){
       const card=dashboardElement('div','preflight-source');
@@ -853,8 +898,8 @@ aovPreflightBtn.addEventListener('click',async()=>{
   compatibilityBtn.disabled=true;noticeScanBtn.disabled=true;decodeBytesBtn.disabled=true;
   report.textContent='';
   try{
-    status.textContent='Đang phân loại MOD wrapper, VTK parts và Actor ID...';
-    const runPreflight=uploadId=>fetchWithRetry('/api/upload/'+encodeURIComponent(uploadId)+'/aov-preflight',{method:'POST'});
+    status.textContent='Đang phân tích cấu trúc của mọi loại MOD đã nạp...';
+    const runPreflight=uploadId=>fetchWithRetry('/api/upload/'+encodeURIComponent(uploadId)+'/mods-preflight',{method:'POST'});
     const response=driveUploadId?await runPreflight(driveUploadId):await withUploadSession(files,runPreflight);
     const data=await response.json();
     aovPreflightReport=data;
@@ -868,20 +913,26 @@ aovPreflightBtn.addEventListener('click',async()=>{
       aov_mod_unclassified:'MOD AoV chưa phân loại'
     };
     const lines=[
-      'BÁO CÁO PHÂN LOẠI BỘ NGUỒN AOV (CHỈ ĐỌC)',
+      'BÁO CÁO PHÂN TÍCH NHIỀU LOẠI MOD (CHỈ ĐỌC)',
       'Số ZIP: '+data.source_count+' | Dung lượng: '+(data.total_input_bytes/1048576).toFixed(1)+' MB',
       'Vai trò: '+Object.entries(data.role_counts||{}).map(([role,count])=>(roleNames[role]||role)+' = '+count).join(' | '),
       'Actor ID phát hiện trong AssetBundle hoặc Actions package: '+((data.actor_asset_ids||[]).join(', ')||'không phát hiện'),
+      'Các định dạng tài nguyên: '+Object.entries((data.general_analysis||{}).resource_formats||{}).map(([key,value])=>key+'='+value).join(' | '),
+      'Các định dạng theo chữ ký: '+Object.entries((data.general_analysis||{}).detected_formats||{}).map(([key,value])=>key+'='+value).join(' | '),
       'Adapter phù hợp: '+(data.selected_adapter||'chưa có'),
       'Có thể chạy bộ ghép hiện tại: '+(data.ready_to_merge?'CÓ, vẫn phải qua kiểm tra chuyên sâu':'CHƯA'),
       '',
       'CHI TIẾT TỪNG FILE:'
     ];
     const targetSet=data.target_set||{};
-    if(targetSet.sources){
+    const hasKnownTargetFamily=(data.profiles||[]).some(item=>
+      ['P9','P10','TM','VTK'].includes(item.source_family_hint) ||
+      String(item.source_family_hint||'').startsWith('PART_')
+    );
+    if(targetSet.sources && hasKnownTargetFamily){
       lines.push(
         '',
-        'ĐỐI CHIẾU BỘ MỤC TIÊU P9 + P10 + TM + VTK',
+        'NHẬN DIỆN THAM KHẢO MỘT SỐ NHÓM MOD',
         'Số file đã nạp: '+targetSet.detected_archive_count+' / '+targetSet.expected_archive_count,
         'Nhận diện đủ đúng 6 vai trò nguồn: '+(targetSet.input_set_complete?'CÓ':'CHƯA'),
         'Đã xác minh adapter ghép cả bốn nhóm: KHÔNG'
@@ -943,9 +994,9 @@ aovPreflightBtn.addEventListener('click',async()=>{
     renderPreflightDashboard(data);
     report.textContent=lines.join('\n');
     status.textContent=data.ready_to_merge
-      ?'Đã phân loại. Bộ nguồn khớp adapter có giới hạn; có thể thử Ghép AOV để máy chủ xác minh payload.'
-      :'Đã phân loại nhưng chưa có adapter an toàn cho tổ hợp này. Phiên tải vẫn được giữ để chạy báo cáo xung đột.';
-  }catch(e){status.textContent='Lỗi phân loại AOV: '+e.message+' Phiên tải vẫn được giữ.';}
+      ?'Đã phân tích. Bộ nguồn khớp adapter có giới hạn; máy chủ sẽ xác minh payload trước khi xuất ZIP.'
+      :'Đã phân tích các loại MOD đã nạp. Một số tài nguyên chưa có adapter ghép an toàn; dữ liệu được giữ để đối chiếu tiếp.';
+  }catch(e){status.textContent='Lỗi phân tích MOD: '+e.message+' Phiên tải vẫn được giữ.';}
   finally{
     aovPreflightBtn.disabled=!(input.files.length||driveUploadId)||input.files.length>10;
     go.disabled=!input.files.length||input.files.length>10;
