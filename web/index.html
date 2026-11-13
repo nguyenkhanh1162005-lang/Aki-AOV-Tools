@@ -135,7 +135,7 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
   <section class="panel">
     <div class="panel-inner">
       <h2 class="section-title"><span class="section-number">01</span> Nạp bộ MOD</h2>
-      <p class="section-sub">Chọn tối đa 10 ZIP từ iPhone. Có thể trộn nhiều kiểu MOD, nhiều nguồn và các gói ZIP chia phần trong cùng lượt.</p>
+      <p class="section-sub">Chọn tối đa 10 ZIP từ iPhone. Có thể nạp nhiều nguồn và các gói ZIP chia phần trong cùng lượt.</p>
       <label class="drop">
         <input id="upload" type="file" accept=".zip,application/zip" multiple>
         <span class="drop-icon">⇧</span>
@@ -169,51 +169,79 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
 
   <section class="panel">
     <div class="panel-inner">
-      <h2 class="section-title"><span class="section-number">02</span> Phân tích & xử lý</h2>
-      <p class="section-sub">Chạy kiểm tra trước, sau đó mới chọn bộ ghép phù hợp với định dạng và phiên bản.</p>
+      <h2 class="section-title"><span class="section-number">02</span> Kiểm tra & ghép</h2>
+      <p class="section-sub">Thông thường chỉ cần làm 2 bước: phân tích bộ file, rồi chọn kiểu ghép đang được hệ thống cho phép.</p>
+
       <div class="action-stack">
-        <div class="action-card">
-          <h3>Hợp nhất MOD Liên Quân</h3>
-          <p>Chỉ bật khi nguồn khớp adapter đã có parser và quy tắc xác minh.</p>
-          <button id="aovMerge" class="button button-primary" disabled>⚙️ Ghép AOV chuyên sâu</button>
+        <div class="action-card primary-flow-card">
+          <div class="flow-step-label">BƯỚC 1</div>
+          <h3>Phân tích bộ MOD đã nạp</h3>
+          <p>Nhận diện loại gói, Resources.zip lồng, định dạng, Actor ID, phiên bản và các dấu hiệu xung đột.</p>
+          <button id="aovPreflight" class="button button-primary" disabled>⌕ Phân tích bộ file</button>
+          <button id="downloadAovPreflightReport" class="button button-secondary" disabled>Tải báo cáo phân tích (.json)</button>
         </div>
-        <div class="action-card">
-          <h3>Phân tích nhiều loại MOD</h3>
-          <p>Phân tích mọi ZIP được nạp, kể cả MOD chưa từng gặp: cấu trúc wrapper, Resources.zip lồng, định dạng, Actor ID, phiên bản và xung đột.</p>
-          <button id="aovPreflight" class="button button-sky" disabled>⌕ Phân tích mọi loại MOD</button>
-          <button id="downloadAovPreflightReport" class="button button-secondary" disabled>Tải báo cáo phân loại (.json)</button>
-        </div>
-        <div class="action-card">
-          <h3>Đối chiếu & kiểm tra tài nguyên</h3>
-          <p>Hiển thị đường dẫn trùng, khác nội dung và tương thích phiên bản.</p>
-          <div class="action-pair">
-            <button id="compatibility" class="button button-violet" disabled>Đối chiếu xung đột</button>
-            <button id="inspect" class="button button-secondary" disabled>Kiểm tra ZIP</button>
+
+        <div class="action-card merge-flow-card">
+          <div class="flow-step-label">BƯỚC 2</div>
+          <h3>Chọn kiểu ghép phù hợp</h3>
+          <p>Chỉ dùng một trong hai nút được bật. Bộ ghép AOV chỉ nhận đúng cấu trúc và phiên bản đã xác minh.</p>
+          <div class="merge-choices">
+            <div class="merge-choice">
+              <button id="aovMerge" class="button button-primary" disabled>⚙️ Ghép AOV (10 skin / KPM100) + Vấn Tâm Kiếm</button>
+              <small>MOD Liên Quân theo adapter được hỗ trợ</small>
+            </div>
+            <div class="merge-choice">
+              <button id="go" class="button button-warm" disabled>Ghép ZIP thường</button>
+              <small>Chỉ dành cho ZIP thông thường, không có xung đột AoV</small>
+            </div>
           </div>
-        </div>
-        <div class="action-card">
-          <h3>Công cụ phân tích nâng cao</h3>
-          <p>Đọc dữ liệu hỗ trợ và tìm chuỗi thông báo khởi động ở chế độ chỉ đọc.</p>
-          <div class="action-pair">
-            <button id="decodeBytes" class="button button-violet" disabled>Giải mã .bytes</button>
-            <button id="noticeScan" class="button button-rose" disabled>Quét thông báo</button>
-          </div>
-          <button id="downloadNoticeReport" class="button button-secondary" disabled>Tải báo cáo thông báo (.json)</button>
-          <button id="brandingScan" class="button button-sky" disabled>⌕ Quét KIANA MOD AOV / Web Mod / Youtube</button>
-          <button id="downloadBrandingReport" class="button button-secondary" disabled>Tải báo cáo thương hiệu (.json)</button>
-        </div>
-        <div class="action-card">
-          <h3>Đổi thông báo khởi động thành AKI</h3>
-          <p>Chọn đúng một ZIP đã gộp. Chỉ sửa chuỗi văn bản và .bytes AoV giải mã được; không đụng AssetBundle, MSES, IFix hay âm thanh.</p>
-          <button id="brandNotice" class="button button-rose" disabled>✦ Thay thương hiệu bằng AKI</button>
-        </div>
-        <div class="action-card">
-          <h3>Ghép ZIP thông thường</h3>
-          <p>Chỉ áp dụng cho ZIP không chứa tài nguyên AoV xung đột.</p>
-          <button id="go" class="button button-warm" disabled>Ghép ZIP thường</button>
         </div>
       </div>
-      <div class="note-box"><strong>Ưu tiên an toàn:</strong> không thay file bytes, AssetBundle, soundbank hoặc package chỉ vì trùng tên. Kiểm tra cấu trúc không đồng nghĩa đã test trong game; cần thử trên Liên Quân iOS để xác nhận hiệu ứng, biến về, thông báo hạ gục, nút bấm và âm thanh.</div>
+
+      <details class="advanced-tools">
+        <summary>
+          <span class="advanced-summary-copy">
+            <strong>Công cụ nâng cao</strong>
+            <small>Kiểm tra sâu · giải mã · quét thông báo · thương hiệu</small>
+          </span>
+          <span class="advanced-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="advanced-content">
+          <div class="advanced-group">
+            <h3>Kiểm tra & đối chiếu</h3>
+            <p>Hai báo cáo bổ sung để xem cấu trúc ZIP và đường dẫn tài nguyên bị trùng hoặc xung đột.</p>
+            <div class="action-pair">
+              <button id="inspect" class="button button-secondary" disabled>Kiểm tra cấu trúc ZIP</button>
+              <button id="compatibility" class="button button-violet" disabled>Đối chiếu xung đột</button>
+            </div>
+          </div>
+
+          <div class="advanced-group">
+            <h3>Giải mã & quét thông báo</h3>
+            <p>Chỉ đọc và xuất báo cáo. Quét thông báo không đồng nghĩa mọi thông báo trong game đều có thể sửa.</p>
+            <div class="action-pair">
+              <button id="decodeBytes" class="button button-violet" disabled>Giải mã .bytes</button>
+              <button id="noticeScan" class="button button-rose" disabled>Quét thông báo</button>
+            </div>
+            <button id="downloadNoticeReport" class="button button-secondary" disabled>Tải báo cáo thông báo (.json)</button>
+          </div>
+
+          <div class="advanced-group">
+            <h3>Quét dấu vết thương hiệu</h3>
+            <p>Tìm các chuỗi KIANA MOD AOV / Web Mod / Youtube trong dữ liệu có thể đọc được.</p>
+            <button id="brandingScan" class="button button-sky" disabled>⌕ Quét dấu vết thương hiệu</button>
+            <button id="downloadBrandingReport" class="button button-secondary" disabled>Tải báo cáo thương hiệu (.json)</button>
+          </div>
+
+          <div class="advanced-group">
+            <h3>Thay thương hiệu trong thông báo khởi động</h3>
+            <p>Chọn đúng một ZIP đã gộp. Chỉ sửa chuỗi văn bản và .bytes AoV giải mã được; không sửa AssetBundle, MSES, IFix hay âm thanh. Không bảo đảm loại bỏ được mọi popup.</p>
+            <button id="brandNotice" class="button button-rose" disabled>✦ Thay chuỗi thương hiệu bằng AKI</button>
+          </div>
+        </div>
+      </details>
+
+      <div class="note-box"><strong>Lưu ý an toàn:</strong> Phân tích cấu trúc không đồng nghĩa đã xác minh chạy trong game. Nếu nguồn chưa có quy tắc ghép an toàn, hệ thống sẽ chặn thay vì tự ghi đè và làm mất hiệu ứng, biến về, thông báo hạ gục, giao diện hoặc âm thanh.</div>
     </div>
   </section>
 </div>
