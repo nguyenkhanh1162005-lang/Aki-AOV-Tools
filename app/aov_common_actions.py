@@ -632,6 +632,7 @@ _COMMON_ACTIONS_MERGE_CANDIDATES = {
 def _inspect_common_actions_overlay(
     source_name: str,
     package_bytes: bytes,
+    actor_prefixes: set[str] | None = None,
 ) -> tuple[set[str], dict]:
     """Read explicit actor skin gates from the supported CommonActions XML files."""
     try:
@@ -688,7 +689,7 @@ def _inspect_common_actions_overlay(
                         f"{_normalized_track_name(track)} có SkinOrAvatarList lồng "
                         "ở vị trí chưa được hỗ trợ."
                     )
-                gated_tracks += 1
+                owned_nodes = []
                 for node in direct_nodes:
                     skin_id = node.attrib.get("id", "")
                     if not skin_id.isdigit():
@@ -696,7 +697,14 @@ def _inspect_common_actions_overlay(
                             f"{source_name}: {name}, track "
                             f"{_normalized_track_name(track)} có skin ID không phải số."
                         )
-                    skin_ids.add(skin_id)
+                    if actor_prefixes and skin_id[:3] not in actor_prefixes:
+                        continue
+                    owned_nodes.append(node)
+                if not owned_nodes:
+                    continue
+                gated_tracks += 1
+                for node in owned_nodes:
+                    skin_ids.add(node.attrib["id"])
                     gated_conditions += 1
     finally:
         archive.close()
@@ -718,7 +726,8 @@ def _common_actions_opaque_path_conflicts(
 ) -> tuple[list[dict], int, list[str]]:
     """List unresolved opaque conflicts and recognize safe semantic XML subsets."""
     by_path: dict[str, list[dict]] = {}
-    for source_name, package_bytes in overlays:
+    for overlay in overlays:
+        source_name, package_bytes = overlay[:2]
         try:
             archive = zipfile.ZipFile(io.BytesIO(package_bytes), "r")
         except zipfile.BadZipFile as exc:
@@ -808,10 +817,17 @@ def analyze_common_actions_overlay_set(
     package_reports = []
     parser_overlays = []
     try:
-        for source_name, package_bytes in overlays:
+        for overlay in overlays:
+            if len(overlay) == 3:
+                source_name, package_bytes, actor_prefixes = overlay
+                actor_prefixes = {str(value) for value in actor_prefixes}
+            else:
+                source_name, package_bytes = overlay
+                actor_prefixes = None
             skin_ids, report = _inspect_common_actions_overlay(
-                source_name, package_bytes
+                source_name, package_bytes, actor_prefixes
             )
+            report["actor_prefixes"] = sorted(actor_prefixes or ())
             package_reports.append(report)
             if skin_ids:
                 parser_overlays.append((package_bytes, skin_ids))
