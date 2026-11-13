@@ -288,6 +288,14 @@ def _merge_p9_p10_actor_owned_rows(
         raise MSESError(f"{resource_name}: tập khóa riêng P9 thay đổi so với fixture.")
     if "p10_only_keys" in spec and p10_only != spec["p10_only_keys"]:
         raise MSESError(f"{resource_name}: tập khóa riêng P10 thay đổi so với fixture.")
+    if (
+        "p9_only_keys" not in spec
+        and "p10_only_keys" not in spec
+        and (p9_only or p10_only)
+    ):
+        raise MSESError(
+            f"{resource_name}: tập khóa P9/P10 thay đổi so với cặp nguồn đã xác minh."
+        )
 
     common = base_keys & overlay_keys
     differing = {
