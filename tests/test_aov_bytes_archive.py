@@ -202,29 +202,20 @@ class AOVBytesArchiveTests(unittest.TestCase):
 
 
     def test_scans_opaque_startup_script_inside_raw_zip_pkg_container(self):
-        package = io.BytesIO()
-        with zipfile.ZipFile(package, "w") as nested:
-            nested.writestr(
-                "Lua_Signed/AOV/Lobby/GameEntryControl_lua.bytes",
-                b"\\x4f\\xe3\\xa0\\x0bopaque-startup-script",
-            )
-            nested.writestr(
-                "Lua_Signed/AOV/Lobby/LoginNotice.lua",
-                "function ShowLoginNotice() print('Welcome notice') end",
-            )
-
-        resources = self._archive(
-            Path(tempfile.gettempdir()) / "aki-unused-resources.zip",
-            {"Resources/1.64.1/StableSystems_3.pkg.bytes": package.getvalue()},
-        )
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
-            # Repackage the raw resource ZIP as the inner Resources.zip so the
-            # scan must expand both the resource ZIP and its raw .pkg.bytes.
-            inner = folder / "Resources.zip"
-            inner.write_bytes(Path(resources).read_bytes())
+            package = self._archive(folder / "stable-package.zip", {
+                "Lua_Signed/AOV/Lobby/GameEntryControl_lua.bytes":
+                    b"\\x4f\\xe3\\xa0\\x0bopaque-startup-script",
+                "Lua_Signed/AOV/Lobby/LoginNotice.lua":
+                    b"function ShowLoginNotice() print('Welcome notice') end",
+            })
+            resources = self._archive(folder / "Resources.zip", {
+                "Resources/1.64.1/StableSystems_3.pkg.bytes":
+                    Path(package).read_bytes(),
+            })
             wrapper = self._archive(folder / "wrapper.zip", {
-                "Resources.zip": inner.read_bytes(),
+                "Resources.zip": Path(resources).read_bytes(),
             })
 
             report = decode_archive_resources(
