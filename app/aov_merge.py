@@ -74,9 +74,15 @@ def merge_aov_mses_resource(
                 )
             base_table = parse_mses(base_decoded, verify_checksum=False)
             overlay_table = parse_mses(overlay_decoded, verify_checksum=False)
-            if base_table.checksum_valid or overlay_table.checksum_valid:
+            expected_stale_checksum = b"6679e51360ee25c838a5ee74af96a364"
+            if (
+                base_table.checksum_valid
+                or overlay_table.checksum_valid
+                or base_decoded[0x60:0x80] != expected_stale_checksum
+                or overlay_decoded[0x60:0x80] != expected_stale_checksum
+            ):
                 raise MSESError(
-                    "Adapter P9/P10 chỉ nhận cặp nguồn đã xác minh có checksum cũ ở cả hai bảng."
+                    "Adapter P9/P10 chỉ nhận đúng chuỗi checksum cũ đã xác minh ở cả hai bảng."
                 )
             if (
                 base_table.field_count != 69
