@@ -207,6 +207,7 @@ class AOVBytesArchiveTests(unittest.TestCase):
                 return {
                     "m_Name": "LoginNoticeController",
                     "m_Message": "ShowLoginNotice",
+                    "m_BrandLabel": "KIANA MOD AOV",
                 }
 
         fake_asset = SimpleNamespace(
@@ -238,6 +239,11 @@ class AOVBytesArchiveTests(unittest.TestCase):
                 item["keyword_group"] == "login_notice"
                 and "LoginNoticeController" in item["path"]
                 for item in report["notice_candidates"]
+            ))
+            self.assertTrue(any(
+                item["label"] == "brand"
+                and "LoginNoticeController" in item["path"]
+                for item in report["branding_candidates"]
             ))
             self.assertTrue(report["scan_only"])
             self.assertFalse((folder / "scan-only.zip").exists())
