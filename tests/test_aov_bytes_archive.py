@@ -39,10 +39,10 @@ class AOVBytesArchiveTests(unittest.TestCase):
         prefix = bytes(range(128))
         payload = (
             prefix
-            + b"\\x1bLuaS\\x01"
-            + b"\\x19\\x93\\r\\n\\x1a\\n"
-            + b"\\x00ShowHonorRoadTips\\x00"
-            + b"\\x00ShowLoginNotice\\x00"
+            + bytes([0x1B]) + b"LuaS" + bytes([0x01])
+            + bytes([0x19, 0x93, 0x0D, 0x0A, 0x1A, 0x0A])
+            + bytes([0]) + b"ShowHonorRoadTips" + bytes([0])
+            + b"ShowLoginNotice" + bytes([0])
         )
         result = _inspect_custom_lua_resource(
             payload, "Lua_Signed/AOV/Lobby/GameEntryControl_lua.bytes"
@@ -54,7 +54,7 @@ class AOVBytesArchiveTests(unittest.TestCase):
         self.assertFalse(result["startup_removal_eligible"])
         self.assertIn("ShowHonorRoadTips", result["strings"])
         self.assertIsNone(_inspect_custom_lua_resource(
-            b"\\x00" * 128 + b"LuaS\\x01" + b"payload",
+            bytes([0]) * 128 + b"LuaS" + bytes([1]) + b"payload",
             "Lua_Signed/AOV/Lobby/GameEntryControl_lua.bytes",
         ))
         self.assertIsNone(_inspect_custom_lua_resource(
@@ -64,10 +64,10 @@ class AOVBytesArchiveTests(unittest.TestCase):
     def test_scans_same_custom_lua_payload_in_raw_package_and_zstd_wrapper(self):
         payload = (
             bytes(range(128))
-            + b"\\x1bLuaS\\x01"
-            + b"\\x19\\x93\\r\\n\\x1a\\n"
-            + b"\\x00ShowHonorRoadTips\\x00"
-            + b"\\x00ShowLoginNotice\\x00"
+            + bytes([0x1B]) + b"LuaS" + bytes([0x01])
+            + bytes([0x19, 0x93, 0x0D, 0x0A, 0x1A, 0x0A])
+            + bytes([0]) + b"ShowHonorRoadTips" + bytes([0])
+            + b"ShowLoginNotice" + bytes([0])
         )
         resource_path = "Lua_Signed/AOV/Lobby/GameEntryControl_lua.bytes"
         with tempfile.TemporaryDirectory() as tmp:
@@ -100,7 +100,7 @@ class AOVBytesArchiveTests(unittest.TestCase):
         self.assertEqual(len(report["custom_lua_resources"]), 2)
         self.assertEqual(
             {item["resource_sha256"] for item in report["custom_lua_resources"]},
-            {__import__("hashlib").sha256(payload).hexdigest()},
+            {hashlib.sha256(payload).hexdigest()},
         )
         self.assertEqual(
             {item["decode_mode"] for item in report["custom_lua_resources"]},
