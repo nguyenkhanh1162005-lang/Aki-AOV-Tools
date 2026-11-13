@@ -41,6 +41,17 @@ NOTICE_PATTERNS = (
     ("cjk_notice", r"公告|通知|提示|弹窗|登录公告|登入公告"),
 )
 
+# Exact legacy labels requested for the Aki branding pass. This remains a
+# read-only inventory; discovering a string is not permission to rewrite a
+# Unity object, binary package, or game configuration.
+BRANDING_TERMS = (
+    ("creator_credit", "Mod được tạo bởi youtuber KIANA MOD AOV"),
+    ("brand", "KIANA MOD AOV"),
+    ("web_mod", "Web Mod"),
+    ("youtube", "Youtube"),
+)
+MAX_BRANDING_CANDIDATES = 100
+
 
 class AOVBytesArchiveError(ValueError):
     pass
@@ -105,6 +116,39 @@ def _scan_notice_text_view(decoded: str, path: str, encoding: str) -> list[dict[
                 "excerpt": excerpt[:MAX_NOTICE_SNIPPET],
             })
     return findings
+
+
+def _scan_branding_text_view(
+    decoded: str, path: str, encoding: str
+) -> tuple[list[dict[str, str]], bool]:
+    """Find exact legacy branding labels in bounded text views, without editing them."""
+    findings: list[dict[str, str]] = []
+    occupied: list[tuple[int, int]] = []
+    truncated = False
+    for label, term in BRANDING_TERMS:
+        # Word boundaries prevent the standalone "Youtube" label from also
+        # matching the beginning of "youtuber" in the longer creator credit.
+        expression = re.compile(r"(?<!\\w)" + re.escape(term) + r"(?!\\w)", re.IGNORECASE)
+        matches = expression.finditer(decoded)
+        for match in matches:
+            if any(start < match.end() and end > match.start() for start, end in occupied):
+                continue
+            start = max(0, match.start() - 90)
+            end = min(len(decoded), match.end() + 120)
+            excerpt = " ".join(decoded[start:end].split())
+            findings.append({
+                "label": label,
+                "path": path,
+                "term": term,
+                "matched_text": match.group(0)[:100],
+                "encoding": encoding,
+                "excerpt": excerpt[:240],
+            })
+            occupied.append((match.start(), match.end()))
+            if len(findings) >= 25:
+                truncated = True
+                return findings, truncated
+    return findings, truncated
 
 
 def _scan_notice_text(data: bytes, path: str) -> list[dict[str, str]]:
@@ -188,6 +232,7 @@ def _scan_notice_assetbundle(data: bytes, path: str) -> dict[str, Any]:
         }
 
     findings: list[dict[str, str]] = []
+    branding_findings: list[dict[str, str]] = []
     inspected_objects = 0
     text_truncated = False
     object_scan_errors = 0
@@ -239,6 +284,11 @@ def _scan_notice_assetbundle(data: bytes, path: str) -> dict[str, Any]:
                 findings.extend(
                     _scan_notice_text_view(text, label_path, "unity-typetree")
                 )
+                brand_matches, brand_truncated = _scan_branding_text_view(
+                    text, label_path, "unity-typetree"
+                )
+                branding_findings.extend(brand_matches)
+                text_truncated = text_truncated or brand_truncated
                 if len(findings) >= MAX_NOTICE_CANDIDATES:
                     findings = findings[:MAX_NOTICE_CANDIDATES]
                     text_truncated = True
@@ -250,6 +300,7 @@ def _scan_notice_assetbundle(data: bytes, path: str) -> dict[str, Any]:
     return {
         "scanned": True,
         "findings": findings,
+        "branding_findings": branding_findings,
         "objects_inspected": inspected_objects,
         "object_scan_errors": object_scan_errors,
         "truncated": text_truncated,
@@ -339,6 +390,9 @@ def decode_archive_resources(
         "notice_assetbundle_scan_errors": [],
         "notice_candidates": [],
         "notice_candidates_truncated": False,
+        "branding_candidates": [],
+        "branding_candidates_truncated": False,
+        "branding_scan_terms": [term for _, term in BRANDING_TERMS],
         "notice_scan_scope": "Text-like Lua/XML/JSON/TXT/config/CSV, decoded non-MSES .bytes, and bounded UnityFS AssetBundle object text (MonoBehaviour/TextAsset/ScriptableObject, up to 64 MiB and 500 objects per bundle). Opaque binary remains unscanned.",
         "advisory_only": True,
         "merge_authorized": False,
@@ -347,6 +401,19 @@ def decode_archive_resources(
     output = Path(output_path)
     seen_output_paths: set[str] = set()
     total_uncompressed = 0
+
+    def add_branding_candidates(source: str, candidates: list[dict[str, str]], truncated: bool = False) -> None:
+        report["branding_candidates_truncated"] = (
+            report["branding_candidates_truncated"] or truncated
+        )
+        for candidate in candidates:
+            if len(report["branding_candidates"]) >= MAX_BRANDING_CANDIDATES:
+                report["branding_candidates_truncated"] = True
+                break
+            report["branding_candidates"].append({
+                "source": source,
+                **candidate,
+            })
 
     def process_archive(archive: zipfile.ZipFile, prefix: str, depth: int) -> None:
         nonlocal total_uncompressed
@@ -405,6 +472,9 @@ def decode_archive_resources(
                             "source": prefix,
                             **finding,
                         })
+                    add_branding_candidates(
+                        prefix, bundle_scan.get("branding_findings", [])
+                    )
                 else:
                     report["notice_assetbundles_skipped"] += 1
                     reason = bundle_scan.get("reason", "")
@@ -429,6 +499,13 @@ def decode_archive_resources(
                             "path": path,
                             **finding,
                         })
+                    text_view = _notice_text_view(raw)
+                    if text_view is not None:
+                        encoding, decoded_text = text_view
+                        matches, was_truncated = _scan_branding_text_view(
+                            decoded_text, path, encoding
+                        )
+                        add_branding_candidates(prefix, matches, was_truncated)
                 continue
             expected_size = _expected_decoded_size(raw)
             if expected_size is None:
@@ -476,6 +553,13 @@ def decode_archive_resources(
                     "path": path,
                     **finding,
                 })
+            text_view = _notice_text_view(decoded)
+            if text_view is not None:
+                encoding, decoded_text = text_view
+                matches, was_truncated = _scan_branding_text_view(
+                    decoded_text, path, encoding
+                )
+                add_branding_candidates(prefix, matches, was_truncated)
             if path.lower().endswith(("heroskin_1.bytes", "heroskin_2.bytes")):
                 try:
                     patch = parse_ifix_patch(decoded)
