@@ -15,6 +15,7 @@ Công cụ web và Telegram bot riêng tư bằng tiếng Việt để tải, ki
 - Web API `/api/upload/{upload_id}/aov-merge`: tự chọn adapter theo cấu trúc ZIP; hỗ trợ hai đường ghép có giới hạn: KPM100 ZIP trực tiếp + VTK, hoặc MOD wrapper 10 skin + các ZIP phần VTK iOS.
 - Web API `/api/upload/{upload_id}/decode-bytes`: giải mã các tài nguyên `.bytes` AoV AES/Zstandard đã nhận diện từ ZIP đã tải lên; hỗ trợ ZIP `Resources.zip` lồng nhau và bung tiếp ZIP bên trong `.pkg.bytes` đã giải mã (tối đa hai tầng), xuất ZIP riêng cùng `decode-report.json`, không sửa ZIP gốc và không ghép tài nguyên.
 - Web API `/api/upload/{upload_id}/notice-scan`: quét chỉ đọc các chuỗi liên quan thông báo trong Lua/XML/JSON/TXT/config/CSV và `.bytes` đã giải mã; trả đường dẫn, từ khóa, đoạn trích ngắn; giữ nguyên phiên tải và file gốc.
+- Web API `/api/upload/{upload_id}/branding-scan`: quét chỉ đọc chính xác `KIANA MOD AOV`, `Mod được tạo bởi youtuber KIANA MOD AOV`, `Web Mod` và `Youtube` trong văn bản, `.bytes` giải mã được, package lồng và metadata Unity AssetBundle có giới hạn; không thay đổi ZIP.
 
 ## Telegram bot riêng tư
 
@@ -36,6 +37,12 @@ Chọn ZIP rồi bấm **Giải mã tài nguyên .bytes đã hỗ trợ**. Web g
 Bộ lõi MSES v7 có parser, serializer, kiểm tra checksum và ghép theo khóa. Mọi khóa row mới phải nằm trong allowlist riêng của bảng. Soundbank chỉ nhận row có marker `Hero_LiXin_Skin_C`; `ResSkinSeniorLabelCfg` chỉ nhận key 59500 và từ chối nếu key này đã tồn tại với payload khác; `skillcombine` chỉ nhận đúng năm key Actor 595 đã xác minh (0x000915A7–0x000915AB). Không nối byte hoặc ghi đè bảng khi thiếu quy tắc theo schema.
 
 Giới hạn: tối đa 20.000 entry, 1 GiB dữ liệu giải nén, 256 MiB mỗi entry và 256 MiB kích thước giải mã khai báo cho mỗi tài nguyên. Chức năng này chỉ trích xuất payload đã giải mã để kiểm tra/phân tích; không sửa MSES/IFix, không giải mã Unity AssetBundle hoặc Wwise BNK, không ghép skin và không tạo ZIP có thể cài vào game.
+
+## Quét chuỗi thương hiệu AKI (chỉ đọc)
+
+Trên web chọn các ZIP đầu vào rồi bấm **Quét KIANA MOD AOV / Web Mod / Youtube**. Báo cáo nêu vị trí, encoding và đoạn trích của từng nhãn cũ; có thể tải JSON để lưu lại. Bộ quét xét văn bản thường, `.bytes` đã giải mã, package ZIP lồng và metadata text trong UnityFS AssetBundle dưới các giới hạn đã nêu. Dữ liệu opaque, bundle quá lớn và định dạng chưa giải mã có thể không được quét.
+
+Bước này chỉ dùng để chẩn đoán. Nút **Thay thương hiệu bằng AKI** dùng bộ ghi lại riêng và chỉ sửa UTF text cùng AoV AES/Zstandard wrapper giải mã được; Unity AssetBundle, MSES, IFix, Wwise và payload opaque vẫn được giữ nguyên. Không xem số chuỗi quét được là bằng chứng popup đã biến mất.
 
 ## Quét thông báo khởi động (chỉ đọc)
 

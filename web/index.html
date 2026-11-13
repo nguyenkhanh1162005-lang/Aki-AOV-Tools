@@ -199,6 +199,8 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
             <button id="noticeScan" class="button button-rose" disabled>Quét thông báo</button>
           </div>
           <button id="downloadNoticeReport" class="button button-secondary" disabled>Tải báo cáo thông báo (.json)</button>
+          <button id="brandingScan" class="button button-sky" disabled>⌕ Quét KIANA MOD AOV / Web Mod / Youtube</button>
+          <button id="downloadBrandingReport" class="button button-secondary" disabled>Tải báo cáo thương hiệu (.json)</button>
         </div>
         <div class="action-card">
           <h3>Đổi thông báo khởi động thành AKI</h3>
@@ -237,8 +239,8 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
 <footer>AKI AOV TOOLS · INPUT FILES ARE KEPT SEPARATE UNTIL VALIDATION PASSES</footer>
 </div>
 <script>
-const driveLinks=document.querySelector('#driveLinks'),driveImport=document.querySelector('#driveImport'),driveMerge=document.querySelector('#driveMerge');let driveUploadId=null,localAovUploadId=null;let aovAdapterEnabled=false;const input=document.querySelector('#upload'),go=document.querySelector('#go'),aovMerge=document.querySelector('#aovMerge'),decodeBytesBtn=document.querySelector('#decodeBytes'),noticeScanBtn=document.querySelector('#noticeScan'),brandNoticeBtn=document.querySelector('#brandNotice'),downloadNoticeReportBtn=document.querySelector('#downloadNoticeReport'),downloadAovPreflightReportBtn=document.querySelector('#downloadAovPreflightReport'),compatibilityBtn=document.querySelector('#compatibility'),aovPreflightBtn=document.querySelector('#aovPreflight'),inspectBtn=document.querySelector('#inspect'),report=document.querySelector('#report'),list=document.querySelector('#files'),status=document.querySelector('#status');
-const CHUNK_BYTES=4*1024*1024,UPLOAD_CONCURRENCY=4;let noticeScanReport=null,aovPreflightReport=null,transferStartedAt=0;
+const driveLinks=document.querySelector('#driveLinks'),driveImport=document.querySelector('#driveImport'),driveMerge=document.querySelector('#driveMerge');let driveUploadId=null,localAovUploadId=null;let aovAdapterEnabled=false;const input=document.querySelector('#upload'),go=document.querySelector('#go'),aovMerge=document.querySelector('#aovMerge'),decodeBytesBtn=document.querySelector('#decodeBytes'),noticeScanBtn=document.querySelector('#noticeScan'),brandNoticeBtn=document.querySelector('#brandNotice'),downloadNoticeReportBtn=document.querySelector('#downloadNoticeReport'),brandingScanBtn=document.querySelector('#brandingScan'),downloadBrandingReportBtn=document.querySelector('#downloadBrandingReport'),downloadAovPreflightReportBtn=document.querySelector('#downloadAovPreflightReport'),compatibilityBtn=document.querySelector('#compatibility'),aovPreflightBtn=document.querySelector('#aovPreflight'),inspectBtn=document.querySelector('#inspect'),report=document.querySelector('#report'),list=document.querySelector('#files'),status=document.querySelector('#status');
+const CHUNK_BYTES=4*1024*1024,UPLOAD_CONCURRENCY=4;let noticeScanReport=null,brandingScanReport=null,aovPreflightReport=null,transferStartedAt=0;
 const transferBar=document.querySelector('#transferBar'),transferPct=document.querySelector('#transferPct'),transferLabel=document.querySelector('#transferLabel'),transferMeta=document.querySelector('#transferMeta');
 function setTransferProgress(done,total,label){
   const pct=total?Math.min(100,done/total*100):0;
@@ -652,7 +654,7 @@ async function withUploadSession(files, action){
 driveImport.addEventListener('click',async()=>{const links=driveLinks.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);if(!links.length){status.textContent='Hãy dán ít nhất một link Google Drive.';return;}driveImport.disabled=true;go.disabled=true;inspectBtn.disabled=true;driveMerge.disabled=true;driveMerge.style.display='none';driveUploadId=null;aovPreflightReport=null;downloadAovPreflightReportBtn.disabled=true;report.textContent='';try{let uploadId=localAovUploadId;if(input.files.length&&!uploadId){status.textContent='Đang tải ZIP đã chọn từ thiết bị lên máy chủ...';uploadId=await uploadInChunks([...input.files]);localAovUploadId=uploadId;}status.textContent='Máy chủ đang tải ZIP trực tiếp từ Google Drive. File lớn có thể mất vài phút...';const payload={links};if(uploadId)payload.upload_id=uploadId;const r=await fetchWithRetry('/api/drive/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await r.json();driveUploadId=data.upload_id;localAovUploadId=null;driveMerge.style.display='block';driveMerge.disabled=!aovAdapterEnabled;aovPreflightBtn.disabled=false;status.textContent='Đã tải '+data.files.length+' ZIP về máy chủ: '+data.files.map(f=>f.name+' ('+(f.size/1048576).toFixed(1)+' MB)').join(', ')+'. Đang kiểm tra cấu trúc...';const checked=await fetchWithRetry('/api/upload/'+data.upload_id+'/inspect?keep_session=true',{method:'POST'});report.textContent=await checked.text();status.textContent='Đã kiểm tra xong ZIP từ Drive. Có thể chạy bộ ghép AOV chuyên sâu.';}catch(e){status.textContent='Lỗi: '+e.message;}finally{driveImport.disabled=false;go.disabled=!input.files.length;inspectBtn.disabled=!input.files.length;}});
 driveMerge.addEventListener('click',async()=>{if(!driveUploadId)return;driveMerge.disabled=true;status.textContent='Đang giải mã và ghép tài nguyên AOV trên máy chủ...';try{const r=await fetchWithRetry('/api/upload/'+driveUploadId+'/aov-merge',{method:'POST'});if(r.headers.get('X-AOV-Validation')!=='passed')throw Error('Máy chủ chưa xác nhận đầy đủ các bước kiểm tra AOV; không tải file như bản đã xác minh.');const base=r.headers.get('X-AOV-Base-Version')||'không rõ',vtk=r.headers.get('X-AOV-VTK-Version')||'không rõ',bundles=r.headers.get('X-AOV-AssetBundles')||'?',added=r.headers.get('X-AOV-New-Files')||'?',nested=r.headers.get('X-AOV-Nested-Packages')||'0',nestedAdded=r.headers.get('X-AOV-Nested-Package-Added-Entries')||'0',billboardTables=r.headers.get('X-AOV-Huanhua-Tables-Merged')||'0',billboardRows=r.headers.get('X-AOV-Huanhua-Actor595-Rows-Added')||'0',adapter=r.headers.get('X-AOV-Adapter')||'';const isWrapper=adapter==='aov_mod_to_mod_vtk_actor595_1.64.1';const mode=isWrapper?'10 skin + VTK':'KPM100 + VTK';const fileName=isWrapper?'Aki-AOV-10Skin-VanTamKiem.zip':'Aki-AOV-KPM100-VTK.zip';const tested=r.headers.get('X-AOV-Game-Tested')==='true';const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);driveUploadId=null;clearUploadState();driveMerge.style.display='none';status.textContent='Đã tạo ZIP '+mode+'. Kiểm tra cấu trúc máy chủ: ĐẠT; nền '+base+'; VTK '+vtk+'; AssetBundle '+bundles+'; tài nguyên thêm '+added+'; package lồng đã hợp nhất '+nested+' (thêm '+nestedAdded+' mục). Bảng thông báo hạ đã ghép: '+billboardTables+'; hàng Actor 595 thêm: '+billboardRows+'. '+(tested?'Đã xác nhận test trong game.':'Chưa test trong Liên Quân iOS, nên cần thử hiệu ứng trực tiếp trên thiết bị.');}catch(e){status.textContent='Lỗi ghép: '+e.message;driveMerge.disabled=false;}});
 
-input.addEventListener('change',()=>{preflightDashboard.hidden=true;preflightDashboard.replaceChildren();localAovUploadId=null;driveUploadId=null;const fs=[...input.files];list.textContent=fs.length?fs.map(f=>f.name+' ('+(f.size/1048576).toFixed(1)+' MB)').join('\n'):'Chưa chọn file nào.';go.disabled=!fs.length||fs.length>10;aovMerge.disabled=!aovAdapterEnabled||fs.length<2||fs.length>10;inspectBtn.disabled=!fs.length||fs.length>10;compatibilityBtn.disabled=!fs.length||fs.length>10;aovPreflightBtn.disabled=!fs.length||fs.length>10;decodeBytesBtn.disabled=!fs.length||fs.length>10;noticeScanBtn.disabled=!fs.length||fs.length>10;brandNoticeBtn.disabled=fs.length!==1;noticeScanReport=null;downloadNoticeReportBtn.disabled=true;aovPreflightReport=null;downloadAovPreflightReportBtn.disabled=true;report.textContent='';status.textContent=fs.length>10?'Chỉ được chọn tối đa 10 file.':'';setTransferProgress(0,1,fs.length?'SẴN SÀNG TẢI LÊN':'CHƯA CHỌN FILE');});
+input.addEventListener('change',()=>{preflightDashboard.hidden=true;preflightDashboard.replaceChildren();localAovUploadId=null;driveUploadId=null;const fs=[...input.files];list.textContent=fs.length?fs.map(f=>f.name+' ('+(f.size/1048576).toFixed(1)+' MB)').join('\n'):'Chưa chọn file nào.';go.disabled=!fs.length||fs.length>10;aovMerge.disabled=!aovAdapterEnabled||fs.length<2||fs.length>10;inspectBtn.disabled=!fs.length||fs.length>10;compatibilityBtn.disabled=!fs.length||fs.length>10;aovPreflightBtn.disabled=!fs.length||fs.length>10;decodeBytesBtn.disabled=!fs.length||fs.length>10;noticeScanBtn.disabled=!fs.length||fs.length>10;brandNoticeBtn.disabled=fs.length!==1;brandingScanBtn.disabled=!fs.length||fs.length>10;brandingScanReport=null;downloadBrandingReportBtn.disabled=true;noticeScanReport=null;downloadNoticeReportBtn.disabled=true;aovPreflightReport=null;downloadAovPreflightReportBtn.disabled=true;report.textContent='';status.textContent=fs.length>10?'Chỉ được chọn tối đa 10 file.':'';setTransferProgress(0,1,fs.length?'SẴN SÀNG TẢI LÊN':'CHƯA CHỌN FILE');});
 
 
 downloadNoticeReportBtn.addEventListener('click',()=>{
@@ -714,6 +716,63 @@ noticeScanBtn.addEventListener('click',async()=>{
     go.disabled=!input.files.length||input.files.length>10;
     inspectBtn.disabled=!input.files.length||input.files.length>10;
     aovMerge.disabled=!aovAdapterEnabled||input.files.length<2||input.files.length>10;
+  }
+});
+
+downloadBrandingReportBtn.addEventListener('click',()=>{
+  if(!brandingScanReport)return;
+  const blob=new Blob([JSON.stringify(brandingScanReport,null,2)],{type:'application/json;charset=utf-8'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download='aki-aov-branding-scan-report.json';
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+});
+
+brandingScanBtn.addEventListener('click',async()=>{
+  const files=[...input.files];
+  if(!files.length||files.length>10){status.textContent='Chọn từ 1 đến 10 ZIP trước khi quét.';return;}
+  brandingScanBtn.disabled=true;brandNoticeBtn.disabled=true;go.disabled=true;inspectBtn.disabled=true;
+  aovMerge.disabled=true;compatibilityBtn.disabled=true;noticeScanBtn.disabled=true;decodeBytesBtn.disabled=true;
+  brandingScanReport=null;downloadBrandingReportBtn.disabled=true;report.textContent='';
+  try{
+    status.textContent='Đang tìm đúng các chuỗi thương hiệu trong văn bản, .bytes đã giải mã và metadata Unity AssetBundle có thể đọc. Chỉ đọc, không sửa ZIP...';
+    const response=await withUploadSession(files,uploadId=>fetchWithRetry('/api/upload/'+encodeURIComponent(uploadId)+'/branding-scan',{method:'POST'}));
+    const data=await response.json();
+    brandingScanReport=data;downloadBrandingReportBtn.disabled=false;
+    const candidates=data.candidates||[];
+    const lines=[
+      'BÁO CÁO QUÉT THƯƠNG HIỆU AKI (CHỈ ĐỌC)',
+      'Số mục/nội dung đã quét: '+(data.scan_files||0),
+      'Số .bytes giải mã được: '+(data.decoded_resources||0),
+      'Dung lượng đã giải mã: '+((data.decoded_bytes||0)/1048576).toFixed(1)+' MB',
+      'Unity AssetBundle đã quét: '+(data.assetbundles_scanned||0),
+      'Unity AssetBundle bỏ qua: '+(data.assetbundles_skipped||0),
+      'Package lồng đã bung: '+(data.nested_packages_expanded||0),
+      'Tài nguyên chưa giải mã: '+(data.unsupported_resources||0),
+      'Số vị trí chứa chuỗi: '+candidates.length+(data.truncated?' (đã giới hạn kết quả)':''),
+      ''
+    ];
+    for(const item of candidates){
+      lines.push('['+item.label+'] '+item.source+'/'+item.path);
+      lines.push('  Khớp: '+item.matched_text+' · '+item.encoding);
+      lines.push('  '+item.excerpt);
+    }
+    if(!candidates.length)lines.push('Chưa tìm thấy chuỗi trong phần dữ liệu có thể đọc.');
+    lines.push('',data.warning||'Kết quả chỉ đọc; không chỉnh sửa file nguồn.');
+    report.textContent=lines.join('\n');
+    status.textContent=candidates.length
+      ?'Đã tìm thấy '+candidates.length+' vị trí chứa nhãn cũ. Chưa chỉnh sửa file nào.'
+      :'Quét xong nhưng chưa thấy nhãn cũ trong vùng dữ liệu đọc được. Có thể chuỗi nằm trong tài nguyên opaque/chưa hỗ trợ.';
+  }catch(e){status.textContent='Lỗi quét thương hiệu: '+e.message+' ZIP nguồn vẫn được giữ nguyên.';}
+  finally{
+    brandingScanBtn.disabled=!input.files.length||input.files.length>10;
+    brandNoticeBtn.disabled=input.files.length!==1;
+    go.disabled=!input.files.length||input.files.length>10;
+    inspectBtn.disabled=!input.files.length||input.files.length>10;
+    aovMerge.disabled=!aovAdapterEnabled||input.files.length<2||input.files.length>10;
+    compatibilityBtn.disabled=!input.files.length||input.files.length>10;
+    noticeScanBtn.disabled=!input.files.length||input.files.length>10;
+    decodeBytesBtn.disabled=!input.files.length||input.files.length>10;
   }
 });
 
