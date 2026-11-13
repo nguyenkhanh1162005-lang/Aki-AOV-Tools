@@ -5,6 +5,7 @@ from app.aov_bytes import encode_aov_resource, decode_aov_resource
 from app.aov_merge import (
     AOVResourceMergeError,
     _P9_P10_ACTOR_OWNED_MSES,
+    _actor_id_from_mses_key,
     merge_aov_mses_resource,
 )
 from app.aov_mses import build_mses, MSESTable, parse_mses
@@ -450,6 +451,38 @@ class AOVResourceMergeTests(unittest.TestCase):
         name = "Databin/Client/Actor/heroSkin.bytes"
         with self.assertRaisesRegex(AOVResourceMergeError, "cần Actor_Action inventory"):
             merge_aov_mses_resource(b"invalid", b"invalid", name)
+
+
+
+    def test_actor_id_decoding_for_audio_mses_key_families(self):
+        bank_spec = {"actor_id_rule": "bank_10000"}
+        sound_spec = {"actor_id_rule": "sound_1000"}
+        self.assertEqual(_actor_id_from_mses_key(107000123, bank_spec), 107)
+        self.assertEqual(_actor_id_from_mses_key(509000456, bank_spec), 509)
+        self.assertEqual(_actor_id_from_mses_key(107123, sound_spec), 107)
+        self.assertEqual(_actor_id_from_mses_key(509456, sound_spec), 509)
+        self.assertIsNone(_actor_id_from_mses_key(12345, {"actor_id_rule": "unknown"}))
+
+    def test_p9_p10_audio_mses_specs_are_source_pinned(self):
+        audio_paths = (
+            "Databin/Client/Sound/BattleBank.bytes",
+            "Databin/Client/Sound/LobbyBank.bytes",
+            "Databin/Client/Sound/LobbySound.bytes",
+            "Databin/Client/Sound/ChatSound.bytes",
+            "Databin/Client/Sound/CoupleSound.bytes",
+        )
+        for path in audio_paths:
+            with self.subTest(path=path):
+                spec = _P9_P10_ACTOR_OWNED_MSES[path]
+                self.assertEqual(len(spec["p9_sha256"]), 64)
+                self.assertEqual(len(spec["p10_sha256"]), 64)
+                self.assertGreater(spec["conflict_count"], 0)
+                self.assertEqual(
+                    spec["p9_actor_ids"] | spec["p10_actor_ids"],
+                    {107, 130, 137, 163, 509, 510, 518, 540, 597,
+                     111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
+                )
+                self.assertFalse(spec["p9_actor_ids"] & spec["p10_actor_ids"])
 
 
 
