@@ -279,14 +279,21 @@ function renderPreflightDashboard(data){
   const root=preflightDashboard;
   root.replaceChildren();root.hidden=false;
   const analysis=data.resource_analysis||{},counts=analysis.summary||{},target=data.target_set||{};
+  const selectedAdapter=data.selected_adapter||data.general_analysis?.selected_adapter||'';
+  const genericZipReady=selectedAdapter==='generic_zip';
+  const canMerge=!!data.ready_to_merge||genericZipReady;
   const state=dashboardElement('div','preflight-state');
-  state.dataset.ready=data.ready_to_merge?'true':'false';
-  state.append(dashboardElement('div','preflight-state-icon',data.ready_to_merge?'✓':'!'));
+  state.dataset.ready=canMerge?'true':'false';
+  state.append(dashboardElement('div','preflight-state-icon',canMerge?'✓':'!'));
   const stateCopy=dashboardElement('div');
-  stateCopy.append(dashboardElement('strong','',data.ready_to_merge?'Bộ nguồn khớp adapter đã giới hạn':'Chưa đủ điều kiện ghép an toàn'));
-  stateCopy.append(dashboardElement('p','',data.ready_to_merge
-    ?'Hệ thống vẫn kiểm tra inventory, phiên bản, checksum và dependency trước khi xuất file.'
-    :'Còn xung đột hoặc thiếu adapter. Hệ thống không tự chọn file để ghi đè.'));
+  const stateTitle=genericZipReady?'ZIP phù hợp bộ ghép thông thường':canMerge?'Bộ nguồn khớp adapter AoV đã giới hạn':'Chưa đủ điều kiện ghép an toàn';
+  const stateDetail=genericZipReady
+    ?'Máy chủ sẽ kiểm tra đường dẫn trùng, xung đột nội dung và CRC trước khi xuất ZIP.'
+    :canMerge
+      ?'Hệ thống vẫn kiểm tra inventory, phiên bản, checksum và dependency trước khi xuất file.'
+      :'Còn xung đột hoặc thiếu adapter. Hệ thống không tự chọn file để ghi đè.';
+  stateCopy.append(dashboardElement('strong','',stateTitle));
+  stateCopy.append(dashboardElement('p','',stateDetail));
   state.append(stateCopy);root.append(state);
 
   const metrics=dashboardElement('div','preflight-metrics');
@@ -338,8 +345,8 @@ function renderPreflightDashboard(data){
     ' · MOD AoV chưa phân loại: '+(general.unclassified_aov_source_count||0)
   ));
   generalCard.append(dashboardElement('p','',
-    general.merge_ready
-      ?'Đã khớp adapter có giới hạn: '+(general.selected_adapter||'không rõ')+'. Máy chủ vẫn kiểm tra sâu trước khi xuất.'
+    general.merge_ready||genericZipReady
+      ?'Đã chọn adapter có thể ghép: '+(selectedAdapter||'không rõ')+'. Máy chủ vẫn kiểm tra sâu trước khi xuất.'
       :'Đang ở chế độ phân tích. Những MOD chưa có adapter riêng sẽ không được xuất ZIP tự động.'
   ));
   root.append(generalCard);
