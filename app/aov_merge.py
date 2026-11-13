@@ -94,6 +94,16 @@ _P9_P10_ACTOR_OWNED_MSES = {
         "p9_actor_ids": {107, 130, 137, 163, 509, 510, 518, 540, 597},
         "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
     },
+
+    "Databin/Client/Sound/HeroSound.bytes": {
+        "field_count": 69, "row_count": 2033, "actor_id_rule": "hero_sound_mixed_scale",
+        "actor_prefix_divisors": (10, 100, 1000, 10000, 100000, 1000000),
+        "conflict_count": 485,
+        "p9_sha256": "53f9d8d23b286ae39d23b0d8f22fa327e35567dc09e42bad38906e41235b0f0c",
+        "p10_sha256": "4c191ea50effed067ac88247efdd4704b46455aed64ce1ff9b86f480b81fbcfe",
+        "p9_actor_ids": {107, 130, 137, 163, 509, 510, 518, 540, 597},
+        "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
+    },
     "Databin/Client/Sound/CoupleSound.bytes": {
         "field_count": 80, "row_count": 577, "actor_id_rule": "sound_1000",
         "conflict_count": 114,
@@ -143,6 +153,17 @@ def _actor_id_from_mses_key(key: int, spec: dict) -> int | None:
     if rule == "sound_1000":
         encoded = key // 1000
         return encoded if encoded <= 999 else encoded // 100
+    if rule == "hero_sound_mixed_scale":
+        # HeroSound uses more than one numeric key width. Only accept a unique
+        # prefix that belongs to the exact P9/P10 Actor_Action inventories.
+        allowed_actors = set(spec.get("p9_actor_ids", ())) | set(spec.get("p10_actor_ids", ()))
+        candidates = {
+            key // divisor
+            for divisor in spec.get("actor_prefix_divisors", ())
+            if isinstance(divisor, int) and divisor > 0
+            and key // divisor in allowed_actors
+        }
+        return next(iter(candidates)) if len(candidates) == 1 else None
     if rule == "actor_divisor" or rule is None:
         divisor = spec.get("actor_divisor")
         return key // divisor if isinstance(divisor, int) and divisor > 0 else None

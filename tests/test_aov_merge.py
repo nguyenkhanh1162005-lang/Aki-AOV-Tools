@@ -461,6 +461,20 @@ class AOVResourceMergeTests(unittest.TestCase):
         self.assertEqual(_actor_id_from_mses_key(509000456, bank_spec), 509)
         self.assertEqual(_actor_id_from_mses_key(107123, sound_spec), 107)
         self.assertEqual(_actor_id_from_mses_key(509456, sound_spec), 509)
+        hero_spec = {
+            "actor_id_rule": "hero_sound_mixed_scale",
+            "actor_prefix_divisors": (10, 100, 1000, 10000, 100000, 1000000),
+            "p9_actor_ids": {597},
+            "p10_actor_ids": {167},
+        }
+        self.assertEqual(_actor_id_from_mses_key(0xE934, hero_spec), 597)
+        self.assertEqual(_actor_id_from_mses_key(0x9F54B75, hero_spec), 167)
+        self.assertIsNone(_actor_id_from_mses_key(
+            1000,
+            {"actor_id_rule": "hero_sound_mixed_scale",
+             "actor_prefix_divisors": (100, 1000),
+             "p9_actor_ids": {10}, "p10_actor_ids": {1}},
+        ))
         self.assertEqual(_actor_id_from_mses_key(10700, {"actor_divisor": 100}), 107)
         self.assertEqual(_actor_id_from_mses_key(5090000, {"actor_divisor": 10000}), 509)
         self.assertIsNone(_actor_id_from_mses_key(12345, {"actor_id_rule": "unknown"}))
@@ -472,6 +486,7 @@ class AOVResourceMergeTests(unittest.TestCase):
             "Databin/Client/Sound/LobbySound.bytes",
             "Databin/Client/Sound/ChatSound.bytes",
             "Databin/Client/Sound/CoupleSound.bytes",
+            "Databin/Client/Sound/HeroSound.bytes",
         )
         for path in audio_paths:
             with self.subTest(path=path):
@@ -485,6 +500,7 @@ class AOVResourceMergeTests(unittest.TestCase):
                      111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
                 )
                 self.assertFalse(spec["p9_actor_ids"] & spec["p10_actor_ids"])
+                self.assertEqual(spec["actor_id_rule"], "hero_sound_mixed_scale") if path.endswith("HeroSound.bytes") else None
 
 
 
