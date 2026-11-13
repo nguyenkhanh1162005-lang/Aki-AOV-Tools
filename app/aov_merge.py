@@ -4,7 +4,10 @@ import hashlib
 import re
 
 from .aov_bytes import AOVBytesError, decode_aov_resource, encode_aov_resource
-from .aov_mses import MSESError, build_mses, merge_mses_rows, parse_mses
+from .aov_mses import (
+    MSESError, build_mses, merge_mses_rows, parse_mses,
+    repair_mses_declared_row_count,
+)
 
 
 class AOVResourceMergeError(ValueError):
@@ -21,6 +24,7 @@ _CHARACTER_COMPONENT_PATH = "Databin/Client/Character/ResCharacterComponent.byte
 
 _SUPPORTED_MSES_TABLES = {
     _CHARACTER_COMPONENT_PATH,
+    "Databin/Client/Actor/organSkin.bytes",
     "Databin/Client/Sound/BattleBank.bytes",
     "Databin/Client/Sound/LobbyBank.bytes",
     "Databin/Client/Skill/skillcombine.bytes",
@@ -130,6 +134,17 @@ _P9_P10_ACTOR_OWNED_MSES = {
 }
 
 _SUPPORTED_MSES_TABLES.update(_P9_P10_ACTOR_OWNED_MSES)
+
+_P9_P10_ORGANSKIN_SPEC = {
+    "p9_sha256": "3a9d4d037f15567b6895ae7e7ea0a141adaa4a9f243107c5cef87ef20e14b107",
+    "p10_sha256": "172cadb27a930f90b27c625a4c29ff0040a7407b87f71cdafcfa29244d75f7dd",
+    "field_count": 40,
+    "p9_declared_rows": 937,
+    "p9_complete_rows": 931,
+    "p10_rows": 651,
+    "expected_missing_keys": {0x1F1, 0x1F2, 0x1F3, 0x1F4, 0x1F5, 0x1F6},
+}
+
 
 
 def _normalise_actor_ids(values: set[int | str], label: str) -> set[int]:
@@ -419,6 +434,113 @@ def merge_aov_mses_resource(
         raise AOVResourceMergeError(
             f"{resource_name}: không có adapter MSES theo bảng đã xác minh."
         )
+
+    if normalized_name == "Databin/Client/Actor/organSkin.bytes":
+        if base_actor_action_ids is not None or overlay_actor_action_ids is not None:
+            raise AOVResourceMergeError(
+                "organSkin: không nhận Actor_Action inventory ngoài adapter nguồn ghim."
+            )
+        try:
+            base_decoded, base_mode = decode_aov_resource(base_resource, resource_name)
+            overlay_decoded, overlay_mode = decode_aov_resource(overlay_resource, resource_name)
+            base_hash = hashlib.sha256(base_decoded).hexdigest()
+            overlay_hash = hashlib.sha256(overlay_decoded).hexdigest()
+            spec = _P9_P10_ORGANSKIN_SPEC
+            if (base_hash, overlay_hash) == (spec["p9_sha256"], spec["p10_sha256"]):
+                p9_decoded, p9_mode = base_decoded, base_mode
+                p10_decoded, p10_mode = overlay_decoded, overlay_mode
+                base_source, overlay_source = "P9", "P10"
+            elif (base_hash, overlay_hash) == (spec["p10_sha256"], spec["p9_sha256"]):
+                p9_decoded, p9_mode = overlay_decoded, overlay_mode
+                p10_decoded, p10_mode = base_decoded, base_mode
+                base_source, overlay_source = "P10", "P9"
+            else:
+                raise MSESError(
+                    "Payload không khớp hash organSkin P9/P10 đã kiểm chứng."
+                )
+
+            p10_table = parse_mses(p10_decoded)
+            if (
+                p10_table.field_count != spec["field_count"]
+                or len(p10_table.rows) != spec["p10_rows"]
+            ):
+                raise MSESError("organSkin P10 không đúng schema/số hàng đã kiểm chứng.")
+
+            repaired_p9, repair_report = repair_mses_declared_row_count(
+                p9_decoded,
+                expected_missing_keys=set(spec["expected_missing_keys"]),
+            )
+            p9_table = parse_mses(repaired_p9)
+            if (
+                p9_table.field_count != spec["field_count"]
+                or len(p9_table.rows) != spec["p9_complete_rows"]
+                or repair_report["declared_row_count"] != spec["p9_declared_rows"]
+                or repair_report["repaired_row_count"] != spec["p9_complete_rows"]
+                or repair_report["output_checksum_valid"] is not True
+            ):
+                raise MSESError("organSkin P9 sau sửa header không đúng fixture.")
+
+            def _organ_index(rows, label):
+                result = {}
+                for row in rows:
+                    key = int.from_bytes(row[:4], "little")
+                    if key in result:
+                        raise MSESError(f"organSkin {label}: khóa trùng 0x{key:08x}.")
+                    result[key] = row
+                return result
+
+            p9_rows = _organ_index(p9_table.rows, "P9")
+            p10_rows = _organ_index(p10_table.rows, "P10")
+            if not set(p10_rows).issubset(p9_rows):
+                raise MSESError("organSkin P10 có khóa không tồn tại trong P9.")
+            differing = [
+                key for key, row in p10_rows.items()
+                if p9_rows[key] != row
+            ]
+            if differing:
+                raise MSESError(
+                    "organSkin có hàng chung P9/P10 khác byte; từ chối tự chọn."
+                )
+
+            output_resource = encode_aov_resource(
+                repaired_p9, resource_name, p9_mode
+            )
+            verify_decoded, verify_mode = decode_aov_resource(
+                output_resource, resource_name
+            )
+            verified = parse_mses(verify_decoded)
+            if verify_decoded != repaired_p9 or not verified.checksum_valid:
+                raise MSESError("organSkin sau mã hóa không round-trip chính xác.")
+            report = {
+                "adapter": "p9_p10_organskin_stale_row_count_repair",
+                "resource": normalized_name,
+                "base_source": base_source,
+                "overlay_source": overlay_source,
+                "p9_fields": p9_table.field_count,
+                "p10_fields": p10_table.field_count,
+                "output_fields": verified.field_count,
+                "p9_declared_rows": repair_report["declared_row_count"],
+                "p9_complete_rows": len(p9_table.rows),
+                "p10_rows": len(p10_table.rows),
+                "output_rows": len(verified.rows),
+                "p10_rows_identical_subset_of_p9": True,
+                "p9_only_rows": len(p9_rows) - len(p10_rows),
+                "p10_only_rows": 0,
+                "differing_shared_rows": 0,
+                "expected_missing_keys": repair_report["expected_missing_keys"],
+                "source_checksum_valid": repair_report["source_checksum_valid"],
+                "output_checksum_valid": verified.checksum_valid,
+                "rows_synthesized": 0,
+                "base_encoding": base_mode,
+                "overlay_encoding": overlay_mode,
+                "output_encoding": verify_mode,
+                "verified": True,
+            }
+            return output_resource, report
+        except (AOVBytesError, MSESError) as exc:
+            raise AOVResourceMergeError(
+                f"{resource_name}: không thể sửa/gộp organSkin theo fixture P9/P10: {exc}"
+            ) from exc
 
     actor_owner_requested = (
         base_actor_action_ids is not None or overlay_actor_action_ids is not None
