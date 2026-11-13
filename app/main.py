@@ -27,6 +27,7 @@ from .adapter_registry import get_adapter_capabilities
 from .compatibility_planner import CompatibilityPlanError, plan_resource_compatibility
 from .resource_manifest import ResourceManifestError, build_resource_manifest
 from .aov_bytes_archive import AOVBytesArchiveError, decode_archive_resources
+from .notice_rewriter import NoticeRewriteError, rewrite_archive_branding
 
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -781,6 +782,42 @@ async def scan_chunked_aov_notices(upload_id: str):
             "Không xóa hoặc ghi đè tài nguyên chỉ dựa trên từ khóa."
         ),
     }
+
+
+@app.post("/api/upload/{upload_id}/notice-branding")
+async def rewrite_chunked_aov_branding(upload_id: str):
+    """Return a separate ZIP with safe, exact AKI branding replacements."""
+    session = _get_upload_session(upload_id)
+    if len(session["paths"]) != 1:
+        raise HTTPException(
+            400,
+            "Chức năng thay thông báo cần đúng một ZIP đã gộp làm đầu vào.",
+        )
+    if any(item["received"] != item["size"] for item in session["files"]):
+        raise HTTPException(400, "File chưa tải lên đầy đủ.")
+    output_path = Path(session["workdir"]) / "aki-aov-branding-updated.zip"
+    try:
+        report = await run_in_threadpool(
+            rewrite_archive_branding, session["paths"], str(output_path)
+        )
+    except NoticeRewriteError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    _remove_upload_session_metadata(session)
+    UPLOAD_SESSIONS.pop(upload_id, None)
+    return FileResponse(
+        path=output_path,
+        media_type="application/zip",
+        filename="Aki-AOV-Branding-Updated.zip",
+        headers={
+            "X-AOV-Branding-Replacements": str(report["replacement_total"]),
+            "X-AOV-Branding-Resources": str(report["modified_resource_count"]),
+            "X-AOV-Branding-Wrappers": str(report["rewritten_aov_wrappers"]),
+            "X-AOV-Game-Tested": "false",
+        },
+        background=BackgroundTask(
+            shutil.rmtree, session["workdir"], ignore_errors=True
+        ),
+    )
 
 
 @app.post("/api/upload/{upload_id}/decode-bytes")
