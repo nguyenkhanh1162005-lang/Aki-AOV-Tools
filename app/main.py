@@ -797,6 +797,9 @@ async def scan_chunked_aov_notices(upload_id: str):
         "protected_billboard_candidates": protected_billboard_candidates,
         "startup_flow_unsupported_count": len(startup_flow_unsupported_resources),
         "startup_flow_unsupported_resources": startup_flow_unsupported_resources,
+        "custom_lua_resource_count": len(report.get("custom_lua_resources", [])),
+        "custom_lua_resources": report.get("custom_lua_resources", []),
+        "custom_lua_resources_truncated": report.get("custom_lua_resources_truncated", False),
         "truncated": report.get("notice_candidates_truncated", False),
         "decoded_resources": len(report.get("decoded", [])),
         "decoded_bytes": report.get("decoded_bytes", 0),
@@ -813,9 +816,9 @@ async def scan_chunked_aov_notices(upload_id: str):
             "Chế độ quét giới hạn 256 MiB dữ liệu .bytes đã giải mã và không ghi ZIP tạm. "
             "Chỉ các script thuộc luồng login/startup mới được gắn nhãn ứng viên; "
             "commercializenotify và các bảng billboard được phân loại bảo vệ riêng. "
-            "Kết quả chưa tự xóa popup; cần xác nhận chính xác lệnh gọi trong script. "
-            "Các script GameEntryControl/LobbyView không giải mã được sẽ được liệt kê "
-            "riêng và không thể kết luận popup đã hết."
+            "GameEntryControl/LobbyView/CLobbySystem có thể được nhận diện header Lua tùy biến "
+            "và trích chuỗi, nhưng chưa decompile được bytecode hoặc xác định lệnh gọi popup. "
+            "Kết quả chưa tự xóa popup; cần xác nhận chính xác lệnh gọi trong script."
         ),
     }
 
