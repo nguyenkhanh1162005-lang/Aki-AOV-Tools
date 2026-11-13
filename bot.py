@@ -338,19 +338,75 @@ async def notice_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             encoding="utf-8",
         )
         candidates = report.get("notice_candidates", [])
+        startup_candidates = [
+            item for item in candidates
+            if item.get("startup_removal_eligible") is True
+        ]
+        protected_kill_candidates = [
+            item for item in candidates
+            if item.get("resource_role") == "protected_kill_notification"
+        ]
+        protected_billboard_candidates = [
+            item for item in candidates
+            if item.get("resource_role") == "protected_billboard"
+        ]
+        startup_markers = (
+            "gameentrycontrol", "lobbyview", "loginnotice",
+            "startup", "firstlogin", "first_login", "first-login",
+        )
+        startup_opaque = [
+            item for item in report.get("unsupported", [])
+            if any(
+                marker in str(item.get("path") or "").replace("\\", "/").casefold()
+                for marker in startup_markers
+            )
+        ]
+        report["startup_notice_candidates"] = startup_candidates
+        report["protected_kill_notification_candidates"] = protected_kill_candidates
+        report["protected_billboard_candidates"] = protected_billboard_candidates
+        report["startup_flow_unsupported_resources"] = startup_opaque
         lines = [
             f"Đã quét {report.get('notice_scan_files', 0)} mục.",
-            f"Tìm thấy {len(candidates)} ứng viên từ khóa.",
+            f"Tổng kết từ khóa: {len(candidates)} ứng viên.",
             f"AssetBundle đã quét: {report.get('notice_assetbundles_scanned', 0)}; bỏ qua: {report.get('notice_assetbundles_skipped', 0)}.",
+            "",
+            f"ỨNG VIÊN STARTUP / LOGIN: {len(startup_candidates)}",
         ]
-        for item in candidates[:8]:
+        for item in startup_candidates[:6]:
             lines.append(
-                f"\n• {item.get('path', '(không rõ đường dẫn)')} "
+                f"• {item.get('source', '')}/{item.get('path', '')} "
                 f"[{item.get('keyword_group', 'keyword')}] "
-                f"{item.get('matched_text', '')}\n  {item.get('excerpt', '')}"
+                f"{item.get('matched_text', '')}\n  {item.get('protection_reason', '')}"
+            )
+        if not startup_candidates:
+            lines.append("Không có ứng viên startup/login đủ điều kiện theo quy tắc đường dẫn.")
+        lines.extend([
+            "",
+            f"THÔNG BÁO HẠ GỤC PHẢI GIỮ: {len(protected_kill_candidates)}",
+        ])
+        for item in protected_kill_candidates[:6]:
+            lines.append(
+                f"• GIỮ NGUYÊN {item.get('source', '')}/{item.get('path', '')}"
+            )
+        lines.extend([
+            "",
+            f"BILLBOARD PHẢI GIỮ: {len(protected_billboard_candidates)}",
+        ])
+        for item in protected_billboard_candidates[:6]:
+            lines.append(
+                f"• GIỮ NGUYÊN {item.get('source', '')}/{item.get('path', '')}"
+            )
+        lines.extend([
+            "",
+            f"STARTUP / LOBBY CHƯA GIẢI MÃ: {len(startup_opaque)}",
+        ])
+        for item in startup_opaque[:6]:
+            lines.append(
+                f"• CHƯA ĐỌC ĐƯỢC {item.get('source', '')}/{item.get('path', '')}: "
+                f"{item.get('reason', 'Chưa có decoder đã xác minh.')}"
             )
         lines.append(
-            "\nĐây chỉ là ứng viên theo từ khóa, không chứng minh đó là popup đang hiển thị. "
+            "\nBáo cáo chỉ đọc: từ khóa chưa chứng minh popup cụ thể đang hiển thị. "
             "Bot không tự xóa hoặc ghi đè tài nguyên."
         )
         await status_message.edit_text("\n".join(lines))
@@ -403,6 +459,31 @@ async def preflight(update: Update, context: ContextTypes.DEFAULT_TYPE):
             summary = "Chưa có adapter ghép đã xác minh cho bộ này."
             if blockers:
                 summary += "\n" + "\n".join(f"• {item}" for item in blockers[:5])
+        resource_analysis = report.get("resource_analysis", {})
+        mses_diagnostics = resource_analysis.get("mses_diagnostics", {})
+        mses_tables = mses_diagnostics.get("tables", [])
+        mses_pairs = [
+            comparison
+            for table in mses_tables
+            for comparison in table.get("comparisons", [])
+        ]
+        differing_rows = sum(
+            int(comparison.get("differing_common_rows", 0))
+            for comparison in mses_pairs
+        )
+        invalid_mses_sources = sum(
+            1
+            for table in mses_tables
+            for resource in table.get("resources", [])
+            if resource.get("parse_ok") and not resource.get("checksum_valid")
+        )
+        if mses_tables:
+            summary += (
+                f"\nMSES đã so sánh: {len(mses_tables)} bảng / {len(mses_pairs)} cặp; "
+                f"{differing_rows} hàng chung khác payload; "
+                f"{invalid_mses_sources} nguồn có checksum không hợp lệ. "
+                "Đây là chẩn đoán chỉ đọc."
+            )
         await status_message.edit_text(
             summary + "\n\nBáo cáo JSON đầy đủ được gửi kèm."
         )
