@@ -636,6 +636,21 @@ def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
             ),
         }
 
+    if leaf == "resourcepackerinfosetall.assetbundle":
+        return {
+            "adapter_state": "source_pinned_p9_p10_actor_owned_packer_helper",
+            "next_action": (
+                "Có helper P9/P10 đúng SHA-256: giữ 22.298 đường dẫn và 60.243 liên kết, "
+                "chọn 410 ResourceInfos theo Actor sở hữu (164 P9, 246 P10), serialize "
+                "và đọc lại. Helper cấp metadata này chưa nối vào luồng xuất ZIP nhiều wrapper; "
+                "P9/TM/VTK vẫn cần quy tắc graph/index riêng."
+            ),
+            "safety_rule": (
+                "Chỉ đúng cặp P9/P10 1.64.1.12 và Actor_Action inventory ghim; "
+                "không áp dụng cho TM/VTK hoặc nguồn khác."
+            ),
+        }
+
     if leaf in {"battlebank.bytes", "lobbybank.bytes"}:
         return {
             "adapter_state": "version_locked_schema",
