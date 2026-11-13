@@ -142,7 +142,7 @@ def _actor_id_from_mses_key(key: int, spec: dict) -> int | None:
     if rule == "sound_1000":
         encoded = key // 1000
         return encoded if encoded <= 999 else encoded // 100
-    if rule == "actor_divisor":
+    if rule == "actor_divisor" or rule is None:
         divisor = spec.get("actor_divisor")
         return key // divisor if isinstance(divisor, int) and divisor > 0 else None
     return None
