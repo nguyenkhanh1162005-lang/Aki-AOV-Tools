@@ -140,7 +140,7 @@ _CUSTOM_LUA_RESOURCE_NAMES = {
     "clobbysystem_lua.bytes",
 }
 _CUSTOM_LUA_CHUNK_OFFSET = 128
-_CUSTOM_LUA_CHUNK_SIGNATURE = b"\\x1bLuaS"
+_CUSTOM_LUA_CHUNK_SIGNATURE = b"\x1bLuaS"
 _CUSTOM_LUA_FORMAT_BYTE = 0x01
 _MAX_CUSTOM_LUA_INSPECT_BYTES = 2 * 1024 * 1024
 _MAX_CUSTOM_LUA_STRINGS = 300
@@ -166,7 +166,7 @@ def _inspect_custom_lua_resource(
 
     inspected = payload[offset:offset + _MAX_CUSTOM_LUA_INSPECT_BYTES]
     strings = []
-    for match in re.finditer(rb"[\\x20-\\x7e]{4,}", inspected):
+    for match in re.finditer(rb"[\x20-\x7e]{4,}", inspected):
         value = match.group(0).decode("ascii", errors="ignore")
         if not value:
             continue
@@ -678,7 +678,7 @@ def decode_archive_resources(
                     else:
                         report["custom_lua_resources_truncated"] = True
                     report["notice_scan_files"] += 1
-                    extracted_text = "\\n".join(custom_lua["strings"])
+                extracted_text = "\n".join(custom_lua["strings"])
                     for finding in _scan_notice_text_view(
                         extracted_text, path, "lua_ascii_strings"
                     ):
