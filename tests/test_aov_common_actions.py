@@ -267,7 +267,7 @@ class CommonActionsMergeTests(unittest.TestCase):
 
     def test_multi_overlay_analysis_lists_opaque_path_conflicts(self):
         path = "commonresource/Back.xml"
-        opaque = "commonresource/HasteE1_leave.xml"
+        opaque = "commonresource/UnsupportedOpaque.xml"
 
         def overlay(skin_id, opaque_payload):
             root = ET.Element("Project")
