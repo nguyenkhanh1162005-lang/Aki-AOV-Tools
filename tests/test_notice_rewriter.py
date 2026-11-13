@@ -102,6 +102,43 @@ class NoticeBrandingRewriteTests(unittest.TestCase):
                 )
                 self.assertIsNone(archive.testzip())
 
+    def test_branding_rewrite_preserves_kill_notice_and_billboard_resources(self):
+        startup_text = b'title = "KIANA MOD AOV"'
+        protected_payloads = {
+            "Databin/Client/Huanhua/ResKillBillboardCfg.bytes":
+                b"KIANA MOD AOV",
+            "Databin/Client/Huanhua/ResBillboardCfg.bytes":
+                b"KIANA MOD AOV",
+            "assetbundle/commercializenotify/battle/"
+            "commercializenotify_red_595.assetbundle":
+                b"KIANA MOD AOV",
+        }
+        source_bytes = _zip_bytes({
+            "Resources/LoginNotice.lua": startup_text,
+            **protected_payloads,
+        })
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            source = folder / "source.zip"
+            output = folder / "output.zip"
+            source.write_bytes(source_bytes)
+
+            report = rewrite_archive_branding([str(source)], str(output))
+
+            self.assertEqual(report["protected_notice_resource_count"], 3)
+            self.assertCountEqual(
+                report["protected_notice_resources"],
+                list(protected_payloads),
+            )
+            with zipfile.ZipFile(output, "r") as archive:
+                self.assertIn(b"AKI MOD AOV", archive.read(
+                    "Resources/LoginNotice.lua"
+                ))
+                for path, original_payload in protected_payloads.items():
+                    self.assertEqual(archive.read(path), original_payload)
+                self.assertIsNone(archive.testzip())
+
     def test_no_matching_text_fails_without_creating_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
