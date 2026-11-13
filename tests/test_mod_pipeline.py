@@ -666,23 +666,27 @@ class ModPipelineTests(unittest.TestCase):
                 archive.writestr("commonresource/Back.xml", payload)
             return buffer.getvalue()
 
-        def resources_zip(package_bytes: bytes) -> bytes:
+        def resources_zip(package_bytes: bytes, actor_id: str) -> bytes:
             buffer = io.BytesIO()
             with zipfile.ZipFile(buffer, "w") as archive:
                 archive.writestr(
                     "Resources/1.64.1/Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes",
                     package_bytes,
                 )
+                archive.writestr(
+                    f"Resources/1.64.1/Ages/Prefab_Characters/Prefab_Hero/Actor_{actor_id}_Actions.pkg.bytes",
+                    b"actor fixture",
+                )
             return buffer.getvalue()
 
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
             p9 = self._zip(folder, "Actor593-source.zip", {
-                "Resources.zip": resources_zip(common_package("59300", "recall-593")),
+                "Resources.zip": resources_zip(common_package("59300", "recall-593"), "593"),
                 "DanhSachSkin.txt": b"P9",
             })
             p10 = self._zip(folder, "Actor595-source.zip", {
-                "Resources.zip": resources_zip(common_package("59500", "recall-595")),
+                "Resources.zip": resources_zip(common_package("59500", "recall-595"), "595"),
                 "DanhSachSkin.txt": b"P10",
             })
 
