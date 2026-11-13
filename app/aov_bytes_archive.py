@@ -678,16 +678,25 @@ def decode_archive_resources(
                     else:
                         report["custom_lua_resources_truncated"] = True
                     report["notice_scan_files"] += 1
-                extracted_text = "\n".join(custom_lua["strings"])
+                    extracted_text = "\n".join(custom_lua["strings"])
                     for finding in _scan_notice_text_view(
                         extracted_text, path, "lua_ascii_strings"
                     ):
                         if len(report["notice_candidates"]) >= MAX_NOTICE_CANDIDATES:
                             report["notice_candidates_truncated"] = True
                             break
-                        report["notice_candidates"].append(
-                            _build_notice_candidate(prefix, path, finding)
+                        custom_candidate = _build_notice_candidate(
+                            prefix, path, finding
                         )
+                        custom_candidate.update({
+                            "resource_role": "custom_lua_string_candidate",
+                            "startup_removal_eligible": False,
+                            "protection_reason": (
+                                "Chuỗi được trích từ bytecode Lua tùy biến; chưa decompile "
+                                "được luồng gọi nên không được xem là mục tiêu xóa popup."
+                            ),
+                        })
+                        report["notice_candidates"].append(custom_candidate)
                     continue
                 report["unsupported"].append({
                     "source": prefix,
@@ -733,16 +742,25 @@ def decode_archive_resources(
                     })
                 else:
                     report["custom_lua_resources_truncated"] = True
-                extracted_text = "\\n".join(custom_lua["strings"])
+                extracted_text = "\n".join(custom_lua["strings"])
                 for finding in _scan_notice_text_view(
                     extracted_text, path, "lua_ascii_strings"
                 ):
                     if len(report["notice_candidates"]) >= MAX_NOTICE_CANDIDATES:
                         report["notice_candidates_truncated"] = True
                         break
-                    report["notice_candidates"].append(
-                        _build_notice_candidate(prefix, path, finding)
+                    custom_candidate = _build_notice_candidate(
+                        prefix, path, finding
                     )
+                    custom_candidate.update({
+                        "resource_role": "custom_lua_string_candidate",
+                        "startup_removal_eligible": False,
+                        "protection_reason": (
+                            "Chuỗi được trích từ bytecode Lua tùy biến; chưa decompile "
+                            "được luồng gọi nên không được xem là mục tiêu xóa popup."
+                        ),
+                    })
+                    report["notice_candidates"].append(custom_candidate)
             report["notice_scan_files"] += 1
             for finding in _scan_notice_text(decoded, path):
                 if len(report["notice_candidates"]) >= MAX_NOTICE_CANDIDATES:
