@@ -283,6 +283,68 @@ class AOVBytesArchiveTests(unittest.TestCase):
                     archive.read(nested_record["output_path"]), inner_payload
                 )
 
+    def test_scans_exact_legacy_branding_labels_in_plain_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            source = self._archive(folder / "branding.zip", {
+                "Resources/notice.txt": (
+                    "KIANA MOD AOV\\n"
+                    "Mod được tạo bởi youtuber KIANA MOD AOV\\n"
+                    "Web Mod\\n"
+                    "Youtube\\n"
+                ).encode("utf-8"),
+            })
+
+            report = decode_archive_resources(
+                [source], str(folder / "scan-only.zip"), scan_only=True
+            )
+
+            matches = report["branding_candidates"]
+            self.assertEqual(
+                {item["label"] for item in matches},
+                {"creator_credit", "brand", "web_mod", "youtube"},
+            )
+            self.assertEqual(len(matches), 4)
+            self.assertTrue(all(
+                item["path"] == "Resources/notice.txt" for item in matches
+            ))
+            # The word "Youtube" must not be double-counted inside "youtuber".
+            self.assertEqual(
+                sum(item["label"] == "youtube" for item in matches), 1
+            )
+            self.assertFalse(report["branding_candidates_truncated"])
+            self.assertFalse((folder / "scan-only.zip").exists())
+
+    def test_scans_legacy_branding_inside_supported_encrypted_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            plain = (
+                "Mod được tạo bởi youtuber KIANA MOD AOV\\n"
+                "Web Mod\\nYoutube\\n"
+            ).encode("utf-8")
+            encoded = encrypt_aes_zstd_resource(plain, "NoticeConfig")
+            source = self._archive(folder / "wrapped-branding.zip", {
+                "Resources/NoticeConfig.bytes": encoded,
+            })
+
+            report = decode_archive_resources(
+                [source], str(folder / "scan-only.zip"), scan_only=True
+            )
+
+            matches = report["branding_candidates"]
+            self.assertEqual(
+                {item["label"] for item in matches},
+                {"creator_credit", "web_mod", "youtube"},
+            )
+            self.assertTrue(all(
+                item["path"] == "Resources/NoticeConfig.bytes"
+                for item in matches
+            ))
+            self.assertEqual(len(report["decoded"]), 1)
+            self.assertTrue(report["scan_only"])
+            self.assertFalse((folder / "scan-only.zip").exists())
+
+
     def test_rejects_total_decoded_output_over_limit(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
