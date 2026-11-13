@@ -147,6 +147,7 @@ def _inspect_one(
             "path": path,
             "decode_mode": mode,
             "decode_ok": True,
+            "decoded_size": len(decoded),
             "parse_ok": False,
             "error": str(exc),
         }
@@ -161,6 +162,7 @@ def _inspect_one(
         "path": path,
         "decode_mode": mode,
         "decode_ok": True,
+        "decoded_size": len(decoded),
         "parse_ok": True,
         "version": table.version,
         "field_count": table.field_count,
@@ -245,7 +247,9 @@ def analyze_mses_overlaps(
                         "error": str(exc)[:240],
                     }
             if result is not None:
-                group_decoded_bytes += int(item.get("size") or 0)
+                group_decoded_bytes += int(
+                    result.get("decoded_size") or item.get("size") or 0
+                )
                 inspected_resources += 1
                 inspected.append(result)
 
