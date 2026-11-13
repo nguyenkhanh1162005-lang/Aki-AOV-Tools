@@ -119,7 +119,7 @@ class MSESDiagnosticsTests(unittest.TestCase):
         self.assertTrue(p9_vs_vtk["append_only_candidate"])
 
         self.assertEqual(tm_vs_vtk["differing_common_rows"], 1)
-        self.assertEqual(tm_vs_vtk["right_only_keys"], 1)
+        self.assertEqual(tm_vs_vtk["left_only_keys"], 1)
         self.assertFalse(tm_vs_vtk["checksums_valid"])
 
 
