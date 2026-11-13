@@ -452,6 +452,24 @@ class ModPipelineTests(unittest.TestCase):
         self.assertEqual(ifix["adapter_state"], "version_locked_parser")
         self.assertIn("Actor 595", ifix["next_action"])
 
+        character = _resource_merge_guidance(
+            "Databin/Client/Character/ResCharacterComponent.bytes"
+        )
+        self.assertEqual(
+            character["adapter_state"], "source_validated_mses_union"
+        )
+        self.assertIn("188 trường", character["next_action"])
+        self.assertIn("chưa mở ghép hai wrapper", character["next_action"])
+
+        label_cfg = _resource_merge_guidance(
+            "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
+        )
+        self.assertEqual(
+            label_cfg["adapter_state"], "source_pinned_mses_union"
+        )
+        self.assertIn("8-98 hàng", label_cfg["next_action"])
+        self.assertIn("checksum", label_cfg["safety_rule"])
+
         mses = _resource_merge_guidance("Databin/Client/Sound/BattleBank.bytes")
         self.assertEqual(mses["adapter_state"], "version_locked_schema")
         self.assertIn("allowlist", mses["next_action"])
