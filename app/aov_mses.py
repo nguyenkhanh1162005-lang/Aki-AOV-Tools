@@ -80,6 +80,7 @@ def merge_mses_rows(
     allow_schema_mismatch: bool = False,
     allow_new_rows_across_schema_mismatch: bool = False,
     allowed_new_keys: set[int] | None = None,
+    allow_retained_conflict_keys: set[int] | None = None,
     verify_base_checksum: bool = True,
     verify_overlay_checksum: bool = True,
 ) -> tuple[bytes, dict]:
@@ -124,6 +125,28 @@ def merge_mses_rows(
         raise MSESError(
             f"Khóa ghi đè MSES không tồn tại trong overlay: {formatted}."
         )
+    retained_overrides = set(allow_retained_conflict_keys or ())
+    if any(
+        type(key) is not int or not 0 <= key <= 0xFFFFFFFF
+        for key in retained_overrides
+    ):
+        raise MSESError("Danh sách khóa xung đột giữ bản nền phải là uint32 hợp lệ.")
+    missing_retained_keys = retained_overrides - common
+    if missing_retained_keys:
+        formatted = ", ".join(
+            f"0x{key:08x}" for key in sorted(missing_retained_keys)
+        )
+        raise MSESError(
+            f"Khóa xung đột giữ bản nền không phải bản ghi chung: {formatted}."
+        )
+    overlap_retained_keys = retained_overrides & overrides
+    if overlap_retained_keys:
+        formatted = ", ".join(
+            f"0x{key:08x}" for key in sorted(overlap_retained_keys)
+        )
+        raise MSESError(
+            f"Khóa không thể vừa ghi đè vừa giữ bản nền: {formatted}."
+        )
 
     new_keys = set(overlay_map) - set(base_map)
     if allowed_new_keys is not None and any(
@@ -153,7 +176,7 @@ def merge_mses_rows(
             )
 
     if base.field_count != overlay.field_count:
-        unsafe_differing_common = differing_common - overrides
+        unsafe_differing_common = differing_common - overrides - retained_overrides
         if unsafe_differing_common:
             raise MSESError(
                 "Schema MSES khác nhau và có bản ghi chung không được cho phép ghi đè; "
