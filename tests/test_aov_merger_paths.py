@@ -5,6 +5,9 @@ from pathlib import Path
 
 from app.aov_merger import (
     AOVMergeError,
+    P9_P10_PACKER_ACTOR_IDS,
+    _actor_id_from_packer_path,
+    _merge_p9_p10_packer_trees,
     _assert_archive_inventory,
     _find_outer_entries,
     _normalise_vtk_path,
@@ -13,6 +16,131 @@ from app.aov_merger import (
     _validate_archive_paths,
     _zip_entry_sha256,
 )
+
+
+class P9P10PackerMetadataTests(unittest.TestCase):
+    @staticmethod
+    def _tree(entries, links):
+        return {
+            "Version": "1.64.1.12",
+            "AllResourcePackInfo": entries,
+            "AllParentIdexToChild": links,
+        }
+
+    def test_actor_id_parser_accepts_skin_and_hero_bundle_paths(self):
+        self.assertEqual(
+            _actor_id_from_packer_path(
+                "assetbundle/battle/skin/15015_hanxin_battle.assetbundle"
+            ),
+            150,
+        )
+        self.assertEqual(
+            _actor_id_from_packer_path(
+                "assetbundle/show/hero/593_machao_show_base.assetbundle"
+            ),
+            593,
+        )
+        self.assertIsNone(
+            _actor_id_from_packer_path("assetbundle/shaders.assetbundle")
+        )
+
+    def test_p9_p10_packer_selects_resource_info_by_actor_and_keeps_links(self):
+        from unittest.mock import patch
+
+        p9_path = "assetbundle/battle/skin/1075_zhaoyun_battle.assetbundle"
+        p10_path = "assetbundle/show/hero/111_sunshangxiang_show.assetbundle"
+        base_entries = [
+            {"PathInIFS": p9_path, "Tag": "CharBattle", "ResourceInfos": [{"HashCode": 1}]},
+            {"PathInIFS": p10_path, "Tag": "CharShow", "ResourceInfos": [{"HashCode": 2}]},
+        ]
+        overlay_entries = [
+            {"PathInIFS": p9_path, "Tag": "CharBattle", "ResourceInfos": [{"HashCode": 9}]},
+            {"PathInIFS": p10_path, "Tag": "CharShow", "ResourceInfos": [{"HashCode": 8}]},
+        ]
+        links = [{"parentIdx": 0, "childIdx": 1}]
+        with (
+            patch("app.aov_merger.P9_P10_PACKER_ENTRY_COUNT", 2),
+            patch("app.aov_merger.P9_P10_PACKER_LINK_COUNT", 1),
+            patch("app.aov_merger.P9_P10_PACKER_CHANGED_PATH_COUNT", 2),
+            patch(
+                "app.aov_merger.P9_P10_PACKER_CHANGED_OWNER_COUNTS",
+                {"P9": 1, "P10": 1},
+            ),
+        ):
+            merged, report = _merge_p9_p10_packer_trees(
+                self._tree(base_entries, links),
+                self._tree(overlay_entries, links),
+                "P9",
+                "P10",
+                P9_P10_PACKER_ACTOR_IDS["P9"],
+                P9_P10_PACKER_ACTOR_IDS["P10"],
+            )
+
+        self.assertEqual(
+            merged["AllResourcePackInfo"][0]["ResourceInfos"],
+            [{"HashCode": 1}],
+        )
+        self.assertEqual(
+            merged["AllResourcePackInfo"][1]["ResourceInfos"],
+            [{"HashCode": 8}],
+        )
+        self.assertEqual(merged["AllParentIdexToChild"], links)
+        self.assertEqual(report["changed_resource_info_entries"], 2)
+        self.assertEqual(report["selected_entry_counts"], {"P9": 1, "P10": 1})
+
+    def test_packer_rejects_unknown_actor_or_other_metadata_drift(self):
+        from unittest.mock import patch
+
+        unknown_path = "assetbundle/battle/skin/9995_unknown_battle.assetbundle"
+        base_entries = [{
+            "PathInIFS": unknown_path,
+            "Tag": "CharBattle",
+            "ResourceInfos": [{"HashCode": 1}],
+        }]
+        overlay_entries = [{
+            "PathInIFS": unknown_path,
+            "Tag": "CharBattle",
+            "ResourceInfos": [{"HashCode": 2}],
+        }]
+        links = []
+        with (
+            patch("app.aov_merger.P9_P10_PACKER_ENTRY_COUNT", 1),
+            patch("app.aov_merger.P9_P10_PACKER_LINK_COUNT", 0),
+            patch("app.aov_merger.P9_P10_PACKER_CHANGED_PATH_COUNT", 1),
+            patch(
+                "app.aov_merger.P9_P10_PACKER_CHANGED_OWNER_COUNTS",
+                {"P9": 1, "P10": 0},
+            ),
+        ):
+            with self.assertRaisesRegex(AOVMergeError, "Actor 999"):
+                _merge_p9_p10_packer_trees(
+                    self._tree(base_entries, links),
+                    self._tree(overlay_entries, links),
+                    "P9",
+                    "P10",
+                    P9_P10_PACKER_ACTOR_IDS["P9"],
+                    P9_P10_PACKER_ACTOR_IDS["P10"],
+                )
+
+        overlay_entries[0]["Flags"] = 512
+        with (
+            patch("app.aov_merger.P9_P10_PACKER_ENTRY_COUNT", 1),
+            patch("app.aov_merger.P9_P10_PACKER_LINK_COUNT", 0),
+            patch("app.aov_merger.P9_P10_PACKER_CHANGED_PATH_COUNT", 1),
+            patch(
+                "app.aov_merger.P9_P10_PACKER_CHANGED_OWNER_COUNTS",
+                {"P9": 1, "P10": 0},
+            ),
+        ):
+            with self.assertRaisesRegex(AOVMergeError, "ngoài ResourceInfos"):
+                _merge_p9_p10_packer_trees(
+                    self._tree(base_entries, links),
+                    self._tree(overlay_entries, links),
+                    "P9",
+                    "P10",
+                    P9_P10_PACKER_ACTOR_IDS["P9"],
+                    P9_P10_PACKER_ACTOR_IDS["P10"],
+                )
 
 
 class NestedPackageMergeTests(unittest.TestCase):
