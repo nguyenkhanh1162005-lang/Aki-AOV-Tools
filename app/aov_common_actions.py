@@ -312,14 +312,7 @@ def merge_common_actions_pkg(
         overlay_zip.close()
         raise
 
-    merge_candidates = {
-        "commonresource/Back.xml",
-        "commonresource/BackFast.xml",
-        "commonresource/HasteE1.xml",
-        "commonresource/HasteE1_super.xml",
-        "commonresource/HasteE2.xml",
-        "commonresource/HasteE3.xml",
-    }
+    merge_candidates = set(_COMMON_ACTIONS_MERGE_CANDIDATES)
     base_entries = {item.filename: item for item in base_zip.infolist() if not item.is_dir()}
     overlay_entries = {item.filename: item for item in overlay_zip.infolist() if not item.is_dir()}
     output_buffer = io.BytesIO()
@@ -403,14 +396,7 @@ def _overlay_actor_track_signatures(
     multi-overlay path detect two sources trying to define the same actor
     condition differently without confusing distinct event variants.
     """
-    merge_candidates = {
-        "commonresource/Back.xml",
-        "commonresource/BackFast.xml",
-        "commonresource/HasteE1.xml",
-        "commonresource/HasteE1_super.xml",
-        "commonresource/HasteE2.xml",
-        "commonresource/HasteE3.xml",
-    }
+    merge_candidates = set(_COMMON_ACTIONS_MERGE_CANDIDATES)
     try:
         archive = zipfile.ZipFile(io.BytesIO(overlay_package), "r")
     except zipfile.BadZipFile as exc:
@@ -545,10 +531,16 @@ def merge_common_actions_packages(
 _COMMON_ACTIONS_MERGE_CANDIDATES = {
     "commonresource/Back.xml",
     "commonresource/BackFast.xml",
+    "commonresource/Born.xml",
+    "commonresource/Dance.xml",
+    "commonresource/DanceBullet.xml",
+    "commonresource/Dead_Born.xml",
     "commonresource/HasteE1.xml",
+    "commonresource/HasteE1_leave.xml",
     "commonresource/HasteE1_super.xml",
     "commonresource/HasteE2.xml",
     "commonresource/HasteE3.xml",
+    "commonresource/QuickBack.xml",
 }
 
 
