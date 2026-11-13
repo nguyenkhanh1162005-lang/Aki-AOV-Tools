@@ -461,6 +461,8 @@ class AOVResourceMergeTests(unittest.TestCase):
         self.assertEqual(_actor_id_from_mses_key(509000456, bank_spec), 509)
         self.assertEqual(_actor_id_from_mses_key(107123, sound_spec), 107)
         self.assertEqual(_actor_id_from_mses_key(509456, sound_spec), 509)
+        self.assertEqual(_actor_id_from_mses_key(10700, {"actor_divisor": 100}), 107)
+        self.assertEqual(_actor_id_from_mses_key(5090000, {"actor_divisor": 10000}), 509)
         self.assertIsNone(_actor_id_from_mses_key(12345, {"actor_id_rule": "unknown"}))
 
     def test_p9_p10_audio_mses_specs_are_source_pinned(self):
