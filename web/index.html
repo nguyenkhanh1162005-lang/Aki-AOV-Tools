@@ -394,6 +394,15 @@ function renderPreflightDashboard(data){
       ));
     }
 
+    const semanticPaths=commonActions.semantic_subset_paths||[];
+    if(semanticPaths.length){
+      commonCard.append(dashboardElement('p','',
+        semanticPaths.length+' đường dẫn XML khác encoding/độ dài nhưng nội dung overlay là tập con chính xác của bản nền; giữ nguyên bản nền để không mất track:'
+      ));
+      for(const path of semanticPaths.slice(0,8)){
+        commonCard.append(dashboardElement('div','preflight-source',path));
+      }
+    }
     if(commonActions.reason)commonCard.append(dashboardElement('p','',commonActions.reason));
     commonCard.append(dashboardElement('p','',
       'Chỉ kiểm tra sáu XML CommonActions và xung đột điều kiện actor. Bản ZIP mô phỏng đã bị loại bỏ; kết quả không cấp quyền ghép toàn bộ MOD và chưa được kiểm tra trong game.'
