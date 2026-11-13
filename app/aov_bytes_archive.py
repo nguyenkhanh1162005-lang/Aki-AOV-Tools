@@ -290,6 +290,9 @@ def _scan_notice_assetbundle(data: bytes, path: str) -> dict[str, Any]:
                 )
                 branding_findings.extend(brand_matches)
                 branding_truncated = branding_truncated or brand_truncated
+                if len(branding_findings) >= MAX_BRANDING_CANDIDATES:
+                    branding_findings = branding_findings[:MAX_BRANDING_CANDIDATES]
+                    branding_truncated = True
                 if len(findings) >= MAX_NOTICE_CANDIDATES:
                     findings = findings[:MAX_NOTICE_CANDIDATES]
                     text_truncated = True
