@@ -121,6 +121,68 @@ class AOVResourceMergeTests(unittest.TestCase):
                 with self.assertRaisesRegex(AOVResourceMergeError, error):
                     merge_aov_mses_resource(base, overlay, name)
 
+    def test_merges_res_character_component_only_when_shared_rows_are_identical(self):
+        name = "Databin/Client/Character/ResCharacterComponent.bytes"
+        shared_a = struct.pack("<I", 1) + b"shared-A"
+        shared_b = struct.pack("<I", 2) + b"shared-B"
+        p9_only = struct.pack("<I", 9) + b"P9-row"
+        p10_only = struct.pack("<I", 10) + b"P10-row"
+
+        base = encode_aov_resource(
+            table(188, [shared_a, p9_only, shared_b]), name, "aes"
+        )
+        overlay = encode_aov_resource(
+            table(188, [shared_b, p10_only, shared_a]), name, "aes"
+        )
+
+        result, report = merge_aov_mses_resource(base, overlay, name)
+        decoded, mode = decode_aov_resource(result, name)
+        parsed = parse_mses(decoded)
+        rows = {struct.unpack_from("<I", row)[0]: row for row in parsed.rows}
+
+        self.assertEqual(mode, "aes")
+        self.assertEqual(parsed.field_count, 188)
+        self.assertEqual(set(rows), {1, 2, 9, 10})
+        self.assertEqual(rows[1], shared_a)
+        self.assertEqual(rows[2], shared_b)
+        self.assertEqual(rows[9], p9_only)
+        self.assertEqual(rows[10], p10_only)
+        self.assertEqual(report["appended_keys"], ["0x0000000a"])
+        self.assertEqual(report["retained_base_conflicts"], [])
+        self.assertTrue(report["verified"])
+
+    def test_res_character_component_rejects_different_shared_rows(self):
+        name = "Databin/Client/Character/ResCharacterComponent.bytes"
+        base = encode_aov_resource(
+            table(188, [struct.pack("<I", 1) + b"base"]), name, "aes"
+        )
+        overlay = encode_aov_resource(
+            table(188, [
+                struct.pack("<I", 1) + b"changed",
+                struct.pack("<I", 2) + b"new",
+            ]), name, "aes"
+        )
+        with self.assertRaisesRegex(
+            AOVResourceMergeError, "hàng chung khác nội dung"
+        ):
+            merge_aov_mses_resource(base, overlay, name)
+
+    def test_res_character_component_rejects_schema_mismatch(self):
+        name = "Databin/Client/Character/ResCharacterComponent.bytes"
+        base = encode_aov_resource(
+            table(188, [struct.pack("<I", 1) + b"base"]), name, "aes"
+        )
+        overlay = encode_aov_resource(
+            table(187, [
+                struct.pack("<I", 1) + b"base",
+                struct.pack("<I", 2) + b"new",
+            ]), name, "aes"
+        )
+        with self.assertRaisesRegex(
+            AOVResourceMergeError, "khác chuẩn 188"
+        ):
+            merge_aov_mses_resource(base, overlay, name)
+
     def test_rejects_unregistered_mses_table_path(self):
         base = encode_aov_resource(table(3, [struct.pack("<I", 1) + b"base"]), "Unknown.bytes", "aes")
         overlay = encode_aov_resource(table(3, [struct.pack("<I", 2) + b"overlay"]), "Unknown.bytes", "aes")

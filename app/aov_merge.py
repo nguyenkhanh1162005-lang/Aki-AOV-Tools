@@ -14,8 +14,10 @@ _HUANHUA_TABLE_KEYS = {
     "Databin/Client/Huanhua/ResKillBillboardCfg.bytes": {0x00000253},
 }
 _SKILLCOMBINE_KEYS = {0x000915A7, 0x000915A8, 0x000915A9, 0x000915AA, 0x000915AB}
+_CHARACTER_COMPONENT_PATH = "Databin/Client/Character/ResCharacterComponent.bytes"
 
 _SUPPORTED_MSES_TABLES = {
+    _CHARACTER_COMPONENT_PATH,
     "Databin/Client/Sound/BattleBank.bytes",
     "Databin/Client/Sound/LobbyBank.bytes",
     "Databin/Client/Skill/skillcombine.bytes",
@@ -35,9 +37,9 @@ def merge_aov_mses_resource(
 
     New opaque rows are admitted only by an exact table-specific key allowlist.
     Sound banks admit only rows carrying the VTK Hero_LiXin_Skin_C marker;
-    ResSkinSeniorLabelCfg admits only the observed 59500 row. skillcombine
-    currently has no verified new-row key allowlist and therefore fails closed
-    if the overlay introduces any new key.
+    ResSkinSeniorLabelCfg admits only the observed 59500 row. ResCharacterComponent
+    allows only a same-schema union when every shared row is byte-identical.
+    skillcombine admits only its source-verified Actor 595 keys.
     """
     normalized_name = resource_name.replace("\\", "/").lstrip("/")
     if normalized_name not in _SUPPORTED_MSES_TABLES:
@@ -143,6 +145,46 @@ def merge_aov_mses_resource(
                 + ", ".join(f"0x{key:08x}" for key in sorted(unexpected))
                 + "."
             )
+    elif normalized_name == _CHARACTER_COMPONENT_PATH:
+        if (
+            base_table.field_count != 188
+            or overlay_table.field_count != 188
+        ):
+            raise AOVResourceMergeError(
+                f"{resource_name}: số trường khác chuẩn 188 hoặc schema không hợp lệ; "
+                f"nhận {base_table.field_count}/{overlay_table.field_count}; chặn ghép."
+            )
+
+        def rows_by_key(rows, label):
+            indexed = {}
+            for row in rows:
+                if len(row) < 4:
+                    raise AOVResourceMergeError(
+                        f"{resource_name}: bản ghi {label} quá ngắn."
+                    )
+                key = int.from_bytes(row[:4], "little")
+                if key in indexed:
+                    raise AOVResourceMergeError(
+                        f"{resource_name}: khóa ResCharacterComponent trùng "
+                        f"trong {label}: 0x{key:08x}."
+                    )
+                indexed[key] = row
+            return indexed
+
+        base_rows_by_key = rows_by_key(base_table.rows, "base")
+        overlay_rows_by_key = rows_by_key(overlay_table.rows, "overlay")
+        common_keys = set(base_rows_by_key) & set(overlay_rows_by_key)
+        differing_keys = {
+            key for key in common_keys
+            if base_rows_by_key[key] != overlay_rows_by_key[key]
+        }
+        if differing_keys:
+            raise AOVResourceMergeError(
+                f"{resource_name}: hàng chung khác nội dung, chưa có quy tắc ghi đè: "
+                + ", ".join(f"0x{key:08x}" for key in sorted(differing_keys)[:20])
+                + "."
+            )
+        allowed_new_keys = set(overlay_rows_by_key) - set(base_rows_by_key)
     elif normalized_name == "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes":
         allowed_new_keys = {59500}
         base_rows_by_key = {
