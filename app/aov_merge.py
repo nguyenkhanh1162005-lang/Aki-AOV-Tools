@@ -26,6 +26,7 @@ _SUPPORTED_MSES_TABLES = {
     "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes",
     *_HUANHUA_TABLE_KEYS,
 }
+_LEGACY_MSES_TABLES = set(_SUPPORTED_MSES_TABLES)
 
 _P9_P10_ACTOR_OWNED_MSES = {
     "Databin/Client/Actor/heroSkin.bytes": {
@@ -298,37 +299,41 @@ def merge_aov_mses_resource(
         base_actor_action_ids is not None or overlay_actor_action_ids is not None
     )
     if normalized_name in _P9_P10_ACTOR_OWNED_MSES:
-        if base_actor_action_ids is None or overlay_actor_action_ids is None:
+        if base_actor_action_ids is not None and overlay_actor_action_ids is not None:
+            try:
+                base_decoded, base_mode = decode_aov_resource(base_resource, resource_name)
+                overlay_decoded, overlay_mode = decode_aov_resource(overlay_resource, resource_name)
+                merged_decoded, report = _merge_p9_p10_actor_owned_rows(
+                    base_decoded,
+                    overlay_decoded,
+                    normalized_name,
+                    base_actor_action_ids,
+                    overlay_actor_action_ids,
+                )
+                merged_resource = encode_aov_resource(merged_decoded, resource_name, base_mode)
+                verify_decoded, verify_mode = decode_aov_resource(merged_resource, resource_name)
+                parse_mses(verify_decoded)
+                if verify_decoded != merged_decoded:
+                    raise MSESError("Payload sau mã hóa/giải mã round-trip không trùng.")
+                report.update({
+                    "base_encoding": base_mode,
+                    "overlay_encoding": overlay_mode,
+                    "output_encoding": verify_mode,
+                    "output_bytes": len(merged_resource),
+                })
+                return merged_resource, report
+            except (AOVBytesError, MSESError) as exc:
+                raise AOVResourceMergeError(
+                    f"{resource_name}: không thể ghép theo Actor-owner: {exc}"
+                ) from exc
+        if actor_owner_requested:
             raise AOVResourceMergeError(
-                f"{resource_name}: cần Actor_Action inventory của cả P9 và P10; "
-                "không được đoán chủ sở hữu hàng."
+                f"{resource_name}: phải có Actor_Action inventory của cả hai nguồn."
             )
-        try:
-            base_decoded, base_mode = decode_aov_resource(base_resource, resource_name)
-            overlay_decoded, overlay_mode = decode_aov_resource(overlay_resource, resource_name)
-            merged_decoded, report = _merge_p9_p10_actor_owned_rows(
-                base_decoded,
-                overlay_decoded,
-                normalized_name,
-                base_actor_action_ids,
-                overlay_actor_action_ids,
-            )
-            merged_resource = encode_aov_resource(merged_decoded, resource_name, base_mode)
-            verify_decoded, verify_mode = decode_aov_resource(merged_resource, resource_name)
-            parse_mses(verify_decoded)
-            if verify_decoded != merged_decoded:
-                raise MSESError("Payload sau mã hóa/giải mã round-trip không trùng.")
-            report.update({
-                "base_encoding": base_mode,
-                "overlay_encoding": overlay_mode,
-                "output_encoding": verify_mode,
-                "output_bytes": len(merged_resource),
-            })
-            return merged_resource, report
-        except (AOVBytesError, MSESError) as exc:
+        if normalized_name not in _LEGACY_MSES_TABLES:
             raise AOVResourceMergeError(
-                f"{resource_name}: không thể ghép theo Actor-owner: {exc}"
-            ) from exc
+                f"{resource_name}: cần Actor_Action inventory P9/P10 để dùng adapter mới."
+            )
     if actor_owner_requested:
         raise AOVResourceMergeError(
             f"{resource_name}: Actor_Action inventory chỉ dùng cho bốn bảng P9/P10 đã ghim."
