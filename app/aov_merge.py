@@ -32,13 +32,16 @@ def merge_aov_mses_resource(
     resource_name: str,
     *,
     allow_invalid_base_checksum: bool = False,
+    allow_p9_p10_label_union: bool = False,
 ) -> tuple[bytes, dict]:
     """Merge the known MSES v7 AoV tables while retaining the base package's schema.
 
     New opaque rows are admitted only by an exact table-specific key allowlist.
     Sound banks admit only rows carrying the VTK Hero_LiXin_Skin_C marker;
-    ResSkinSeniorLabelCfg admits only the observed 59500 row. ResCharacterComponent
-    allows only a same-schema union when every shared row is byte-identical.
+    ResSkinSeniorLabelCfg normally admits only the observed 59500 row. Its separate
+    P9/P10 mode is pinned to the observed 69-field 8-row/98-row pair with stale
+    source checksums and byte-identical shared rows. ResCharacterComponent allows
+    only a same-schema union when every shared row is byte-identical.
     skillcombine admits only its source-verified Actor 595 keys.
     """
     normalized_name = resource_name.replace("\\", "/").lstrip("/")
@@ -51,6 +54,9 @@ def merge_aov_mses_resource(
         base_decoded, base_mode = decode_aov_resource(base_resource, resource_name)
         overlay_decoded, overlay_mode = decode_aov_resource(overlay_resource, resource_name)
         base_checksum_repaired = False
+        overlay_checksum_repaired = False
+        if allow_invalid_base_checksum and allow_p9_p10_label_union:
+            raise MSESError("Không thể bật đồng thời hai chế độ sửa checksum MSES.")
         if allow_invalid_base_checksum:
             if not resource_name.replace("\\", "/").endswith("/ResSkinSeniorLabelCfg.bytes"):
                 raise MSESError("Chỉ cho phép sửa checksum nền cho ResSkinSeniorLabelCfg.")
@@ -60,9 +66,78 @@ def merge_aov_mses_resource(
             base_decoded = build_mses(base_table, base_table.rows)
             base_table = parse_mses(base_decoded)
             base_checksum_repaired = True
+            overlay_table = parse_mses(overlay_decoded)
+        elif allow_p9_p10_label_union:
+            if normalized_name != "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes":
+                raise MSESError(
+                    "Chế độ P9/P10 chỉ áp dụng cho ResSkinSeniorLabelCfg.bytes."
+                )
+            base_table = parse_mses(base_decoded, verify_checksum=False)
+            overlay_table = parse_mses(overlay_decoded, verify_checksum=False)
+            expected_stale_checksum = b"6679e51360ee25c838a5ee74af96a364"
+            if (
+                base_table.checksum_valid
+                or overlay_table.checksum_valid
+                or base_decoded[0x60:0x80] != expected_stale_checksum
+                or overlay_decoded[0x60:0x80] != expected_stale_checksum
+            ):
+                raise MSESError(
+                    "Adapter P9/P10 chỉ nhận đúng chuỗi checksum cũ đã xác minh ở cả hai bảng."
+                )
+            if (
+                base_table.field_count != 69
+                or overlay_table.field_count != 69
+                or sorted((len(base_table.rows), len(overlay_table.rows))) != [8, 98]
+            ):
+                raise MSESError(
+                    "Adapter P9/P10 chỉ xác minh schema 69 trường với cặp 8/98 hàng."
+                )
+
+            def _index_label_rows(rows, label):
+                indexed = {}
+                for row in rows:
+                    if len(row) < 4:
+                        raise MSESError(
+                            f"ResSkinSeniorLabelCfg: hàng {label} quá ngắn."
+                        )
+                    key = int.from_bytes(row[:4], "little")
+                    if key in indexed:
+                        raise MSESError(
+                            f"ResSkinSeniorLabelCfg: khóa trùng trong {label}: 0x{key:08x}."
+                        )
+                    indexed[key] = row
+                return indexed
+
+            base_rows_by_key = _index_label_rows(base_table.rows, "base")
+            overlay_rows_by_key = _index_label_rows(overlay_table.rows, "overlay")
+            smaller = (
+                base_rows_by_key
+                if len(base_rows_by_key) == 8
+                else overlay_rows_by_key
+            )
+            larger = (
+                overlay_rows_by_key
+                if len(overlay_rows_by_key) == 98
+                else base_rows_by_key
+            )
+            if not set(smaller).issubset(larger):
+                raise MSESError(
+                    "Bảng P9/P10 8 hàng không phải tập con của bảng 98 hàng."
+                )
+            differing = [
+                key for key in smaller
+                if smaller[key] != larger[key]
+            ]
+            if differing:
+                raise MSESError(
+                    "Bảng P9/P10 có hàng chung khác nội dung: "
+                    + ", ".join(f"0x{key:08x}" for key in sorted(differing)[:20])
+                )
+            base_checksum_repaired = True
+            overlay_checksum_repaired = True
         else:
             base_table = parse_mses(base_decoded)
-        overlay_table = parse_mses(overlay_decoded)
+            overlay_table = parse_mses(overlay_decoded)
     except (AOVBytesError, MSESError) as exc:
         raise AOVResourceMergeError(f"{resource_name}: {exc}") from exc
 
@@ -185,6 +260,17 @@ def merge_aov_mses_resource(
                 + "."
             )
         allowed_new_keys = set(overlay_rows_by_key) - set(base_rows_by_key)
+    elif (
+        normalized_name == "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
+        and allow_p9_p10_label_union
+    ):
+        base_keys = {
+            int.from_bytes(row[:4], "little") for row in base_table.rows
+        }
+        overlay_keys = {
+            int.from_bytes(row[:4], "little") for row in overlay_table.rows
+        }
+        allowed_new_keys = overlay_keys - base_keys
     elif normalized_name == "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes":
         allowed_new_keys = {59500}
         base_rows_by_key = {
@@ -219,7 +305,8 @@ def merge_aov_mses_resource(
             allow_schema_mismatch=True,
             allow_new_rows_across_schema_mismatch=bool(allowed_new_keys),
             allowed_new_keys=allowed_new_keys,
-            verify_base_checksum=True,
+            verify_base_checksum=not allow_p9_p10_label_union,
+            verify_overlay_checksum=not allow_p9_p10_label_union,
         )
         merged_resource = encode_aov_resource(merged_decoded, resource_name, base_mode)
         # Decode and parse once more so a successful return means the wrapper,
@@ -236,5 +323,6 @@ def merge_aov_mses_resource(
         "output_bytes": len(merged_resource),
         "verified": True,
         "base_checksum_repaired": base_checksum_repaired,
+        "overlay_checksum_repaired": overlay_checksum_repaired,
     })
     return merged_resource, report

@@ -183,6 +183,122 @@ class AOVResourceMergeTests(unittest.TestCase):
         ):
             merge_aov_mses_resource(base, overlay, name)
 
+    def test_merges_exact_p9_p10_res_skin_label_tables_and_repairs_stale_checksums(self):
+        name = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
+        common_rows = [
+            struct.pack("<I", key) + f"shared-{key}".encode()
+            for key in range(1, 9)
+        ]
+        p9_raw = bytearray(table(69, common_rows))
+        p10_raw = bytearray(table(
+            69,
+            common_rows + [
+                struct.pack("<I", key) + f"P10-only-{key}".encode()
+                for key in range(9, 99)
+            ],
+        ))
+        # These two real source tables carry the same stale checksum string.
+        stale = b"6679e51360ee25c838a5ee74af96a364"
+        p9_raw[0x60:0x80] = stale
+        p10_raw[0x60:0x80] = stale
+        base = encode_aov_resource(bytes(p9_raw), name, "aes")
+        overlay = encode_aov_resource(bytes(p10_raw), name, "aes")
+
+        result, report = merge_aov_mses_resource(
+            base, overlay, name, allow_p9_p10_label_union=True
+        )
+        decoded, mode = decode_aov_resource(result, name)
+        parsed = parse_mses(decoded)
+
+        self.assertEqual(mode, "aes")
+        self.assertEqual(parsed.field_count, 69)
+        self.assertEqual(len(parsed.rows), 98)
+        self.assertTrue(parsed.checksum_valid)
+        self.assertTrue(report["base_checksum_repaired"])
+        self.assertTrue(report["overlay_checksum_repaired"])
+        self.assertEqual(
+            len(report["appended_keys"]), 90
+        )
+        self.assertTrue(report["verified"])
+
+    def test_p9_p10_label_union_rejects_different_shared_rows(self):
+        name = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
+        common = [
+            struct.pack("<I", key) + f"shared-{key}".encode()
+            for key in range(1, 9)
+        ]
+        p9_raw = bytearray(table(69, common))
+        p10_rows = [
+            struct.pack("<I", 1) + b"changed-shared-row",
+            *common[1:],
+            *[
+                struct.pack("<I", key) + f"P10-only-{key}".encode()
+                for key in range(9, 99)
+            ],
+        ]
+        p10_raw = bytearray(table(69, p10_rows))
+        stale = b"6679e51360ee25c838a5ee74af96a364"
+        p9_raw[0x60:0x80] = stale
+        p10_raw[0x60:0x80] = stale
+        base = encode_aov_resource(bytes(p9_raw), name, "aes")
+        overlay = encode_aov_resource(bytes(p10_raw), name, "aes")
+
+        with self.assertRaisesRegex(
+            AOVResourceMergeError, "hàng chung khác nội dung"
+        ):
+            merge_aov_mses_resource(
+                base, overlay, name, allow_p9_p10_label_union=True
+            )
+
+    def test_p9_p10_label_union_rejects_unknown_stale_checksum_value(self):
+        name = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
+        rows_a = [
+            struct.pack("<I", key) + f"shared-{key}".encode()
+            for key in range(1, 9)
+        ]
+        rows_b = rows_a + [
+            struct.pack("<I", key) + f"extra-{key}".encode()
+            for key in range(9, 99)
+        ]
+        raw_a = bytearray(table(69, rows_a))
+        raw_b = bytearray(table(69, rows_b))
+        raw_a[0x60:0x80] = b"0" * 32
+        raw_b[0x60:0x80] = b"0" * 32
+        base = encode_aov_resource(bytes(raw_a), name, "aes")
+        overlay = encode_aov_resource(bytes(raw_b), name, "aes")
+
+        with self.assertRaisesRegex(
+            AOVResourceMergeError, "đúng chuỗi checksum cũ"
+        ):
+            merge_aov_mses_resource(
+                base, overlay, name, allow_p9_p10_label_union=True
+            )
+
+    def test_p9_p10_label_union_rejects_unrecognized_row_counts(self):
+        name = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
+        rows_a = [
+            struct.pack("<I", key) + f"A-{key}".encode()
+            for key in range(1, 9)
+        ]
+        rows_b = [
+            struct.pack("<I", key) + f"A-{key}".encode()
+            for key in range(1, 10)
+        ]
+        raw_a = bytearray(table(69, rows_a))
+        raw_b = bytearray(table(69, rows_b))
+        stale = b"6679e51360ee25c838a5ee74af96a364"
+        raw_a[0x60:0x80] = stale
+        raw_b[0x60:0x80] = stale
+        base = encode_aov_resource(bytes(raw_a), name, "aes")
+        overlay = encode_aov_resource(bytes(raw_b), name, "aes")
+
+        with self.assertRaisesRegex(
+            AOVResourceMergeError, "cặp 8/98 hàng"
+        ):
+            merge_aov_mses_resource(
+                base, overlay, name, allow_p9_p10_label_union=True
+            )
+
     def test_rejects_unregistered_mses_table_path(self):
         base = encode_aov_resource(table(3, [struct.pack("<I", 1) + b"base"]), "Unknown.bytes", "aes")
         overlay = encode_aov_resource(table(3, [struct.pack("<I", 2) + b"overlay"]), "Unknown.bytes", "aes")
