@@ -532,7 +532,8 @@ def decode_archive_resources(
                 try:
                     with zipfile.ZipFile(io.BytesIO(raw), "r") as nested:
                         process_archive(nested, f"{prefix}/{path}", depth + 1)
-                    report["nested_packages_expanded"] += 1
+                    if is_raw_pkg_zip:
+                        report["nested_packages_expanded"] += 1
                 except zipfile.BadZipFile as exc:
                     if lower_path.endswith(".zip") or is_raw_pkg_zip:
                         raise AOVBytesArchiveError(
