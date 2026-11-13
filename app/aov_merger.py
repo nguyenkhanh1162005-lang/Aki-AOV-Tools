@@ -966,7 +966,10 @@ def p9_p10_actor_id_from_packer_path(path: str) -> str | None:
         return None
     filename = normalized.rsplit("/", 1)[-1]
     match = re.match(r"^(\d{3})\d*_.+_battle(?:_low)?\.assetbundle$", filename)
-    return match.group(1) if match else None
+    if not match:
+        return None
+    actor_id = match.group(1)
+    return actor_id if actor_id in P9_ACTOR_IDS | P10_ACTOR_IDS else None
 
 
 def _merge_p9_p10_packer_metadata(p10_data: bytes, p9_data: bytes) -> tuple[bytes, dict]:
