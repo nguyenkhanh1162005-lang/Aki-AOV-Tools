@@ -14,7 +14,11 @@ from typing import Any
 
 from .aov_bytes import AOVBytesError, decode_aov_resource, encode_aov_resource
 from .aov_merge import AOVResourceMergeError, merge_aov_mses_resource
-from .aov_common_actions import CommonActionsMergeError, merge_common_actions_pkg
+from .aov_common_actions import (
+    CommonActionsMergeError,
+    analyze_common_actions_overlay_set,
+    merge_common_actions_pkg,
+)
 from .ifix_merger import (
     IFixMergeError,
     merge_ifix_patches,
@@ -926,6 +930,14 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                 pass
 
 
+def _sha256_file_for_aov(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 P9_ARCHIVE_SHA256 = "77dcb4f270c4be00d2cbce8194a57a388420eeb6e430f0edae7bc8e812cf2e84"
 P10_ARCHIVE_SHA256 = "325c6c96baf931cd2b3cd33b65c944e994f3c48bbe2c22eab08d7a338d04b03e"
 P9_ACTOR_IDS = {"107", "130", "137", "163", "509", "510", "518", "540", "597"}
@@ -952,7 +964,7 @@ def p9_p10_actor_id_from_packer_path(path: str) -> str | None:
     if not normalized.startswith("assetbundle/battle/skin/"):
         return None
     filename = normalized.rsplit("/", 1)[-1]
-    match = re.match(r"^(\d{3})\d*_[a-z0-9]+_battle(?:_low)?\.assetbundle$", filename)
+    match = re.match(r"^(\d{3})\d*_.+_battle(?:_low)?\.assetbundle$", filename)
     return match.group(1) if match else None
 
 
@@ -1234,11 +1246,22 @@ def merge_p9_p10_archives(
                 != "2e0e1fce641b5310c70d19a63637381de3af5ec938c92488e7e1b16afcdb87ca"
             ):
                 raise AOVMergeError("CommonActions P9/P10 không khớp hai package đã kiểm chứng.")
+            common_dry_run = analyze_common_actions_overlay_set([
+                ("P9", p9_common, set(P9_ACTOR_IDS))
+            ])
+            if (
+                not common_dry_run.get("parser_verified")
+                or common_dry_run.get("unsupported_path_conflict_count") != 0
+                or not common_dry_run.get("skin_ids")
+            ):
+                raise AOVMergeError(
+                    "CommonActions P9 không qua dry-run hoặc còn path conflict ngoài parser."
+                )
             try:
                 merged_common, common_report = merge_common_actions_pkg(
                     p10_common,
                     p9_common,
-                    special_ids={f"{actor}00" for actor in P9_ACTOR_IDS},
+                    special_ids=set(common_dry_run["skin_ids"]),
                     strict_conflicts=True,
                 )
             except CommonActionsMergeError as exc:
