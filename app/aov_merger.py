@@ -4,6 +4,7 @@ import copy
 import hashlib
 import io
 import os
+import re
 import shutil
 import stat
 import sys
@@ -46,6 +47,20 @@ LOBBY_BANK_PATH = "Databin/Client/Sound/LobbyBank.bytes"
 SKILL_COMBINE_PATH = "Databin/Client/Skill/skillcombine.bytes"
 PACKER_PATH = "assetbundle/resourcepackerinfosetall.assetbundle"
 VERIFICATION_PATH = "assetbundle/resourceverificationinfosetall.assetbundle"
+
+# Exact P9/P10 1.64.1.12 ResourcePackerInfoSetAll source pair.
+P9_P10_PACKER_SOURCE_SHA256 = {
+    "P9": "6784ca2038e4f141dba82d4b8bc71cd0b7b7998efa3adf9d61447335bf9e06f5",
+    "P10": "b87d60ef87d5d49dacad2cdb32536e06bd933ac4e2f8649e6336855609b39d56",
+}
+P9_P10_PACKER_ACTOR_IDS = {
+    "P9": {107, 130, 137, 163, 509, 510, 518, 540, 597},
+    "P10": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
+}
+P9_P10_PACKER_ENTRY_COUNT = 22298
+P9_P10_PACKER_LINK_COUNT = 60243
+P9_P10_PACKER_CHANGED_PATH_COUNT = 410
+P9_P10_PACKER_CHANGED_OWNER_COUNTS = {"P9": 164, "P10": 246}
 
 EXPECTED_ASSETBUNDLES = {
     "assetbundle/battle/hero/595_lixin_battle_base.assetbundle",
@@ -386,6 +401,228 @@ def _find_mono_behaviour(env: Any, name: str):
             if tree.get("m_Name") == name:
                 return obj, tree
     raise AOVMergeError(f"AssetBundle metadata thiếu object {name}.")
+
+
+def _actor_id_from_packer_path(path: str) -> int | None:
+    """Extract the three-digit Actor ID from a source-validated skin bundle path."""
+    normalized = path.replace(chr(92), "/")
+    match = re.search(
+        r"(?:^|/)(?:battle|show)/(?:skin|hero)/([0-9]{3,6})_",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return int(match.group(1)[:3])
+
+
+def _normalise_actor_inventory(values: set[int | str], label: str) -> set[int]:
+    normalized = set()
+    for value in values:
+        try:
+            actor_id = int(value)
+        except (TypeError, ValueError) as exc:
+            raise AOVMergeError(f"{label}: Actor ID không hợp lệ: {value!r}.") from exc
+        if not 0 < actor_id <= 999:
+            raise AOVMergeError(f"{label}: Actor ID ngoài phạm vi hỗ trợ: {actor_id}.")
+        normalized.add(actor_id)
+    return normalized
+
+
+def _merge_p9_p10_packer_trees(
+    base_tree: dict,
+    overlay_tree: dict,
+    base_source: str,
+    overlay_source: str,
+    base_actor_action_ids: set[int | str],
+    overlay_actor_action_ids: set[int | str],
+) -> tuple[dict, dict]:
+    """Merge P9/P10 Packer ResourceInfos using exact Actor_Action source ownership.
+
+    The source pair has the same Packer path order and identical parent-child index
+    table. Only 410 ResourceInfos lists differ; no other entry metadata may drift.
+    """
+    if {base_source, overlay_source} != {"P9", "P10"} or base_source == overlay_source:
+        raise AOVMergeError("Packer adapter chỉ nhận đúng một nguồn P9 và một nguồn P10.")
+    if base_tree.get("Version") != BASE_VERSION or overlay_tree.get("Version") != BASE_VERSION:
+        raise AOVMergeError("Packer P9/P10 phải cùng phiên bản 1.64.1.12.")
+
+    base_ids = _normalise_actor_inventory(base_actor_action_ids, "base")
+    overlay_ids = _normalise_actor_inventory(overlay_actor_action_ids, "overlay")
+    if base_ids != P9_P10_PACKER_ACTOR_IDS[base_source]:
+        raise AOVMergeError("Actor_Action inventory nguồn nền không khớp P9/P10 đã ghim.")
+    if overlay_ids != P9_P10_PACKER_ACTOR_IDS[overlay_source]:
+        raise AOVMergeError("Actor_Action inventory nguồn overlay không khớp P9/P10 đã ghim.")
+    if base_ids & overlay_ids:
+        raise AOVMergeError("Actor_Action inventory P9/P10 bị giao nhau.")
+
+    base_entries = base_tree.get("AllResourcePackInfo")
+    overlay_entries = overlay_tree.get("AllResourcePackInfo")
+    base_links = base_tree.get("AllParentIdexToChild")
+    overlay_links = overlay_tree.get("AllParentIdexToChild")
+    if not isinstance(base_entries, list) or not isinstance(overlay_entries, list):
+        raise AOVMergeError("Packer thiếu AllResourcePackInfo dạng danh sách.")
+    if not isinstance(base_links, list) or not isinstance(overlay_links, list):
+        raise AOVMergeError("Packer thiếu AllParentIdexToChild dạng danh sách.")
+    if (
+        len(base_entries) != P9_P10_PACKER_ENTRY_COUNT
+        or len(overlay_entries) != P9_P10_PACKER_ENTRY_COUNT
+    ):
+        raise AOVMergeError("Số entry ResourcePackerInfoSetAll không khớp cặp P9/P10.")
+    if len(base_links) != P9_P10_PACKER_LINK_COUNT or base_links != overlay_links:
+        raise AOVMergeError(
+            "Bảng parent-child P9/P10 không khớp chính xác; không thể giữ nguyên index."
+        )
+
+    base_paths = [entry.get("PathInIFS") if isinstance(entry, dict) else None for entry in base_entries]
+    overlay_paths = [
+        entry.get("PathInIFS") if isinstance(entry, dict) else None
+        for entry in overlay_entries
+    ]
+    if (
+        any(not isinstance(path, str) or not path for path in base_paths)
+        or len(set(base_paths)) != len(base_paths)
+        or base_paths != overlay_paths
+    ):
+        raise AOVMergeError(
+            "Đường dẫn/thứ tự ResourcePackerInfoSetAll giữa P9/P10 đã thay đổi."
+        )
+
+    merged_tree = copy.deepcopy(base_tree)
+    merged_entries = merged_tree["AllResourcePackInfo"]
+    changed_count = 0
+    changed_by_source = {"P9": 0, "P10": 0}
+
+    for index, (base_entry, overlay_entry) in enumerate(zip(base_entries, overlay_entries)):
+        base_info = base_entry.get("ResourceInfos")
+        overlay_info = overlay_entry.get("ResourceInfos")
+        if not isinstance(base_info, list) or not isinstance(overlay_info, list):
+            raise AOVMergeError(
+                f"Packer entry thiếu ResourceInfos dạng danh sách: {base_entry['PathInIFS']}."
+            )
+        path = base_entry["PathInIFS"]
+        base_other = {key: value for key, value in base_entry.items() if key != "ResourceInfos"}
+        overlay_other = {
+            key: value for key, value in overlay_entry.items() if key != "ResourceInfos"
+        }
+        if base_other != overlay_other:
+            raise AOVMergeError(
+                f"Packer entry ngoài ResourceInfos bị khác giữa P9/P10: {path}."
+            )
+        if base_info == overlay_info:
+            continue
+
+        actor_id = _actor_id_from_packer_path(path)
+        if actor_id is None:
+            raise AOVMergeError(
+                f"Packer ResourceInfos khác nhau nhưng không đọc được Actor ID: {path}."
+            )
+        owned_by_base = actor_id in base_ids
+        owned_by_overlay = actor_id in overlay_ids
+        if owned_by_base == owned_by_overlay:
+            raise AOVMergeError(
+                f"Không xác định được duy nhất nguồn Packer cho {path} (Actor {actor_id})."
+            )
+        selected_source = base_source if owned_by_base else overlay_source
+        if selected_source == overlay_source:
+            merged_entries[index]["ResourceInfos"] = copy.deepcopy(overlay_info)
+        changed_count += 1
+        changed_by_source[selected_source] += 1
+
+    if changed_count != P9_P10_PACKER_CHANGED_PATH_COUNT:
+        raise AOVMergeError(
+            f"Số Packer entry xung đột thay đổi ({changed_count} != "
+            f"{P9_P10_PACKER_CHANGED_PATH_COUNT}); từ chối ghép."
+        )
+    if changed_by_source != P9_P10_PACKER_CHANGED_OWNER_COUNTS:
+        raise AOVMergeError(
+            f"Phân bố Actor-owner của Packer thay đổi: {changed_by_source}."
+        )
+
+    report = {
+        "adapter": "p9_p10_actor_owned_resource_packer_exact_source_pair",
+        "base_source": base_source,
+        "overlay_source": overlay_source,
+        "version": BASE_VERSION,
+        "base_entries": len(base_entries),
+        "overlay_entries": len(overlay_entries),
+        "output_entries": len(merged_entries),
+        "parent_child_links": len(base_links),
+        "changed_resource_info_entries": changed_count,
+        "selected_entry_counts": dict(changed_by_source),
+        "source_hashes_pinned": True,
+        "actor_inventory_pinned": True,
+        "paths_and_indexes_preserved": True,
+        "verified": True,
+    }
+    return merged_tree, report
+
+
+def merge_p9_p10_packer_metadata(
+    base_data: bytes,
+    overlay_data: bytes,
+    base_actor_action_ids: set[int | str],
+    overlay_actor_action_ids: set[int | str],
+) -> tuple[bytes, dict]:
+    """Merge exact P9/P10 ResourcePackerInfoSetAll AssetBundle metadata only."""
+    base_hash = hashlib.sha256(base_data).hexdigest()
+    overlay_hash = hashlib.sha256(overlay_data).hexdigest()
+    if (base_hash, overlay_hash) == (
+        P9_P10_PACKER_SOURCE_SHA256["P9"],
+        P9_P10_PACKER_SOURCE_SHA256["P10"],
+    ):
+        base_source, overlay_source = "P9", "P10"
+    elif (base_hash, overlay_hash) == (
+        P9_P10_PACKER_SOURCE_SHA256["P10"],
+        P9_P10_PACKER_SOURCE_SHA256["P9"],
+    ):
+        base_source, overlay_source = "P10", "P9"
+    else:
+        raise AOVMergeError(
+            "ResourcePackerInfoSetAll không khớp SHA-256 cặp P9/P10 đã kiểm chứng."
+        )
+
+    UnityPy_AOV = _load_unitypy_aov()
+    try:
+        base_env = UnityPy_AOV.load(base_data)
+        _, base_tree = _find_mono_behaviour(base_env, "ResourcePackerInfoSetXML")
+        base_obj, _ = _find_mono_behaviour(base_env, "ResourcePackerInfoSetXML")
+        overlay_env = UnityPy_AOV.load(overlay_data)
+        _, overlay_tree = _find_mono_behaviour(overlay_env, "ResourcePackerInfoSetXML")
+        merged_tree, report = _merge_p9_p10_packer_trees(
+            base_tree,
+            overlay_tree,
+            base_source,
+            overlay_source,
+            base_actor_action_ids,
+            overlay_actor_action_ids,
+        )
+        base_obj.save_typetree(merged_tree)
+        bundle = next(iter(base_env.files.values()))
+        merged = bundle.save("original")
+        check_env = UnityPy_AOV.load(merged)
+        _, check_tree = _find_mono_behaviour(check_env, "ResourcePackerInfoSetXML")
+    except AOVMergeError:
+        raise
+    except Exception as exc:
+        raise AOVMergeError(
+            f"Không serialize được ResourcePackerInfoSetAll P9/P10: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+
+    if (
+        check_tree.get("Version") != BASE_VERSION
+        or check_tree.get("AllResourcePackInfo") != merged_tree["AllResourcePackInfo"]
+        or check_tree.get("AllParentIdexToChild") != merged_tree["AllParentIdexToChild"]
+    ):
+        raise AOVMergeError(
+            "ResourcePackerInfoSetAll sau serialize không khớp candidate."
+        )
+    report.update({
+        "output_bytes": len(merged),
+        "serialization_roundtrip_verified": True,
+    })
+    return merged, report
 
 
 def _merge_packer_metadata(base_data: bytes, vtk_data: bytes,
