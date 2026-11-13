@@ -615,15 +615,80 @@ def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
             ),
         }
 
-    if leaf in {"battlebank.bytes", "lobbybank.bytes", "skillcombine.bytes"}:
+    if leaf in {
+        "heroskin.bytes", "resskinmotionbasecfg.bytes",
+        "heroskinshop.bytes", "skillmark.bytes",
+        "lobbysound.bytes", "chatsound.bytes", "couplesound.bytes",
+    }:
+        return {
+            "adapter_state": "source_pinned_actor_owned_mses_helper",
+            "next_action": (
+                "Có helper cấp bảng đã kiểm chứng cho đúng cặp P9/P10 nguồn: "
+                "bốn bảng skin và năm bảng metadata âm thanh chọn hàng xung đột theo "
+                "Actor_Action inventory, SHA-256, schema và số hàng ghim. Helper hiện "
+                "chưa được nối vào bộ ghép ZIP nhiều wrapper; preflight chỉ báo khả năng xử lý."
+            ),
+            "safety_rule": (
+                "Không áp dụng cho nguồn/build khác; thiếu Actor_Action inventory, "
+                "hash/schema/số hàng không khớp hoặc Actor ID không duy nhất thì phải chặn. "
+                "Không coi metadata âm thanh là đã hợp nhất Wwise BNK."
+            ),
+        }
+
+    if leaf in {"battlebank.bytes", "lobbybank.bytes"}:
         return {
             "adapter_state": "version_locked_schema",
             "next_action": (
-                "Có parser/serializer MSES v7; allowlist khóa chỉ có trong adapter "
-                "VTK Actor 595. P9/P10 sample skillcombine giống hệt nhau, có thể dedupe; "
-                "soundbank P9/P10/TM có nhiều hàng chung khác payload và chưa được ghép."
+                "Bộ ghép VTK Actor 595 có allowlist MSES đã khóa phiên bản; ngoài ra "
+                "cặp P9/P10 mẫu có helper cấp bảng chọn hàng âm thanh theo Actor_Action "
+                "inventory và hash nguồn ghim. Helper P9/P10 chưa được nối vào luồng xuất ZIP."
             ),
-            "safety_rule": "Khác payload ở cùng khóa hoặc khóa mới ngoài allowlist phải chặn ghép.",
+            "safety_rule": (
+                "Nhánh VTK cũ chỉ nhận đúng allowlist; nhánh P9/P10 cần đủ Actor_Action "
+                "inventory, đúng nguồn/schema và không cấp quyền ghép nhiều wrapper."
+            ),
+        }
+
+    if leaf == "skillcombine.bytes":
+        return {
+            "adapter_state": "identical_duplicate_only",
+            "next_action": (
+                "P9/P10 mẫu có payload skillcombine giống hệt nhau; chỉ được dedupe "
+                "khi SHA-256 thực tế trùng, không cần ghi đè."
+            ),
+            "safety_rule": "Nếu payload hoặc phiên bản khác, cần phân tích lại và chặn ghép.",
+        }
+
+    if leaf == "herosound.bytes":
+        return {
+            "adapter_state": "inspect_only_unresolved_actor_rows",
+            "next_action": (
+                "HeroSound P9/P10 có 485 hàng chung khác payload; 475 hàng ánh xạ được "
+                "theo Actor, còn 10 hàng chưa có chủ sở hữu trong Actor_Action inventory. "
+                "Chưa có quy tắc an toàn cho toàn bảng."
+            ),
+            "safety_rule": "Không bỏ qua 10 hàng chưa xác định và không tự chọn P9 hoặc P10.",
+        }
+
+    if leaf == "organskin.bytes":
+        return {
+            "adapter_state": "blocked_invalid_source_table",
+            "next_action": (
+                "Nguồn P9 khai 937 hàng nhưng chỉ parse được 931 hàng đến EOF và checksum "
+                "không hợp lệ; không thể tự khôi phục sáu hàng còn thiếu."
+            ),
+            "safety_rule": "Chặn ghép cho tới khi có nguồn organSkin hoàn chỉnh, checksum hợp lệ.",
+        }
+
+    if leaf == "litebulletcfg.bytes":
+        return {
+            "adapter_state": "blocked_schema_drift",
+            "next_action": (
+                "P9/P10 có MSES v7 nhưng schema khác nhau (156/158 trường); có 19 hàng "
+                "chung khác payload và sáu khóa chỉ có ở P10. Cần giải nghĩa hai trường "
+                "chênh và chuyển đổi schema trước khi hợp nhất."
+            ),
+            "safety_rule": "Không trộn raw row khác schema hoặc tự thêm giá trị mặc định.",
         }
 
     if leaf in {"kernellua.pkg.bytes", "stablesystems_3.pkg.bytes"}:

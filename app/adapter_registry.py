@@ -69,8 +69,17 @@ _ADAPTERS = (
         "name": "MSES tables",
         "status": "inspect_only_except_locked_vtk_adapter",
         "formats": ["BattleBank.bytes", "LobbyBank.bytes", "skillcombine.bytes", "ResSkinSeniorLabelCfg.bytes"],
-        "scope": "Parser/serializer chỉ được gọi trong adapter Vấn Tâm Kiếm đã khóa phiên bản; chưa hỗ trợ mọi schema MSES.",
-        "merge_policy": "Không nối byte hoặc thay bảng giữa các phiên bản tùy ý.",
+        "scope": (
+            "MSES v7 parser/serializer hỗ trợ adapter VTK Actor 595 đã khóa phiên bản "
+            "và helper cấp bảng P9/P10 ghim SHA-256/Actor_Action cho heroSkin, "
+            "ResSkinMotionBaseCfg, HeroSkinShop, skillmark, BattleBank, LobbyBank, "
+            "LobbySound, ChatSound và CoupleSound. HeroSound còn 10 hàng chưa rõ chủ sở hữu."
+        ),
+        "merge_policy": (
+            "Helper P9/P10 là cấp bảng, chưa phải quyền ghép ZIP nhiều wrapper. "
+            "Không nối byte hoặc thay bảng giữa phiên bản tùy ý; Wwise BNK vẫn cần "
+            "remap Event/Action/HIRC/WEM riêng."
+        ),
         "game_compatibility": "not_tested",
     },
     {
