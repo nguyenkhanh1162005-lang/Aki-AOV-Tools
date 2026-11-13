@@ -122,6 +122,7 @@ def _rewrite_text_bytes(data: bytes, resource_path: str, state: dict) -> tuple[b
     if updated == decoded:
         return data, False
 
+    state["replacement_total"] += sum(per_file.values())
     output = updated.encode(encoding)
     if len(output) > MAX_ENTRY_UNCOMPRESSED:
         raise NoticeRewriteError(
@@ -310,7 +311,7 @@ def _rewrite_zip_stream(
                     )
                 try:
                     with output_zip.open(info, "w", force_zip64=True) as member_target:
-                        shutil.copyfileobj(member_source=rewritten, fdst=member_target, length=1024 * 1024)
+                        shutil.copyfileobj(rewritten, member_target, length=1024 * 1024)
                 finally:
                     rewritten.close()
 
