@@ -15,6 +15,7 @@ Công cụ web và Telegram bot riêng tư bằng tiếng Việt để tải, ki
 - Web API `/api/upload/{upload_id}/aov-merge`: tự chọn adapter theo cấu trúc ZIP; hỗ trợ hai đường ghép có giới hạn: KPM100 ZIP trực tiếp + VTK, hoặc MOD wrapper 10 skin + các ZIP phần VTK iOS.
 - Web API `/api/upload/{upload_id}/decode-bytes`: giải mã các tài nguyên `.bytes` AoV AES/Zstandard đã nhận diện từ ZIP đã tải lên; hỗ trợ ZIP `Resources.zip` lồng nhau và bung tiếp ZIP bên trong `.pkg.bytes` đã giải mã (tối đa hai tầng), xuất ZIP riêng cùng `decode-report.json`, không sửa ZIP gốc và không ghép tài nguyên.
 - Web API `/api/upload/{upload_id}/notice-scan`: quét chỉ đọc các chuỗi liên quan thông báo trong Lua/XML/JSON/TXT/config/CSV và `.bytes` đã giải mã; trả đường dẫn, từ khóa, đoạn trích ngắn; giữ nguyên phiên tải và file gốc.
+- Web API `/api/upload/{upload_id}/branding-scan`: quét chỉ đọc chính xác các nhãn `KIANA MOD AOV`, `Mod được tạo bởi youtuber KIANA MOD AOV`, `Web Mod` và `Youtube` trong văn bản, `.bytes` giải mã được và metadata object Unity AssetBundle có giới hạn. Web cho tải báo cáo JSON; tính năng này chỉ xác định vị trí chuỗi, chưa sửa/xóa dữ liệu.
 
 ## Telegram bot riêng tư
 
@@ -42,17 +43,6 @@ Giới hạn: tối đa 20.000 entry, 1 GiB dữ liệu giải nén, 256 MiB m�
 Trên web dùng nút **Quét thông báo khởi động**; sau khi quét, có thể tải riêng `aki-aov-notice-scan-report.json`. Bộ quét chỉ đọc, giải mã các `.bytes` đã hỗ trợ, bung ZIP package lồng nhau và dò từ khóa trong Lua/XML/JSON/TXT/INI/CFG/CSV cùng metadata object của UnityFS AssetBundle (MonoBehaviour, TextAsset, ScriptableObject; giới hạn 64 MiB/bundle và 500 object). Chế độ quét không tạo ZIP tạm, giới hạn 256 MiB dữ liệu đã giải mã và giữ nguyên ZIP nguồn.
 
 Đây là quét heuristic để tìm ứng viên, không chứng minh chuỗi tìm được là popup đang hiển thị. Bundle vượt giới hạn, payload nhị phân opaque và định dạng không giải mã được có thể bị bỏ qua; báo cáo nêu rõ số AssetBundle đã quét/bỏ qua và lý do. Không tự xóa hoặc ghi đè tài nguyên chỉ vì một từ khóa xuất hiện. Cần đối chiếu object/script và kiểm tra trong game trước khi tạo bản sửa.
-## Thay thương hiệu thông báo khởi động (có giới hạn)
-
-Trên web, chọn đúng một ZIP đã gộp rồi dùng **Thay thương hiệu bằng AKI**. Bộ xử lý tạo ZIP mới, không sửa ZIP nguồn; thay chính xác:
-- `KIANA MOD AOV` → `AKI MOD AOV`
-- `Mod được tạo bởi youtuber KIANA MOD AOV` → `Mod được gộp bởi AKI MOD AOV`
-- Xóa chuỗi `Web Mod` và `Youtube`
-
-Chỉ sửa UTF text thuộc các phần mở rộng hỗ trợ và payload AoV AES/Zstandard giải mã được; nếu payload là ZIP lồng thì xử lý tuần tự và mã hóa lại theo wrapper gốc, sau đó xác minh round-trip, danh sách đường dẫn và CRC. Nếu không tìm thấy chuỗi trong tài nguyên có thể chỉnh sửa, endpoint dừng và không xuất ZIP.
-
-**Giới hạn:** không ghi lại Unity AssetBundle/MonoBehaviour, MSES, IFix, Wwise hoặc payload nhị phân opaque. Vì vậy ZIP đầu ra chỉ chứng minh các chuỗi trong phạm vi chỉnh sửa đã được thay và cấu trúc ZIP qua CRC; không chứng minh popup đã biến mất. Cần quét lại và thử trong Liên Quân iOS.
-
 ## Bộ ghép KPM100 iOS + Vấn Tâm Kiếm VTK
 
 Adapter này nhận đúng KPM100 iOS MOD 1.64.1.12_KPM dạng ZIP trực tiếp (cây `Resources/1.64.1/`, 70 `KPM_MOD_*` payload) cùng VTK iOS Vấn Tâm Kiếm Actor 595 phiên bản 1.64.1.11. Bộ xử lý kiểm tra hash và cấu trúc của cặp nguồn KPM100 đã được tích hợp riêng; không nhận ZIP khác chỉ vì tên file giống nhau.
