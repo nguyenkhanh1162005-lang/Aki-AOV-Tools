@@ -8,11 +8,12 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from app.aov_bytes import encrypt_aes_zstd_resource
+from app.aov_bytes import encode_aov_resource, encrypt_aes_zstd_resource
 from app.ifix_merger import serialize_ifix_patch
 from app.aov_bytes_archive import (
     AOVBytesArchiveError,
     _classify_notice_candidate,
+    _inspect_custom_lua_resource,
     decode_archive_resources,
 )
 
@@ -33,6 +34,93 @@ class AOVBytesArchiveTests(unittest.TestCase):
             for name, payload in entries.items():
                 archive.writestr(name, payload)
         return str(path)
+
+    def test_recognizes_custom_lua_prefix_and_rejects_wrong_signature(self):
+        prefix = bytes(range(128))
+        payload = (
+            prefix
+            + b"\\x1bLuaS\\x01"
+            + b"\\x19\\x93\\r\\n\\x1a\\n"
+            + b"\\x00ShowHonorRoadTips\\x00"
+            + b"\\x00ShowLoginNotice\\x00"
+        )
+        result = _inspect_custom_lua_resource(
+            payload, "Lua_Signed/AOV/Lobby/GameEntryControl_lua.bytes"
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["format_family"], "aov_custom_lua53_family")
+        self.assertEqual(result["header_offset"], 128)
+        self.assertFalse(result["decompiled"])
+        self.assertFalse(result["startup_removal_eligible"])
+        self.assertIn("ShowHonorRoadTips", result["strings"])
+        self.assertIsNone(_inspect_custom_lua_resource(
+            b"\\x00" * 128 + b"LuaS\\x01" + b"payload",
+            "Lua_Signed/AOV/Lobby/GameEntryControl_lua.bytes",
+        ))
+        self.assertIsNone(_inspect_custom_lua_resource(
+            payload, "Lua_Signed/AOV/Lobby/SomeOther_lua.bytes"
+        ))
+
+    def test_scans_same_custom_lua_payload_in_raw_package_and_zstd_wrapper(self):
+        payload = (
+            bytes(range(128))
+            + b"\\x1bLuaS\\x01"
+            + b"\\x19\\x93\\r\\n\\x1a\\n"
+            + b"\\x00ShowHonorRoadTips\\x00"
+            + b"\\x00ShowLoginNotice\\x00"
+        )
+        resource_path = "Lua_Signed/AOV/Lobby/GameEntryControl_lua.bytes"
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            stable_package = self._archive(folder / "stable.zip", {
+                resource_path: payload,
+            })
+            p9_resources = self._archive(folder / "p9-resources.zip", {
+                "Resources/1.64.1/StableSystems_3.pkg.bytes":
+                    Path(stable_package).read_bytes(),
+            })
+            p9_wrapper = self._archive(folder / "p9-wrapper.zip", {
+                "Resources.zip": Path(p9_resources).read_bytes(),
+            })
+
+            encoded_payload = encode_aov_resource(
+                payload, resource_path, "zstd"
+            )
+            tm_resources = self._archive(folder / "tm-resources.zip", {
+                "Resources/1.64.1/" + resource_path: encoded_payload,
+            })
+            tm_wrapper = self._archive(folder / "tm-wrapper.zip", {
+                "Resources.zip": Path(tm_resources).read_bytes(),
+            })
+
+            report = decode_archive_resources(
+                [p9_wrapper, tm_wrapper], "", scan_only=True
+            )
+
+        self.assertEqual(len(report["custom_lua_resources"]), 2)
+        self.assertEqual(
+            {item["resource_sha256"] for item in report["custom_lua_resources"]},
+            {__import__("hashlib").sha256(payload).hexdigest()},
+        )
+        self.assertEqual(
+            {item["decode_mode"] for item in report["custom_lua_resources"]},
+            {"custom_prefix_unwrapped", "zstd"},
+        )
+        self.assertFalse(any(
+            item.get("path", "").endswith("GameEntryControl_lua.bytes")
+            for item in report["unsupported"]
+        ))
+        custom_candidates = [
+            item for item in report["notice_candidates"]
+            if item.get("resource_role") == "custom_lua_string_candidate"
+        ]
+        self.assertTrue(custom_candidates)
+        self.assertTrue(all(
+            item["startup_removal_eligible"] is False
+            for item in custom_candidates
+        ))
+        self.assertTrue(report["scan_only"])
+        self.assertFalse(report["game_tested"])
 
     def test_decodes_supported_bytes_and_writes_report(self):
         with tempfile.TemporaryDirectory() as tmp:
