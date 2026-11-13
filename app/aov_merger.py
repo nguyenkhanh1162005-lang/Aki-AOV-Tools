@@ -1257,14 +1257,14 @@ def merge_p9_p10_archives(
                 with zipfile.ZipFile(io.BytesIO(p10_common), "r") as p10_ca, zipfile.ZipFile(
                     io.BytesIO(p9_common), "r"
                 ) as p9_ca:
-                    p10_names = [info.filename for info in p10_ca.infolist() if not info.is_dir()]
-                    p9_names = [info.filename for info in p9_ca.infolist() if not info.is_dir()]
+                    p10_common_names = [info.filename for info in p10_ca.infolist() if not info.is_dir()]
+                    p9_common_names = [info.filename for info in p9_ca.infolist() if not info.is_dir()]
                     if (
-                        len(p10_names) != 785
-                        or len(p9_names) != 785
-                        or len(set(p10_names)) != 785
-                        or len(set(p9_names)) != 785
-                        or set(p10_names) != set(p9_names)
+                        len(p10_common_names) != 785
+                        or len(p9_common_names) != 785
+                        or len(set(p10_common_names)) != 785
+                        or len(set(p9_common_names)) != 785
+                        or set(p10_common_names) != set(p9_common_names)
                     ):
                         raise AOVMergeError("CommonActions P9/P10 không giữ đúng 785 path duy nhất.")
                     common_differences = {
