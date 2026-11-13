@@ -271,3 +271,65 @@ footer{margin-top:24px;color:#7187a7;font-size:9px;letter-spacing:.14em}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}
 }
+
+
+/* Simplified two-step workflow and collapsed advanced tools. */
+.flow-step-label{
+  display:inline-flex;align-items:center;gap:7px;margin-bottom:7px;
+  color:#91e8e3;font-size:9px;font-weight:900;letter-spacing:.16em
+}
+.primary-flow-card,.merge-flow-card{padding:17px 16px 15px}
+.primary-flow-card::before{background:linear-gradient(180deg,#82baff,#69e9dc)}
+.merge-flow-card::before{background:linear-gradient(180deg,#9b8aff,#6db5ff)}
+.primary-flow-card h3,.merge-flow-card h3{font-size:13px}
+.primary-flow-card p,.merge-flow-card p{max-width:560px}
+.merge-choices{display:grid;grid-template-columns:1fr;gap:9px;margin-top:11px}
+.merge-choice{
+  display:grid;grid-template-columns:minmax(0,1.2fr) minmax(130px,.8fr);
+  align-items:center;gap:12px;padding:10px;border:1px solid rgba(93,130,181,.2);
+  border-radius:13px;background:rgba(5,13,26,.4)
+}
+.merge-choice .button{margin:0;min-height:46px}
+.merge-choice small{color:#94a9c6;font-size:9px;line-height:1.5}
+.advanced-tools{
+  margin-top:13px;border:1px solid rgba(112,137,190,.27);
+  border-radius:16px;background:linear-gradient(145deg,rgba(19,25,48,.78),rgba(9,16,30,.86));
+  overflow:hidden
+}
+.advanced-tools summary{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  min-height:65px;padding:13px 15px;cursor:pointer;list-style:none;
+  user-select:none
+}
+.advanced-tools summary::-webkit-details-marker{display:none}
+.advanced-tools summary::marker{content:""}
+.advanced-summary-copy{display:grid;gap:3px}
+.advanced-summary-copy strong{color:#dceaff;font-size:12px}
+.advanced-summary-copy small{color:#91a7c5;font-size:9px;line-height:1.5}
+.advanced-chevron{
+  display:grid;place-items:center;width:29px;height:29px;flex:0 0 29px;
+  border:1px solid rgba(114,166,220,.22);border-radius:9px;
+  background:rgba(32,56,86,.5);color:#a9d5ff;font-size:17px;
+  transition:transform .18s ease
+}
+.advanced-tools[open] .advanced-chevron{transform:rotate(180deg)}
+.advanced-tools summary:focus-visible{outline:2px solid #74ece1;outline-offset:-3px}
+.advanced-content{display:grid;gap:9px;padding:0 12px 12px}
+.advanced-group{
+  padding:12px;border:1px solid rgba(93,130,181,.17);
+  border-radius:13px;background:rgba(5,13,25,.46)
+}
+.advanced-group h3{margin:0 0 4px;color:#d8e8fb;font-size:11px}
+.advanced-group p{margin:0;color:#92a8c5;font-size:9px;line-height:1.6}
+.advanced-group .button{margin-top:9px}
+.advanced-group .action-pair{grid-template-columns:1fr 1fr}
+@media(max-width:520px){
+  .primary-flow-card,.merge-flow-card{padding:14px 12px}
+  .primary-flow-card h3,.merge-flow-card h3{font-size:12px}
+  .merge-choice{grid-template-columns:1fr;gap:5px;padding:9px}
+  .merge-choice .button{min-height:44px}
+  .merge-choice small{padding:0 2px}
+  .advanced-tools summary{min-height:59px;padding:11px 12px}
+  .advanced-content{padding:0 9px 9px}
+  .advanced-group{padding:10px}
+}
