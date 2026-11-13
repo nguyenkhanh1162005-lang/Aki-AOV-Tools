@@ -763,9 +763,28 @@ async def scan_chunked_aov_notices(upload_id: str):
         raise HTTPException(400, str(exc)) from exc
     session["created"] = time.time()
     _persist_upload_session(upload_id, session)
+    notice_candidates = report.get("notice_candidates", [])
+    startup_candidates = [
+        item for item in notice_candidates
+        if item.get("startup_removal_eligible") is True
+    ]
+    protected_kill_candidates = [
+        item for item in notice_candidates
+        if item.get("resource_role") == "protected_kill_notification"
+    ]
+    protected_billboard_candidates = [
+        item for item in notice_candidates
+        if item.get("resource_role") == "protected_billboard"
+    ]
     return {
         "scan_files": report.get("notice_scan_files", 0),
-        "candidates": report.get("notice_candidates", []),
+        "candidates": notice_candidates,
+        "startup_notice_candidate_count": len(startup_candidates),
+        "startup_notice_candidates": startup_candidates,
+        "protected_kill_notification_count": len(protected_kill_candidates),
+        "protected_kill_notification_candidates": protected_kill_candidates,
+        "protected_billboard_count": len(protected_billboard_candidates),
+        "protected_billboard_candidates": protected_billboard_candidates,
         "truncated": report.get("notice_candidates_truncated", False),
         "decoded_resources": len(report.get("decoded", [])),
         "decoded_bytes": report.get("decoded_bytes", 0),
@@ -780,7 +799,9 @@ async def scan_chunked_aov_notices(upload_id: str):
             "đang hiển thị. AssetBundle UnityFS được quét metadata có giới hạn; bundle quá lớn, "
             "payload nhị phân opaque và định dạng chưa giải mã có thể bị bỏ qua. "
             "Chế độ quét giới hạn 256 MiB dữ liệu .bytes đã giải mã và không ghi ZIP tạm. "
-            "Không xóa hoặc ghi đè tài nguyên chỉ dựa trên từ khóa."
+            "Chỉ các script thuộc luồng login/startup mới được gắn nhãn ứng viên; "
+            "commercializenotify và các bảng billboard được phân loại bảo vệ riêng. "
+            "Kết quả chưa tự xóa popup; cần xác nhận chính xác lệnh gọi trong script."
         ),
     }
 
