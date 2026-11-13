@@ -2,9 +2,14 @@ import struct
 import unittest
 
 from app.aov_bytes import encode_aov_resource, decode_aov_resource
-from app.aov_merge import AOVResourceMergeError, merge_aov_mses_resource
+from app.aov_merge import (
+    AOVResourceMergeError,
+    _P9_P10_ACTOR_OWNED_MSES,
+    merge_aov_mses_resource,
+)
 from app.aov_mses import build_mses, MSESTable, parse_mses
 import hashlib
+from unittest.mock import patch
 
 
 def table(field_count, rows):
@@ -373,6 +378,79 @@ class AOVResourceMergeTests(unittest.TestCase):
         overlay = encode_aov_resource(table(3, [struct.pack("<I", 1) + b"other"]), name, "aes")
         with self.assertRaises(AOVResourceMergeError):
             merge_aov_mses_resource(base, overlay, name)
+
+
+    def test_p9_p10_actor_owned_rows_merge_from_exact_source_inventory(self):
+        name = "Databin/Client/Actor/heroSkin.bytes"
+        p9_rows = [
+            struct.pack("<I", 10700) + b"p9-actor-107",
+            struct.pack("<I", 11100) + b"p9-actor-111",
+            struct.pack("<I", 12300) + b"same-row",
+        ]
+        p10_rows = [
+            struct.pack("<I", 10700) + b"p10-actor-107",
+            struct.pack("<I", 11100) + b"p10-actor-111",
+            struct.pack("<I", 12300) + b"same-row",
+        ]
+        p9_decoded = table(2, p9_rows)
+        p10_decoded = table(2, p10_rows)
+        spec = {
+            "field_count": 2,
+            "row_count": 3,
+            "actor_divisor": 100,
+            "conflict_count": 2,
+            "p9_sha256": hashlib.sha256(p9_decoded).hexdigest(),
+            "p10_sha256": hashlib.sha256(p10_decoded).hexdigest(),
+            "p9_actor_ids": {107},
+            "p10_actor_ids": {111},
+        }
+        with patch.dict(_P9_P10_ACTOR_OWNED_MSES, {name: spec}):
+            p9 = encode_aov_resource(p9_decoded, name, "aes")
+            p10 = encode_aov_resource(p10_decoded, name, "aes")
+            merged, report = merge_aov_mses_resource(
+                p9,
+                p10,
+                name,
+                base_actor_action_ids={"107"},
+                overlay_actor_action_ids={"111"},
+            )
+            decoded, _ = decode_aov_resource(merged, name)
+            result = parse_mses(decoded)
+            rows = {int.from_bytes(row[:4], "little"): row for row in result.rows}
+            self.assertEqual(rows[10700], p9_rows[0])
+            self.assertEqual(rows[11100], p10_rows[1])
+            self.assertEqual(rows[12300], p9_rows[2])
+            self.assertEqual(report["differing_shared_rows"], 2)
+            self.assertEqual(report["selected_base_owned_rows"], 1)
+            self.assertEqual(report["selected_overlay_owned_rows"], 1)
+            self.assertTrue(report["output_checksum_valid"])
+
+    def test_p9_p10_actor_owned_rows_reject_unknown_source_actor(self):
+        name = "Databin/Client/Actor/heroSkin.bytes"
+        p9_decoded = table(2, [struct.pack("<I", 10700) + b"p9"])
+        p10_decoded = table(2, [struct.pack("<I", 10700) + b"p10"])
+        spec = {
+            "field_count": 2, "row_count": 1, "actor_divisor": 100,
+            "conflict_count": 1,
+            "p9_sha256": hashlib.sha256(p9_decoded).hexdigest(),
+            "p10_sha256": hashlib.sha256(p10_decoded).hexdigest(),
+            "p9_actor_ids": {107}, "p10_actor_ids": {111},
+        }
+        with patch.dict(_P9_P10_ACTOR_OWNED_MSES, {name: spec}):
+            with self.assertRaisesRegex(AOVResourceMergeError, "inventory không khớp"):
+                merge_aov_mses_resource(
+                    encode_aov_resource(p9_decoded, name, "aes"),
+                    encode_aov_resource(p10_decoded, name, "aes"),
+                    name,
+                    base_actor_action_ids={"107"},
+                    overlay_actor_action_ids={"190"},
+                )
+
+    def test_p9_p10_actor_owned_table_requires_both_actor_inventories(self):
+        name = "Databin/Client/Actor/heroSkin.bytes"
+        with self.assertRaisesRegex(AOVResourceMergeError, "cần Actor_Action inventory"):
+            merge_aov_mses_resource(b"invalid", b"invalid", name)
+
 
 
 if __name__ == "__main__":
