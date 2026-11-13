@@ -129,7 +129,7 @@ class NoticeBrandingRewriteTests(unittest.TestCase):
             self.assertEqual(report["protected_notice_resource_count"], 3)
             self.assertCountEqual(
                 report["protected_notice_resources"],
-                list(protected_payloads),
+                [f"source.zip!/{path}" for path in protected_payloads],
             )
             with zipfile.ZipFile(output, "r") as archive:
                 self.assertIn(b"AKI MOD AOV", archive.read(
