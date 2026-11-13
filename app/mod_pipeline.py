@@ -618,7 +618,6 @@ def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
     if leaf in {
         "heroskin.bytes", "resskinmotionbasecfg.bytes",
         "heroskinshop.bytes", "skillmark.bytes",
-        "battlebank.bytes", "lobbybank.bytes",
         "lobbysound.bytes", "chatsound.bytes", "couplesound.bytes",
     }:
         return {
@@ -633,6 +632,20 @@ def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
                 "Không áp dụng cho nguồn/build khác; thiếu Actor_Action inventory, "
                 "hash/schema/số hàng không khớp hoặc Actor ID không duy nhất thì phải chặn. "
                 "Không coi metadata âm thanh là đã hợp nhất Wwise BNK."
+            ),
+        }
+
+    if leaf in {"battlebank.bytes", "lobbybank.bytes"}:
+        return {
+            "adapter_state": "version_locked_schema",
+            "next_action": (
+                "Bộ ghép VTK Actor 595 có allowlist MSES đã khóa phiên bản; ngoài ra "
+                "cặp P9/P10 mẫu có helper cấp bảng chọn hàng âm thanh theo Actor_Action "
+                "inventory và hash nguồn ghim. Helper P9/P10 chưa được nối vào luồng xuất ZIP."
+            ),
+            "safety_rule": (
+                "Nhánh VTK cũ chỉ nhận đúng allowlist; nhánh P9/P10 cần đủ Actor_Action "
+                "inventory, đúng nguồn/schema và không cấp quyền ghép nhiều wrapper."
             ),
         }
 
