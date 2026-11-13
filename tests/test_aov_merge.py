@@ -179,7 +179,7 @@ class AOVResourceMergeTests(unittest.TestCase):
             ]), name, "aes"
         )
         with self.assertRaisesRegex(
-            AOVResourceMergeError, "khác số trường"
+            AOVResourceMergeError, "khác chuẩn 188"
         ):
             merge_aov_mses_resource(base, overlay, name)
 
