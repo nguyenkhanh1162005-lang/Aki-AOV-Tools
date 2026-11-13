@@ -539,3 +539,313 @@ def merge_ifix_patches(base: dict[str, Any], incoming: dict[str, Any]) -> dict[s
     base["new_classes"].extend(incoming["new_classes"])
     validate_ifix_patch(base)
     return base
+
+
+def _ifix_actor_prefix(
+    first: list[tuple[int, int]],
+    second: list[tuple[int, int]],
+    length: int,
+    branch_indices: set[int],
+) -> list[tuple[int, int]]:
+    left = list(first[:length])
+    right = list(second[:length])
+    for index in branch_indices:
+        left[index] = (left[index][0], 0)
+        right[index] = (right[index][0], 0)
+    if left != right:
+        raise IFixMergeError("IFix actor patch có phần IL nền khác nhau.")
+    return list(first[:length])
+
+
+def _ifix_parse_notify(inst: list[tuple[int, int]]) -> list[int]:
+    if inst[:3] != [(146, 2), (164, 1), (167, 80)]:
+        raise IFixMergeError("IFix IsPlaySkinKillNotify không đúng mẫu actor đã xác minh.")
+    if inst[-4:] != [(143, 0), (173, 1), (143, 1), (173, 1)]:
+        raise IFixMergeError("IFix IsPlaySkinKillNotify thiếu nhánh trả về chuẩn.")
+    body = inst[3:-4]
+    if len(body) < 3 or (len(body) - 3) % 5:
+        raise IFixMergeError("IFix IsPlaySkinKillNotify có chuỗi actor không hợp lệ.")
+    if body[0][0] != 143 or body[1] != (166, 0) or body[2][0] != 127:
+        raise IFixMergeError("IFix IsPlaySkinKillNotify thiếu điều kiện actor đầu tiên.")
+    actor_ids = [body[0][1]]
+    for offset in range(3, len(body), 5):
+        block = body[offset:offset + 5]
+        if (
+            block[0] != (164, 1) or block[1] != (167, 80)
+            or block[2][0] != 143 or block[3] != (166, 0)
+            or block[4][0] != 127
+        ):
+            raise IFixMergeError("IFix IsPlaySkinKillNotify có block actor không hợp lệ.")
+        actor_ids.append(block[2][1])
+    return actor_ids
+
+
+def _ifix_build_notify(
+    first: list[tuple[int, int]], second: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    actor_ids = sorted(set(_ifix_parse_notify(first)) | set(_ifix_parse_notify(second)))
+    output = [(146, 2), (164, 1), (167, 80)]
+    true_return = 3 + 3 + 5 * (len(actor_ids) - 1) + 2
+    branch_index = len(output) + 2
+    output.extend([(143, actor_ids[0]), (166, 0), (127, true_return - branch_index)])
+    for actor_id in actor_ids[1:]:
+        branch_index = len(output) + 4
+        output.extend([
+            (164, 1), (167, 80), (143, actor_id), (166, 0),
+            (127, true_return - branch_index),
+        ])
+    output.extend([(143, 0), (173, 1), (143, 1), (173, 1)])
+    return output
+
+
+def _ifix_parse_open(inst: list[tuple[int, int]]) -> tuple[int, list[int]]:
+    prefix_length = 55
+    if inst[0] != (146, 196611) or inst[prefix_length - 1] != (72, 0):
+        raise IFixMergeError("IFix IsOpen không đúng mẫu actor đã xác minh.")
+    if inst[-4:] != [(143, 0), (173, 1), (143, 1), (173, 1)]:
+        raise IFixMergeError("IFix IsOpen thiếu nhánh trả về chuẩn.")
+    body = inst[prefix_length:-4]
+    if len(body) < 3 or (len(body) - 3) % 4:
+        raise IFixMergeError("IFix IsOpen có chuỗi actor không hợp lệ.")
+    if body[0][0] != 143 or body[1] != (166, 0) or body[2][0] != 127:
+        raise IFixMergeError("IFix IsOpen thiếu điều kiện actor đầu tiên.")
+    actor_ids = [body[0][1]]
+    for offset in range(3, len(body), 4):
+        block = body[offset:offset + 4]
+        if (
+            block[0] != (72, 0) or block[1][0] != 143
+            or block[2] != (166, 0) or block[3][0] != 127
+        ):
+            raise IFixMergeError("IFix IsOpen có block actor không hợp lệ.")
+        actor_ids.append(block[1][1])
+    return prefix_length, actor_ids
+
+
+def _ifix_build_open(
+    first: list[tuple[int, int]], second: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    first_length, first_ids = _ifix_parse_open(first)
+    second_length, second_ids = _ifix_parse_open(second)
+    if first_length != second_length:
+        raise IFixMergeError("IFix IsOpen có prefix không đồng nhất.")
+    prefix = _ifix_actor_prefix(first, second, first_length, {5, 13, 18, 26})
+    actor_ids = sorted(set(first_ids) | set(second_ids))
+    false_return = first_length + 3 + 4 * (len(actor_ids) - 1)
+    true_return = false_return + 2
+    for index in (5, 13, 18, 26):
+        prefix[index] = (134, false_return - index)
+    output = prefix
+    branch_index = len(output) + 2
+    output.extend([(143, actor_ids[0]), (166, 0), (127, true_return - branch_index)])
+    for actor_id in actor_ids[1:]:
+        branch_index = len(output) + 3
+        output.extend([(72, 0), (143, actor_id), (166, 0), (127, true_return - branch_index)])
+    output.extend([(143, 0), (173, 1), (143, 1), (173, 1)])
+    return output
+
+
+def _ifix_parse_personal_buttons(
+    inst: list[tuple[int, int]]
+) -> tuple[int, dict[int, int]]:
+    prefix_length = 55
+    if inst[0] != (146, 196611) or inst[prefix_length - 1] != (72, 0):
+        raise IFixMergeError("IFix get_PersonalBtnId không đúng mẫu actor đã xác minh.")
+    if inst[-2:] != [(143, 0), (173, 1)]:
+        raise IFixMergeError("IFix get_PersonalBtnId thiếu giá trị mặc định.")
+    body = inst[prefix_length:-2]
+    if len(body) < 5 or (len(body) - 5) % 6:
+        raise IFixMergeError("IFix get_PersonalBtnId có chuỗi actor không hợp lệ.")
+    mapping: dict[int, int] = {}
+    first = body[:5]
+    if (
+        first[0][0] != 143 or first[1] != (166, 0)
+        or first[2] != (134, 3) or first[3][0] != 143
+        or first[4] != (173, 1)
+    ):
+        raise IFixMergeError("IFix get_PersonalBtnId thiếu mapping actor đầu tiên.")
+    mapping[first[0][1]] = first[3][1]
+    for offset in range(5, len(body), 6):
+        block = body[offset:offset + 6]
+        if (
+            block[0] != (72, 0) or block[1][0] != 143
+            or block[2] != (166, 0) or block[3] != (134, 3)
+            or block[4][0] != 143 or block[5] != (173, 1)
+        ):
+            raise IFixMergeError("IFix get_PersonalBtnId có block actor không hợp lệ.")
+        actor_id, button_id = block[1][1], block[4][1]
+        if actor_id in mapping and mapping[actor_id] != button_id:
+            raise IFixMergeError("IFix get_PersonalBtnId có mapping actor trùng khác giá trị.")
+        mapping[actor_id] = button_id
+    return prefix_length, mapping
+
+
+def _ifix_build_personal_buttons(
+    first: list[tuple[int, int]], second: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    first_length, first_map = _ifix_parse_personal_buttons(first)
+    second_length, second_map = _ifix_parse_personal_buttons(second)
+    if first_length != second_length:
+        raise IFixMergeError("IFix get_PersonalBtnId có prefix không đồng nhất.")
+    mapping = dict(first_map)
+    for actor_id, button_id in second_map.items():
+        if actor_id in mapping and mapping[actor_id] != button_id:
+            raise IFixMergeError("IFix get_PersonalBtnId có mapping actor xung đột.")
+        mapping[actor_id] = button_id
+    mapping = dict(sorted(mapping.items()))
+    prefix = _ifix_actor_prefix(first, second, first_length, {5, 13, 18, 26})
+    default_return = first_length + 5 + 6 * (len(mapping) - 1)
+    for index in (5, 13, 18, 26):
+        prefix[index] = (134, default_return - index)
+    output = prefix
+    first_actor = next(iter(mapping))
+    output.extend([
+        (143, first_actor), (166, 0), (134, 3),
+        (143, mapping[first_actor]), (173, 1),
+    ])
+    for actor_id, button_id in list(mapping.items())[1:]:
+        output.extend([
+            (72, 0), (143, actor_id), (166, 0), (134, 3),
+            (143, button_id), (173, 1),
+        ])
+    output.extend([(143, 0), (173, 1)])
+    return output
+
+
+def _ifix_parse_add_hero(
+    inst: list[tuple[int, int]]
+) -> tuple[int, dict[int, tuple[int, int | None]]]:
+    prefix_length = 58
+    if inst[0] != (146, 5) or inst[-1] != (173, 0):
+        raise IFixMergeError("IFix AddHero không đúng mẫu actor đã xác minh.")
+    body = inst[prefix_length:-1]
+    mapping: dict[int, tuple[int, int | None]] = {}
+    offset = 0
+    while offset < len(body):
+        if (
+            len(body) - offset < 4 or body[offset] != (164, 1)
+            or body[offset + 1][0] != 143 or body[offset + 2] != (166, 0)
+            or body[offset + 3][0] != 134
+        ):
+            raise IFixMergeError("IFix AddHero có header actor không hợp lệ.")
+        actor_id = body[offset + 1][1]
+        branch_length = body[offset + 3][1]
+        if branch_length == 5:
+            if (
+                body[offset + 4][0] != 164 or body[offset + 5][0] != 143
+                or body[offset + 6] != (75, 3) or body[offset + 7] != (173, 0)
+            ):
+                raise IFixMergeError("IFix AddHero có block một trường không hợp lệ.")
+            values = (body[offset + 5][1], None)
+            block_length = 8
+        elif branch_length == 8:
+            if (
+                body[offset + 4] != (164, 0) or body[offset + 5][0] != 143
+                or body[offset + 6] != (75, 3) or body[offset + 7] != (164, 0)
+                or body[offset + 8][0] != 143 or body[offset + 9] != (75, 2)
+                or body[offset + 10] != (173, 0)
+            ):
+                raise IFixMergeError("IFix AddHero có block hai trường không hợp lệ.")
+            values = (body[offset + 5][1], body[offset + 8][1])
+            block_length = 11
+        else:
+            raise IFixMergeError("IFix AddHero có độ dài nhánh actor chưa hỗ trợ.")
+        if actor_id in mapping and mapping[actor_id] != values:
+            raise IFixMergeError("IFix AddHero có mapping actor trùng khác giá trị.")
+        mapping[actor_id] = values
+        offset += block_length
+    return prefix_length, mapping
+
+
+def _ifix_build_add_hero(
+    first: list[tuple[int, int]], second: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    first_length, first_map = _ifix_parse_add_hero(first)
+    second_length, second_map = _ifix_parse_add_hero(second)
+    if first_length != second_length:
+        raise IFixMergeError("IFix AddHero có prefix không đồng nhất.")
+    mapping = dict(first_map)
+    for actor_id, values in second_map.items():
+        if actor_id in mapping and mapping[actor_id] != values:
+            raise IFixMergeError("IFix AddHero có mapping actor xung đột.")
+        mapping[actor_id] = values
+    mapping = dict(sorted(mapping.items()))
+    prefix = _ifix_actor_prefix(first, second, first_length, {33, 41, 46, 54})
+    blocks: list[tuple[int, int]] = []
+    for actor_id, (field_three, field_two) in mapping.items():
+        if field_two is None:
+            blocks.extend([
+                (164, 1), (143, actor_id), (166, 0), (134, 5),
+                (164, 0), (143, field_three), (75, 3), (173, 0),
+            ])
+        else:
+            blocks.extend([
+                (164, 1), (143, actor_id), (166, 0), (134, 8),
+                (164, 0), (143, field_three), (75, 3),
+                (164, 0), (143, field_two), (75, 2), (173, 0),
+            ])
+    final_return = first_length + len(blocks)
+    for index in (33, 41, 46, 54):
+        prefix[index] = (134, final_return - index)
+    return prefix + blocks + [(173, 0)]
+
+
+def merge_ifix_actor_scoped_patches(
+    base: dict[str, Any], incoming: dict[str, Any]
+) -> dict[str, Any]:
+    """Union the verified actor cases in P9/P10 HeroSkin IFix helper methods.
+
+    Shared metadata and all non-target methods must be identical. Only the
+    known HeroSkin_1 notification/open/button methods or HeroSkin_2 AddHero
+    method are accepted. Unknown layouts and conflicting actor mappings fail closed.
+    """
+    validate_ifix_patch(base)
+    validate_ifix_patch(incoming)
+    for key in (
+        "magic", "bridge", "types", "extern_methods", "strings", "fields",
+        "static_fields", "anon", "fixes", "new_classes", "wrappers", "assembly",
+    ):
+        if base[key] != incoming[key]:
+            raise IFixMergeError(f"IFix P9/P10 metadata không khớp tại {key}.")
+    if len(base["methods"]) != len(incoming["methods"]):
+        raise IFixMergeError("IFix P9/P10 có số lượng method khác nhau.")
+
+    fixes_by_name: dict[str, list[dict[str, Any]]] = {}
+    for fix in base["fixes"]:
+        fixes_by_name.setdefault(fix["name"], []).append(fix)
+    if all(
+        name in fixes_by_name and len(fixes_by_name[name]) == 1
+        for name in ("IsPlaySkinKillNotify", "IsOpen", "get_PersonalBtnId")
+    ):
+        builders = {
+            "IsPlaySkinKillNotify": _ifix_build_notify,
+            "IsOpen": _ifix_build_open,
+            "get_PersonalBtnId": _ifix_build_personal_buttons,
+        }
+    elif "AddHero" in fixes_by_name and len(fixes_by_name["AddHero"]) == 1:
+        builders = {"AddHero": _ifix_build_add_hero}
+    else:
+        raise IFixMergeError("IFix không thuộc mẫu actor-scoped P9/P10 đã xác minh.")
+
+    target_indices = {fixes_by_name[name][0]["patch"] for name in builders}
+    for index, (base_method, incoming_method) in enumerate(
+        zip(base["methods"], incoming["methods"])
+    ):
+        if index not in target_indices and base_method != incoming_method:
+            raise IFixMergeError(
+                f"IFix P9/P10 có method ngoài danh sách actor-scoped khác nhau: {index}."
+            )
+
+    merged = copy.deepcopy(base)
+    for name, builder in builders.items():
+        method_index = fixes_by_name[name][0]["patch"]
+        merged["methods"][method_index]["inst"] = builder(
+            base["methods"][method_index]["inst"],
+            incoming["methods"][method_index]["inst"],
+        )
+    validate_ifix_patch(merged)
+    encoded = serialize_ifix_patch(merged)
+    if serialize_ifix_patch(parse_ifix_patch(encoded)) != encoded:
+        raise IFixMergeError("IFix sau ghép không round-trip chính xác.")
+    return merged
+
+

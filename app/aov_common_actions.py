@@ -280,6 +280,75 @@ def merge_action_xml(
     }
 
 
+def _canonical_xml_bytes(root: ET.Element) -> bytes:
+    clone = copy.deepcopy(root)
+    for node in clone.iter():
+        if node.attrib:
+            node.attrib = dict(sorted(node.attrib.items()))
+        if node.text is not None and not node.text.strip():
+            node.text = None
+        if node.tail is not None and not node.tail.strip():
+            node.tail = None
+    return ET.tostring(clone, encoding="utf-8")
+
+
+def _decode_xml_resource(data: bytes, resource_name: str) -> ET.Element:
+    try:
+        decoded, _ = decode_aov_resource(data, resource_name)
+    except AOVBytesError:
+        # Some CommonActions resources are stored as plain UTF-8 XML.
+        decoded = data
+    try:
+        return ET.fromstring(decoded.lstrip(b"\xef\xbb\xbf"))
+    except ET.ParseError as exc:
+        raise CommonActionsMergeError(
+            f"{resource_name}: XML không giải mã/parse được khi đối chiếu semantic."
+        ) from exc
+
+
+def _xml_resource_is_semantic_subset(
+    base_data: bytes, overlay_data: bytes, resource_name: str
+) -> bool:
+    """Return true only when every overlay XML track is already present in base."""
+    try:
+        base_root = _decode_xml_resource(base_data, resource_name)
+        overlay_root = _decode_xml_resource(overlay_data, resource_name)
+    except CommonActionsMergeError:
+        return False
+    if base_root.tag != overlay_root.tag or base_root.attrib != overlay_root.attrib:
+        return False
+    base_action = base_root.find("Action")
+    overlay_action = overlay_root.find("Action")
+    if (base_action is None) != (overlay_action is None):
+        return False
+    base_non_action = [node for node in list(base_root) if node is not base_action]
+    overlay_non_action = [node for node in list(overlay_root) if node is not overlay_action]
+    if [_canonical_xml_bytes(node) for node in base_non_action] != [
+        _canonical_xml_bytes(node) for node in overlay_non_action
+    ]:
+        return False
+    if base_action is None:
+        return _canonical_xml_bytes(base_root) == _canonical_xml_bytes(overlay_root)
+    if base_action.attrib != overlay_action.attrib:
+        return False
+    base_other = [node for node in list(base_action) if node.tag != "Track"]
+    overlay_other = [node for node in list(overlay_action) if node.tag != "Track"]
+    if [_canonical_xml_bytes(node) for node in base_other] != [
+        _canonical_xml_bytes(node) for node in overlay_other
+    ]:
+        return False
+    from collections import Counter
+    base_tracks = Counter(
+        _canonical_xml_bytes(node)
+        for node in list(base_action) if node.tag == "Track"
+    )
+    overlay_tracks = Counter(
+        _canonical_xml_bytes(node)
+        for node in list(overlay_action) if node.tag == "Track"
+    )
+    return all(base_tracks[key] >= count for key, count in overlay_tracks.items())
+
+
 def merge_common_actions_pkg(
     base_package: bytes,
     overlay_package: bytes,
@@ -312,14 +381,7 @@ def merge_common_actions_pkg(
         overlay_zip.close()
         raise
 
-    merge_candidates = {
-        "commonresource/Back.xml",
-        "commonresource/BackFast.xml",
-        "commonresource/HasteE1.xml",
-        "commonresource/HasteE1_super.xml",
-        "commonresource/HasteE2.xml",
-        "commonresource/HasteE3.xml",
-    }
+    merge_candidates = set(_COMMON_ACTIONS_MERGE_CANDIDATES)
     base_entries = {item.filename: item for item in base_zip.infolist() if not item.is_dir()}
     overlay_entries = {item.filename: item for item in overlay_zip.infolist() if not item.is_dir()}
     output_buffer = io.BytesIO()
@@ -329,27 +391,43 @@ def merge_common_actions_pkg(
         for name in set(base_entries) & set(overlay_entries):
             if name in merge_candidates:
                 continue
-            if base_zip.read(base_entries[name]) != overlay_zip.read(overlay_entries[name]):
-                base_zip.close()
-                overlay_zip.close()
-                raise CommonActionsMergeError(
-                    f"{name}: xung đột tệp CommonActions ngoài danh sách XML có parser; "
-                    "không tự chọn bản nền hoặc bản overlay."
-                )
+            base_payload = base_zip.read(base_entries[name])
+            overlay_payload = overlay_zip.read(overlay_entries[name])
+            if base_payload == overlay_payload:
+                continue
+            if name.lower().endswith(".xml") and _xml_resource_is_semantic_subset(
+                base_payload, overlay_payload, name
+            ):
+                continue
+            base_zip.close()
+            overlay_zip.close()
+            raise CommonActionsMergeError(
+                f"{name}: xung đột tệp CommonActions ngoài danh sách XML có parser; "
+                "không tự chọn bản nền hoặc bản overlay."
+            )
 
     try:
         with zipfile.ZipFile(output_buffer, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as out:
             for name, info in base_entries.items():
                 base_data = base_zip.read(info)
                 if name in merge_candidates and name in overlay_entries:
-                    merged, report = merge_action_xml(
-                        base_data,
-                        overlay_zip.read(overlay_entries[name]),
-                        name,
-                        special_ids=special_ids,
+                    overlay_data = overlay_zip.read(overlay_entries[name])
+                    decoded_overlay, _ = decode_aov_resource(overlay_data, name)
+                    overlay_root = ET.fromstring(decoded_overlay)
+                    has_target_gate = any(
+                        node.attrib.get("id") in target_ids
+                        for track in overlay_root.iter("Track")
+                        for node in track.findall("SkinOrAvatarList")
                     )
-                    base_data = merged
-                    merged_files[name] = report
+                    if has_target_gate:
+                        merged, report = merge_action_xml(
+                            base_data,
+                            overlay_data,
+                            name,
+                            special_ids=target_ids,
+                        )
+                        base_data = merged
+                        merged_files[name] = report
                 target = zipfile.ZipInfo(name, date_time=info.date_time)
                 target.compress_type = zipfile.ZIP_DEFLATED
                 target.external_attr = info.external_attr
@@ -403,14 +481,7 @@ def _overlay_actor_track_signatures(
     multi-overlay path detect two sources trying to define the same actor
     condition differently without confusing distinct event variants.
     """
-    merge_candidates = {
-        "commonresource/Back.xml",
-        "commonresource/BackFast.xml",
-        "commonresource/HasteE1.xml",
-        "commonresource/HasteE1_super.xml",
-        "commonresource/HasteE2.xml",
-        "commonresource/HasteE3.xml",
-    }
+    merge_candidates = set(_COMMON_ACTIONS_MERGE_CANDIDATES)
     try:
         archive = zipfile.ZipFile(io.BytesIO(overlay_package), "r")
     except zipfile.BadZipFile as exc:
@@ -545,16 +616,23 @@ def merge_common_actions_packages(
 _COMMON_ACTIONS_MERGE_CANDIDATES = {
     "commonresource/Back.xml",
     "commonresource/BackFast.xml",
+    "commonresource/Born.xml",
+    "commonresource/Dance.xml",
+    "commonresource/DanceBullet.xml",
+    "commonresource/Dead_Born.xml",
     "commonresource/HasteE1.xml",
+    "commonresource/HasteE1_leave.xml",
     "commonresource/HasteE1_super.xml",
     "commonresource/HasteE2.xml",
     "commonresource/HasteE3.xml",
+    "commonresource/QuickBack.xml",
 }
 
 
 def _inspect_common_actions_overlay(
     source_name: str,
     package_bytes: bytes,
+    actor_prefixes: set[str] | None = None,
 ) -> tuple[set[str], dict]:
     """Read explicit actor skin gates from the supported CommonActions XML files."""
     try:
@@ -611,7 +689,7 @@ def _inspect_common_actions_overlay(
                         f"{_normalized_track_name(track)} có SkinOrAvatarList lồng "
                         "ở vị trí chưa được hỗ trợ."
                     )
-                gated_tracks += 1
+                owned_nodes = []
                 for node in direct_nodes:
                     skin_id = node.attrib.get("id", "")
                     if not skin_id.isdigit():
@@ -619,7 +697,14 @@ def _inspect_common_actions_overlay(
                             f"{source_name}: {name}, track "
                             f"{_normalized_track_name(track)} có skin ID không phải số."
                         )
-                    skin_ids.add(skin_id)
+                    if actor_prefixes and skin_id[:3] not in actor_prefixes:
+                        continue
+                    owned_nodes.append(node)
+                if not owned_nodes:
+                    continue
+                gated_tracks += 1
+                for node in owned_nodes:
+                    skin_ids.add(node.attrib["id"])
                     gated_conditions += 1
     finally:
         archive.close()
@@ -638,10 +723,11 @@ def _inspect_common_actions_overlay(
 
 def _common_actions_opaque_path_conflicts(
     overlays: list[tuple[str, bytes]],
-) -> tuple[list[dict], int]:
-    """List non-parser package paths whose contents differ across sources."""
+) -> tuple[list[dict], int, list[str]]:
+    """List unresolved opaque conflicts and recognize safe semantic XML subsets."""
     by_path: dict[str, list[dict]] = {}
-    for source_name, package_bytes in overlays:
+    for overlay in overlays:
+        source_name, package_bytes = overlay[:2]
         try:
             archive = zipfile.ZipFile(io.BytesIO(package_bytes), "r")
         except zipfile.BadZipFile as exc:
@@ -652,31 +738,46 @@ def _common_actions_opaque_path_conflicts(
             for info in archive.infolist():
                 if info.is_dir() or info.filename in _COMMON_ACTIONS_MERGE_CANDIDATES:
                     continue
-                digest = hashlib.sha256(archive.read(info)).hexdigest()
+                payload = archive.read(info)
                 by_path.setdefault(info.filename, []).append({
                     "source": source_name,
                     "size_bytes": info.file_size,
-                    "sha256": digest,
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                    "_payload": payload,
                 })
         finally:
             archive.close()
 
     conflicts = []
+    semantic_subset_paths = []
     identical_duplicates = 0
     for path, contributors in sorted(by_path.items()):
         if len(contributors) < 2:
             continue
         unique_hashes = {item["sha256"] for item in contributors}
-        if len(unique_hashes) > 1:
-            conflicts.append({
-                "path": path,
-                "source_count": len(contributors),
-                "sources": contributors,
-            })
-        else:
+        if len(unique_hashes) == 1:
             identical_duplicates += 1
-    return conflicts, identical_duplicates
-
+            continue
+        payloads = [item["_payload"] for item in contributors]
+        semantic_subset = (
+            path.lower().endswith(".xml")
+            and all(
+                _xml_resource_is_semantic_subset(payloads[0], payload, path)
+                for payload in payloads[1:]
+            )
+        )
+        if semantic_subset:
+            semantic_subset_paths.append(path)
+            continue
+        conflicts.append({
+            "path": path,
+            "source_count": len(contributors),
+            "sources": [
+                {key: value for key, value in item.items() if key != "_payload"}
+                for item in contributors
+            ],
+        })
+    return conflicts, identical_duplicates, semantic_subset_paths
 
 def _empty_common_actions_package() -> bytes:
     """Build a parser-only baseline; its output is never used as a game resource."""
@@ -696,7 +797,7 @@ def _empty_common_actions_package() -> bytes:
 
 
 def analyze_common_actions_overlay_set(
-    overlays: list[tuple[str, bytes]],
+    overlays: list[tuple],
 ) -> dict:
     """Dry-run compatibility check for actor-gated CommonActions from many sources.
 
@@ -716,17 +817,26 @@ def analyze_common_actions_overlay_set(
     package_reports = []
     parser_overlays = []
     try:
-        for source_name, package_bytes in overlays:
+        for overlay in overlays:
+            if len(overlay) == 3:
+                source_name, package_bytes, actor_prefixes = overlay
+                actor_prefixes = {str(value) for value in actor_prefixes}
+            else:
+                source_name, package_bytes = overlay
+                actor_prefixes = None
             skin_ids, report = _inspect_common_actions_overlay(
-                source_name, package_bytes
+                source_name, package_bytes, actor_prefixes
             )
+            report["actor_prefixes"] = sorted(actor_prefixes or ())
             package_reports.append(report)
             if skin_ids:
                 parser_overlays.append((package_bytes, skin_ids))
 
-        opaque_conflicts, identical_duplicate_paths = (
-            _common_actions_opaque_path_conflicts(overlays)
-        )
+        (
+            opaque_conflicts,
+            identical_duplicate_paths,
+            semantic_subset_paths,
+        ) = _common_actions_opaque_path_conflicts(overlays)
 
         if not parser_overlays:
             return {
@@ -738,6 +848,7 @@ def analyze_common_actions_overlay_set(
                 "unsupported_path_conflicts": opaque_conflicts,
                 "unsupported_path_conflict_count": len(opaque_conflicts),
                 "identical_duplicate_path_count": identical_duplicate_paths,
+                "semantic_subset_paths": semantic_subset_paths,
                 "reason": (
                     f"Có {len(opaque_conflicts)} đường dẫn CommonActions ngoài parser "
                     "bị khác nội dung giữa các nguồn."
@@ -748,7 +859,7 @@ def analyze_common_actions_overlay_set(
                 "output_discarded": True,
                 "game_tested": False,
                 "note": (
-                    "Không tìm thấy track có SkinOrAvatarList trực tiếp trong sáu XML "
+                    "Không tìm thấy track có SkinOrAvatarList trực tiếp trong mười hai XML "
                     "được parser hỗ trợ."
                 ),
             }
@@ -799,13 +910,14 @@ def analyze_common_actions_overlay_set(
             "unsupported_path_conflicts": opaque_conflicts,
             "unsupported_path_conflict_count": len(opaque_conflicts),
             "identical_duplicate_path_count": identical_duplicate_paths,
+            "semantic_subset_paths": semantic_subset_paths,
             "parser_verified": bool(dry_run_report["verified"]),
             "merge_authorized": False,
             "full_merge_authorized": False,
             "output_discarded": True,
             "game_tested": False,
             "note": (
-                "Dry-run chỉ kiểm tra sáu XML CommonActions và các điều kiện actor. "
+                "Dry-run chỉ kiểm tra mười hai XML CommonActions và các điều kiện actor. "
                 "ZIP mô phỏng đã bị loại bỏ; kết quả này không ghép MSES, IFix, "
                 "AssetBundle, AssetRef, Packer/Verification hoặc Wwise."
             ),

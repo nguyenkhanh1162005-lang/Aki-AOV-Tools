@@ -133,5 +133,37 @@ class MSESTests(unittest.TestCase):
             parse_mses(original)
 
 
+
+    def test_schema_drift_can_override_owned_rows_and_retain_unowned_conflicts(self):
+        base = make_table(4, [
+            struct.pack("<I", 1) + b"base-owned",
+            struct.pack("<I", 2) + b"base-unowned",
+        ])
+        overlay = make_table(3, [
+            struct.pack("<I", 1) + b"overlay-owned",
+            struct.pack("<I", 2) + b"overlay-unowned",
+            struct.pack("<I", 3) + b"new-approved",
+        ])
+
+        output, report = merge_mses_rows(
+            base,
+            overlay,
+            override_keys={1},
+            allow_retained_conflict_keys={2},
+            allow_schema_mismatch=True,
+            allow_new_rows_across_schema_mismatch=True,
+            allowed_new_keys={3},
+        )
+        result = parse_mses(output)
+        rows = {
+            struct.unpack_from("<I", row)[0]: row[4:]
+            for row in result.rows
+        }
+        self.assertEqual(rows[1], b"overlay-owned")
+        self.assertEqual(rows[2], b"base-unowned")
+        self.assertEqual(rows[3], b"new-approved")
+        self.assertEqual(report["retained_base_conflicts"], ["0x00000002"])
+
+
 if __name__ == "__main__":
     unittest.main()

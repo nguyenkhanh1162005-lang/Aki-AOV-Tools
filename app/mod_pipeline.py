@@ -728,11 +728,19 @@ def _read_zip_member_limited(
 
 def _collect_common_actions_overlays(
     archive_paths: list[str],
-) -> list[tuple[str, bytes]]:
+    profiles: list[dict[str, Any]] | None = None,
+) -> list[tuple[str, bytes, set[str]]]:
     """Extract one CommonActions package per source, including nested Resources.zip."""
     found = []
+    profile_by_name = {
+        str(item.get("name")): item for item in (profiles or [])
+    }
     for archive_path in archive_paths:
         source_name = Path(archive_path).name
+        profile = profile_by_name.get(source_name, {})
+        actor_prefixes = {
+            str(value) for value in profile.get("actor_action_ids", [])
+        }
         source_matches = []
         with zipfile.ZipFile(archive_path, "r") as outer:
             for info in outer.infolist():
@@ -793,15 +801,20 @@ def _collect_common_actions_overlays(
             )
         if source_matches:
             internal_path, payload = source_matches[0]
-            found.append((f"{source_name} · {internal_path}", payload))
+            found.append((
+                f"{source_name} · {internal_path}",
+                payload,
+                actor_prefixes,
+            ))
     return found
 
 
 def _build_common_actions_overlay_assessment(
     archive_paths: list[str],
+    profiles: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     try:
-        overlays = _collect_common_actions_overlays(archive_paths)
+        overlays = _collect_common_actions_overlays(archive_paths, profiles)
         from .aov_common_actions import analyze_common_actions_overlay_set
 
         return analyze_common_actions_overlay_set(overlays)
@@ -967,7 +980,9 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
         "profiles": profiles,
         "blockers": blockers,
         "resource_analysis": resource_analysis,
-        "common_actions_overlay_assessment": _build_common_actions_overlay_assessment(archive_paths),
+        "common_actions_overlay_assessment": _build_common_actions_overlay_assessment(
+            archive_paths, profiles
+        ),
         "game_tested": False,
         "note": (
             "Đạt bước chọn adapter theo cấu trúc; bộ ghép vẫn tự xác minh phiên bản, "

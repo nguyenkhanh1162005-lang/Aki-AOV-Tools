@@ -26,6 +26,117 @@ def make_patch(name, type_name, string_value, field_name, opcode=103):
     }
 
 
+
+
+def make_actor_skin_ifix(kind, notify_ids=None, open_ids=None, buttons=None, add_hero=None):
+    is_plugins = kind == "HeroSkin_2"
+    type_count = 9 if is_plugins else 168
+    field_count = 4 if is_plugins else 81
+    fields = [
+        {"new": False, "type": 0, "name": f"field_{index}", "extra": b""}
+        for index in range(field_count)
+    ]
+
+    def notify_method(actor_ids):
+        actor_ids = sorted(actor_ids)
+        out = [(146, 2), (164, 1), (167, 80)]
+        true_return = 3 + 3 + 5 * (len(actor_ids) - 1) + 2
+        branch_index = len(out) + 2
+        out.extend([(143, actor_ids[0]), (166, 0), (127, true_return - branch_index)])
+        for actor_id in actor_ids[1:]:
+            branch_index = len(out) + 4
+            out.extend([(164, 1), (167, 80), (143, actor_id), (166, 0), (127, true_return - branch_index)])
+        out.extend([(143, 0), (173, 1), (143, 1), (173, 1)])
+        return out
+
+    def open_method(actor_ids):
+        actor_ids = sorted(actor_ids)
+        prefix = [(0, 0)] * 55
+        prefix[0] = (146, 196611)
+        prefix[5] = prefix[13] = prefix[18] = prefix[26] = (134, 0)
+        prefix[54] = (72, 0)
+        false_return = 55 + 3 + 4 * (len(actor_ids) - 1)
+        true_return = false_return + 2
+        for index in (5, 13, 18, 26):
+            prefix[index] = (134, false_return - index)
+        out = prefix
+        branch_index = len(out) + 2
+        out.extend([(143, actor_ids[0]), (166, 0), (127, true_return - branch_index)])
+        for actor_id in actor_ids[1:]:
+            branch_index = len(out) + 3
+            out.extend([(72, 0), (143, actor_id), (166, 0), (127, true_return - branch_index)])
+        out.extend([(143, 0), (173, 1), (143, 1), (173, 1)])
+        return out
+
+    def button_method(mapping):
+        mapping = dict(sorted(mapping.items()))
+        prefix = [(0, 0)] * 55
+        prefix[0] = (146, 196611)
+        prefix[5] = prefix[13] = prefix[18] = prefix[26] = (134, 0)
+        prefix[54] = (72, 0)
+        default_return = 55 + 5 + 6 * (len(mapping) - 1)
+        for index in (5, 13, 18, 26):
+            prefix[index] = (134, default_return - index)
+        out = prefix
+        actor_id = next(iter(mapping))
+        out.extend([(143, actor_id), (166, 0), (134, 3), (143, mapping[actor_id]), (173, 1)])
+        for actor_id, button_id in list(mapping.items())[1:]:
+            out.extend([(72, 0), (143, actor_id), (166, 0), (134, 3), (143, button_id), (173, 1)])
+        out.extend([(143, 0), (173, 1)])
+        return out
+
+    def add_hero_method(mapping):
+        mapping = dict(sorted(mapping.items()))
+        prefix = [(0, 0)] * 58
+        prefix[0] = (146, 5)
+        prefix[33] = prefix[41] = prefix[46] = prefix[54] = (134, 0)
+        prefix[57] = (127, 1)
+        blocks = []
+        for actor_id, (field_three, field_two) in mapping.items():
+            if field_two is None:
+                blocks.extend([(164, 1), (143, actor_id), (166, 0), (134, 5), (164, 0), (143, field_three), (75, 3), (173, 0)])
+            else:
+                blocks.extend([(164, 1), (143, actor_id), (166, 0), (134, 8), (164, 0), (143, field_three), (75, 3), (164, 0), (143, field_two), (75, 2), (173, 0)])
+        final_return = 58 + len(blocks)
+        for index in (33, 41, 46, 54):
+            prefix[index] = (134, final_return - index)
+        return prefix + blocks + [(173, 0)]
+
+    if is_plugins:
+        method_list = [add_hero_method(add_hero or {})]
+        fix_names = ["AddHero"]
+        bridge = "IFix.ILFixInterfaceBridge, Project.Plugins_d"
+        assembly = "Project.Plugins_d"
+    else:
+        method_list = [
+            notify_method(notify_ids or []),
+            open_method(open_ids or []),
+            button_method(buttons or {}),
+        ]
+        fix_names = ["IsPlaySkinKillNotify", "IsOpen", "get_PersonalBtnId"]
+        bridge = "IFix.ILFixInterfaceBridge, Project_d"
+        assembly = "Project_d"
+
+    return {
+        "magic": 123456789,
+        "bridge": bridge,
+        "types": [f"Type{index}" for index in range(type_count)],
+        "methods": [{"inst": method, "eh": []} for method in method_list],
+        "extern_methods": [],
+        "strings": [],
+        "fields": fields,
+        "static_fields": [],
+        "anon": [],
+        "wrappers": "Wrappers",
+        "assembly": assembly,
+        "fixes": [
+            {"gen": False, "type": 0, "name": name, "g": [], "params": [], "patch": index}
+            for index, name in enumerate(fix_names)
+        ],
+        "new_classes": [],
+    }
+
+
 class IFixMergerTests(unittest.TestCase):
     def test_parse_serialize_roundtrip(self):
         patch = make_patch("BaseFix", "BaseType", "base-string", "baseField")
@@ -133,6 +244,81 @@ class IFixMergerTests(unittest.TestCase):
         encoded = serialize_ifix_patch(patch)
         with self.assertRaises(IFixMergeError):
             parse_ifix_patch(encoded[:-1])
+
+
+
+    def test_merge_p9_p10_hero_skin_1_actor_methods(self):
+        from app.ifix_merger import merge_ifix_actor_scoped_patches
+
+        p9 = make_actor_skin_ifix(
+            "HeroSkin_1",
+            notify_ids={130, 137},
+            open_ids={107, 130},
+            buttons={107: 10714, 130: 13015},
+        )
+        p10 = make_actor_skin_ifix(
+            "HeroSkin_1",
+            notify_ids={111, 132},
+            open_ids={111, 132},
+            buttons={111: 11120, 132: 13215},
+        )
+        merged = merge_ifix_actor_scoped_patches(p9, p10)
+
+        notify = merged["methods"][0]["inst"]
+        self.assertIn((143, 111), notify)
+        self.assertIn((143, 130), notify)
+        self.assertIn((143, 132), notify)
+        self.assertIn((143, 137), notify)
+
+        open_method = merged["methods"][1]["inst"]
+        self.assertIn((143, 107), open_method)
+        self.assertIn((143, 111), open_method)
+        self.assertIn((143, 130), open_method)
+        self.assertIn((143, 132), open_method)
+
+        buttons = merged["methods"][2]["inst"]
+        self.assertIn((143, 10714), buttons)
+        self.assertIn((143, 11120), buttons)
+        self.assertIn((143, 13015), buttons)
+        self.assertIn((143, 13215), buttons)
+        encoded = serialize_ifix_patch(merged)
+        self.assertEqual(serialize_ifix_patch(parse_ifix_patch(encoded)), encoded)
+
+    def test_merge_p9_p10_hero_skin_2_add_hero_actor_mappings(self):
+        from app.ifix_merger import merge_ifix_actor_scoped_patches
+
+        p9 = make_actor_skin_ifix(
+            "HeroSkin_2",
+            add_hero={107: (36, None), 130: (12, 12)},
+        )
+        p10 = make_actor_skin_ifix(
+            "HeroSkin_2",
+            add_hero={111: (34, 33), 132: (76, 64)},
+        )
+        merged = merge_ifix_actor_scoped_patches(p9, p10)
+        instructions = merged["methods"][0]["inst"]
+        for value in (107, 111, 130, 132, 36, 34, 33, 12, 76, 64):
+            self.assertIn((143, value), instructions)
+        encoded = serialize_ifix_patch(merged)
+        self.assertEqual(serialize_ifix_patch(parse_ifix_patch(encoded)), encoded)
+
+    def test_p9_p10_ifix_union_rejects_conflicting_personal_button_mapping(self):
+        from app.ifix_merger import merge_ifix_actor_scoped_patches
+
+        p9 = make_actor_skin_ifix(
+            "HeroSkin_1",
+            notify_ids={130},
+            open_ids={130},
+            buttons={130: 13015},
+        )
+        p10 = make_actor_skin_ifix(
+            "HeroSkin_1",
+            notify_ids={130},
+            open_ids={130},
+            buttons={130: 13099},
+        )
+        with self.assertRaisesRegex(IFixMergeError, "mapping actor xung đột"):
+            merge_ifix_actor_scoped_patches(p9, p10)
 
 
 if __name__ == "__main__":

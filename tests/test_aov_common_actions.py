@@ -10,6 +10,8 @@ from app.aov_common_actions import (
     merge_common_actions_pkg,
     merge_common_actions_packages,
     analyze_common_actions_overlay_set,
+    _xml_resource_is_semantic_subset,
+    _common_actions_opaque_path_conflicts,
 )
 
 
@@ -265,7 +267,7 @@ class CommonActionsMergeTests(unittest.TestCase):
 
     def test_multi_overlay_analysis_lists_opaque_path_conflicts(self):
         path = "commonresource/Back.xml"
-        opaque = "commonresource/HasteE1_leave.xml"
+        opaque = "commonresource/UnsupportedOpaque.xml"
 
         def overlay(skin_id, opaque_payload):
             root = ET.Element("Project")
@@ -393,6 +395,167 @@ class CommonActionsMergeTests(unittest.TestCase):
             merge_common_actions_pkg(
                 base, overlay, special_ids={"59500"}
             )
+
+
+    def test_semantic_xml_subset_accepts_raw_xml_and_zstd_encoding(self):
+        name = "PassiveResource/junglemark.xml"
+
+        def root_with_tracks(names):
+            root = ET.Element("Project")
+            ET.SubElement(root, "TemplateObjectList")
+            ET.SubElement(root, "RefParamList")
+            action = ET.SubElement(root, "Action", {"length": "1.000", "loop": "false"})
+            for track_name in names:
+                ET.SubElement(action, "Track", {
+                    "trackName": track_name,
+                    "eventType": "HitTriggerTick",
+                    "enabled": "true",
+                })
+            return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+        base = root_with_tracks(["HitTriggerTick0", "SkillFuncDuration0", "SetCameraHeightDuration0"])
+        overlay = root_with_tracks(["HitTriggerTick0", "SkillFuncDuration0"])
+        encoded_overlay = encode_aov_resource(overlay, name, "zstd")
+
+        self.assertTrue(_xml_resource_is_semantic_subset(base, encoded_overlay, name))
+        self.assertFalse(_xml_resource_is_semantic_subset(encoded_overlay, base, name))
+
+    def test_strict_merge_keeps_base_xml_superset_and_skips_unowned_candidate(self):
+        back = "commonresource/Back.xml"
+        quick_back = "commonresource/QuickBack.xml"
+        unused = "commonresource/HasteE1_super.xml"
+        passive = "PassiveResource/junglemark.xml"
+
+        base_root = ET.Element("Project")
+        base_action = ET.SubElement(base_root, "Action")
+        ET.SubElement(base_action, "Track", {
+            "trackName": "BaseBack",
+            "eventType": "TriggerParticleTick",
+        })
+        base_quick = ET.Element("Project")
+        base_quick_action = ET.SubElement(base_quick, "Action")
+        ET.SubElement(base_quick_action, "Track", {
+            "trackName": "BaseQuickBack",
+            "eventType": "TriggerParticleTick",
+        })
+        passive_base = ET.Element("Project")
+        passive_action = ET.SubElement(passive_base, "Action")
+        for track_name in ("HitTriggerTick0", "SkillFuncDuration0", "SetCameraHeightDuration0"):
+            ET.SubElement(passive_action, "Track", {
+                "trackName": track_name,
+                "eventType": "HitTriggerTick",
+            })
+        unused_base = encode_aov_resource(action_xml("BaseUnused"), unused, "zstd")
+        base = package({
+            back: encode_aov_resource(ET.tostring(base_root), back, "zstd"),
+            quick_back: encode_aov_resource(ET.tostring(base_quick), quick_back, "zstd"),
+            unused: unused_base,
+            passive: ET.tostring(passive_base, encoding="utf-8", xml_declaration=True),
+        })
+
+        overlay_back = ET.Element("Project")
+        overlay_action = ET.SubElement(overlay_back, "Action")
+        overlay_track = ET.SubElement(overlay_action, "Track", {
+            "trackName": "0_QuickBackActor593",
+            "eventType": "TriggerParticleTick",
+            "enabled": "true",
+        })
+        ET.SubElement(overlay_track, "SkinOrAvatarList", {"id": "59300"})
+        overlay_quick = ET.Element("Project")
+        quick_action = ET.SubElement(overlay_quick, "Action")
+        quick_track = ET.SubElement(quick_action, "Track", {
+            "trackName": "0_QuickBackActor593",
+            "eventType": "TriggerParticleTick",
+            "enabled": "true",
+        })
+        ET.SubElement(quick_track, "SkinOrAvatarList", {"id": "59300"})
+        unused_overlay = encode_aov_resource(
+            action_xml("Unused595", True, "59500"), unused, "zstd"
+        )
+        passive_overlay_root = ET.Element("Project")
+        passive_overlay_action = ET.SubElement(passive_overlay_root, "Action")
+        for track_name in ("HitTriggerTick0", "SkillFuncDuration0"):
+            ET.SubElement(passive_overlay_action, "Track", {
+                "trackName": track_name,
+                "eventType": "HitTriggerTick",
+            })
+        overlay = package({
+            back: encode_aov_resource(ET.tostring(overlay_back), back, "zstd"),
+            quick_back: encode_aov_resource(ET.tostring(overlay_quick), quick_back, "zstd"),
+            unused: unused_overlay,
+            passive: encode_aov_resource(
+                ET.tostring(passive_overlay_root), passive, "zstd"
+            ),
+        })
+
+        merged, report = merge_common_actions_pkg(
+            base, overlay, special_ids={"59300"}, strict_conflicts=True
+        )
+        with zipfile.ZipFile(io.BytesIO(merged)) as archive:
+            result = {name: archive.read(name) for name in archive.namelist()}
+        quick_decoded, _ = decode_aov_resource(result[quick_back], quick_back)
+        quick_ids = {
+            node.attrib.get("id")
+            for node in ET.fromstring(quick_decoded).iter("SkinOrAvatarList")
+        }
+        self.assertEqual(quick_ids, {"59300"})
+        self.assertEqual(result[unused], unused_base)
+        self.assertEqual(
+            result[passive],
+            ET.tostring(passive_base, encoding="utf-8", xml_declaration=True),
+        )
+        self.assertTrue(report["verified"])
+        self.assertIn(quick_back, report["merged_files"])
+
+    def test_opaque_inventory_recognizes_semantic_xml_subset(self):
+        path = "PassiveResource/junglemark.xml"
+
+        def xml_package(track_names, mode):
+            root = ET.Element("Project")
+            action = ET.SubElement(root, "Action", {"length": "1.000"})
+            for track_name in track_names:
+                ET.SubElement(action, "Track", {
+                    "trackName": track_name,
+                    "eventType": "HitTriggerTick",
+                })
+            raw = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+            payload = raw if mode == "plain" else encode_aov_resource(raw, path, "zstd")
+            return package({path: payload})
+
+        conflicts, identical, subsets = _common_actions_opaque_path_conflicts([
+            ("P9-source.zip", xml_package(["HitTriggerTick0", "SkillFuncDuration0", "SetCameraHeightDuration0"], "plain")),
+            ("VTK-source.zip", xml_package(["HitTriggerTick0", "SkillFuncDuration0"], "zstd")),
+        ])
+        self.assertEqual(conflicts, [])
+        self.assertEqual(identical, 0)
+        self.assertEqual(subsets, [path])
+
+
+
+    def test_preflight_filters_shared_common_action_ids_by_source_actor_prefix(self):
+        path = "commonresource/Back.xml"
+        root = ET.Element("Project")
+        action = ET.SubElement(root, "Action")
+        track = ET.SubElement(action, "Track", {
+            "trackName": "0_SharedBack",
+            "eventType": "TriggerParticleTick",
+        })
+        ET.SubElement(track, "SkinOrAvatarList", {"id": "59300"})
+        ET.SubElement(track, "SkinOrAvatarList", {"id": "59500"})
+        payload = encode_aov_resource(ET.tostring(root), path, "zstd")
+        source = package({path: payload})
+
+        report = analyze_common_actions_overlay_set([
+            ("mixed-source.zip", source, {"593"}),
+        ])
+
+        self.assertEqual(report["skin_ids"], ["59300"])
+        self.assertEqual(
+            report["packages"][0]["actor_prefixes"], ["593"]
+        )
+        self.assertEqual(report["packages"][0]["actor_gate_condition_count"], 1)
+        self.assertFalse(report["merge_authorized"])
+
 
 if __name__ == "__main__":
     unittest.main()
