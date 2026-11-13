@@ -128,7 +128,7 @@ def _scan_branding_text_view(
     for label, term in BRANDING_TERMS:
         # Word boundaries prevent the standalone "Youtube" label from also
         # matching the beginning of "youtuber" in the longer creator credit.
-        expression = re.compile(r"(?<!\\w)" + re.escape(term) + r"(?!\\w)", re.IGNORECASE)
+        expression = re.compile(r"(?<!\w)" + re.escape(term) + r"(?!\w)", re.IGNORECASE)
         matches = expression.finditer(decoded)
         for match in matches:
             if any(start < match.end() and end > match.start() for start, end in occupied):
