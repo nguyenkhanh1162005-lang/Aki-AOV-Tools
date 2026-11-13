@@ -28,6 +28,24 @@ TEXT_EXTENSIONS = {
     ".lua", ".txt", ".xml", ".json", ".json5", ".ini", ".cfg", ".csv",
     ".md", ".yaml", ".yml",
 }
+# Notice cleanup/branding must never rewrite kill-notification or billboard
+# resources. They are distinct from startup/login scripts even when their
+# embedded text contains generic announcement/notify terms.
+_PROTECTED_NOTICE_PATH_MARKERS = (
+    "commercializenotify",
+    "reskillbillboardcfg",
+    "resbillboardcfg",
+    "resbillboardskincfg",
+    "killnotify",
+    "kill_notification",
+)
+
+
+def _is_protected_notice_resource(resource_path: str) -> bool:
+    normalized = resource_path.replace(chr(92), "/").casefold()
+    return any(marker in normalized for marker in _PROTECTED_NOTICE_PATH_MARKERS)
+
+
 ZIP_HEADERS = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
 AOV_AES_PREFIX = b"\x22\x4a\x67"
 AOV_ZSTD_PREFIX = b"\x22\x4a\x00\xef"
@@ -152,6 +170,12 @@ def _process_member(
     try:
         _copy_limited(source, original, MAX_ENTRY_UNCOMPRESSED)
         original.seek(0)
+        if _is_protected_notice_resource(logical_path):
+            state["protected_notice_resource_count"] += 1
+            if len(state["protected_notice_resources"]) < 100:
+                state["protected_notice_resources"].append(logical_path)
+            return original
+
         prefix = original.read(8)
         original.seek(0)
         suffix = PurePosixPath(member_name.lower()).suffix
@@ -348,6 +372,8 @@ def rewrite_archive_branding(archive_paths: list[str], output_path: str) -> dict
         "modified_resources": [],
         "rewritten_aov_wrappers": 0,
         "rewritten_nested_zips": 0,
+        "protected_notice_resource_count": 0,
+        "protected_notice_resources": [],
     }
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -385,6 +411,8 @@ def rewrite_archive_branding(archive_paths: list[str], output_path: str) -> dict
             "modified_resources": state["modified_resources"][:200],
             "rewritten_aov_wrappers": state["rewritten_aov_wrappers"],
             "rewritten_nested_zips": state["rewritten_nested_zips"],
+            "protected_notice_resource_count": state["protected_notice_resource_count"],
+            "protected_notice_resources": state["protected_notice_resources"],
             "structurally_validated": True,
             "game_tested": False,
             "limitations": (
