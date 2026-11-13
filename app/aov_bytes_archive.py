@@ -235,6 +235,7 @@ def _scan_notice_assetbundle(data: bytes, path: str) -> dict[str, Any]:
     branding_findings: list[dict[str, str]] = []
     inspected_objects = 0
     text_truncated = False
+    branding_truncated = False
     object_scan_errors = 0
     for asset_file in (getattr(env, "assets", []) or []):
         if inspected_objects >= MAX_NOTICE_ASSETBUNDLE_OBJECTS:
@@ -288,7 +289,7 @@ def _scan_notice_assetbundle(data: bytes, path: str) -> dict[str, Any]:
                     text, label_path, "unity-typetree"
                 )
                 branding_findings.extend(brand_matches)
-                text_truncated = text_truncated or brand_truncated
+                branding_truncated = branding_truncated or brand_truncated
                 if len(findings) >= MAX_NOTICE_CANDIDATES:
                     findings = findings[:MAX_NOTICE_CANDIDATES]
                     text_truncated = True
@@ -301,6 +302,7 @@ def _scan_notice_assetbundle(data: bytes, path: str) -> dict[str, Any]:
         "scanned": True,
         "findings": findings,
         "branding_findings": branding_findings,
+        "branding_truncated": branding_truncated,
         "objects_inspected": inspected_objects,
         "object_scan_errors": object_scan_errors,
         "truncated": text_truncated,
@@ -473,7 +475,9 @@ def decode_archive_resources(
                             **finding,
                         })
                     add_branding_candidates(
-                        prefix, bundle_scan.get("branding_findings", [])
+                        prefix,
+                        bundle_scan.get("branding_findings", []),
+                        bundle_scan.get("branding_truncated", False),
                     )
                 else:
                     report["notice_assetbundles_skipped"] += 1
