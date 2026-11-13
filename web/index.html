@@ -682,7 +682,7 @@ downloadAovPreflightReportBtn.addEventListener('click',()=>{
 brandingScanBtn.addEventListener('click',async()=>{
   const files=[...input.files];
   if(!files.length||files.length>10){status.textContent='Chọn từ 1 đến 10 file ZIP.';return;}
-  brandingScanBtn.disabled=true;noticeScanBtn.disabled=true;brandingScanBtn.disabled=true;go.disabled=true;inspectBtn.disabled=true;
+  brandingScanBtn.disabled=true;noticeScanBtn.disabled=true;go.disabled=true;inspectBtn.disabled=true;
   aovMerge.disabled=true;compatibilityBtn.disabled=true;decodeBytesBtn.disabled=true;
   brandingScanReport=null;downloadBrandingReportBtn.disabled=true;report.textContent='';
   try{
@@ -716,8 +716,8 @@ brandingScanBtn.addEventListener('click',async()=>{
       :'Đã quét xong nhưng chưa thấy chuỗi thương hiệu trong phần dữ liệu đọc được. Một số bundle/dữ liệu opaque có thể chưa quét được.';
   }catch(e){status.textContent='Lỗi quét thương hiệu: '+e.message+' File nguồn vẫn được giữ lại.';}
   finally{
+    noticeScanBtn.disabled=!input.files.length||input.files.length>10;
     brandingScanBtn.disabled=!input.files.length||input.files.length>10;
-    noticeScanBtn.disabled=!input.files.length||input.files.length>10;brandingScanBtn.disabled=!input.files.length||input.files.length>10;
     decodeBytesBtn.disabled=!input.files.length||input.files.length>10;
     compatibilityBtn.disabled=!input.files.length||input.files.length>10;
     go.disabled=!input.files.length||input.files.length>10;
