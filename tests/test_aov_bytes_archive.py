@@ -1,4 +1,5 @@
 import hashlib
+import io
 import json
 import struct
 import tempfile
@@ -199,6 +200,41 @@ class AOVBytesArchiveTests(unittest.TestCase):
             self.assertTrue(report["scan_only"])
             self.assertFalse((folder / "scan-only.zip").exists())
 
+
+    def test_scans_opaque_startup_script_inside_raw_zip_pkg_container(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            package = self._archive(folder / "stable-package.zip", {
+                "Lua_Signed/AOV/Lobby/GameEntryControl_lua.bytes":
+                    bytes.fromhex("4fe3a00b") + b"opaque-startup-script",
+                "Lua_Signed/AOV/Lobby/LoginNotice.lua":
+                    b"function ShowLoginNotice() print('Welcome notice') end",
+            })
+            resources = self._archive(folder / "Resources.zip", {
+                "Resources/1.64.1/StableSystems_3.pkg.bytes":
+                    Path(package).read_bytes(),
+            })
+            wrapper = self._archive(folder / "wrapper.zip", {
+                "Resources.zip": Path(resources).read_bytes(),
+            })
+
+            report = decode_archive_resources(
+                [wrapper], "", scan_only=True
+            )
+
+        self.assertGreaterEqual(report["nested_packages_expanded"], 1)
+        self.assertTrue(any(
+            item["path"].endswith("GameEntryControl_lua.bytes")
+            for item in report["unsupported"]
+        ))
+        self.assertTrue(any(
+            item["keyword_group"] == "login_notice"
+            and item["path"].endswith("LoginNotice.lua")
+            and item["resource_role"] == "startup_flow_candidate"
+            for item in report["notice_candidates"]
+        ))
+        self.assertTrue(report["scan_only"])
+        self.assertFalse(report["game_tested"])
 
     def test_separates_startup_notice_candidates_from_kill_notification_assets(self):
         startup = _classify_notice_candidate(

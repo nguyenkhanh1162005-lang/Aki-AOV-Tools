@@ -776,6 +776,16 @@ async def scan_chunked_aov_notices(upload_id: str):
         item for item in notice_candidates
         if item.get("resource_role") == "protected_billboard"
     ]
+    startup_flow_unsupported_resources = [
+        item for item in report.get("unsupported", [])
+        if any(
+            marker in str(item.get("path") or "").replace(chr(92), "/").casefold()
+            for marker in (
+                "gameentrycontrol", "lobbyview", "loginnotice",
+                "startup", "firstlogin", "first_login", "first-login",
+            )
+        )
+    ]
     return {
         "scan_files": report.get("notice_scan_files", 0),
         "candidates": notice_candidates,
@@ -785,6 +795,8 @@ async def scan_chunked_aov_notices(upload_id: str):
         "protected_kill_notification_candidates": protected_kill_candidates,
         "protected_billboard_count": len(protected_billboard_candidates),
         "protected_billboard_candidates": protected_billboard_candidates,
+        "startup_flow_unsupported_count": len(startup_flow_unsupported_resources),
+        "startup_flow_unsupported_resources": startup_flow_unsupported_resources,
         "truncated": report.get("notice_candidates_truncated", False),
         "decoded_resources": len(report.get("decoded", [])),
         "decoded_bytes": report.get("decoded_bytes", 0),
@@ -801,7 +813,9 @@ async def scan_chunked_aov_notices(upload_id: str):
             "Chế độ quét giới hạn 256 MiB dữ liệu .bytes đã giải mã và không ghi ZIP tạm. "
             "Chỉ các script thuộc luồng login/startup mới được gắn nhãn ứng viên; "
             "commercializenotify và các bảng billboard được phân loại bảo vệ riêng. "
-            "Kết quả chưa tự xóa popup; cần xác nhận chính xác lệnh gọi trong script."
+            "Kết quả chưa tự xóa popup; cần xác nhận chính xác lệnh gọi trong script. "
+            "Các script GameEntryControl/LobbyView không giải mã được sẽ được liệt kê "
+            "riêng và không thể kết luận popup đã hết."
         ),
     }
 
