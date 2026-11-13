@@ -1000,7 +1000,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
                 "không thay thế việc parse payload hoặc xác nhận chức năng trong game."
             ),
         }
-    except (ResourceManifestError, CompatibilityPlanError, MSESDiagnosticsError) as exc:
+    except (ResourceManifestError, CompatibilityPlanError) as exc:
         resource_analysis = {
             "available": False,
             "advisory_only": True,
