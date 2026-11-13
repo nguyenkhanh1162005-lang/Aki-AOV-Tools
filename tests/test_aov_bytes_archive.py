@@ -206,7 +206,7 @@ class AOVBytesArchiveTests(unittest.TestCase):
             folder = Path(tmp)
             package = self._archive(folder / "stable-package.zip", {
                 "Lua_Signed/AOV/Lobby/GameEntryControl_lua.bytes":
-                    b"\\x4f\\xe3\\xa0\\x0bopaque-startup-script",
+                    bytes.fromhex("4fe3a00b") + b"opaque-startup-script",
                 "Lua_Signed/AOV/Lobby/LoginNotice.lua":
                     b"function ShowLoginNotice() print('Welcome notice') end",
             })
