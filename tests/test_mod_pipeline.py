@@ -767,5 +767,91 @@ class ModPipelineTests(unittest.TestCase):
             self.assertTrue(general["can_analyze_unlisted_mod_types"])
             self.assertFalse(report["ready_to_merge"])
 
+
+    def test_selects_source_locked_p9_p10_nineteen_skin_adapter(self):
+        p9 = {
+            "name": "P9.zip",
+            "looks_like_aov": True,
+            "source_family_hint": "P9",
+            "has_mod_skin_container": True,
+            "resources_zip_count": 1,
+            "skin_list_count": 1,
+            "actor_action_ids": ["107", "130", "137", "163", "509", "510", "518", "540", "597"],
+        }
+        p10 = {
+            "name": "P10.zip",
+            "looks_like_aov": True,
+            "source_family_hint": "P10",
+            "has_mod_skin_container": True,
+            "resources_zip_count": 1,
+            "skin_list_count": 1,
+            "actor_action_ids": ["111", "132", "150", "157", "167", "190", "524", "567", "598", "599"],
+        }
+        self.assertEqual(
+            _select_adapter([p9, p10]),
+            "aov_p9_p10_skin_union_1.64.1",
+        )
+
+    def test_p9_p10_adapter_refuses_incomplete_or_wrong_actor_inventory(self):
+        p9 = {
+            "name": "P9.zip",
+            "looks_like_aov": True,
+            "source_family_hint": "P9",
+            "has_mod_skin_container": True,
+            "resources_zip_count": 1,
+            "skin_list_count": 1,
+            "actor_action_ids": ["107", "130", "137", "163", "509", "510", "518", "540", "596"],
+        }
+        p10 = {
+            "name": "P10.zip",
+            "looks_like_aov": True,
+            "source_family_hint": "P10",
+            "has_mod_skin_container": True,
+            "resources_zip_count": 1,
+            "skin_list_count": 1,
+            "actor_action_ids": ["111", "132", "150", "157", "167", "190", "524", "567", "598", "599"],
+        }
+        with self.assertRaisesRegex(ModPipelineError, "chưa có adapter ghép"):
+            _select_adapter([p9, p10])
+
+    def test_merge_dispatches_p9_p10_to_source_locked_exporter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            p9 = self._zip(folder, "P9.zip", {"source": b"p9"})
+            p10 = self._zip(folder, "P10.zip", {"source": b"p10"})
+            output = folder / "merged.zip"
+            profiles = [
+                {
+                    "name": "P9.zip", "looks_like_aov": True,
+                    "source_family_hint": "P9", "has_mod_skin_container": True,
+                    "resources_zip_count": 1, "skin_list_count": 1,
+                    "actor_action_ids": ["107", "130", "137", "163", "509", "510", "518", "540", "597"],
+                    "entries": 2, "uncompressed_bytes": 4,
+                },
+                {
+                    "name": "P10.zip", "looks_like_aov": True,
+                    "source_family_hint": "P10", "has_mod_skin_container": True,
+                    "resources_zip_count": 1, "skin_list_count": 1,
+                    "actor_action_ids": ["111", "132", "150", "157", "167", "190", "524", "567", "598", "599"],
+                    "entries": 2, "uncompressed_bytes": 5,
+                },
+            ]
+
+            def fake_merge(paths, staged_path):
+                with zipfile.ZipFile(staged_path, "w") as archive:
+                    archive.writestr("merged-marker.txt", b"p9+p10")
+                return {"skin_count": 19, "structurally_validated": True}
+
+            with patch("app.mod_pipeline._preflight_inputs", return_value=9), \
+                 patch("app.mod_pipeline._archive_profile", side_effect=profiles), \
+                 patch("app.mod_pipeline.merge_p9_p10_archives", side_effect=fake_merge) as merger:
+                result = merge_mod_archives([p9, p10], str(output))
+
+            merger.assert_called_once()
+            self.assertTrue(output.exists())
+            self.assertEqual(result["adapter"], "aov_p9_p10_skin_union_1.64.1")
+            self.assertEqual(result["skin_count"], 19)
+
+
 if __name__ == "__main__":
     unittest.main()
