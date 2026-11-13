@@ -9,7 +9,11 @@ from unittest.mock import patch
 
 from app.aov_bytes import encrypt_aes_zstd_resource
 from app.ifix_merger import serialize_ifix_patch
-from app.aov_bytes_archive import AOVBytesArchiveError, decode_archive_resources
+from app.aov_bytes_archive import (
+    AOVBytesArchiveError,
+    _classify_notice_candidate,
+    decode_archive_resources,
+)
 
 
 def make_mses_payload():
@@ -195,6 +199,38 @@ class AOVBytesArchiveTests(unittest.TestCase):
             self.assertTrue(report["scan_only"])
             self.assertFalse((folder / "scan-only.zip").exists())
 
+
+    def test_separates_startup_notice_candidates_from_kill_notification_assets(self):
+        startup = _classify_notice_candidate(
+            "StableSystems_3.pkg.bytes::GameEntryControl_lua.bytes",
+            "startup_notice",
+        )
+        kill_notice = _classify_notice_candidate(
+            "assetbundle/commercializenotify/battle/"
+            "commercializenotify_red_595.assetbundle",
+            "announcement",
+        )
+        billboard = _classify_notice_candidate(
+            "Databin/Client/Huanhua/ResKillBillboardCfg.bytes",
+            "vietnamese_notice",
+        )
+        unrelated = _classify_notice_candidate(
+            "Resources/SomeConfig.bytes",
+            "announcement",
+        )
+
+        self.assertEqual(startup["resource_role"], "startup_flow_candidate")
+        self.assertTrue(startup["startup_removal_eligible"])
+        self.assertEqual(
+            kill_notice["resource_role"], "protected_kill_notification"
+        )
+        self.assertFalse(kill_notice["startup_removal_eligible"])
+        self.assertEqual(billboard["resource_role"], "protected_billboard")
+        self.assertFalse(billboard["startup_removal_eligible"])
+        self.assertEqual(
+            unrelated["resource_role"], "unclassified_notice_text"
+        )
+        self.assertFalse(unrelated["startup_removal_eligible"])
 
     def test_scans_unity_assetbundle_typetree_strings_read_only(self):
         from types import SimpleNamespace
