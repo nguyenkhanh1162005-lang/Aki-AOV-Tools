@@ -73,7 +73,7 @@ _ADAPTERS = (
             "MSES v7 parser/serializer hỗ trợ adapter VTK Actor 595 đã khóa phiên bản "
             "và helper cấp bảng P9/P10 ghim SHA-256/Actor_Action cho heroSkin, "
             "ResSkinMotionBaseCfg, HeroSkinShop, skillmark, BattleBank, LobbyBank, "
-            "LobbySound, ChatSound và CoupleSound. HeroSound còn 10 hàng chưa rõ chủ sở hữu."
+            "LobbySound, ChatSound, CoupleSound và HeroSound; HeroSound dùng prefix ID đa độ dài nhưng chỉ nhận một Actor khớp duy nhất."
         ),
         "merge_policy": (
             "Helper P9/P10 là cấp bảng, chưa phải quyền ghép ZIP nhiều wrapper. "
