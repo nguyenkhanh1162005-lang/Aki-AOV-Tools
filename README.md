@@ -15,6 +15,7 @@ Công cụ web và Telegram bot riêng tư bằng tiếng Việt để tải, ki
 - Web API `/api/upload/{upload_id}/aov-merge`: tự chọn adapter theo cấu trúc ZIP; hỗ trợ hai đường ghép có giới hạn: KPM100 ZIP trực tiếp + VTK, hoặc MOD wrapper 10 skin + các ZIP phần VTK iOS.
 - Web API `/api/upload/{upload_id}/decode-bytes`: giải mã các tài nguyên `.bytes` AoV AES/Zstandard đã nhận diện từ ZIP đã tải lên; hỗ trợ ZIP `Resources.zip` lồng nhau và bung tiếp ZIP bên trong `.pkg.bytes` đã giải mã (tối đa hai tầng), xuất ZIP riêng cùng `decode-report.json`, không sửa ZIP gốc và không ghép tài nguyên.
 - Web API `/api/upload/{upload_id}/notice-scan`: quét chỉ đọc các chuỗi liên quan thông báo trong Lua/XML/JSON/TXT/config/CSV và `.bytes` đã giải mã; trả đường dẫn, từ khóa, đoạn trích ngắn; giữ nguyên phiên tải và file gốc.
+- Web API `/api/upload/{upload_id}/branding-scan`: quét chỉ đọc chính xác các nhãn `KIANA MOD AOV`, `Mod được tạo bởi youtuber KIANA MOD AOV`, `Web Mod` và `Youtube` trong văn bản, `.bytes` giải mã được và metadata object Unity AssetBundle có giới hạn. Web cho tải báo cáo JSON; tính năng này chỉ xác định vị trí chuỗi, chưa sửa/xóa dữ liệu.
 
 ## Telegram bot riêng tư
 
