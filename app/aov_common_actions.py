@@ -797,7 +797,7 @@ def _empty_common_actions_package() -> bytes:
 
 
 def analyze_common_actions_overlay_set(
-    overlays: list[tuple[str, bytes]],
+    overlays: list[tuple],
 ) -> dict:
     """Dry-run compatibility check for actor-gated CommonActions from many sources.
 
@@ -859,7 +859,7 @@ def analyze_common_actions_overlay_set(
                 "output_discarded": True,
                 "game_tested": False,
                 "note": (
-                    "Không tìm thấy track có SkinOrAvatarList trực tiếp trong sáu XML "
+                    "Không tìm thấy track có SkinOrAvatarList trực tiếp trong mười hai XML "
                     "được parser hỗ trợ."
                 ),
             }
@@ -917,7 +917,7 @@ def analyze_common_actions_overlay_set(
             "output_discarded": True,
             "game_tested": False,
             "note": (
-                "Dry-run chỉ kiểm tra sáu XML CommonActions và các điều kiện actor. "
+                "Dry-run chỉ kiểm tra mười hai XML CommonActions và các điều kiện actor. "
                 "ZIP mô phỏng đã bị loại bỏ; kết quả này không ghép MSES, IFix, "
                 "AssetBundle, AssetRef, Packer/Verification hoặc Wwise."
             ),
