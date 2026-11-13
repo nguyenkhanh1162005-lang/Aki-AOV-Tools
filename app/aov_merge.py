@@ -60,6 +60,47 @@ _P9_P10_ACTOR_OWNED_MSES = {
         "p9_actor_ids": {107, 130, 137, 163, 509, 510, 518, 540, 597},
         "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
     },
+
+    "Databin/Client/Sound/BattleBank.bytes": {
+        "field_count": 59, "row_count": 1932, "actor_id_rule": "bank_10000",
+        "conflict_count": 352,
+        "p9_sha256": "e350c1093ed73a3ffd06bfcdaa0485213eef630f49ace02bbd7ebf5d6c659ee1",
+        "p10_sha256": "edcce2276905a12e39c3422754ac7c1429f95b2c43282cece11d3d02d49c6472",
+        "p9_actor_ids": {107, 130, 137, 163, 509, 510, 518, 540, 597},
+        "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
+    },
+    "Databin/Client/Sound/LobbyBank.bytes": {
+        "field_count": 61, "row_count": 888, "actor_id_rule": "bank_10000",
+        "conflict_count": 177,
+        "p9_sha256": "0af679c8fea70399eef53830735ab1925b1502e8af11e03b0b67ad840747b3c6",
+        "p10_sha256": "ef681b2e8a1041020249f7f7093869432623e960ad093c2fe5fefe82da6b11ad",
+        "p9_actor_ids": {107, 130, 137, 163, 509, 510, 518, 540, 597},
+        "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
+    },
+    "Databin/Client/Sound/LobbySound.bytes": {
+        "field_count": 69, "row_count": 959, "actor_id_rule": "sound_1000",
+        "conflict_count": 183,
+        "p9_sha256": "0ef6ff11497eaa28ba9bb2c1dbf3f23f7ce3ac03be9d6a67b2ce8040586df8af",
+        "p10_sha256": "4cb175546942bd5f5dda76e82419bf665108735d75821e506bab5db0aaa8eab5",
+        "p9_actor_ids": {107, 130, 137, 163, 509, 510, 518, 540, 597},
+        "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
+    },
+    "Databin/Client/Sound/ChatSound.bytes": {
+        "field_count": 65, "row_count": 1270, "actor_id_rule": "sound_1000",
+        "conflict_count": 171,
+        "p9_sha256": "41fe532898207cfc08b4886e485d93b6c2333c1f92341aa6f5c766464bc0db99",
+        "p10_sha256": "f356c99cbf752c0d3e471c2c7f7fef247517bf3901e26e69fee304a648e1d581",
+        "p9_actor_ids": {107, 130, 137, 163, 509, 510, 518, 540, 597},
+        "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
+    },
+    "Databin/Client/Sound/CoupleSound.bytes": {
+        "field_count": 80, "row_count": 577, "actor_id_rule": "sound_1000",
+        "conflict_count": 114,
+        "p9_sha256": "3954faa22b4223e47dd5a9bb6a7fa2d3badc9fc5b681e850afa7d887cf49aff7",
+        "p10_sha256": "31ecde02feca2329ca4cfab9acf13c140d8a1700de25aa77531223bef4cabbbd",
+        "p9_actor_ids": {107, 130, 137, 163, 509, 510, 518, 540, 597},
+        "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
+    },
 }
 
 _SUPPORTED_MSES_TABLES.update(_P9_P10_ACTOR_OWNED_MSES)
@@ -90,6 +131,21 @@ def _index_actor_owned_rows(rows: tuple[bytes, ...], label: str) -> tuple[dict[i
         indexed[key] = row
         order.append(key)
     return indexed, order
+
+
+def _actor_id_from_mses_key(key: int, spec: dict) -> int | None:
+    """Decode the source-validated Actor ID prefix used by a specific MSES table."""
+    rule = spec.get("actor_id_rule")
+    if rule == "bank_10000":
+        encoded = key // 10000
+        return encoded if encoded <= 999 else encoded // 100
+    if rule == "sound_1000":
+        encoded = key // 1000
+        return encoded if encoded <= 999 else encoded // 100
+    if rule == "actor_divisor":
+        divisor = spec.get("actor_divisor")
+        return key // divisor if isinstance(divisor, int) and divisor > 0 else None
+    return None
 
 
 def _merge_p9_p10_actor_owned_rows(
@@ -163,9 +219,12 @@ def _merge_p9_p10_actor_owned_rows(
     merged = dict(base_map)
     selected_base = 0
     selected_overlay = 0
-    divisor = spec["actor_divisor"]
     for key in differing:
-        actor_id = key // divisor
+        actor_id = _actor_id_from_mses_key(key, spec)
+        if actor_id is None:
+            raise MSESError(
+                f"{resource_name}: không có quy tắc Actor ID cho khóa 0x{key:08x}."
+            )
         owned_by_base = actor_id in base_ids
         owned_by_overlay = actor_id in overlay_ids
         if owned_by_base == owned_by_overlay:
