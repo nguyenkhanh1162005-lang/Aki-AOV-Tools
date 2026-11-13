@@ -979,12 +979,11 @@ def _merge_p9_p10_packer_metadata(p10_data: bytes, p9_data: bytes) -> tuple[byte
     Only source-owned skin-bundle ResourceInfos differ, so no dependency index
     needs to be rewritten for this exact pair.
     """
-    p10_raw, p10_mode = decode_aov_resource(
-        p10_data, "resourcepackerinfosetall.assetbundle"
-    )
-    p9_raw, p9_mode = decode_aov_resource(
-        p9_data, "resourcepackerinfosetall.assetbundle"
-    )
+    # ResourcePackerInfo is a raw UnityFS AssetBundle, not an AES/.bytes
+    # resource. Parse and serialize it directly; the source hash pins its exact
+    # raw UnityFS payload.
+    p10_raw = p10_data
+    p9_raw = p9_data
     if (
         hashlib.sha256(p10_data).hexdigest()
         != "b87d60ef87d5d49dacad2cdb32536e06bd933ac4e2f8649e6336855609b39d56"
@@ -1078,14 +1077,16 @@ def _merge_p9_p10_packer_metadata(p10_data: bytes, p9_data: bytes) -> tuple[byte
         or len(check_entries) != 22298
     ):
         raise AOVMergeError("PackerInfo round-trip làm thay đổi path hoặc dependency graph.")
-    output = encode_aov_resource(
-        serialized, "resourcepackerinfosetall.assetbundle", p10_mode
+    output = serialized
+    verify_env = UnityPy_AOV.load(output)
+    _, verify_tree = _find_mono_behaviour(
+        verify_env, "ResourcePackerInfoSetXML"
     )
-    verify_raw, verify_mode = decode_aov_resource(
-        output, "resourcepackerinfosetall.assetbundle"
-    )
-    if verify_raw != serialized or verify_mode != p10_mode:
-        raise AOVMergeError("PackerInfo AES round-trip không khớp.")
+    if (
+        [item["PathInIFS"] for item in verify_tree["AllResourcePackInfo"]] != p10_paths
+        or verify_tree["AllParentIdexToChild"] != p10_links
+    ):
+        raise AOVMergeError("PackerInfo UnityFS round-trip không giữ nguyên dependency graph.")
     return output, {
         "version": BASE_VERSION,
         "entry_count": len(check_entries),
