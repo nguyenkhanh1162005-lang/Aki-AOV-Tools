@@ -41,6 +41,79 @@ NOTICE_PATTERNS = (
     ("cjk_notice", r"公告|通知|提示|弹窗|登录公告|登入公告"),
 )
 
+
+# Resource-path semantics are a safety boundary for notice tooling. A keyword hit
+# in a kill-notification/billboard resource must never become a startup-removal
+# candidate merely because its payload contains words such as "notify" or "popup".
+_KILL_NOTIFICATION_PATH_MARKERS = (
+    "commercializenotify",
+    "reskillbillboardcfg",
+    "killnotify",
+    "kill_notification",
+)
+_BILLBOARD_PATH_MARKERS = (
+    "resbillboardcfg",
+    "resbillboardskincfg",
+)
+_STARTUP_FLOW_PATH_MARKERS = (
+    "gameentrycontrol",
+    "lobbyview",
+    "loginnotice",
+    "startup",
+    "firstlogin",
+    "first_login",
+    "first-login",
+)
+
+
+def _classify_notice_candidate(path: str, keyword_group: str) -> dict[str, Any]:
+    normalized = path.replace(chr(92), "/").casefold()
+    if any(marker in normalized for marker in _KILL_NOTIFICATION_PATH_MARKERS):
+        return {
+            "resource_role": "protected_kill_notification",
+            "startup_removal_eligible": False,
+            "protection_reason": "Đây là tài nguyên thông báo hạ gục; phải giữ nguyên.",
+        }
+    if any(marker in normalized for marker in _BILLBOARD_PATH_MARKERS):
+        return {
+            "resource_role": "protected_billboard",
+            "startup_removal_eligible": False,
+            "protection_reason": "Đây là bảng billboard trong game; không phải popup khởi động.",
+        }
+    if (
+        keyword_group in {"startup_notice", "login_notice"}
+        and any(marker in normalized for marker in _STARTUP_FLOW_PATH_MARKERS)
+    ):
+        return {
+            "resource_role": "startup_flow_candidate",
+            "startup_removal_eligible": True,
+            "protection_reason": (
+                "Chỉ là ứng viên trong luồng đăng nhập/khởi động; phải xác nhận "
+                "đúng lệnh gọi popup trước khi sửa."
+            ),
+        }
+    return {
+        "resource_role": "unclassified_notice_text",
+        "startup_removal_eligible": False,
+        "protection_reason": (
+            "Từ khóa chưa đủ chứng minh đây là popup khởi động; giữ nguyên."
+        ),
+    }
+
+
+def _build_notice_candidate(
+    source: str, default_path: str, finding: dict[str, Any]
+) -> dict[str, Any]:
+    candidate = {"source": source, **finding}
+    candidate.setdefault("path", default_path)
+    candidate.update(
+        _classify_notice_candidate(
+            str(candidate.get("path") or default_path),
+            str(candidate.get("keyword_group") or ""),
+        )
+    )
+    return candidate
+
 # Exact legacy labels requested for the Aki branding pass. This remains a
 # read-only inventory; discovering a string is not permission to rewrite a
 # Unity object, binary package, or game configuration.
@@ -473,10 +546,9 @@ def decode_archive_resources(
                         if len(report["notice_candidates"]) >= MAX_NOTICE_CANDIDATES:
                             report["notice_candidates_truncated"] = True
                             break
-                        report["notice_candidates"].append({
-                            "source": prefix,
-                            **finding,
-                        })
+                        report["notice_candidates"].append(
+                            _build_notice_candidate(prefix, path, finding)
+                        )
                     add_branding_candidates(
                         prefix,
                         bundle_scan.get("branding_findings", []),
@@ -501,11 +573,9 @@ def decode_archive_resources(
                         if len(report["notice_candidates"]) >= MAX_NOTICE_CANDIDATES:
                             report["notice_candidates_truncated"] = True
                             break
-                        report["notice_candidates"].append({
-                            "source": prefix,
-                            "path": path,
-                            **finding,
-                        })
+                        report["notice_candidates"].append(
+                            _build_notice_candidate(prefix, path, finding)
+                        )
                     text_view = _notice_text_view(raw)
                     if text_view is not None:
                         encoding, decoded_text = text_view
@@ -555,11 +625,9 @@ def decode_archive_resources(
                 if len(report["notice_candidates"]) >= MAX_NOTICE_CANDIDATES:
                     report["notice_candidates_truncated"] = True
                     break
-                report["notice_candidates"].append({
-                    "source": prefix,
-                    "path": path,
-                    **finding,
-                })
+                report["notice_candidates"].append(
+                    _build_notice_candidate(prefix, path, finding)
+                )
             text_view = _notice_text_view(decoded)
             if text_view is not None:
                 encoding, decoded_text = text_view
