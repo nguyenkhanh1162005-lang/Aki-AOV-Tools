@@ -957,6 +957,27 @@ noticeScanBtn.addEventListener('click',async()=>{
     if(!opaqueStartupResources.length){
       lines.push('Không có script startup/lobby bị đánh dấu chưa giải mã trong lần quét này.');
     }
+    const customLuaResources=data.custom_lua_resources||[];
+    lines.push(
+      '',
+      '=== LUA TÙY BIẾN ĐÃ NHẬN DIỆN HEADER (CHƯA DECOMPILE) ===',
+      'Số tài nguyên: '+(data.custom_lua_resource_count||customLuaResources.length)
+    );
+    for(const item of customLuaResources){
+      lines.push(item.source+'/'+item.resource_path);
+      lines.push('  '+item.format_family+' · format byte '+item.format_byte+
+        ' · header offset '+item.header_offset+' · chunk '+item.chunk_size+
+        ' bytes · '+item.decode_mode);
+      lines.push('  SHA-256: '+item.resource_sha256);
+      lines.push('  Chuỗi trích xuất: '+(item.strings||[]).slice(0,18).join(' | '));
+      lines.push('  '+(item.note||'Chỉ nhận diện header/chuỗi; chưa thể sửa bytecode.'));
+    }
+    if(!customLuaResources.length){
+      lines.push('Không tìm thấy header Lua tùy biến thuộc nhóm GameEntryControl/LobbyView/CLobbySystem.');
+    }
+    if(data.custom_lua_resources_truncated){
+      lines.push('Danh sách Lua tùy biến đã được giới hạn; xem dữ liệu còn lại trong báo cáo JSON nếu có.');
+    }
     lines.push('', '=== CÁC KẾT QUẢ TỪ KHÓA KHÁC (CHỈ THAM KHẢO) ===');
     for(const item of (data.candidates||[])){
       lines.push('['+(item.resource_role||'unclassified_notice_text')+'] ['+item.keyword_group+'] '+item.source+'/'+item.path);
