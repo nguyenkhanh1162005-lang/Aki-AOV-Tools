@@ -1268,7 +1268,7 @@ def merge_p9_p10_archives(
                     ):
                         raise AOVMergeError("CommonActions P9/P10 không giữ đúng 785 path duy nhất.")
                     common_differences = {
-                        name for name in p10_names
+                        name for name in p10_common_names
                         if p10_ca.read(name) != p9_ca.read(name)
                     }
             except zipfile.BadZipFile as exc:
