@@ -225,6 +225,45 @@ class HTTPUploadMergeFlowTests(unittest.TestCase):
             if session:
                 main.shutil.rmtree(session["workdir"], ignore_errors=True)
 
+    def test_branding_scan_endpoint_returns_candidates_and_keeps_session(self):
+        payload = _zip_bytes(
+            "Resources/notice.txt",
+            (
+                "KIANA MOD AOV\\n"
+                "Mod được tạo bởi youtuber KIANA MOD AOV\\n"
+                "Web Mod\\n"
+                "Youtube\\n"
+            ).encode("utf-8"),
+        )
+        with TestClient(main.app) as client:
+            started = client.post("/api/upload/start", json={
+                "files": [{"name": "branding.zip", "size": len(payload)}]
+            })
+            self.assertEqual(started.status_code, 200)
+            upload_id = started.json()["upload_id"]
+            try:
+                uploaded = client.put(
+                    f"/api/upload/{upload_id}/0",
+                    content=payload,
+                    headers={"X-Chunk-Offset": "0"},
+                )
+                self.assertEqual(uploaded.status_code, 200)
+
+                response = client.post(
+                    f"/api/upload/{upload_id}/branding-scan"
+                )
+                self.assertEqual(response.status_code, 200)
+                report = response.json()
+                self.assertEqual(
+                    {item["label"] for item in report["candidates"]},
+                    {"creator_credit", "brand", "web_mod", "youtube"},
+                )
+                self.assertIn(upload_id, main.UPLOAD_SESSIONS)
+            finally:
+                session = main.UPLOAD_SESSIONS.pop(upload_id, None)
+                if session:
+                    main.shutil.rmtree(session["workdir"], ignore_errors=True)
+
     def test_http_merge_rejects_incomplete_upload_without_discarding_session(self):
         payload = _zip_bytes("docs/readme.txt", b"hello")
         with TestClient(main.app) as client:
