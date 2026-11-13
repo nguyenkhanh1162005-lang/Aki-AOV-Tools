@@ -30,6 +30,10 @@ jobs:
           for attempt in $(seq 1 20); do
             if curl --fail --silent --show-error http://127.0.0.1:8000/health -o /tmp/aki-health.json; then
               python -c 'import json; data=json.load(open("/tmp/aki-health.json")); assert data == {"status":"ok","service":"Aki AOV Tools"}, data'
+              curl --fail --silent --show-error http://127.0.0.1:8000/ -o /tmp/aki-index.html
+              grep -q 'aki-studio.css' /tmp/aki-index.html
+              curl --fail --silent --show-error http://127.0.0.1:8000/aki-studio.css -o /tmp/aki-studio.css
+              grep -q 'AKI Gaming Studio' /tmp/aki-studio.css
               curl --fail --silent --show-error http://127.0.0.1:8000/api/capabilities -o /tmp/aki-capabilities.json
               python -c 'import json; data=json.load(open("/tmp/aki-capabilities.json")); items={x["id"]:x for x in data["adapters"]}; assert data["policy"]=="fail_closed"; assert items["aov_kpm100_vtk_actor595_1.64.1"]["status"]=="merge_supported_version_locked"; assert items["aov_mod_to_mod_vtk_actor595_1.64.1"]["status"]=="merge_supported_version_locked"; assert data["summary"]["version_locked"]==2; assert data["summary"]["blocked"]==0; assert data["game_tested"] is False'
               exit 0
