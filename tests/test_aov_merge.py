@@ -6,6 +6,7 @@ from app.aov_merge import (
     AOVResourceMergeError,
     _P9_P10_ACTOR_OWNED_MSES,
     _actor_id_from_mses_key,
+    _lite_bullet_row_identity,
     merge_aov_mses_resource,
 )
 from app.aov_mses import build_mses, MSESTable, parse_mses
@@ -501,6 +502,125 @@ class AOVResourceMergeTests(unittest.TestCase):
                 )
                 self.assertFalse(spec["p9_actor_ids"] & spec["p10_actor_ids"])
                 self.assertEqual(spec["actor_id_rule"], "hero_sound_mixed_scale") if path.endswith("HeroSound.bytes") else None
+
+
+
+    def test_p9_p10_lite_bullet_cfg_preserves_p10_schema_and_actor_owned_rows(self):
+        name = "Databin/Client/Skill/liteBulletCfg.bytes"
+
+        def lite_row(key, actor_id, suffix):
+            path = f"prefab_skill_effects/hero_skill_effects/{actor_id}_hero/{suffix}".encode("ascii")
+            return struct.pack("<I", key) + b"same-prefix" + struct.pack("<I", len(path)) + path
+
+        p9_rows = [
+            lite_row(10, 107, "old_attack.prefab"),
+            lite_row(20, 111, "p9_old_effect.prefab"),
+        ]
+        p10_rows = [
+            lite_row(10, 107, "new_attack_hd.prefab"),
+            lite_row(20, 111, "p10_effect_hd.prefab"),
+            lite_row(30, 111, "p10_only_skin.prefab"),
+        ]
+        p9_decoded = table(156, p9_rows)
+        p10_decoded = table(158, p10_rows)
+        spec = {
+            "p9_field_count": 156,
+            "p10_field_count": 158,
+            "p9_row_count": 2,
+            "p10_row_count": 3,
+            "output_source": "P10",
+            "output_field_count": 158,
+            "output_row_count": 3,
+            "conflict_count": 2,
+            "p9_only_keys": set(),
+            "p10_only_keys": {30},
+            "actor_id_rule": "lite_bullet_effect_path",
+            "p9_sha256": hashlib.sha256(p9_decoded).hexdigest(),
+            "p10_sha256": hashlib.sha256(p10_decoded).hexdigest(),
+            "p9_actor_ids": {107},
+            "p10_actor_ids": {111},
+        }
+        with patch.dict(_P9_P10_ACTOR_OWNED_MSES, {name: spec}):
+            p9_resource = encode_aov_resource(p9_decoded, name, "aes")
+            p10_resource = encode_aov_resource(p10_decoded, name, "aes")
+            merged, report = merge_aov_mses_resource(
+                p9_resource,
+                p10_resource,
+                name,
+                base_actor_action_ids={"107"},
+                overlay_actor_action_ids={"111"},
+            )
+            decoded, _ = decode_aov_resource(merged, name)
+            result = parse_mses(decoded)
+            result_rows = {
+                int.from_bytes(row[:4], "little"): row
+                for row in result.rows
+            }
+            self.assertEqual(result.field_count, 158)
+            self.assertEqual(len(result.rows), 3)
+            self.assertEqual(result_rows[10], p9_rows[0])
+            self.assertEqual(result_rows[20], p10_rows[1])
+            self.assertEqual(result_rows[30], p10_rows[2])
+            self.assertEqual(report["differing_shared_rows"], 2)
+            self.assertEqual(report["p9_only_rows"], 0)
+            self.assertEqual(report["p10_only_rows"], 1)
+            self.assertEqual(report["selected_base_owned_rows"], 1)
+            self.assertEqual(report["selected_overlay_owned_rows"], 1)
+            self.assertTrue(report["output_checksum_valid"])
+
+
+    def test_p9_p10_lite_bullet_cfg_is_order_independent(self):
+        name = "Databin/Client/Skill/liteBulletCfg.bytes"
+
+        def lite_row(key, actor_id, suffix):
+            path = f"prefab_skill_effects/hero_skill_effects/{actor_id}_hero/{suffix}".encode("ascii")
+            return struct.pack("<I", key) + b"same-prefix" + struct.pack("<I", len(path)) + path
+
+        p9_decoded = table(156, [lite_row(10, 107, "p9.prefab")])
+        p10_decoded = table(158, [
+            lite_row(10, 107, "p10.prefab"),
+            lite_row(30, 111, "p10-only.prefab"),
+        ])
+        spec = {
+            "p9_field_count": 156, "p10_field_count": 158,
+            "p9_row_count": 1, "p10_row_count": 2,
+            "output_source": "P10", "output_field_count": 158,
+            "output_row_count": 2, "conflict_count": 1,
+            "p9_only_keys": set(), "p10_only_keys": {30},
+            "actor_id_rule": "lite_bullet_effect_path",
+            "p9_sha256": hashlib.sha256(p9_decoded).hexdigest(),
+            "p10_sha256": hashlib.sha256(p10_decoded).hexdigest(),
+            "p9_actor_ids": {107}, "p10_actor_ids": {111},
+        }
+        with patch.dict(_P9_P10_ACTOR_OWNED_MSES, {name: spec}):
+            merged, report = merge_aov_mses_resource(
+                encode_aov_resource(p10_decoded, name, "aes"),
+                encode_aov_resource(p9_decoded, name, "aes"),
+                name,
+                base_actor_action_ids={"111"},
+                overlay_actor_action_ids={"107"},
+            )
+            decoded, _ = decode_aov_resource(merged, name)
+            result = parse_mses(decoded)
+            rows = {int.from_bytes(row[:4], "little"): row for row in result.rows}
+            self.assertEqual(result.field_count, 158)
+            self.assertEqual(rows[10], lite_row(10, 107, "p9.prefab"))
+            self.assertEqual(rows[30], lite_row(30, 111, "p10-only.prefab"))
+            self.assertEqual(report["output_source"], "P10")
+
+
+    def test_lite_bullet_cfg_rejects_unverifiable_effect_path_layout(self):
+        valid = (
+            struct.pack("<I", 1)
+            + b"prefix"
+            + struct.pack("<I", len(b"prefab_skill_effects/hero_skill_effects/107_hero/effect.prefab"))
+            + b"prefab_skill_effects/hero_skill_effects/107_hero/effect.prefab"
+        )
+        actor, prefix, path = _lite_bullet_row_identity(valid, "test row")
+        self.assertEqual(actor, 107)
+        self.assertEqual(path, b"prefab_skill_effects/hero_skill_effects/107_hero/effect.prefab")
+        with self.assertRaisesRegex(Exception, "đúng một đường dẫn hiệu ứng"):
+            _lite_bullet_row_identity(valid + b"prefab_skill_effects/hero_skill_effects/107_hero/other", "bad row")
 
 
 
