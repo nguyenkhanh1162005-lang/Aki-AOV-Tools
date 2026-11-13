@@ -18,7 +18,7 @@ from .aov_mses import MSESError, parse_mses
 
 _MAX_DIAGNOSTIC_TABLES = 100
 _MAX_RESOURCE_BYTES = 256 * 1024 * 1024
-_VERSION = re.compile(r"^\\d+\\.\\d+\\.\\d+(?:\\.\\d+)?$")
+_VERSION = re.compile(r"^\d+\.\d+\.\d+(?:\.\d+)?$")
 
 
 class MSESDiagnosticsError(ValueError):
@@ -27,7 +27,7 @@ class MSESDiagnosticsError(ValueError):
 
 def canonical_resource_path(path: str) -> str:
     """Remove only an explicit Resources/<semantic-version>/ root prefix."""
-    normalized = path.replace("\\\\", "/")
+    normalized = path.replace("\\", "/")
     parts = [part for part in normalized.split("/") if part]
     for index in range(len(parts) - 1):
         if (
