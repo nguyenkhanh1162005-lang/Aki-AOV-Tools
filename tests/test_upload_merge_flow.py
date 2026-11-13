@@ -225,6 +225,57 @@ class HTTPUploadMergeFlowTests(unittest.TestCase):
             if session:
                 main.shutil.rmtree(session["workdir"], ignore_errors=True)
 
+    def test_notice_scan_endpoint_separates_startup_candidates_and_opaque_resources(self):
+        package = _zip_entries_bytes({
+            "Lua_Signed/AOV/Lobby/GameEntryControl_lua.bytes":
+                bytes.fromhex("4fe3a00b") + b"opaque-startup-script",
+            "Lua_Signed/AOV/Lobby/LoginNotice.lua":
+                b"function ShowLoginNotice() end",
+        })
+        resources = _zip_entries_bytes({
+            "Resources/1.64.1/StableSystems_3.pkg.bytes": package,
+        })
+        wrapper = _zip_entries_bytes({"Resources.zip": resources})
+
+        with TestClient(main.app) as client:
+            started = client.post("/api/upload/start", json={
+                "files": [{"name": "startup-wrapper.zip", "size": len(wrapper)}]
+            })
+            self.assertEqual(started.status_code, 200)
+            upload_id = started.json()["upload_id"]
+            try:
+                uploaded = client.put(
+                    f"/api/upload/{upload_id}/0",
+                    content=wrapper,
+                    headers={"X-Chunk-Offset": "0"},
+                )
+                self.assertEqual(uploaded.status_code, 200)
+
+                response = client.post(
+                    f"/api/upload/{upload_id}/notice-scan"
+                )
+                self.assertEqual(response.status_code, 200)
+                report = response.json()
+
+                self.assertEqual(report["startup_notice_candidate_count"], 1)
+                self.assertEqual(
+                    report["startup_notice_candidates"][0]["resource_role"],
+                    "startup_flow_candidate",
+                )
+                self.assertEqual(
+                    report["startup_flow_unsupported_count"], 1
+                )
+                self.assertTrue(
+                    report["startup_flow_unsupported_resources"][0]["path"].endswith(
+                        "GameEntryControl_lua.bytes"
+                    )
+                )
+                self.assertIn(upload_id, main.UPLOAD_SESSIONS)
+            finally:
+                session = main.UPLOAD_SESSIONS.pop(upload_id, None)
+                if session:
+                    main.shutil.rmtree(session["workdir"], ignore_errors=True)
+
     def test_branding_scan_endpoint_returns_candidates_and_keeps_session(self):
         payload = _zip_bytes(
             "Resources/notice.txt",
