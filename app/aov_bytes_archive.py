@@ -471,7 +471,7 @@ def decode_archive_resources(
         "branding_candidates": [],
         "branding_candidates_truncated": False,
         "branding_scan_terms": [term for _, term in BRANDING_TERMS],
-        "notice_scan_scope": "Text-like Lua/XML/JSON/TXT/config/CSV, decoded non-MSES .bytes, and bounded UnityFS AssetBundle object text (MonoBehaviour/TextAsset/ScriptableObject, up to 64 MiB and 500 objects per bundle). Opaque binary remains unscanned.",
+        "notice_scan_scope": "Text-like Lua/XML/JSON/TXT/config/CSV, decoded non-MSES .bytes, raw ZIP-based .pkg.bytes packages, and bounded UnityFS AssetBundle object text (MonoBehaviour/TextAsset/ScriptableObject, up to 64 MiB and 500 objects per bundle). Opaque binary remains unscanned.",
         "advisory_only": True,
         "merge_authorized": False,
         "game_tested": False,
@@ -520,12 +520,24 @@ def decode_archive_resources(
             except (RuntimeError, zipfile.BadZipFile, OSError, EOFError) as exc:
                 raise AOVBytesArchiveError(f"Không đọc được ZIP entry: {path}") from exc
 
-            if path.lower().endswith(".zip") and depth < MAX_NESTED_ZIP_DEPTH:
+            lower_path = path.casefold()
+            is_raw_pkg_zip = (
+                lower_path.endswith(".pkg.bytes")
+                and raw.startswith((b"PK\\x03\\x04", b"PK\\x05\\x06"))
+            )
+            if (
+                (lower_path.endswith(".zip") or is_raw_pkg_zip)
+                and depth < MAX_NESTED_ZIP_DEPTH
+            ):
                 try:
                     with zipfile.ZipFile(io.BytesIO(raw), "r") as nested:
                         process_archive(nested, f"{prefix}/{path}", depth + 1)
-                except zipfile.BadZipFile:
-                    report["ignored_files"] += 1
+                    report["nested_packages_expanded"] += 1
+                except zipfile.BadZipFile as exc:
+                    if lower_path.endswith(".zip") or is_raw_pkg_zip:
+                        raise AOVBytesArchiveError(
+                            f"Package ZIP lồng có header nhưng dữ liệu không hợp lệ: {path}"
+                        ) from exc
                 continue
 
             if PurePosixPath(path.lower()).suffix == ".assetbundle":
