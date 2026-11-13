@@ -361,6 +361,7 @@ async def notice_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 for marker in startup_markers
             )
         ]
+        custom_lua_resources = report.get("custom_lua_resources", [])
         report["startup_notice_candidates"] = startup_candidates
         report["protected_kill_notification_candidates"] = protected_kill_candidates
         report["protected_billboard_candidates"] = protected_billboard_candidates
@@ -395,6 +396,24 @@ async def notice_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for item in protected_billboard_candidates[:6]:
             lines.append(
                 f"• GIỮ NGUYÊN {item.get('source', '')}/{item.get('path', '')}"
+            )
+        lines.extend([
+            "",
+            f"LUA TÙY BIẾN ĐÃ NHẬN DIỆN HEADER (CHƯA DECOMPILE): {len(custom_lua_resources)}",
+        ])
+        for item in custom_lua_resources[:6]:
+            lines.append(
+                f"• {item.get('source', '')}/{item.get('resource_path', '')} "
+                f"| {item.get('format_family', '')} | {item.get('decode_mode', '')}"
+            )
+            lines.append(
+                f"  SHA-256: {item.get('resource_sha256', '')}"
+            )
+            lines.append(
+                f"  Chuỗi: {' | '.join(item.get('strings', [])[:12])}"
+            )
+            lines.append(
+                f"  {item.get('note', 'Chỉ nhận diện header và chuỗi, chưa thể sửa bytecode.')}"
             )
         lines.extend([
             "",
