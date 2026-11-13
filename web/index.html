@@ -903,6 +903,19 @@ noticeScanBtn.addEventListener('click',async()=>{
     for(const item of (data.protected_billboard_candidates||[])){
       lines.push('GIỮ NGUYÊN: '+item.source+'/'+item.path+' | '+item.keyword_group);
     }
+    const opaqueStartupResources=data.startup_flow_unsupported_resources||[];
+    lines.push(
+      '',
+      '=== SCRIPT STARTUP / LOBBY CHƯA GIẢI MÃ ĐƯỢC ===',
+      'Số tài nguyên: '+(data.startup_flow_unsupported_count||0)
+    );
+    for(const item of opaqueStartupResources){
+      lines.push('CHƯA ĐỌC ĐƯỢC: '+item.source+'/'+item.path);
+      lines.push('  '+(item.reason||'Định dạng chưa có bộ giải mã tương ứng.'));
+    }
+    if(!opaqueStartupResources.length){
+      lines.push('Không có script startup/lobby bị đánh dấu chưa giải mã trong lần quét này.');
+    }
     lines.push('', '=== CÁC KẾT QUẢ TỪ KHÓA KHÁC (CHỈ THAM KHẢO) ===');
     for(const item of (data.candidates||[])){
       lines.push('['+(item.resource_role||'unclassified_notice_text')+'] ['+item.keyword_group+'] '+item.source+'/'+item.path);
