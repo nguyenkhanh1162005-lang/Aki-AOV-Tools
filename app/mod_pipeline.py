@@ -587,15 +587,41 @@ def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
             ),
         }
 
-    if leaf in {
-        "resskinseniorlabelcfg.bytes", "battlebank.bytes",
-        "lobbybank.bytes", "skillcombine.bytes",
-    }:
+    if leaf == "rescharactercomponent.bytes":
+        return {
+            "adapter_state": "source_validated_mses_union",
+            "next_action": (
+                "Đã xác minh trên cặp P9/P10 mẫu: MSES v7, 188 trường, checksum hợp lệ; "
+                "520 khóa chung giống byte và chỉ nối khóa mới. Đây mới là adapter cấp bảng, "
+                "chưa mở ghép hai wrapper hoàn chỉnh."
+            ),
+            "safety_rule": (
+                "Chỉ hợp nhất cùng schema 188 trường; khóa trùng, hàng chung khác byte, "
+                "checksum sai hoặc sai đường dẫn phải chặn."
+            ),
+        }
+
+    if leaf == "resskinseniorlabelcfg.bytes":
+        return {
+            "adapter_state": "source_pinned_mses_union",
+            "next_action": (
+                "Có hai quy tắc hẹp: VTK Actor 595 dùng allowlist 59500; cặp P9/P10 mẫu "
+                "chỉ nhận MSES v7/69 trường/cặp 8-98 hàng với chuỗi checksum cũ đã ghim, "
+                "tập khóa 8 hàng là tập con và mọi hàng chung giống byte. Output phải tính lại checksum."
+            ),
+            "safety_rule": (
+                "Không tự sửa checksum của nguồn khác; sai số hàng, schema, checksum ghim, "
+                "hàng chung hoặc khóa không đúng quy tắc đều phải chặn."
+            ),
+        }
+
+    if leaf in {"battlebank.bytes", "lobbybank.bytes", "skillcombine.bytes"}:
         return {
             "adapter_state": "version_locked_schema",
             "next_action": (
                 "Có parser/serializer MSES v7; allowlist khóa chỉ có trong adapter "
-                "VTK Actor 595. Cần xác định schema, khóa row và allowlist riêng cho từng bảng P9/P10/TM."
+                "VTK Actor 595. P9/P10 sample skillcombine giống hệt nhau, có thể dedupe; "
+                "soundbank P9/P10/TM có nhiều hàng chung khác payload và chưa được ghép."
             ),
             "safety_rule": "Khác payload ở cùng khóa hoặc khóa mới ngoài allowlist phải chặn ghép.",
         }
