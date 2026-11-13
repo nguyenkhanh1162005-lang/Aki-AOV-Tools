@@ -4,6 +4,7 @@ import copy
 import hashlib
 import io
 import os
+import re
 import shutil
 import stat
 import sys
@@ -14,10 +15,15 @@ from typing import Any
 
 from .aov_bytes import AOVBytesError, decode_aov_resource, encode_aov_resource
 from .aov_merge import AOVResourceMergeError, merge_aov_mses_resource
-from .aov_common_actions import CommonActionsMergeError, merge_common_actions_pkg
+from .aov_common_actions import (
+    CommonActionsMergeError,
+    analyze_common_actions_overlay_set,
+    merge_common_actions_pkg,
+)
 from .ifix_merger import (
     IFixMergeError,
     merge_ifix_patches,
+    merge_ifix_actor_scoped_patches,
     parse_ifix_patch,
     serialize_ifix_patch,
 )
@@ -923,3 +929,593 @@ def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                 zf.close()
             except Exception:
                 pass
+
+
+def _sha256_file_for_aov(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+P9_ARCHIVE_SHA256 = "77dcb4f270c4be00d2cbce8194a57a388420eeb6e430f0edae7bc8e812cf2e84"
+P10_ARCHIVE_SHA256 = "325c6c96baf931cd2b3cd33b65c944e994f3c48bbe2c22eab08d7a338d04b03e"
+P9_ACTOR_IDS = {"107", "130", "137", "163", "509", "510", "518", "540", "597"}
+P10_ACTOR_IDS = {"111", "132", "150", "157", "167", "190", "524", "567", "598", "599"}
+
+P9_P10_ACTOR_MSES_PATHS = {
+    "Databin/Client/Actor/heroSkin.bytes",
+    "Databin/Client/Motion/ResSkinMotionBaseCfg.bytes",
+    "Databin/Client/Shop/HeroSkinShop.bytes",
+    "Databin/Client/Skill/skillmark.bytes",
+    "Databin/Client/Skill/liteBulletCfg.bytes",
+    "Databin/Client/Sound/BattleBank.bytes",
+    "Databin/Client/Sound/LobbyBank.bytes",
+    "Databin/Client/Sound/LobbySound.bytes",
+    "Databin/Client/Sound/ChatSound.bytes",
+    "Databin/Client/Sound/CoupleSound.bytes",
+    "Databin/Client/Sound/HeroSound.bytes",
+}
+
+
+def p9_p10_actor_id_from_packer_path(path: str) -> str | None:
+    """Read the first three actor digits in an exact P9/P10 skin bundle path."""
+    normalized = path.replace(chr(92), "/").casefold()
+    if not normalized.startswith("assetbundle/battle/skin/"):
+        return None
+    filename = normalized.rsplit("/", 1)[-1]
+    match = re.match(r"^(\d{3})\d*_.+_battle(?:_low)?\.assetbundle$", filename)
+    if not match:
+        return None
+    actor_id = match.group(1)
+    return actor_id if actor_id in P9_ACTOR_IDS | P10_ACTOR_IDS else None
+
+
+def _merge_p9_p10_packer_metadata(p10_data: bytes, p9_data: bytes) -> tuple[bytes, dict]:
+    """Select the 410 changed PackerInfo skin rows by the owning P9/P10 Actor.
+
+    P9 and P10 have the same 1.64.1.12 path order and dependency edge array.
+    Only source-owned skin-bundle ResourceInfos differ, so no dependency index
+    needs to be rewritten for this exact pair.
+    """
+    # ResourcePackerInfo is a raw UnityFS AssetBundle, not an AES/.bytes
+    # resource. Parse and serialize it directly; the source hash pins its exact
+    # raw UnityFS payload.
+    p10_raw = p10_data
+    p9_raw = p9_data
+    if (
+        hashlib.sha256(p10_data).hexdigest()
+        != "b87d60ef87d5d49dacad2cdb32536e06bd933ac4e2f8649e6336855609b39d56"
+        or hashlib.sha256(p9_data).hexdigest()
+        != "6784ca2038e4f141dba82d4b8bc71cd0b7b7998efa3adf9d61447335bf9e06f5"
+    ):
+        raise AOVMergeError("PackerInfo không khớp đúng payload P9/P10 đã kiểm chứng.")
+    UnityPy_AOV = _load_unitypy_aov()
+    try:
+        p10_env = UnityPy_AOV.load(p10_raw)
+        p9_env = UnityPy_AOV.load(p9_raw)
+        p10_obj, p10_tree = _find_mono_behaviour(
+            p10_env, "ResourcePackerInfoSetXML"
+        )
+        _, p9_tree = _find_mono_behaviour(
+            p9_env, "ResourcePackerInfoSetXML"
+        )
+    except AOVMergeError:
+        raise
+    except Exception as exc:
+        raise AOVMergeError(
+            f"Không đọc được PackerInfo P9/P10: {type(exc).__name__}: {exc}"
+        ) from exc
+
+    if p10_tree.get("Version") != BASE_VERSION or p9_tree.get("Version") != BASE_VERSION:
+        raise AOVMergeError("PackerInfo P9/P10 không cùng phiên bản 1.64.1.12.")
+    p10_entries = p10_tree["AllResourcePackInfo"]
+    p9_entries = p9_tree["AllResourcePackInfo"]
+    if len(p10_entries) != 22298 or len(p9_entries) != 22298:
+        raise AOVMergeError("PackerInfo P9/P10 không có đúng 22.298 entry.")
+    p10_paths = [item["PathInIFS"] for item in p10_entries]
+    p9_paths = [item["PathInIFS"] for item in p9_entries]
+    if p10_paths != p9_paths or len(set(p10_paths)) != len(p10_paths):
+        raise AOVMergeError("Thứ tự PathInIFS P9/P10 khác nhau; không thể giữ nguyên dependency index.")
+    p10_links = p10_tree["AllParentIdexToChild"]
+    p9_links = p9_tree["AllParentIdexToChild"]
+    if len(p10_links) != 60243 or p10_links != p9_links:
+        raise AOVMergeError("Đồ thị dependency PackerInfo P9/P10 không giống hệt nhau.")
+
+    changed = 0
+    selected_p9 = 0
+    selected_p10 = 0
+    p9_actor_ids = set(P9_ACTOR_IDS)
+    p10_actor_ids = set(P10_ACTOR_IDS)
+    for index, (p10_entry, p9_entry) in enumerate(zip(p10_entries, p9_entries)):
+        if p10_entry == p9_entry:
+            continue
+        changed += 1
+        path = p10_entry["PathInIFS"]
+        actor_id = p9_p10_actor_id_from_packer_path(path)
+        if actor_id is None:
+            raise AOVMergeError(
+                f"PackerInfo có xung đột ngoài đường dẫn skin đã xác minh: {path}"
+            )
+        if actor_id in p9_actor_ids and actor_id not in p10_actor_ids:
+            p10_entries[index] = copy.deepcopy(p9_entry)
+            selected_p9 += 1
+        elif actor_id in p10_actor_ids and actor_id not in p9_actor_ids:
+            selected_p10 += 1
+        else:
+            raise AOVMergeError(
+                f"PackerInfo không xác định được duy nhất Actor sở hữu {path}."
+            )
+    if (changed, selected_p9, selected_p10) != (410, 164, 246):
+        raise AOVMergeError(
+            "Số PackerInfo theo Actor thay đổi so với fixture "
+            f"(changed={changed}, P9={selected_p9}, P10={selected_p10})."
+        )
+
+    try:
+        p10_obj.save_typetree(p10_tree)
+        if len(p10_env.files) != 1:
+            raise AOVMergeError("PackerInfo P10 không có đúng một serialized AssetBundle.")
+        serialized = next(iter(p10_env.files.values())).save("original")
+        check_env = UnityPy_AOV.load(serialized)
+        _, check_tree = _find_mono_behaviour(
+            check_env, "ResourcePackerInfoSetXML"
+        )
+    except AOVMergeError:
+        raise
+    except Exception as exc:
+        raise AOVMergeError(
+            f"Không serialize được PackerInfo P9/P10: {type(exc).__name__}: {exc}"
+        ) from exc
+
+    check_entries = check_tree["AllResourcePackInfo"]
+    if (
+        check_tree.get("Version") != BASE_VERSION
+        or [item["PathInIFS"] for item in check_entries] != p10_paths
+        or check_tree["AllParentIdexToChild"] != p10_links
+        or len(check_entries) != 22298
+    ):
+        raise AOVMergeError("PackerInfo round-trip làm thay đổi path hoặc dependency graph.")
+    output = serialized
+    verify_env = UnityPy_AOV.load(output)
+    _, verify_tree = _find_mono_behaviour(
+        verify_env, "ResourcePackerInfoSetXML"
+    )
+    if (
+        [item["PathInIFS"] for item in verify_tree["AllResourcePackInfo"]] != p10_paths
+        or verify_tree["AllParentIdexToChild"] != p10_links
+    ):
+        raise AOVMergeError("PackerInfo UnityFS round-trip không giữ nguyên dependency graph.")
+    return output, {
+        "version": BASE_VERSION,
+        "entry_count": len(check_entries),
+        "dependency_link_count": len(check_tree["AllParentIdexToChild"]),
+        "changed_entries": changed,
+        "selected_p9_actor_entries": selected_p9,
+        "selected_p10_actor_entries": selected_p10,
+        "dependency_graph_unchanged": True,
+        "verified": True,
+    }
+
+
+def _merge_p9_p10_ifix_resource(
+    p10_data: bytes, p9_data: bytes, resource_name: str
+) -> tuple[bytes, dict]:
+    p10_raw, p10_mode = decode_aov_resource(p10_data, resource_name)
+    p9_raw, _ = decode_aov_resource(p9_data, resource_name)
+    try:
+        p10_patch = parse_ifix_patch(p10_raw)
+        p9_patch = parse_ifix_patch(p9_raw)
+        if (
+            serialize_ifix_patch(p10_patch) != p10_raw
+            or serialize_ifix_patch(p9_patch) != p9_raw
+        ):
+            raise AOVMergeError("IFix P9/P10 source không round-trip chính xác.")
+        merged = merge_ifix_actor_scoped_patches(p10_patch, p9_patch)
+        merged_raw = serialize_ifix_patch(merged)
+        output = encode_aov_resource(merged_raw, resource_name, p10_mode)
+        verify_raw, _ = decode_aov_resource(output, resource_name)
+        verified = parse_ifix_patch(verify_raw)
+        if serialize_ifix_patch(verified) != merged_raw:
+            raise AOVMergeError("IFix sau ghép không round-trip byte-for-byte.")
+    except IFixMergeError as exc:
+        raise AOVMergeError(f"{resource_name}: {exc}") from exc
+    return output, {
+        "fixes": len(verified["fixes"]),
+        "methods": len(verified["methods"]),
+        "encoding": p10_mode,
+        "verified": True,
+    }
+
+
+def merge_p9_p10_archives(
+    archive_paths: list[str], output_path: str
+) -> dict[str, Any]:
+    """Merge the exact iOS P9 and P10 skin wrappers into one 19-skin wrapper.
+
+    All source bytes are pinned by SHA-256. Every differing resource must pass its
+    source-specific MSES, IFix, CommonActions, or PackerInfo adapter. Unknown
+    conflicts are rejected; no stock game package is injected.
+    """
+    if len(archive_paths) != 2:
+        raise AOVMergeError("Adapter P9/P10 chỉ nhận đúng hai ZIP nguồn.")
+    opened: list[zipfile.ZipFile] = []
+    try:
+        total_input_bytes = sum(Path(path).stat().st_size for path in archive_paths)
+        if total_input_bytes > MAX_TOTAL_INPUT_BYTES:
+            raise AOVMergeError("Tổng ZIP P9/P10 vượt giới hạn 500 MB.")
+        archives = []
+        for path in archive_paths:
+            if _sha256_file_for_aov(path) not in {P9_ARCHIVE_SHA256, P10_ARCHIVE_SHA256}:
+                raise AOVMergeError(
+                    f"{Path(path).name}: SHA-256 không thuộc cặp P9/P10 đã kiểm chứng."
+                )
+            try:
+                zf = zipfile.ZipFile(path, "r")
+            except Exception as exc:
+                raise AOVMergeError(f"Không mở được ZIP P9/P10: {Path(path).name}") from exc
+            opened.append(zf)
+            _validate_archive_paths(zf, Path(path).name)
+            bad = zf.testzip()
+            if bad:
+                raise AOVMergeError(f"ZIP P9/P10 lỗi CRC tại {bad}.")
+            resources = _find_outer_entries(zf, "Resources.zip")
+            skins = _find_outer_entries(zf, "DanhSachSkin.txt")
+            if len(resources) != 1 or len(skins) != 1:
+                raise AOVMergeError("Mỗi ZIP P9/P10 phải có đúng một Resources.zip và DanhSachSkin.txt.")
+            digest = _sha256_file_for_aov(path)
+            archives.append({
+                "path": path,
+                "zip": zf,
+                "digest": digest,
+                "source": "P9" if digest == P9_ARCHIVE_SHA256 else "P10",
+                "resources_info": resources[0],
+                "skin_info": skins[0],
+            })
+        if {item["source"] for item in archives} != {"P9", "P10"}:
+            raise AOVMergeError("Cần đúng một nguồn P9 và một nguồn P10.")
+        p10 = next(item for item in archives if item["source"] == "P10")
+        p9 = next(item for item in archives if item["source"] == "P9")
+
+        def read_inner(source):
+            raw = source["zip"].read(source["resources_info"])
+            inner = zipfile.ZipFile(io.BytesIO(raw), "r")
+            _validate_archive_paths(inner, f"Resources.zip {source['source']}")
+            bad = inner.testzip()
+            if bad:
+                inner.close()
+                raise AOVMergeError(
+                    f"Resources.zip {source['source']} lỗi CRC tại {bad}."
+                )
+            files = {
+                info.filename: (info, inner.read(info))
+                for info in inner.infolist() if not info.is_dir()
+            }
+            if any(not name.startswith(BASE_PREFIX) for name in files):
+                inner.close()
+                raise AOVMergeError(
+                    f"Resources.zip {source['source']} có path ngoài build {BASE_PREFIX}."
+                )
+            return raw, inner, files
+
+        p10_raw, p10_inner, p10_files = read_inner(p10)
+        p9_raw, p9_inner, p9_files = read_inner(p9)
+        try:
+            p10_actors = {
+                match.group(1)
+                for name in p10_files
+                if (match := re.search(
+                    r"(?:^|/)Actor_(\d{3})_Actions\.pkg\.bytes$",
+                    name, re.IGNORECASE
+                ))
+            }
+            p9_actors = {
+                match.group(1)
+                for name in p9_files
+                if (match := re.search(
+                    r"(?:^|/)Actor_(\d{3})_Actions\.pkg\.bytes$",
+                    name, re.IGNORECASE
+                ))
+            }
+            if p10_actors != P10_ACTOR_IDS or p9_actors != P9_ACTOR_IDS:
+                raise AOVMergeError("Actor_Action inventory không khớp bộ P9/P10 đã ghim.")
+            version_path = BASE_PREFIX + "version.txt"
+            if (
+                version_path not in p10_files
+                or version_path not in p9_files
+                or p10_files[version_path][1] != p9_files[version_path][1]
+            ):
+                raise AOVMergeError("version.txt P9/P10 không giống nhau.")
+
+            p10_names = set(p10_files)
+            p9_names = set(p9_files)
+            common_path = BASE_PREFIX + COMMON_ACTIONS_PATH
+            packer_path = BASE_PREFIX + PACKER_PATH
+            verification_path = BASE_PREFIX + VERIFICATION_PATH
+            if any(path not in p10_names or path not in p9_names for path in (
+                common_path,
+                packer_path,
+                verification_path,
+                BASE_PREFIX + "Thanos/HeroSkin_1.bytes",
+                BASE_PREFIX + "Thanos/HeroSkin_2.bytes",
+            )):
+                raise AOVMergeError("P9/P10 thiếu tài nguyên bắt buộc để ghép.")
+
+            p10_common = p10_files[common_path][1]
+            p9_common = p9_files[common_path][1]
+            if (
+                hashlib.sha256(p10_common).hexdigest()
+                != "2ec3ca0a185850566c4001305e6fd367bbfd616d459d04adc4b2fa88a458405f"
+                or hashlib.sha256(p9_common).hexdigest()
+                != "2e0e1fce641b5310c70d19a63637381de3af5ec938c92488e7e1b16afcdb87ca"
+            ):
+                raise AOVMergeError("CommonActions P9/P10 không khớp hai package đã kiểm chứng.")
+            # The exact source pair differs at exactly three XML tracks, all
+            # covered by the actor-gated parser. Do not let an opaque semantic
+            # subset or a new file silently pass through strict_conflicts.
+            try:
+                with zipfile.ZipFile(io.BytesIO(p10_common), "r") as p10_ca, zipfile.ZipFile(
+                    io.BytesIO(p9_common), "r"
+                ) as p9_ca:
+                    p10_common_names = [info.filename for info in p10_ca.infolist() if not info.is_dir()]
+                    p9_common_names = [info.filename for info in p9_ca.infolist() if not info.is_dir()]
+                    if (
+                        len(p10_common_names) != 785
+                        or len(p9_common_names) != 785
+                        or len(set(p10_common_names)) != 785
+                        or len(set(p9_common_names)) != 785
+                        or set(p10_common_names) != set(p9_common_names)
+                    ):
+                        raise AOVMergeError("CommonActions P9/P10 không giữ đúng 785 path duy nhất.")
+                    common_differences = {
+                        name for name in p10_common_names
+                        if p10_ca.read(name) != p9_ca.read(name)
+                    }
+            except zipfile.BadZipFile as exc:
+                raise AOVMergeError("CommonActions P9/P10 không phải ZIP lồng hợp lệ.") from exc
+            expected_common_differences = {
+                "commonresource/Back.xml",
+                "commonresource/HasteE1.xml",
+                "commonresource/HasteE1_leave.xml",
+            }
+            if common_differences != expected_common_differences:
+                raise AOVMergeError(
+                    "CommonActions P9/P10 có path xung đột ngoài ba XML đã kiểm chứng: "
+                    + ", ".join(sorted(common_differences ^ expected_common_differences))
+                )
+
+            common_dry_run = analyze_common_actions_overlay_set([
+                ("P9", p9_common, set(P9_ACTOR_IDS))
+            ])
+            if (
+                not common_dry_run.get("parser_verified")
+                or common_dry_run.get("unsupported_path_conflict_count") != 0
+                or not common_dry_run.get("skin_ids")
+            ):
+                raise AOVMergeError(
+                    "CommonActions P9 không qua dry-run hoặc còn path conflict ngoài parser."
+                )
+            try:
+                merged_common, common_report = merge_common_actions_pkg(
+                    p10_common,
+                    p9_common,
+                    special_ids=set(common_dry_run["skin_ids"]),
+                    strict_conflicts=True,
+                )
+            except CommonActionsMergeError as exc:
+                raise AOVMergeError(f"CommonActions P9/P10: {exc}") from exc
+            if not common_report.get("verified"):
+                raise AOVMergeError("CommonActions P9/P10 không qua xác minh track.")
+            replacements: dict[str, bytes] = {
+                COMMON_ACTIONS_PATH: merged_common,
+            }
+
+            for relative in ("Thanos/HeroSkin_1.bytes", "Thanos/HeroSkin_2.bytes"):
+                full_path = BASE_PREFIX + relative
+                if p10_files[full_path][1] == p9_files[full_path][1]:
+                    continue
+                replacements[relative], _ = _merge_p9_p10_ifix_resource(
+                    p10_files[full_path][1],
+                    p9_files[full_path][1],
+                    relative,
+                )
+
+            mses_reports = {}
+            for relative in sorted({
+                name[len(BASE_PREFIX):]
+                for name in p10_names & p9_names
+                if name.endswith(".bytes")
+                and p10_files[name][1] != p9_files[name][1]
+            }):
+                if relative in {
+                    COMMON_ACTIONS_PATH,
+                    "Thanos/HeroSkin_1.bytes",
+                    "Thanos/HeroSkin_2.bytes",
+                }:
+                    continue
+                full_path = BASE_PREFIX + relative
+                options = {}
+                if relative == RES_SKIN_PATH:
+                    options["allow_p9_p10_label_union"] = True
+                elif relative in P9_P10_ACTOR_MSES_PATHS:
+                    options["base_actor_action_ids"] = set(P10_ACTOR_IDS)
+                    options["overlay_actor_action_ids"] = set(P9_ACTOR_IDS)
+                try:
+                    merged, report = merge_aov_mses_resource(
+                        p10_files[full_path][1],
+                        p9_files[full_path][1],
+                        relative,
+                        **options,
+                    )
+                except AOVResourceMergeError as exc:
+                    raise AOVMergeError(str(exc)) from exc
+                if not report.get("verified"):
+                    raise AOVMergeError(f"{relative}: adapter MSES không xác minh được output.")
+                replacements[relative] = merged
+                mses_reports[relative] = report
+
+            if p10_files[verification_path][1] != p9_files[verification_path][1]:
+                raise AOVMergeError("ResourceVerification P9/P10 khác nhau ngoài fixture.")
+            replacements[PACKER_PATH], packer_report = _merge_p9_p10_packer_metadata(
+                p10_files[packer_path][1], p9_files[packer_path][1]
+            )
+
+            # Require every differing shared path to have a dedicated merger.
+            conflict_paths = {
+                name for name in p10_names & p9_names
+                if p10_files[name][1] != p9_files[name][1]
+            }
+            handled_paths = {BASE_PREFIX + item for item in replacements}
+            if conflict_paths != handled_paths:
+                unresolved = sorted(conflict_paths - handled_paths)
+                unexpected = sorted(handled_paths - conflict_paths)
+                raise AOVMergeError(
+                    f"Inventory P9/P10 chưa được xử lý đúng. "
+                    f"Chưa xử lý={unresolved[:12]}; thay đổi thừa={unexpected[:12]}."
+                )
+            if len(conflict_paths) != 18:
+                raise AOVMergeError(
+                    f"Số path xung đột P9/P10 thay đổi ({len(conflict_paths)} != 18)."
+                )
+
+            directories = {
+                info.filename
+                for inner in (p10_inner, p9_inner)
+                for info in inner.infolist() if info.is_dir()
+            }
+            inner_output = io.BytesIO()
+            written_dirs = set()
+            with zipfile.ZipFile(
+                inner_output, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True
+            ) as out_inner:
+                for info in p10_inner.infolist():
+                    if info.is_dir():
+                        if info.filename not in written_dirs:
+                            out_inner.writestr(info, b"")
+                            written_dirs.add(info.filename)
+                        continue
+                    relative = info.filename[len(BASE_PREFIX):]
+                    payload = replacements.get(relative, p10_files[info.filename][1])
+                    out_inner.writestr(info, payload)
+                for info in p9_inner.infolist():
+                    if info.is_dir():
+                        if info.filename not in written_dirs:
+                            out_inner.writestr(info, b"")
+                            written_dirs.add(info.filename)
+                    elif info.filename not in p10_names:
+                        out_inner.writestr(info, p9_files[info.filename][1])
+
+            inner_bytes = inner_output.getvalue()
+            with zipfile.ZipFile(io.BytesIO(inner_bytes), "r") as check_inner:
+                expected_inner = set(p10_inner.namelist()) | set(p9_inner.namelist())
+                _assert_archive_inventory(
+                    check_inner, expected_inner, "Resources.zip P9+P10 sau ghép"
+                )
+                for relative in replacements:
+                    if BASE_PREFIX + relative not in check_inner.namelist():
+                        raise AOVMergeError(f"Resources.zip sau ghép thiếu {relative}.")
+
+            p10_skin_text = p10["zip"].read(p10["skin_info"]).decode(
+                "utf-8-sig", errors="strict"
+            )
+            p9_skin_text = p9["zip"].read(p9["skin_info"]).decode(
+                "utf-8-sig", errors="strict"
+            )
+            p10_skin_lines = [line.strip() for line in p10_skin_text.splitlines() if line.strip()]
+            p9_skin_lines = [line.strip() for line in p9_skin_text.splitlines() if line.strip()]
+            if (
+                len(p10_skin_lines) != 10
+                or len(p9_skin_lines) != 9
+                or len(set(p10_skin_lines)) != 10
+                or len(set(p9_skin_lines)) != 9
+            ):
+                raise AOVMergeError("DanhSachSkin nguồn không có đúng 10 mục P10 và 9 mục P9.")
+            skin_lines = []
+            for line in (p10_skin_text + "\n" + p9_skin_text).splitlines():
+                line = line.strip()
+                if line and line not in skin_lines:
+                    skin_lines.append(line)
+            if len(skin_lines) != 19:
+                raise AOVMergeError(
+                    f"DanhSachSkin sau union có {len(skin_lines)} mục thay vì 19."
+                )
+            merged_skin_text = ("\n".join(skin_lines) + "\n").encode("utf-8")
+
+            destination = Path(output_path)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            fd, staged_name = tempfile.mkstemp(
+                prefix=f".{destination.stem}.",
+                suffix=".tmp.zip",
+                dir=str(destination.parent),
+            )
+            os.close(fd)
+            staged = Path(staged_name)
+            try:
+                with zipfile.ZipFile(staged, "w", allowZip64=True) as out_outer:
+                    for info in p10["zip"].infolist():
+                        if info.is_dir():
+                            out_outer.writestr(info, b"")
+                        elif info.filename == p10["resources_info"].filename:
+                            out_outer.writestr(info, inner_bytes)
+                        elif info.filename == p10["skin_info"].filename:
+                            out_outer.writestr(info, merged_skin_text)
+                        else:
+                            out_outer.writestr(info, p10["zip"].read(info))
+                _publish_staged_archive(
+                    staged,
+                    destination,
+                    {info.filename for info in p10["zip"].infolist()},
+                )
+            finally:
+                staged.unlink(missing_ok=True)
+
+            return {
+                "output": str(destination),
+                "adapter": "aov_p9_p10_skin_union_1.64.1",
+                "base_version": BASE_VERSION,
+                "source_archives": {"P9": P9_ARCHIVE_SHA256, "P10": P10_ARCHIVE_SHA256},
+                "actors": sorted(P9_ACTOR_IDS | P10_ACTOR_IDS),
+                "skin_count": 19,
+                "resource_paths": len(p10_names | p9_names),
+                "conflicting_paths_merged": len(conflict_paths),
+                "common_actions_files": len(common_report.get("merged_files", {})),
+                "common_actions_report": common_report,
+                "ifix_reports": {
+                    relative: {
+                        "fixes": len(parse_ifix_patch(
+                            decode_aov_resource(replacements[relative], relative)[0]
+                        )["fixes"]),
+                        "methods": len(parse_ifix_patch(
+                            decode_aov_resource(replacements[relative], relative)[0]
+                        )["methods"]),
+                    }
+                    for relative in ("Thanos/HeroSkin_1.bytes", "Thanos/HeroSkin_2.bytes")
+                    if relative in replacements
+                },
+                "mses_reports": mses_reports,
+                "packer_report": packer_report,
+                "resource_verification_unchanged": True,
+                "output_bytes": destination.stat().st_size,
+                "validation": (
+                    "outer/inner ZIP CRC and inventory, CommonActions tracks, IFix, "
+                    "MSES checksums, PackerInfo dependency graph and AES round-trip passed"
+                ),
+                "structurally_validated": True,
+                "game_tested": False,
+            }
+        finally:
+            p10_inner.close()
+            p9_inner.close()
+    except AOVMergeError:
+        raise
+    except (AOVBytesError, CommonActionsMergeError, IFixMergeError, ValueError) as exc:
+        if isinstance(exc, AOVMergeError):
+            raise
+        raise AOVMergeError(
+            f"Không thể ghép P9/P10: {type(exc).__name__}: {exc}"
+        ) from exc
+    finally:
+        for zf in opened:
+            zf.close()
+

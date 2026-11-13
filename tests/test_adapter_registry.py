@@ -21,7 +21,11 @@ class AdapterRegistryTests(unittest.TestCase):
         self.assertEqual(wrapper["status"], "merge_supported_version_locked")
         self.assertIn("Resources.zip", wrapper["scope"])
         self.assertIn("10 AssetBundle", wrapper["scope"])
-        self.assertEqual(result["summary"]["version_locked"], 2)
+        p9p10 = adapters["aov_p9_p10_skin_union_1.64.1"]
+        self.assertEqual(p9p10["status"], "merge_supported_version_locked")
+        self.assertIn("19", p9p10["name"])
+        self.assertIn("P9/P10", p9p10["scope"])
+        self.assertEqual(result["summary"]["version_locked"], 3)
         self.assertEqual(result["summary"]["blocked"], 0)
         self.assertEqual(adapters["aov_multi_mod_intake"]["status"], "inspect_only")
         self.assertIn("không phụ thuộc tên P9/P10/TM/VTK", adapters["aov_multi_mod_intake"]["scope"])
