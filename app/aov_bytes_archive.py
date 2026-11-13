@@ -5,6 +5,7 @@ uploaded archives.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
@@ -128,6 +129,83 @@ MAX_BRANDING_CANDIDATES = 100
 
 class AOVBytesArchiveError(ValueError):
     pass
+
+
+# A small set of AoV lobby scripts use a custom Lua-family wrapper instead of
+# the normal 22 4A AoV resource envelope. The marker at offset 128 identifies
+# this container family, but it is NOT a complete Lua decompiler or serializer.
+
+_CUSTOM_LUA_RESOURCE_NAMES = {
+    "gameentrycontrol_lua.bytes",
+    "lobbyview_lua.bytes",
+    "clobbysystem_lua.bytes",
+}
+_CUSTOM_LUA_CHUNK_OFFSET = 128
+_CUSTOM_LUA_CHUNK_SIGNATURE = bytes([0x1B]) + b"LuaS"
+_CUSTOM_LUA_FORMAT_BYTE = 0x01
+_MAX_CUSTOM_LUA_INSPECT_BYTES = 2 * 1024 * 1024
+_MAX_CUSTOM_LUA_STRINGS = 300
+_MAX_CUSTOM_LUA_STRING_LENGTH = 180
+
+
+def _inspect_custom_lua_resource(
+    payload: bytes, path: str
+) -> dict[str, Any] | None:
+    """Recognize a specific custom Lua chunk prefix and extract bounded ASCII strings."""
+    leaf = PurePosixPath(path.replace(chr(92), "/")).name.casefold()
+    if leaf not in _CUSTOM_LUA_RESOURCE_NAMES:
+        return None
+    offset = _CUSTOM_LUA_CHUNK_OFFSET
+    if len(payload) <= offset + len(_CUSTOM_LUA_CHUNK_SIGNATURE):
+        return None
+    if payload[offset:offset + len(_CUSTOM_LUA_CHUNK_SIGNATURE)] != _CUSTOM_LUA_CHUNK_SIGNATURE:
+        return None
+    format_offset = offset + len(_CUSTOM_LUA_CHUNK_SIGNATURE)
+    format_byte = payload[format_offset]
+    if format_byte != _CUSTOM_LUA_FORMAT_BYTE:
+        return None
+
+    inspected = payload[offset:offset + _MAX_CUSTOM_LUA_INSPECT_BYTES]
+    strings: list[str] = []
+    current = bytearray()
+
+    def flush_ascii_run() -> None:
+        if len(current) >= 4 and len(strings) < _MAX_CUSTOM_LUA_STRINGS:
+            strings.append(
+                current.decode("ascii", errors="ignore")[:_MAX_CUSTOM_LUA_STRING_LENGTH]
+            )
+        current.clear()
+
+    for value in inspected:
+        if 0x20 <= value <= 0x7E:
+            current.append(value)
+        else:
+            flush_ascii_run()
+            if len(strings) >= _MAX_CUSTOM_LUA_STRINGS:
+                break
+    if len(strings) < _MAX_CUSTOM_LUA_STRINGS:
+        flush_ascii_run()
+
+    return {
+        "resource_path": path,
+        "format_family": "aov_custom_lua53_family",
+        "format_byte": format_byte,
+        "header_offset": offset,
+        "chunk_size": len(payload) - offset,
+        "resource_size": len(payload),
+        "resource_sha256": hashlib.sha256(payload).hexdigest(),
+        "chunk_sha256": hashlib.sha256(payload[offset:]).hexdigest(),
+        "strings": strings,
+        "strings_truncated": len(strings) >= _MAX_CUSTOM_LUA_STRINGS,
+        "recognized_only": True,
+        "decompiled": False,
+        "startup_removal_eligible": False,
+        "merge_authorized": False,
+        "note": (
+            "Đã nhận diện header Lua tùy biến và trích chuỗi ASCII; chưa có "
+            "decompiler/serializer đã xác minh nên không được sửa bytecode."
+        ),
+    }
 
 
 def _safe_member_path(name: str) -> str:
@@ -468,10 +546,12 @@ def decode_archive_resources(
         "notice_assetbundle_scan_errors": [],
         "notice_candidates": [],
         "notice_candidates_truncated": False,
+        "custom_lua_resources": [],
+        "custom_lua_resources_truncated": False,
         "branding_candidates": [],
         "branding_candidates_truncated": False,
         "branding_scan_terms": [term for _, term in BRANDING_TERMS],
-        "notice_scan_scope": "Text-like Lua/XML/JSON/TXT/config/CSV, decoded non-MSES .bytes, raw ZIP-based .pkg.bytes packages, and bounded UnityFS AssetBundle object text (MonoBehaviour/TextAsset/ScriptableObject, up to 64 MiB and 500 objects per bundle). Opaque binary remains unscanned.",
+        "notice_scan_scope": "Text-like Lua/XML/JSON/TXT/config/CSV, decoded non-MSES .bytes, bounded custom Lua-family header/string inventory for selected lobby scripts, raw ZIP-based .pkg.bytes packages, and bounded UnityFS AssetBundle object text (MonoBehaviour/TextAsset/ScriptableObject, up to 64 MiB and 500 objects per bundle). Opaque binary remains unscanned.",
         "advisory_only": True,
         "merge_authorized": False,
         "game_tested": False,
@@ -599,6 +679,37 @@ def decode_archive_resources(
                 continue
             expected_size = _expected_decoded_size(raw)
             if expected_size is None:
+                custom_lua = _inspect_custom_lua_resource(raw, path)
+                if custom_lua is not None:
+                    if len(report["custom_lua_resources"]) < MAX_NOTICE_CANDIDATES:
+                        report["custom_lua_resources"].append({
+                            "source": prefix,
+                            **custom_lua,
+                            "decode_mode": "custom_prefix_unwrapped",
+                        })
+                    else:
+                        report["custom_lua_resources_truncated"] = True
+                    report["notice_scan_files"] += 1
+                    extracted_text = "\n".join(custom_lua["strings"])
+                    for finding in _scan_notice_text_view(
+                        extracted_text, path, "lua_ascii_strings"
+                    ):
+                        if len(report["notice_candidates"]) >= MAX_NOTICE_CANDIDATES:
+                            report["notice_candidates_truncated"] = True
+                            break
+                        custom_candidate = _build_notice_candidate(
+                            prefix, path, finding
+                        )
+                        custom_candidate.update({
+                            "resource_role": "custom_lua_string_candidate",
+                            "startup_removal_eligible": False,
+                            "protection_reason": (
+                                "Chuỗi được trích từ bytecode Lua tùy biến; chưa decompile "
+                                "được luồng gọi nên không được xem là mục tiêu xóa popup."
+                            ),
+                        })
+                        report["notice_candidates"].append(custom_candidate)
+                    continue
                 report["unsupported"].append({
                     "source": prefix,
                     "path": path,
@@ -633,6 +744,35 @@ def decode_archive_resources(
                 with zipfile.ZipFile(output, "a", compression=zipfile.ZIP_DEFLATED) as target:
                     target.writestr(output_name, decoded)
             payload_details = _inspect_decoded_payload(decoded)
+            custom_lua = _inspect_custom_lua_resource(decoded, path)
+            if custom_lua is not None:
+                if len(report["custom_lua_resources"]) < MAX_NOTICE_CANDIDATES:
+                    report["custom_lua_resources"].append({
+                        "source": prefix,
+                        **custom_lua,
+                        "decode_mode": mode_name,
+                    })
+                else:
+                    report["custom_lua_resources_truncated"] = True
+                extracted_text = "\n".join(custom_lua["strings"])
+                for finding in _scan_notice_text_view(
+                    extracted_text, path, "lua_ascii_strings"
+                ):
+                    if len(report["notice_candidates"]) >= MAX_NOTICE_CANDIDATES:
+                        report["notice_candidates_truncated"] = True
+                        break
+                    custom_candidate = _build_notice_candidate(
+                        prefix, path, finding
+                    )
+                    custom_candidate.update({
+                        "resource_role": "custom_lua_string_candidate",
+                        "startup_removal_eligible": False,
+                        "protection_reason": (
+                            "Chuỗi được trích từ bytecode Lua tùy biến; chưa decompile "
+                            "được luồng gọi nên không được xem là mục tiêu xóa popup."
+                        ),
+                    })
+                    report["notice_candidates"].append(custom_candidate)
             report["notice_scan_files"] += 1
             for finding in _scan_notice_text(decoded, path):
                 if len(report["notice_candidates"]) >= MAX_NOTICE_CANDIDATES:
