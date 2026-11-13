@@ -17,7 +17,9 @@ from .aov_bytes import AOVBytesError, decode_aov_resource
 from .aov_mses import MSESError, parse_mses
 
 _MAX_DIAGNOSTIC_TABLES = 100
-_MAX_RESOURCE_BYTES = 256 * 1024 * 1024
+_MAX_CONTAINER_BYTES = 256 * 1024 * 1024
+_MAX_RESOURCE_BYTES = 32 * 1024 * 1024
+_MAX_TOTAL_DECODED_BYTES = 128 * 1024 * 1024
 _VERSION = re.compile(r"^\d+\.\d+\.\d+(?:\.\d+)?$")
 
 
@@ -49,7 +51,7 @@ def _read_manifest_resource(
     with zipfile.ZipFile(archive_path, "r") as outer:
         if container_path:
             container_info = outer.getinfo(str(container_path))
-            if container_info.file_size > _MAX_RESOURCE_BYTES:
+            if container_info.file_size > _MAX_CONTAINER_BYTES:
                 raise MSESDiagnosticsError(
                     f"Container lồng vượt giới hạn đọc: {container_path}"
                 )
@@ -89,10 +91,39 @@ def _inspect_one(
     item: dict[str, Any],
 ) -> dict[str, Any] | None:
     path = str(item.get("path") or "")
+    if int(item.get("size") or 0) > _MAX_RESOURCE_BYTES:
+        return {
+            "source": item.get("source"),
+            "source_identity": (
+                str(item.get("source") or "")
+                + (" :: " + str(item.get("container_path")) if item.get("container_path") else "")
+            ),
+            "path": path,
+            "decode_ok": False,
+            "parse_ok": False,
+            "error": "Resource vượt giới hạn chẩn đoán MSES 32 MiB.",
+        }
     raw = _read_manifest_resource(archive_path, item)
     if raw.startswith(b"MSES"):
         decoded, mode = raw, "raw_mses"
     else:
+        if (
+            raw.startswith(b"\\x22\\x4a\\x67")
+            or raw.startswith(b"\\x22\\x4a\\x00\\xef")
+        ) and len(raw) >= 8:
+            expected_size = int.from_bytes(raw[4:8], "little")
+            if expected_size > _MAX_RESOURCE_BYTES:
+                return {
+                    "source": item.get("source"),
+                    "source_identity": (
+                        str(item.get("source") or "")
+                        + (" :: " + str(item.get("container_path")) if item.get("container_path") else "")
+                    ),
+                    "path": path,
+                    "decode_ok": False,
+                    "parse_ok": False,
+                    "error": "Dữ liệu sau giải mã vượt giới hạn chẩn đoán MSES 32 MiB.",
+                }
         try:
             decoded, mode = decode_aov_resource(
                 raw, PurePosixPath(path).name
@@ -176,18 +207,14 @@ def analyze_mses_overlaps(
         if len(identities) < 2:
             continue
         inspected = []
+        group_decoded_bytes = 0
         for item in entries:
             source_name = str(item.get("source") or "")
             source_paths = archives_by_name.get(source_name, [])
             if len(source_paths) != 1:
                 skipped_ambiguous_sources += 1
                 continue
-            try:
-                result = _inspect_one(source_paths[0], item)
-            except (
-                OSError, zipfile.BadZipFile, KeyError, RuntimeError,
-                EOFError, MSESDiagnosticsError,
-            ) as exc:
+            if group_decoded_bytes >= _MAX_TOTAL_DECODED_BYTES:
                 result = {
                     "source": source_name,
                     "source_identity": (
@@ -197,9 +224,28 @@ def analyze_mses_overlaps(
                     "path": str(item.get("path") or ""),
                     "decode_ok": False,
                     "parse_ok": False,
-                    "error": str(exc)[:240],
+                    "error": "Đã đạt giới hạn chẩn đoán tổng 128 MiB cho nhóm resource.",
                 }
+            else:
+                try:
+                    result = _inspect_one(source_paths[0], item)
+                except (
+                    OSError, zipfile.BadZipFile, KeyError, RuntimeError,
+                    EOFError, MSESDiagnosticsError,
+                ) as exc:
+                    result = {
+                        "source": source_name,
+                        "source_identity": (
+                            source_name
+                            + (" :: " + str(item.get("container_path")) if item.get("container_path") else "")
+                        ),
+                        "path": str(item.get("path") or ""),
+                        "decode_ok": False,
+                        "parse_ok": False,
+                        "error": str(exc)[:240],
+                    }
             if result is not None:
+                group_decoded_bytes += int(item.get("size") or 0)
                 inspected_resources += 1
                 inspected.append(result)
 
