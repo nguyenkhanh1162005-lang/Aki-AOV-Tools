@@ -294,10 +294,10 @@ class AOVBytesArchiveTests(unittest.TestCase):
             folder = Path(tmp)
             source = self._archive(folder / "branding.zip", {
                 "Resources/notice.txt": (
-                    "KIANA MOD AOV\\n"
-                    "Mod được tạo bởi youtuber KIANA MOD AOV\\n"
-                    "Web Mod\\n"
-                    "Youtube\\n"
+                    "KIANA MOD AOV\n"
+                    "Mod được tạo bởi youtuber KIANA MOD AOV\n"
+                    "Web Mod\n"
+                    "Youtube\n"
                 ).encode("utf-8"),
             })
 
@@ -325,8 +325,8 @@ class AOVBytesArchiveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
             plain = (
-                "Mod được tạo bởi youtuber KIANA MOD AOV\\n"
-                "Web Mod\\nYoutube\\n"
+                "Mod được tạo bởi youtuber KIANA MOD AOV\n"
+                "Web Mod\nYoutube\n"
             ).encode("utf-8")
             encoded = encrypt_aes_zstd_resource(plain, "NoticeConfig")
             source = self._archive(folder / "wrapped-branding.zip", {
