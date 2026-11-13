@@ -934,9 +934,16 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             plan_resource_compatibility,
         )
         from .resource_manifest import ResourceManifestError, build_resource_manifest
+        from .mses_diagnostics import (
+            MSESDiagnosticsError,
+            analyze_mses_overlaps,
+        )
 
         manifest = build_resource_manifest(archive_paths)
         plan = plan_resource_compatibility(manifest["resources"])
+        mses_diagnostics = analyze_mses_overlaps(
+            archive_paths, manifest["resources"]
+        )
         format_counts: dict[str, int] = {}
         detected_format_counts: dict[str, int] = {}
         for resource in manifest["resources"]:
@@ -975,6 +982,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             "advisory_only": True,
             "merge_authorized": False,
             "preservation_gates": preservation_gates,
+            "mses_diagnostics": mses_diagnostics,
             "merge_guidance_counts": guidance_counts,
             "resource_count": manifest["resource_count"],
             "path_count": plan["path_count"],
@@ -992,7 +1000,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
                 "không thay thế việc parse payload hoặc xác nhận chức năng trong game."
             ),
         }
-    except (ResourceManifestError, CompatibilityPlanError) as exc:
+    except (ResourceManifestError, CompatibilityPlanError, MSESDiagnosticsError) as exc:
         resource_analysis = {
             "available": False,
             "advisory_only": True,
