@@ -377,6 +377,47 @@ function renderPreflightDashboard(data){
   }
   preservation.append(preservationGrid);root.append(preservation);
 
+  const mses=analysis.mses_diagnostics||{};
+  if(mses.tables?.length){
+    const msesSection=dashboardElement('section','preflight-group');
+    msesSection.append(dashboardElement('h3','','SO SÁNH HÀNG MSES THEO KHÓA'));
+    msesSection.append(dashboardElement('p','',
+      'Máy chủ đã giải mã các bảng MSES trùng đường dẫn để đối chiếu schema, checksum và từng hàng. Kết quả chỉ đọc, không tự cho phép ghi đè hay ghép.'
+    ));
+    for(const table of mses.tables.slice(0,20)){
+      const card=dashboardElement('article','preflight-resource');
+      card.append(dashboardElement('strong','',table.canonical_path));
+      for(const resource of (table.resources||[])){
+        const status=resource.parse_ok
+          ?'MSES v'+resource.version+' · '+resource.field_count+' trường · '+resource.row_count+' hàng · MD5 '+(resource.checksum_valid?'OK':'SAI')+' · '+resource.decode_mode
+          :'CHƯA ĐỌC ĐƯỢC · '+(resource.error||'lỗi không rõ');
+        card.append(dashboardElement('p','',resource.source_identity+' · '+status));
+      }
+      for(const comparison of (table.comparisons||[])){
+        const label=comparison.left+' ↔ '+comparison.right;
+        const detail='Schema '+(comparison.schema_match?'khớp':'KHÔNG KHỚP')+
+          ' · hàng chung '+comparison.common_keys+
+          ' · giống byte '+comparison.identical_common_rows+
+          ' · khác payload '+comparison.differing_common_rows+
+          ' · riêng trái/phải '+comparison.left_only_keys+'/'+comparison.right_only_keys+
+          ' · checksum '+(comparison.checksums_valid?'đều hợp lệ':'có lỗi');
+        card.append(dashboardElement('p','',label));
+        card.append(dashboardElement('p',comparison.differing_common_rows?'danger':'',detail));
+        if(comparison.append_only_candidate){
+          card.append(dashboardElement('p','',
+            'Có dạng dữ liệu phù hợp phép hợp nhất chỉ-thêm ở cấp bảng; vẫn cần adapter cụ thể và round-trip, chưa được cấp quyền ghép.'
+          ));
+        }
+      }
+      msesSection.append(card);
+    }
+    if(mses.tables.length>20)msesSection.append(dashboardElement('p','',
+      'Còn '+(mses.tables.length-20)+' bảng trong báo cáo JSON.'
+    ));
+    msesSection.append(dashboardElement('p','',mses.note||'Chẩn đoán MSES chỉ đọc.'));
+    root.append(msesSection);
+  }
+
   const sources=dashboardElement('section','preflight-group');
   sources.append(dashboardElement('h3','','CÁC MOD ĐÃ NHẬN DIỆN'));
   const sourceGrid=dashboardElement('div','preflight-sources');
@@ -1143,6 +1184,30 @@ aovPreflightBtn.addEventListener('click',async()=>{
         'Lưu ý: đây là kiểm kê chỉ đọc, không cấp quyền ghi hoặc ghép payload.'
       );
       for(const reason of (sourceCheck.reasons||[]))lines.push('  CẢNH BÁO NGUỒN: '+reason);
+      const msesDiagnostics=resourceAnalysis.mses_diagnostics||{};
+      if(msesDiagnostics.tables?.length){
+        lines.push('','SO SÁNH HÀNG MSES (CHỈ ĐỌC):');
+        for(const table of msesDiagnostics.tables){
+          lines.push(table.canonical_path);
+          for(const resource of (table.resources||[])){
+            lines.push('  '+resource.source_identity+' | '+(resource.parse_ok
+              ?'v'+resource.version+' fields='+resource.field_count+' rows='+resource.row_count+' MD5='+(resource.checksum_valid?'OK':'INVALID')+' mode='+resource.decode_mode
+              :'PARSE_ERROR '+(resource.error||'unknown')));
+          }
+          for(const comparison of (table.comparisons||[])){
+            lines.push('  '+comparison.left+' <-> '+comparison.right+
+              ' | common='+comparison.common_keys+
+              ' identical='+comparison.identical_common_rows+
+              ' differing='+comparison.differing_common_rows+
+              ' left_only='+comparison.left_only_keys+
+              ' right_only='+comparison.right_only_keys+
+              ' checksums_valid='+comparison.checksums_valid+
+              ' append_only_candidate='+comparison.append_only_candidate+
+              ' merge_authorized=false');
+          }
+        }
+        lines.push('  '+(msesDiagnostics.note||'Chẩn đoán chỉ đọc.'));
+      }
       if((resourceAnalysis.important_paths||[]).length){
         lines.push('','ĐƯỜNG DẪN TRÙNG / CẦN KIỂM TRA (tối đa 80):');
         for(const item of resourceAnalysis.important_paths.slice(0,80)){
