@@ -523,7 +523,7 @@ def decode_archive_resources(
             lower_path = path.casefold()
             is_raw_pkg_zip = (
                 lower_path.endswith(".pkg.bytes")
-                and raw.startswith((b"PK\\x03\\x04", b"PK\\x05\\x06"))
+                and raw.startswith((b"PK\x03\x04", b"PK\x05\x06"))
             )
             if (
                 (lower_path.endswith(".zip") or is_raw_pkg_zip)
