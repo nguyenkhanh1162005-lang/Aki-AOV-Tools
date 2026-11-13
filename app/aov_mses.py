@@ -220,3 +220,73 @@ def merge_mses_rows(
         "overlay_checksum_valid": overlay.checksum_valid,
     }
     return output, report
+
+
+def repair_mses_declared_row_count(
+    data: bytes,
+    *,
+    expected_missing_keys: set[int],
+) -> tuple[bytes, dict]:
+    """Repair a stale row-count header only when the complete payload is row-aligned.
+
+    The caller must supply the exact expected key gaps, verified against another
+    source/version of the same table. No row payload is synthesized or discarded.
+    """
+    if len(data) < HEADER_SIZE or data[:4] != MAGIC:
+        raise MSESError("Không nhận diện được header MSES để sửa row count.")
+    version, field_count, declared_count = struct.unpack_from("<III", data, 4)
+    if version != 7 or not 0 < field_count <= 10000:
+        raise MSESError("Header MSES không thuộc schema hỗ trợ.")
+    rows: list[bytes] = []
+    offset = HEADER_SIZE
+    while offset < len(data):
+        if offset + 4 > len(data):
+            raise MSESError("Payload MSES kết thúc giữa trường độ dài bản ghi.")
+        row_size = struct.unpack_from("<I", data, offset)[0]
+        start = offset + 4
+        end = start + row_size
+        if row_size < 4 or row_size > MAX_MSES_ROW_BYTES or end > len(data):
+            raise MSESError("Payload MSES có bản ghi cuối bị thiếu hoặc sai độ dài.")
+        rows.append(data[start:end])
+        offset = end
+    if offset != len(data) or len(rows) >= declared_count:
+        raise MSESError("Row count không phải trường hợp stale-count có thể sửa an toàn.")
+    indexed: dict[int, bytes] = {}
+    for row in rows:
+        key = struct.unpack_from("<I", row)[0]
+        if key in indexed:
+            raise MSESError(f"Khóa MSES trùng khi sửa row count: 0x{key:08x}.")
+        indexed[key] = row
+    if not indexed:
+        raise MSESError("Không thể sửa bảng MSES rỗng bằng row-count repair.")
+    gaps = set(range(min(indexed), max(indexed) + 1)) - set(indexed)
+    expected = set(expected_missing_keys)
+    if any(type(key) is not int or not 0 <= key <= 0xFFFFFFFF for key in expected):
+        raise MSESError("Expected missing keys phải là uint32 hợp lệ.")
+    if gaps != expected:
+        raise MSESError(
+            "Các khóa thiếu trong MSES không khớp allowlist đã xác minh; từ chối sửa."
+        )
+    table = MSESTable(
+        version=version,
+        field_count=field_count,
+        rows=tuple(rows),
+        header=data[:HEADER_SIZE],
+        checksum_valid=(
+            data[CHECKSUM_START:CHECKSUM_END]
+            == hashlib.md5(data[HEADER_SIZE:]).hexdigest().encode("ascii")
+        ),
+    )
+    repaired = build_mses(table, rows)
+    verified = parse_mses(repaired)
+    return repaired, {
+        "declared_row_count": declared_count,
+        "repaired_row_count": len(verified.rows),
+        "expected_missing_keys": [f"0x{key:08x}" for key in sorted(expected)],
+        "source_checksum_valid": table.checksum_valid,
+        "output_checksum_valid": verified.checksum_valid,
+        "payload_complete": True,
+        "rows_synthesized": 0,
+    }
+
+
