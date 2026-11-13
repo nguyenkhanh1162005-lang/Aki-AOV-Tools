@@ -462,6 +462,11 @@ class AOVResourceMergeTests(unittest.TestCase):
         self.assertEqual(_actor_id_from_mses_key(509000456, bank_spec), 509)
         self.assertEqual(_actor_id_from_mses_key(107123, sound_spec), 107)
         self.assertEqual(_actor_id_from_mses_key(509456, sound_spec), 509)
+        # Exact keys observed in the source LobbySound table, including its AW scale.
+        lobby_spec = {"actor_id_rule": "bank_10000"}
+        self.assertEqual(_actor_id_from_mses_key(0x18E002, lobby_spec), 163)
+        self.assertEqual(_actor_id_from_mses_key(132060210, lobby_spec), 132)
+        self.assertEqual(_actor_id_from_mses_key(1070011, lobby_spec), 107)
         hero_spec = {
             "actor_id_rule": "hero_sound_mixed_scale",
             "actor_prefix_divisors": (10, 100, 1000, 10000, 100000, 1000000),
