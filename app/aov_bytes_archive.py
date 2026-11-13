@@ -134,13 +134,14 @@ class AOVBytesArchiveError(ValueError):
 # A small set of AoV lobby scripts use a custom Lua-family wrapper instead of
 # the normal 22 4A AoV resource envelope. The marker at offset 128 identifies
 # this container family, but it is NOT a complete Lua decompiler or serializer.
+
 _CUSTOM_LUA_RESOURCE_NAMES = {
     "gameentrycontrol_lua.bytes",
     "lobbyview_lua.bytes",
     "clobbysystem_lua.bytes",
 }
 _CUSTOM_LUA_CHUNK_OFFSET = 128
-_CUSTOM_LUA_CHUNK_SIGNATURE = b"\x1bLuaS"
+_CUSTOM_LUA_CHUNK_SIGNATURE = bytes([0x1B]) + b"LuaS"
 _CUSTOM_LUA_FORMAT_BYTE = 0x01
 _MAX_CUSTOM_LUA_INSPECT_BYTES = 2 * 1024 * 1024
 _MAX_CUSTOM_LUA_STRINGS = 300
@@ -154,9 +155,9 @@ def _inspect_custom_lua_resource(
     leaf = PurePosixPath(path.replace(chr(92), "/")).name.casefold()
     if leaf not in _CUSTOM_LUA_RESOURCE_NAMES:
         return None
-    if len(payload) <= _CUSTOM_LUA_CHUNK_OFFSET + len(_CUSTOM_LUA_CHUNK_SIGNATURE):
-        return None
     offset = _CUSTOM_LUA_CHUNK_OFFSET
+    if len(payload) <= offset + len(_CUSTOM_LUA_CHUNK_SIGNATURE):
+        return None
     if payload[offset:offset + len(_CUSTOM_LUA_CHUNK_SIGNATURE)] != _CUSTOM_LUA_CHUNK_SIGNATURE:
         return None
     format_offset = offset + len(_CUSTOM_LUA_CHUNK_SIGNATURE)
@@ -165,14 +166,25 @@ def _inspect_custom_lua_resource(
         return None
 
     inspected = payload[offset:offset + _MAX_CUSTOM_LUA_INSPECT_BYTES]
-    strings = []
-    for match in re.finditer(rb"[\x20-\x7e]{4,}", inspected):
-        value = match.group(0).decode("ascii", errors="ignore")
-        if not value:
-            continue
-        strings.append(value[:_MAX_CUSTOM_LUA_STRING_LENGTH])
-        if len(strings) >= _MAX_CUSTOM_LUA_STRINGS:
-            break
+    strings: list[str] = []
+    current = bytearray()
+
+    def flush_ascii_run() -> None:
+        if len(current) >= 4 and len(strings) < _MAX_CUSTOM_LUA_STRINGS:
+            strings.append(
+                current.decode("ascii", errors="ignore")[:_MAX_CUSTOM_LUA_STRING_LENGTH]
+            )
+        current.clear()
+
+    for value in inspected:
+        if 0x20 <= value <= 0x7E:
+            current.append(value)
+        else:
+            flush_ascii_run()
+            if len(strings) >= _MAX_CUSTOM_LUA_STRINGS:
+                break
+    if len(strings) < _MAX_CUSTOM_LUA_STRINGS:
+        flush_ascii_run()
 
     return {
         "resource_path": path,
