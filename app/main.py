@@ -27,7 +27,6 @@ from .adapter_registry import get_adapter_capabilities
 from .compatibility_planner import CompatibilityPlanError, plan_resource_compatibility
 from .resource_manifest import ResourceManifestError, build_resource_manifest
 from .aov_bytes_archive import AOVBytesArchiveError, decode_archive_resources
-from .notice_rewriter import NoticeRewriteError, rewrite_archive_branding
 
 app = FastAPI(title="Aki AOV Tools", version="0.2.0")
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -784,40 +783,39 @@ async def scan_chunked_aov_notices(upload_id: str):
     }
 
 
-@app.post("/api/upload/{upload_id}/notice-branding")
-async def rewrite_chunked_aov_branding(upload_id: str):
-    """Return a separate ZIP with safe, exact AKI branding replacements."""
+@app.post("/api/upload/{upload_id}/branding-scan")
+async def scan_chunked_aov_branding(upload_id: str):
+    """Read-only scan for exact legacy Aki/Kiana branding labels in supported text payloads."""
     session = _get_upload_session(upload_id)
-    if len(session["paths"]) != 1:
-        raise HTTPException(
-            400,
-            "Chức năng thay thông báo cần đúng một ZIP đã gộp làm đầu vào.",
-        )
     if any(item["received"] != item["size"] for item in session["files"]):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
-    output_path = Path(session["workdir"]) / "aki-aov-branding-updated.zip"
     try:
         report = await run_in_threadpool(
-            rewrite_archive_branding, session["paths"], str(output_path)
+            decode_archive_resources, session["paths"], "", scan_only=True
         )
-    except NoticeRewriteError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    _remove_upload_session_metadata(session)
-    UPLOAD_SESSIONS.pop(upload_id, None)
-    return FileResponse(
-        path=output_path,
-        media_type="application/zip",
-        filename="Aki-AOV-Branding-Updated.zip",
-        headers={
-            "X-AOV-Branding-Replacements": str(report["replacement_total"]),
-            "X-AOV-Branding-Resources": str(report["modified_resource_count"]),
-            "X-AOV-Branding-Wrappers": str(report["rewritten_aov_wrappers"]),
-            "X-AOV-Game-Tested": "false",
-        },
-        background=BackgroundTask(
-            shutil.rmtree, session["workdir"], ignore_errors=True
+    except AOVBytesArchiveError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    session["created"] = time.time()
+    _persist_upload_session(upload_id, session)
+    return {
+        "scan_files": report.get("notice_scan_files", 0),
+        "decoded_resources": len(report.get("decoded", [])),
+        "decoded_bytes": report.get("decoded_bytes", 0),
+        "assetbundles_scanned": report.get("notice_assetbundles_scanned", 0),
+        "assetbundles_skipped": report.get("notice_assetbundles_skipped", 0),
+        "unsupported_resources": len(report.get("unsupported", [])),
+        "nested_packages_expanded": report.get("nested_packages_expanded", 0),
+        "terms": report.get("branding_scan_terms", []),
+        "candidates": report.get("branding_candidates", []),
+        "truncated": report.get("branding_candidates_truncated", False),
+        "warning": (
+            "Quét chỉ đọc các tệp văn bản, .bytes giải mã được và chuỗi trong metadata "
+            "Unity AssetBundle có giới hạn. Dữ liệu nhị phân opaque, bundle vượt giới hạn "
+            "hoặc tài nguyên chưa giải mã có thể không được quét. Kết quả chỉ xác định nơi "
+            "có chuỗi thương hiệu, không chứng minh đó là nội dung đang hiển thị trong game "
+            "và không tự sửa hoặc xóa bất kỳ tài nguyên nào."
         ),
-    )
+    }
 
 
 @app.post("/api/upload/{upload_id}/decode-bytes")
