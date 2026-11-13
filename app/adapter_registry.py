@@ -37,6 +37,26 @@ _ADAPTERS = (
         "game_compatibility": "structurally_validated; not_game_tested",
     },
     {
+        "id": "aov_p9_p10_skin_union_1.64.1",
+        "name": "AoV iOS P9 + P10 · Ghép 19 skin",
+        "status": "merge_supported_version_locked",
+        "formats": [
+            "P9/P10 MOD wrapper", "MSES v7", "IFix actor-scoped",
+            "CommonActions actor tracks", "PackerInfo/ResourceVerification"
+        ],
+        "scope": (
+            "Chỉ nhận đúng hai ZIP P9/P10 nguồn đã ghim SHA-256, cùng build 1.64.1.12 "
+            "và đúng Actor_Action inventory (9 + 10 Actor)."
+        ),
+        "merge_policy": (
+            "Hợp nhất resource union; MSES theo Actor-owner và schema nguồn; "
+            "organSkin sửa stale row-count không sinh hàng; IFix actor-scoped; "
+            "CommonActions track merge; PackerInfo chọn 410 entry theo Actor với "
+            "dependency graph giữ nguyên. Mọi xung đột ngoài adapter đều chặn."
+        ),
+        "game_compatibility": "structurally_validated; not_game_tested",
+    },
+    {
         "id": "aov_multi_mod_intake",
         "name": "Phân tích nhiều loại MOD AoV",
         "status": "inspect_only",
