@@ -1246,6 +1246,40 @@ def merge_p9_p10_archives(
                 != "2e0e1fce641b5310c70d19a63637381de3af5ec938c92488e7e1b16afcdb87ca"
             ):
                 raise AOVMergeError("CommonActions P9/P10 không khớp hai package đã kiểm chứng.")
+            # The exact source pair differs at exactly three XML tracks, all
+            # covered by the actor-gated parser. Do not let an opaque semantic
+            # subset or a new file silently pass through strict_conflicts.
+            try:
+                with zipfile.ZipFile(io.BytesIO(p10_common), "r") as p10_ca, zipfile.ZipFile(
+                    io.BytesIO(p9_common), "r"
+                ) as p9_ca:
+                    p10_names = [info.filename for info in p10_ca.infolist() if not info.is_dir()]
+                    p9_names = [info.filename for info in p9_ca.infolist() if not info.is_dir()]
+                    if (
+                        len(p10_names) != 785
+                        or len(p9_names) != 785
+                        or len(set(p10_names)) != 785
+                        or len(set(p9_names)) != 785
+                        or set(p10_names) != set(p9_names)
+                    ):
+                        raise AOVMergeError("CommonActions P9/P10 không giữ đúng 785 path duy nhất.")
+                    common_differences = {
+                        name for name in p10_names
+                        if p10_ca.read(name) != p9_ca.read(name)
+                    }
+            except zipfile.BadZipFile as exc:
+                raise AOVMergeError("CommonActions P9/P10 không phải ZIP lồng hợp lệ.") from exc
+            expected_common_differences = {
+                "commonresource/Back.xml",
+                "commonresource/HasteE1.xml",
+                "commonresource/HasteE1_leave.xml",
+            }
+            if common_differences != expected_common_differences:
+                raise AOVMergeError(
+                    "CommonActions P9/P10 có path xung đột ngoài ba XML đã kiểm chứng: "
+                    + ", ".join(sorted(common_differences ^ expected_common_differences))
+                )
+
             common_dry_run = analyze_common_actions_overlay_set([
                 ("P9", p9_common, set(P9_ACTOR_IDS))
             ])
@@ -1383,6 +1417,15 @@ def merge_p9_p10_archives(
             p9_skin_text = p9["zip"].read(p9["skin_info"]).decode(
                 "utf-8-sig", errors="strict"
             )
+            p10_skin_lines = [line.strip() for line in p10_skin_text.splitlines() if line.strip()]
+            p9_skin_lines = [line.strip() for line in p9_skin_text.splitlines() if line.strip()]
+            if (
+                len(p10_skin_lines) != 10
+                or len(p9_skin_lines) != 9
+                or len(set(p10_skin_lines)) != 10
+                or len(set(p9_skin_lines)) != 9
+            ):
+                raise AOVMergeError("DanhSachSkin nguồn không có đúng 10 mục P10 và 9 mục P9.")
             skin_lines = []
             for line in (p10_skin_text + "\n" + p9_skin_text).splitlines():
                 line = line.strip()
