@@ -531,5 +531,31 @@ class CommonActionsMergeTests(unittest.TestCase):
         self.assertEqual(subsets, [path])
 
 
+
+    def test_preflight_filters_shared_common_action_ids_by_source_actor_prefix(self):
+        path = "commonresource/Back.xml"
+        root = ET.Element("Project")
+        action = ET.SubElement(root, "Action")
+        track = ET.SubElement(action, "Track", {
+            "trackName": "0_SharedBack",
+            "eventType": "TriggerParticleTick",
+        })
+        ET.SubElement(track, "SkinOrAvatarList", {"id": "59300"})
+        ET.SubElement(track, "SkinOrAvatarList", {"id": "59500"})
+        payload = encode_aov_resource(ET.tostring(root), path, "zstd")
+        source = package({path: payload})
+
+        report = analyze_common_actions_overlay_set([
+            ("mixed-source.zip", source, {"593"}),
+        ])
+
+        self.assertEqual(report["skin_ids"], ["59300"])
+        self.assertEqual(
+            report["packages"][0]["actor_prefixes"], ["593"]
+        )
+        self.assertEqual(report["packages"][0]["actor_gate_condition_count"], 1)
+        self.assertFalse(report["merge_authorized"])
+
+
 if __name__ == "__main__":
     unittest.main()
