@@ -225,7 +225,9 @@ class AOVBytesArchiveTests(unittest.TestCase):
             kill_notice["resource_role"], "protected_kill_notification"
         )
         self.assertFalse(kill_notice["startup_removal_eligible"])
-        self.assertEqual(billboard["resource_role"], "protected_billboard")
+        self.assertEqual(
+            billboard["resource_role"], "protected_kill_notification"
+        )
         self.assertFalse(billboard["startup_removal_eligible"])
         self.assertEqual(
             unrelated["resource_role"], "unclassified_notice_text"
