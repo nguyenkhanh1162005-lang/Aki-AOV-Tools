@@ -377,7 +377,11 @@ function renderPreflightDashboard(data){
   if(!sourceGrid.childElementCount)sourceGrid.append(dashboardElement('p','','Không có file nguồn.'));
   sources.append(sourceGrid);root.append(sources);
 
-  if(target.sources){
+  const showsKnownFamilies=(data.profiles||[]).some(item=>
+    ['P9','P10','TM','VTK'].includes(item.source_family_hint) ||
+    String(item.source_family_hint||'').startsWith('PART_')
+  );
+  if(target.sources && showsKnownFamilies){
     const targetCard=dashboardElement('section','preflight-group');
     targetCard.append(dashboardElement('h3','','NHẬN DIỆN THAM KHẢO P9 / P10 / TM / VTK'));
     const targetGrid=dashboardElement('div','preflight-sources');
@@ -921,7 +925,11 @@ aovPreflightBtn.addEventListener('click',async()=>{
       'CHI TIẾT TỪNG FILE:'
     ];
     const targetSet=data.target_set||{};
-    if(targetSet.sources){
+    const hasKnownTargetFamily=(data.profiles||[]).some(item=>
+      ['P9','P10','TM','VTK'].includes(item.source_family_hint) ||
+      String(item.source_family_hint||'').startsWith('PART_')
+    );
+    if(targetSet.sources && hasKnownTargetFamily){
       lines.push(
         '',
         'NHẬN DIỆN THAM KHẢO MỘT SỐ NHÓM MOD',
