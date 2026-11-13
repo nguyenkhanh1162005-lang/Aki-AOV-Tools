@@ -911,6 +911,13 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
 
         manifest = build_resource_manifest(archive_paths)
         plan = plan_resource_compatibility(manifest["resources"])
+        format_counts: dict[str, int] = {}
+        detected_format_counts: dict[str, int] = {}
+        for resource in manifest["resources"]:
+            resource_format = str(resource.get("format") or "unknown")
+            detected_format = str(resource.get("detected_format") or "unknown")
+            format_counts[resource_format] = format_counts.get(resource_format, 0) + 1
+            detected_format_counts[detected_format] = detected_format_counts.get(detected_format, 0) + 1
         critical_statuses = {"VERSION_CONFLICT", "NEEDS_RULE", "UNSUPPORTED"}
         details = [
             item for item in plan["resources"]
@@ -949,6 +956,8 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
                 1 for item in plan["resources"] if len(item["sources"]) == 1
             ),
             "summary": plan["summary"],
+            "format_counts": dict(sorted(format_counts.items())),
+            "detected_format_counts": dict(sorted(detected_format_counts.items())),
             "source_compatibility": plan["source_compatibility"],
             "important_paths": details[:200],
             "details_truncated": len(details) > 200,
@@ -962,13 +971,53 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             "available": False,
             "advisory_only": True,
             "merge_authorized": False,
+            "format_counts": {},
+            "detected_format_counts": {},
             "error": str(exc),
         }
 
     ready = selected_adapter in supported_aov_adapters and not blockers
+    general_analysis = {
+        "scope": "all_uploaded_mod_package_types",
+        "source_package_types": dict(sorted(role_counts.items())),
+        "resource_formats": resource_analysis.get("format_counts", {}),
+        "detected_formats": resource_analysis.get("detected_format_counts", {}),
+        "actor_ids": actor_ids,
+        "unclassified_aov_source_count": sum(
+            1 for item in profiles
+            if item.get("looks_like_aov") and not item.get("source_family_hint")
+        ),
+        "source_hints": [
+            {
+                "name": item["name"],
+                "family_hint": item.get("source_family_hint"),
+                "evidence": item.get("source_family_basis"),
+                "role": item.get("source_role"),
+                "actor_asset_ids": item.get("actor_asset_ids", []),
+                "actor_action_ids": item.get("actor_action_ids", []),
+            }
+            for item in profiles
+        ],
+        "compatibility_summary": resource_analysis.get("summary", {}),
+        "source_compatibility": resource_analysis.get("source_compatibility", {}),
+        "selected_adapter": selected_adapter,
+        "merge_ready": ready,
+        "merge_policy": (
+            "Chỉ ghép khi khớp adapter đã xác minh; định dạng mới vẫn được nhận diện/kiểm kê "
+            "nhưng không tự động được cấp quyền ghi."
+        ),
+        "can_analyze_unlisted_mod_types": True,
+        "can_merge_unlisted_mod_types": False,
+        "note": (
+            "Phân loại cấu trúc dựa trên nội dung ZIP và chữ ký tài nguyên; tên P9/P10/TM/VTK "
+            "chỉ là gợi ý phụ. Actor ID không xác định được sẽ được giữ ở trạng thái chưa phân loại."
+        ),
+    }
     return {
-        "schema_version": 1,
-        "mode": "read_only_aov_preflight",
+        "schema_version": 2,
+        "mode": "read_only_multi_mod_preflight",
+        "analysis_scope": "all_mod_types", 
+        "general_analysis": general_analysis,
         "ready_to_merge": ready,
         "selected_adapter": selected_adapter,
         "source_count": len(profiles),
@@ -988,8 +1037,8 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             "Đạt bước chọn adapter theo cấu trúc; bộ ghép vẫn tự xác minh phiên bản, "
             "schema, checksum và dependency trước khi xuất ZIP."
             if ready else
-            "Chỉ là báo cáo phân loại. Không tạo ZIP và không tự chọn file nền khi có "
-            "nhiều MOD. Các tài nguyên AoV trùng đường dẫn cần quy tắc hợp nhất riêng."
+            "Đây là phân tích nhiều loại MOD ở chế độ chỉ đọc. Không tạo ZIP nếu chưa có "
+            "adapter đã xác minh; tài nguyên game trùng đường dẫn cần quy tắc riêng."
         ),
     }
 
