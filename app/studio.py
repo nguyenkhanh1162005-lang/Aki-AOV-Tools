@@ -2,12 +2,13 @@
 from pathlib import Path
 
 from fastapi.responses import HTMLResponse
+from starlette.requests import Request
 from starlette.routing import Route
 
 from .main import WEB, app
 
 
-def studio_index() -> HTMLResponse:
+def studio_index(_request: Request) -> HTMLResponse:
     """Serve the existing page with the visual theme loaded after its base CSS."""
     page = WEB / "index.html"
     html = page.read_text(encoding="utf-8")
