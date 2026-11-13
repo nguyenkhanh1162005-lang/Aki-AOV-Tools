@@ -783,6 +783,41 @@ async def scan_chunked_aov_notices(upload_id: str):
     }
 
 
+@app.post("/api/upload/{upload_id}/branding-scan")
+async def scan_chunked_aov_branding(upload_id: str):
+    """Read-only scan for exact legacy Aki/Kiana branding labels in supported text payloads."""
+    session = _get_upload_session(upload_id)
+    if any(item["received"] != item["size"] for item in session["files"]):
+        raise HTTPException(400, "File chưa tải lên đầy đủ.")
+    try:
+        report = await run_in_threadpool(
+            decode_archive_resources, session["paths"], "", scan_only=True
+        )
+    except AOVBytesArchiveError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    session["created"] = time.time()
+    _persist_upload_session(upload_id, session)
+    return {
+        "scan_files": report.get("notice_scan_files", 0),
+        "decoded_resources": len(report.get("decoded", [])),
+        "decoded_bytes": report.get("decoded_bytes", 0),
+        "assetbundles_scanned": report.get("notice_assetbundles_scanned", 0),
+        "assetbundles_skipped": report.get("notice_assetbundles_skipped", 0),
+        "unsupported_resources": len(report.get("unsupported", [])),
+        "nested_packages_expanded": report.get("nested_packages_expanded", 0),
+        "terms": report.get("branding_scan_terms", []),
+        "candidates": report.get("branding_candidates", []),
+        "truncated": report.get("branding_candidates_truncated", False),
+        "warning": (
+            "Quét chỉ đọc các tệp văn bản, .bytes giải mã được và chuỗi trong metadata "
+            "Unity AssetBundle có giới hạn. Dữ liệu nhị phân opaque, bundle vượt giới hạn "
+            "hoặc tài nguyên chưa giải mã có thể không được quét. Kết quả chỉ xác định nơi "
+            "có chuỗi thương hiệu, không chứng minh đó là nội dung đang hiển thị trong game "
+            "và không tự sửa hoặc xóa bất kỳ tài nguyên nào."
+        ),
+    }
+
+
 @app.post("/api/upload/{upload_id}/decode-bytes")
 async def decode_chunked_aov_bytes(upload_id: str):
     """Extract supported decoded AoV .bytes resources without modifying source ZIPs."""
