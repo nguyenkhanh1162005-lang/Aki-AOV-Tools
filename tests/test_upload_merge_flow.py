@@ -229,10 +229,10 @@ class HTTPUploadMergeFlowTests(unittest.TestCase):
         payload = _zip_bytes(
             "Resources/notice.txt",
             (
-                "KIANA MOD AOV\\n"
-                "Mod được tạo bởi youtuber KIANA MOD AOV\\n"
-                "Web Mod\\n"
-                "Youtube\\n"
+                "KIANA MOD AOV\n"
+                "Mod được tạo bởi youtuber KIANA MOD AOV\n"
+                "Web Mod\n"
+                "Youtube\n"
             ).encode("utf-8"),
         )
         with TestClient(main.app) as client:
