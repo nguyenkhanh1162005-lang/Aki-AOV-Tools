@@ -5,6 +5,7 @@ from app.aov_bytes import encode_aov_resource, decode_aov_resource
 from app.aov_merge import (
     AOVResourceMergeError,
     _P9_P10_ACTOR_OWNED_MSES,
+    _P9_P10_ORGANSKIN_SPEC,
     _actor_id_from_mses_key,
     _lite_bullet_row_identity,
     merge_aov_mses_resource,
@@ -626,6 +627,106 @@ class AOVResourceMergeTests(unittest.TestCase):
         self.assertEqual(path, b"prefab_skill_effects/hero_skill_effects/107_hero/effect.prefab")
         with self.assertRaisesRegex(Exception, "đúng một đường dẫn hiệu ứng"):
             _lite_bullet_row_identity(valid + b"prefab_skill_effects/hero_skill_effects/107_hero/other", "bad row")
+
+
+
+    def test_p9_p10_organskin_repairs_only_the_exact_stale_row_count_pair(self):
+        name = "Databin/Client/Actor/organSkin.bytes"
+        p9_rows = [
+            struct.pack("<I", 1) + b"row-1",
+            struct.pack("<I", 2) + b"row-2",
+            struct.pack("<I", 4) + b"row-4",
+            struct.pack("<I", 5) + b"row-5",
+            struct.pack("<I", 6) + b"row-6",
+        ]
+        p10_rows = p9_rows[:3]
+        p9_valid = bytearray(table(40, p9_rows))
+        struct.pack_into("<I", p9_valid, 12, 6)
+        p9_valid[0x60:0x80] = b"0" * 32
+        p9_decoded = bytes(p9_valid)
+        p10_decoded = table(40, p10_rows)
+        spec = {
+            "p9_sha256": hashlib.sha256(p9_decoded).hexdigest(),
+            "p10_sha256": hashlib.sha256(p10_decoded).hexdigest(),
+            "field_count": 40,
+            "p9_declared_rows": 6,
+            "p9_complete_rows": 5,
+            "p10_rows": 3,
+            "expected_missing_keys": {3},
+        }
+        with patch("app.aov_merge._P9_P10_ORGANSKIN_SPEC", spec):
+            p9_resource = encode_aov_resource(p9_decoded, name, "aes")
+            p10_resource = encode_aov_resource(p10_decoded, name, "aes")
+            merged, report = merge_aov_mses_resource(
+                p9_resource, p10_resource, name
+            )
+            decoded, _ = decode_aov_resource(merged, name)
+            result = parse_mses(decoded)
+            self.assertEqual(len(result.rows), 5)
+            self.assertEqual(result.field_count, 40)
+            self.assertTrue(result.checksum_valid)
+            self.assertEqual(report["rows_synthesized"], 0)
+            self.assertEqual(report["p10_rows_identical_subset_of_p9"], True)
+            self.assertEqual(report["expected_missing_keys"], ["0x00000003"])
+
+    def test_p9_p10_organskin_accepts_reversed_source_order(self):
+        name = "Databin/Client/Actor/organSkin.bytes"
+        p9_rows = [
+            struct.pack("<I", 1) + b"row-1",
+            struct.pack("<I", 3) + b"row-3",
+            struct.pack("<I", 4) + b"row-4",
+        ]
+        p10_rows = p9_rows[:2]
+        p9_data = bytearray(table(40, p9_rows))
+        struct.pack_into("<I", p9_data, 12, 4)
+        p9_data[0x60:0x80] = b"x" * 32
+        p9_decoded = bytes(p9_data)
+        p10_decoded = table(40, p10_rows)
+        spec = {
+            "p9_sha256": hashlib.sha256(p9_decoded).hexdigest(),
+            "p10_sha256": hashlib.sha256(p10_decoded).hexdigest(),
+            "field_count": 40,
+            "p9_declared_rows": 4,
+            "p9_complete_rows": 3,
+            "p10_rows": 2,
+            "expected_missing_keys": {2},
+        }
+        with patch("app.aov_merge._P9_P10_ORGANSKIN_SPEC", spec):
+            merged, report = merge_aov_mses_resource(
+                encode_aov_resource(p10_decoded, name, "aes"),
+                encode_aov_resource(p9_decoded, name, "aes"),
+                name,
+            )
+            decoded, _ = decode_aov_resource(merged, name)
+            self.assertEqual(len(parse_mses(decoded).rows), 3)
+            self.assertEqual(report["base_source"], "P10")
+            self.assertEqual(report["output_encoding"], "aes")
+
+    def test_p9_p10_organskin_rejects_non_subset_or_differing_shared_rows(self):
+        name = "Databin/Client/Actor/organSkin.bytes"
+        p9_rows = [struct.pack("<I", 1) + b"p9-1", struct.pack("<I", 3) + b"p9-3"]
+        p10_rows = [struct.pack("<I", 1) + b"different", struct.pack("<I", 2) + b"p10-2"]
+        p9_data = bytearray(table(40, p9_rows))
+        struct.pack_into("<I", p9_data, 12, 3)
+        p9_data[0x60:0x80] = b"0" * 32
+        p9_decoded = bytes(p9_data)
+        p10_decoded = table(40, p10_rows)
+        spec = {
+            "p9_sha256": hashlib.sha256(p9_decoded).hexdigest(),
+            "p10_sha256": hashlib.sha256(p10_decoded).hexdigest(),
+            "field_count": 40,
+            "p9_declared_rows": 3,
+            "p9_complete_rows": 2,
+            "p10_rows": 2,
+            "expected_missing_keys": {2},
+        }
+        with patch("app.aov_merge._P9_P10_ORGANSKIN_SPEC", spec):
+            with self.assertRaisesRegex(AOVResourceMergeError, "không tồn tại trong P9"):
+                merge_aov_mses_resource(
+                    encode_aov_resource(p9_decoded, name, "aes"),
+                    encode_aov_resource(p10_decoded, name, "aes"),
+                    name,
+                )
 
 
 
