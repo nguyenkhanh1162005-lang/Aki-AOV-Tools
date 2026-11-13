@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 from .aov_bytes import AOVBytesError, decode_aov_resource, encode_aov_resource
 from .aov_mses import MSESError, build_mses, merge_mses_rows, parse_mses
 
@@ -25,6 +27,187 @@ _SUPPORTED_MSES_TABLES = {
     *_HUANHUA_TABLE_KEYS,
 }
 
+_P9_P10_ACTOR_OWNED_MSES = {
+    "Databin/Client/Actor/heroSkin.bytes": {
+        "field_count": 631, "row_count": 3072, "actor_divisor": 100,
+        "conflict_count": 339,
+        "p9_sha256": "a3721e2fc409ccab59f11fe8a50f1794a7f53b62f2db87b93f97c59c67ea4f7b",
+        "p10_sha256": "8401822bd6a41c1cc648c7d965973da21cb140a00cf10e759b46ea099584f8fa",
+        "p9_actor_ids": {107, 130, 137, 163, 509, 510, 518, 540, 597},
+        "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
+    },
+    "Databin/Client/Motion/ResSkinMotionBaseCfg.bytes": {
+        "field_count": 58, "row_count": 411, "actor_divisor": 10000,
+        "conflict_count": 60,
+        "p9_sha256": "711596da3a9a1453f32b585f72d3d299fc766ce9df280d3a931dfd9213b7a374",
+        "p10_sha256": "159fd5ad6153846d8faafa338acd64d1470d4806fdc21d8c3dd0734994d8e995",
+        "p9_actor_ids": {107, 130, 137, 163, 509, 510, 518, 540, 597},
+        "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
+    },
+    "Databin/Client/Shop/HeroSkinShop.bytes": {
+        "field_count": 273, "row_count": 1347, "actor_divisor": 100,
+        "conflict_count": 208,
+        "p9_sha256": "099bc89ceb79ac9a39d202c7cf11770cb7c389b506adc2f1b5afccd877e4cf95",
+        "p10_sha256": "6a1e1fbb9d7c1e3ea094198e0c9cb39ba76655414e279dd20241fadeccadaa99",
+        "p9_actor_ids": {107, 130, 137, 163, 509, 510, 518, 540, 597},
+        "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
+    },
+    "Databin/Client/Skill/skillmark.bytes": {
+        "field_count": 194, "row_count": 188, "actor_divisor": 100,
+        "conflict_count": 3,
+        "p9_sha256": "06585bd44510621b97a349e61f90df2a47b80a95470b16d61afe5db62efc0a71",
+        "p10_sha256": "a452c192f73cbe81762512a1443e06b8412ed0fc2aa11985bfd3f0107d2f6b4d",
+        "p9_actor_ids": {107, 130, 137, 163, 509, 510, 518, 540, 597},
+        "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
+    },
+}
+
+_SUPPORTED_MSES_TABLES.update(_P9_P10_ACTOR_OWNED_MSES)
+
+
+def _normalise_actor_ids(values: set[int | str], label: str) -> set[int]:
+    result = set()
+    for value in values:
+        try:
+            actor_id = int(value)
+        except (TypeError, ValueError) as exc:
+            raise MSESError(f"{label}: Actor ID không hợp lệ: {value!r}.") from exc
+        if not 0 < actor_id <= 999:
+            raise MSESError(f"{label}: Actor ID ngoài phạm vi hỗ trợ: {actor_id}.")
+        result.add(actor_id)
+    return result
+
+
+def _index_actor_owned_rows(rows: tuple[bytes, ...], label: str) -> tuple[dict[int, bytes], list[int]]:
+    indexed = {}
+    order = []
+    for row in rows:
+        if len(row) < 4:
+            raise MSESError(f"{label}: bản ghi quá ngắn để đọc khóa.")
+        key = int.from_bytes(row[:4], "little")
+        if key in indexed:
+            raise MSESError(f"{label}: khóa MSES trùng 0x{key:08x}.")
+        indexed[key] = row
+        order.append(key)
+    return indexed, order
+
+
+def _merge_p9_p10_actor_owned_rows(
+    base_decoded: bytes,
+    overlay_decoded: bytes,
+    resource_name: str,
+    base_actor_action_ids: set[int | str],
+    overlay_actor_action_ids: set[int | str],
+) -> tuple[bytes, dict]:
+    """Merge only the exact observed P9/P10 table pair using Actor action-package ownership."""
+    normalized_name = resource_name.replace(chr(92), "/").lstrip("/")
+    spec = _P9_P10_ACTOR_OWNED_MSES.get(normalized_name)
+    if spec is None:
+        raise MSESError("Không có quy tắc Actor-owner cho bảng này.")
+
+    base_table = parse_mses(base_decoded)
+    overlay_table = parse_mses(overlay_decoded)
+    expected_shape = (spec["field_count"], spec["row_count"])
+    if (base_table.field_count, len(base_table.rows)) != expected_shape or (
+        overlay_table.field_count, len(overlay_table.rows)
+    ) != expected_shape:
+        raise MSESError(
+            f"{resource_name}: schema/row count khác cặp P9/P10 đã kiểm chứng "
+            f"(cần {expected_shape}, nhận "
+            f"{(base_table.field_count, len(base_table.rows))}/"
+            f"{(overlay_table.field_count, len(overlay_table.rows))})."
+        )
+
+    base_hash = hashlib.sha256(base_decoded).hexdigest()
+    overlay_hash = hashlib.sha256(overlay_decoded).hexdigest()
+    if (base_hash, overlay_hash) == (spec["p9_sha256"], spec["p10_sha256"]):
+        base_source, overlay_source = "P9", "P10"
+    elif (base_hash, overlay_hash) == (spec["p10_sha256"], spec["p9_sha256"]):
+        base_source, overlay_source = "P10", "P9"
+    else:
+        raise MSESError(
+            f"{resource_name}: payload không khớp chính xác mẫu P9/P10 đã kiểm chứng; "
+            "từ chối áp dụng quy tắc theo Actor ID."
+        )
+
+    base_ids = _normalise_actor_ids(base_actor_action_ids, "base")
+    overlay_ids = _normalise_actor_ids(overlay_actor_action_ids, "overlay")
+    expected_base_ids = spec[f"{base_source.lower()}_actor_ids"]
+    expected_overlay_ids = spec[f"{overlay_source.lower()}_actor_ids"]
+    if base_ids != expected_base_ids or overlay_ids != expected_overlay_ids:
+        raise MSESError(
+            f"{resource_name}: Actor_Action inventory không khớp nguồn {base_source}/{overlay_source}; "
+            "không thể xác định nguồn sở hữu từng hàng."
+        )
+    if base_ids & overlay_ids:
+        raise MSESError(
+            f"{resource_name}: Actor_Action inventory bị giao nhau; quyền sở hữu không duy nhất."
+        )
+
+    base_map, base_order = _index_actor_owned_rows(base_table.rows, "base")
+    overlay_map, _ = _index_actor_owned_rows(overlay_table.rows, "overlay")
+    if set(base_map) != set(overlay_map):
+        raise MSESError(
+            f"{resource_name}: tập khóa P9/P10 thay đổi so với fixture đã kiểm chứng."
+        )
+    differing = {
+        key for key in base_map
+        if base_map[key] != overlay_map[key]
+    }
+    if len(differing) != spec["conflict_count"]:
+        raise MSESError(
+            f"{resource_name}: số hàng khác nội dung thay đổi "
+            f"({len(differing)} != {spec['conflict_count']}); từ chối ghép."
+        )
+
+    merged = dict(base_map)
+    selected_base = 0
+    selected_overlay = 0
+    divisor = spec["actor_divisor"]
+    for key in differing:
+        actor_id = key // divisor
+        owned_by_base = actor_id in base_ids
+        owned_by_overlay = actor_id in overlay_ids
+        if owned_by_base == owned_by_overlay:
+            raise MSESError(
+                f"{resource_name}: không xác định được duy nhất chủ sở hữu hàng "
+                f"0x{key:08x} (Actor {actor_id})."
+            )
+        if owned_by_base:
+            merged[key] = base_map[key]
+            selected_base += 1
+        else:
+            merged[key] = overlay_map[key]
+            selected_overlay += 1
+
+    output = build_mses(base_table, [merged[key] for key in base_order])
+    verified = parse_mses(output)
+    if len(verified.rows) != spec["row_count"]:
+        raise MSESError("Số hàng MSES sau ghép không khớp fixture.")
+    report = {
+        "adapter": "p9_p10_actor_owned_mses_exact_source_pair",
+        "resource": normalized_name,
+        "base_source": base_source,
+        "overlay_source": overlay_source,
+        "base_fields": base_table.field_count,
+        "overlay_fields": overlay_table.field_count,
+        "output_fields": verified.field_count,
+        "base_rows": len(base_table.rows),
+        "overlay_rows": len(overlay_table.rows),
+        "output_rows": len(verified.rows),
+        "differing_shared_rows": len(differing),
+        "selected_base_owned_rows": selected_base,
+        "selected_overlay_owned_rows": selected_overlay,
+        "base_checksum_valid": base_table.checksum_valid,
+        "overlay_checksum_valid": overlay_table.checksum_valid,
+        "output_checksum_valid": verified.checksum_valid,
+        "source_hashes_pinned": True,
+        "actor_inventory_pinned": True,
+        "verified": True,
+    }
+    return output, report
+
+
 
 def merge_aov_mses_resource(
     base_resource: bytes,
@@ -33,6 +216,8 @@ def merge_aov_mses_resource(
     *,
     allow_invalid_base_checksum: bool = False,
     allow_p9_p10_label_union: bool = False,
+    base_actor_action_ids: set[int | str] | None = None,
+    overlay_actor_action_ids: set[int | str] | None = None,
 ) -> tuple[bytes, dict]:
     """Merge the known MSES v7 AoV tables while retaining the base package's schema.
 
@@ -48,6 +233,46 @@ def merge_aov_mses_resource(
     if normalized_name not in _SUPPORTED_MSES_TABLES:
         raise AOVResourceMergeError(
             f"{resource_name}: không có adapter MSES theo bảng đã xác minh."
+        )
+
+    actor_owner_requested = (
+        base_actor_action_ids is not None or overlay_actor_action_ids is not None
+    )
+    if normalized_name in _P9_P10_ACTOR_OWNED_MSES:
+        if base_actor_action_ids is None or overlay_actor_action_ids is None:
+            raise AOVResourceMergeError(
+                f"{resource_name}: cần Actor_Action inventory của cả P9 và P10; "
+                "không được đoán chủ sở hữu hàng."
+            )
+        try:
+            base_decoded, base_mode = decode_aov_resource(base_resource, resource_name)
+            overlay_decoded, overlay_mode = decode_aov_resource(overlay_resource, resource_name)
+            merged_decoded, report = _merge_p9_p10_actor_owned_rows(
+                base_decoded,
+                overlay_decoded,
+                normalized_name,
+                base_actor_action_ids,
+                overlay_actor_action_ids,
+            )
+            merged_resource = encode_aov_resource(merged_decoded, resource_name, base_mode)
+            verify_decoded, verify_mode = decode_aov_resource(merged_resource, resource_name)
+            parse_mses(verify_decoded)
+            if verify_decoded != merged_decoded:
+                raise MSESError("Payload sau mã hóa/giải mã round-trip không trùng.")
+            report.update({
+                "base_encoding": base_mode,
+                "overlay_encoding": overlay_mode,
+                "output_encoding": verify_mode,
+                "output_bytes": len(merged_resource),
+            })
+            return merged_resource, report
+        except (AOVBytesError, MSESError) as exc:
+            raise AOVResourceMergeError(
+                f"{resource_name}: không thể ghép theo Actor-owner: {exc}"
+            ) from exc
+    if actor_owner_requested:
+        raise AOVResourceMergeError(
+            f"{resource_name}: Actor_Action inventory chỉ dùng cho bốn bảng P9/P10 đã ghim."
         )
 
     try:
