@@ -718,6 +718,7 @@ class ModPipelineTests(unittest.TestCase):
             general = report["general_analysis"]
 
             self.assertEqual(report["mode"], "read_only_multi_mod_preflight")
+            self.assertEqual(report["analysis_scope"], "all_mod_types")
             self.assertTrue(general["can_analyze_unlisted_mod_types"])
             self.assertFalse(general["can_merge_unlisted_mod_types"])
             self.assertEqual(
@@ -744,7 +745,7 @@ class ModPipelineTests(unittest.TestCase):
             self.assertEqual(report["source_count"], 2)
             self.assertEqual(general["source_package_types"]["aov_mod_unclassified"], 2)
             self.assertIn("701", general["actor_ids"])
-            self.assertIn("702", general["actor_ids"]) is False
+            self.assertNotIn("702", general["actor_ids"])
             self.assertTrue(general["can_analyze_unlisted_mod_types"])
             self.assertFalse(report["ready_to_merge"])
 
