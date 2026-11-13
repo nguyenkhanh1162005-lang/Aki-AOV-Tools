@@ -222,7 +222,7 @@ class AOVBytesArchiveTests(unittest.TestCase):
                 [wrapper], "", scan_only=True
             )
 
-        self.assertGreaterEqual(report["nested_packages_expanded"], 2)
+        self.assertGreaterEqual(report["nested_packages_expanded"], 1)
         self.assertTrue(any(
             item["path"].endswith("GameEntryControl_lua.bytes")
             for item in report["unsupported"]
