@@ -702,5 +702,51 @@ class ModPipelineTests(unittest.TestCase):
             self.assertTrue(common["output_discarded"])
             self.assertFalse(report["ready_to_merge"])
 
+    def test_general_preflight_accepts_unlisted_mod_family_for_analysis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            nested = self._nested_zip({
+                "Resources/1.64.1/assetbundle/battle/hero/777_example_battle_base.assetbundle": b"opaque bundle",
+                "Resources/1.64.1/Ages/Prefab_Characters/Prefab_Hero/Actor_777_Actions.pkg.bytes": b"opaque action",
+            })
+            source = self._zip(folder, "new-creator-skin-pack.zip", {
+                "Resources.zip": nested,
+                "DanhSachSkin.txt": b"Actor 777 skin",
+            })
+
+            report = analyze_aov_input_set([source])
+            general = report["general_analysis"]
+
+            self.assertEqual(report["mode"], "read_only_multi_mod_preflight")
+            self.assertTrue(general["can_analyze_unlisted_mod_types"])
+            self.assertFalse(general["can_merge_unlisted_mod_types"])
+            self.assertEqual(
+                general["source_package_types"]["aov_skin_mod_container_candidate"],
+                1,
+            )
+            self.assertIn("777", general["actor_ids"])
+            self.assertGreaterEqual(general["resource_formats"]["unity_assetbundle"], 1)
+            self.assertFalse(report["ready_to_merge"])
+
+    def test_general_preflight_reports_distinct_unlisted_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            first = self._zip(folder, "creator-alpha.zip", {
+                "Resources/1.64.1/assetbundle/battle/hero/701_alpha.assetbundle": b"asset",
+            })
+            second = self._zip(folder, "creator-beta.zip", {
+                "Resources/1.64.1/Sound/Hero_702_SFX.bnk": b"sound",
+            })
+
+            report = analyze_aov_input_set([first, second])
+            general = report["general_analysis"]
+
+            self.assertEqual(report["source_count"], 2)
+            self.assertEqual(general["source_package_types"]["aov_mod_unclassified"], 2)
+            self.assertIn("701", general["actor_ids"])
+            self.assertIn("702", general["actor_ids"]) is False
+            self.assertTrue(general["can_analyze_unlisted_mod_types"])
+            self.assertFalse(report["ready_to_merge"])
+
 if __name__ == "__main__":
     unittest.main()
