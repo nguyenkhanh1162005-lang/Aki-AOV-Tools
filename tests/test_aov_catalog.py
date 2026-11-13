@@ -85,5 +85,35 @@ class AOVCatalogTests(unittest.TestCase):
         self.assertEqual(report["AllZipVerificationInfo"]["checksum_conflicts_kept_base"], ["c.zip"])
 
 
+
+    def test_overrides_selected_packer_crc_metadata(self):
+        base = packer("ResourcePackerInfoSetXML", [
+            {"PathInIFS": "owned.assetbundle", "pkgType": 0, "CrcXor": 10, "Tag": "A", "Flags": 0,
+             "ResourceInfos": [{"HashCode": 1, "Extension": ""}]},
+            {"PathInIFS": "unowned.assetbundle", "pkgType": 0, "CrcXor": 20, "Tag": "B", "Flags": 0,
+             "ResourceInfos": [{"HashCode": 2, "Extension": ""}]},
+        ], [])
+        overlay = packer("ResourcePackerInfoSetXML", [
+            {"PathInIFS": "owned.assetbundle", "pkgType": 0, "CrcXor": 99, "Tag": "A", "Flags": 0,
+             "ResourceInfos": [{"HashCode": 3, "Extension": ""}]},
+            {"PathInIFS": "unowned.assetbundle", "pkgType": 0, "CrcXor": 88, "Tag": "B", "Flags": 0,
+             "ResourceInfos": [{"HashCode": 4, "Extension": ""}]},
+        ], [])
+        merged, report = merge_resource_packer_tree(
+            base, overlay, prefer_overlay_paths={"owned.assetbundle"}
+        )
+        rows = {row["PathInIFS"]: row for row in merged["AllResourcePackInfo"]}
+        self.assertEqual(rows["owned.assetbundle"]["CrcXor"], 99)
+        self.assertEqual(rows["unowned.assetbundle"]["CrcXor"], 20)
+        self.assertEqual(
+            report["crc_metadata_conflicts_overridden_with_overlay"],
+            ["owned.assetbundle"],
+        )
+        self.assertEqual(
+            report["crc_metadata_conflicts_kept_base"],
+            ["unowned.assetbundle"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
