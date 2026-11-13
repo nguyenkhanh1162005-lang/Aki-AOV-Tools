@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .large_merger import MergeError, merge_zip_files
-from .aov_merger import AOVMergeError, merge_aov_archives
+from .aov_merger import AOVMergeError, merge_aov_archives, merge_p9_p10_archives
 from .kpm100_vtk_merger import merge_kpm100_vtk_archives
 from .adapter_registry import get_adapter_capabilities
 
@@ -437,6 +437,32 @@ def _archive_profile(path: str) -> dict[str, Any]:
 
 def _select_adapter(profiles: list[dict[str, Any]]) -> str:
     if any(item["looks_like_aov"] for item in profiles):
+        p9_inputs = [
+            item for item in profiles
+            if item.get("source_family_hint") == "P9"
+            and item.get("has_mod_skin_container")
+        ]
+        p10_inputs = [
+            item for item in profiles
+            if item.get("source_family_hint") == "P10"
+            and item.get("has_mod_skin_container")
+        ]
+        p9_expected = {"107", "130", "137", "163", "509", "510", "518", "540", "597"}
+        p10_expected = {"111", "132", "150", "157", "167", "190", "524", "567", "598", "599"}
+        if (
+            len(profiles) == 2
+            and len(p9_inputs) == 1
+            and len(p10_inputs) == 1
+            and p9_inputs[0].get("resources_zip_count") == 1
+            and p9_inputs[0].get("skin_list_count") == 1
+            and p10_inputs[0].get("resources_zip_count") == 1
+            and p10_inputs[0].get("skin_list_count") == 1
+            and set(p9_inputs[0].get("actor_action_ids", [])) == p9_expected
+            and set(p10_inputs[0].get("actor_action_ids", [])) == p10_expected
+            and all(item.get("looks_like_aov") for item in profiles)
+        ):
+            return "aov_p9_p10_skin_union_1.64.1"
+
         kpm_bases = [
             item for item in profiles
             if item.get("has_kpm100_direct_base")
@@ -1172,7 +1198,9 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
     temporary.unlink(missing_ok=True)
 
     try:
-        if adapter == "aov_kpm100_vtk_actor595_1.64.1":
+        if adapter == "aov_p9_p10_skin_union_1.64.1":
+            result = merge_p9_p10_archives(archive_paths, str(temporary))
+        elif adapter == "aov_kpm100_vtk_actor595_1.64.1":
             base_path = next(
                 path for path, profile in zip(archive_paths, profiles)
                 if profile.get("has_kpm100_direct_base")
