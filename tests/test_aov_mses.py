@@ -2,7 +2,7 @@ import hashlib
 import struct
 import unittest
 
-from app.aov_mses import MSESError, MSESTable, build_mses, merge_mses_rows, parse_mses
+from app.aov_mses import MSESError, MSESTable, build_mses, merge_mses_rows, parse_mses, repair_mses_declared_row_count
 
 
 def make_table(field_count, rows):
@@ -163,6 +163,48 @@ class MSESTests(unittest.TestCase):
         self.assertEqual(rows[2], b"base-unowned")
         self.assertEqual(rows[3], b"new-approved")
         self.assertEqual(report["retained_base_conflicts"], ["0x00000002"])
+
+
+
+    def test_repairs_stale_row_count_only_with_exact_missing_key_allowlist(self):
+        original = bytearray(make_table(4, [
+            struct.pack("<I", 1) + b"one",
+            struct.pack("<I", 3) + b"three",
+        ]))
+        struct.pack_into("<I", original, 12, 3)
+
+        repaired, report = repair_mses_declared_row_count(
+            bytes(original), expected_missing_keys={2}
+        )
+        parsed = parse_mses(repaired)
+        self.assertEqual(len(parsed.rows), 2)
+        self.assertEqual(parsed.checksum_valid, True)
+        self.assertEqual(report["declared_row_count"], 3)
+        self.assertEqual(report["repaired_row_count"], 2)
+        self.assertEqual(report["expected_missing_keys"], ["0x00000002"])
+        self.assertEqual(report["rows_synthesized"], 0)
+
+    def test_stale_row_count_repair_rejects_unexpected_key_gaps(self):
+        original = bytearray(make_table(4, [
+            struct.pack("<I", 1) + b"one",
+            struct.pack("<I", 3) + b"three",
+        ]))
+        struct.pack_into("<I", original, 12, 3)
+        with self.assertRaisesRegex(MSESError, "không khớp allowlist"):
+            repair_mses_declared_row_count(
+                bytes(original), expected_missing_keys={2, 4}
+            )
+
+    def test_stale_row_count_repair_rejects_truncated_final_record(self):
+        original = bytearray(make_table(4, [
+            struct.pack("<I", 1) + b"one",
+        ]))
+        struct.pack_into("<I", original, 12, 2)
+        original.extend(b"\x08\x00")
+        with self.assertRaisesRegex(MSESError, "kết thúc giữa trường độ dài"):
+            repair_mses_declared_row_count(
+                bytes(original), expected_missing_keys=set()
+            )
 
 
 if __name__ == "__main__":
