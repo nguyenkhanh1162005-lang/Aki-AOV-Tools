@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 
 from .aov_bytes import AOVBytesError, decode_aov_resource, encode_aov_resource
 from .aov_mses import MSESError, build_mses, merge_mses_rows, parse_mses
@@ -50,6 +51,20 @@ _P9_P10_ACTOR_OWNED_MSES = {
         "conflict_count": 208,
         "p9_sha256": "099bc89ceb79ac9a39d202c7cf11770cb7c389b506adc2f1b5afccd877e4cf95",
         "p10_sha256": "6a1e1fbb9d7c1e3ea094198e0c9cb39ba76655414e279dd20241fadeccadaa99",
+        "p9_actor_ids": {107, 130, 137, 163, 509, 510, 518, 540, 597},
+        "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
+    },
+    "Databin/Client/Skill/liteBulletCfg.bytes": {
+        "p9_field_count": 156, "p10_field_count": 158,
+        "p9_row_count": 155, "p10_row_count": 161,
+        "output_source": "P10", "output_field_count": 158,
+        "output_row_count": 161,
+        "conflict_count": 19,
+        "p9_only_keys": set(),
+        "p10_only_keys": {0x2B5C, 0x2B5D, 0x2B5E, 0x1B19A, 0x1B1A4, 0x1B1AE},
+        "actor_id_rule": "lite_bullet_effect_path",
+        "p9_sha256": "5736d1ef1a3b2d7a2922a8eeeaa8ea460343108be4bdf31865f0b8ee2c81b743",
+        "p10_sha256": "3072231b6aac9c6f9e3b89f1b1872312bd6d9306d1523dbb2c62d731de5868c4",
         "p9_actor_ids": {107, 130, 137, 163, 509, 510, 518, 540, 597},
         "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
     },
@@ -170,6 +185,38 @@ def _actor_id_from_mses_key(key: int, spec: dict) -> int | None:
     return None
 
 
+def _lite_bullet_row_identity(row: bytes, label: str) -> tuple[int, bytes, bytes]:
+    """Read the final length-prefixed effect path in a verified liteBulletCfg row."""
+    marker = b"prefab_skill_effects/hero_skill_effects/"
+    path_start = row.find(marker)
+    if path_start < 4 or row.find(marker, path_start + 1) >= 0:
+        raise MSESError(f"{label}: cần đúng một đường dẫn hiệu ứng trong row.")
+    path_size = int.from_bytes(row[path_start - 4:path_start], "little")
+    path_end = path_start + path_size
+    if path_size <= 0 or path_end != len(row):
+        raise MSESError(f"{label}: trường đường dẫn không khớp độ dài row.")
+    path = row[path_start:path_end]
+    try:
+        path.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise MSESError(f"{label}: đường dẫn hiệu ứng không phải ASCII.") from exc
+    matches = {
+        int(value)
+        for value in re.findall(rb"hero_skill_effects/(\d+)_", path, flags=re.IGNORECASE)
+    }
+    if len(matches) != 1:
+        raise MSESError(f"{label}: không xác định được duy nhất Actor ID trong đường dẫn.")
+    return next(iter(matches)), row[:path_start - 4], path
+
+
+def _actor_id_from_mses_row(key: int, row: bytes, spec: dict) -> int | None:
+    if spec.get("actor_id_rule") == "lite_bullet_effect_path":
+        actor_id, _, _ = _lite_bullet_row_identity(row, f"row 0x{key:08x}")
+        return actor_id
+    return _actor_id_from_mses_key(key, spec)
+
+
+
 def _merge_p9_p10_actor_owned_rows(
     base_decoded: bytes,
     overlay_decoded: bytes,
@@ -177,24 +224,11 @@ def _merge_p9_p10_actor_owned_rows(
     base_actor_action_ids: set[int | str],
     overlay_actor_action_ids: set[int | str],
 ) -> tuple[bytes, dict]:
-    """Merge only the exact observed P9/P10 table pair using Actor action-package ownership."""
+    """Merge only exact-source P9/P10 MSES rows with source-owned Actor routing."""
     normalized_name = resource_name.replace(chr(92), "/").lstrip("/")
     spec = _P9_P10_ACTOR_OWNED_MSES.get(normalized_name)
     if spec is None:
         raise MSESError("Không có quy tắc Actor-owner cho bảng này.")
-
-    base_table = parse_mses(base_decoded)
-    overlay_table = parse_mses(overlay_decoded)
-    expected_shape = (spec["field_count"], spec["row_count"])
-    if (base_table.field_count, len(base_table.rows)) != expected_shape or (
-        overlay_table.field_count, len(overlay_table.rows)
-    ) != expected_shape:
-        raise MSESError(
-            f"{resource_name}: schema/row count khác cặp P9/P10 đã kiểm chứng "
-            f"(cần {expected_shape}, nhận "
-            f"{(base_table.field_count, len(base_table.rows))}/"
-            f"{(overlay_table.field_count, len(overlay_table.rows))})."
-        )
 
     base_hash = hashlib.sha256(base_decoded).hexdigest()
     overlay_hash = hashlib.sha256(overlay_decoded).hexdigest()
@@ -206,6 +240,26 @@ def _merge_p9_p10_actor_owned_rows(
         raise MSESError(
             f"{resource_name}: payload không khớp chính xác mẫu P9/P10 đã kiểm chứng; "
             "từ chối áp dụng quy tắc theo Actor ID."
+        )
+
+    base_table = parse_mses(base_decoded)
+    overlay_table = parse_mses(overlay_decoded)
+    expected_base_shape = (
+        spec.get(f"{base_source.lower()}_field_count", spec.get("field_count")),
+        spec.get(f"{base_source.lower()}_row_count", spec.get("row_count")),
+    )
+    expected_overlay_shape = (
+        spec.get(f"{overlay_source.lower()}_field_count", spec.get("field_count")),
+        spec.get(f"{overlay_source.lower()}_row_count", spec.get("row_count")),
+    )
+    if (base_table.field_count, len(base_table.rows)) != expected_base_shape or (
+        overlay_table.field_count, len(overlay_table.rows)
+    ) != expected_overlay_shape:
+        raise MSESError(
+            f"{resource_name}: schema/row count khác cặp P9/P10 đã kiểm chứng "
+            f"(cần {expected_base_shape}/{expected_overlay_shape}, nhận "
+            f"{(base_table.field_count, len(base_table.rows))}/"
+            f"{(overlay_table.field_count, len(overlay_table.rows))})."
         )
 
     base_ids = _normalise_actor_ids(base_actor_action_ids, "base")
@@ -223,13 +277,21 @@ def _merge_p9_p10_actor_owned_rows(
         )
 
     base_map, base_order = _index_actor_owned_rows(base_table.rows, "base")
-    overlay_map, _ = _index_actor_owned_rows(overlay_table.rows, "overlay")
-    if set(base_map) != set(overlay_map):
-        raise MSESError(
-            f"{resource_name}: tập khóa P9/P10 thay đổi so với fixture đã kiểm chứng."
-        )
+    overlay_map, overlay_order = _index_actor_owned_rows(overlay_table.rows, "overlay")
+    base_keys, overlay_keys = set(base_map), set(overlay_map)
+    base_only, overlay_only = base_keys - overlay_keys, overlay_keys - base_keys
+    if base_source == "P9":
+        p9_only, p10_only = base_only, overlay_only
+    else:
+        p9_only, p10_only = overlay_only, base_only
+    if "p9_only_keys" in spec and p9_only != spec["p9_only_keys"]:
+        raise MSESError(f"{resource_name}: tập khóa riêng P9 thay đổi so với fixture.")
+    if "p10_only_keys" in spec and p10_only != spec["p10_only_keys"]:
+        raise MSESError(f"{resource_name}: tập khóa riêng P10 thay đổi so với fixture.")
+
+    common = base_keys & overlay_keys
     differing = {
-        key for key in base_map
+        key for key in common
         if base_map[key] != overlay_map[key]
     }
     if len(differing) != spec["conflict_count"]:
@@ -239,10 +301,24 @@ def _merge_p9_p10_actor_owned_rows(
         )
 
     merged = dict(base_map)
+    merged.update({key: value for key, value in overlay_map.items() if key not in merged})
     selected_base = 0
     selected_overlay = 0
     for key in differing:
-        actor_id = _actor_id_from_mses_key(key, spec)
+        base_row = base_map[key]
+        overlay_row = overlay_map[key]
+        if spec.get("actor_id_rule") == "lite_bullet_effect_path":
+            base_actor, base_prefix, _ = _lite_bullet_row_identity(
+                base_row, f"P9/P10 base row 0x{key:08x}"
+            )
+            overlay_actor, overlay_prefix, _ = _lite_bullet_row_identity(
+                overlay_row, f"P9/P10 overlay row 0x{key:08x}"
+            )
+            if base_prefix != overlay_prefix or base_actor != overlay_actor:
+                raise MSESError(
+                    f"{resource_name}: prefix/schema row hoặc Actor ID khác nhau tại 0x{key:08x}."
+                )
+        actor_id = _actor_id_from_mses_row(key, base_row, spec)
         if actor_id is None:
             raise MSESError(
                 f"{resource_name}: không có quy tắc Actor ID cho khóa 0x{key:08x}."
@@ -255,16 +331,34 @@ def _merge_p9_p10_actor_owned_rows(
                 f"0x{key:08x} (Actor {actor_id})."
             )
         if owned_by_base:
-            merged[key] = base_map[key]
+            merged[key] = base_row
             selected_base += 1
         else:
-            merged[key] = overlay_map[key]
+            merged[key] = overlay_row
             selected_overlay += 1
 
-    output = build_mses(base_table, [merged[key] for key in base_order])
+    output_source = spec.get("output_source")
+    if output_source == "P10":
+        template_table = base_table if base_source == "P10" else overlay_table
+        output_order = base_order if base_source == "P10" else overlay_order
+    else:
+        template_table = base_table
+        output_order = base_order
+    ordered_keys = list(output_order)
+    ordered_keys.extend(key for key in sorted(set(merged) - set(output_order)))
+    output_field_count = spec.get("output_field_count", template_table.field_count)
+    output_row_count = spec.get("output_row_count", spec.get("row_count", len(ordered_keys)))
+    output = build_mses(
+        template_table,
+        [merged[key] for key in ordered_keys],
+        field_count=output_field_count,
+    )
     verified = parse_mses(output)
-    if len(verified.rows) != spec["row_count"]:
-        raise MSESError("Số hàng MSES sau ghép không khớp fixture.")
+    if verified.field_count != output_field_count or len(verified.rows) != output_row_count:
+        raise MSESError(
+            f"{resource_name}: schema/số hàng output không đúng fixture "
+            f"({verified.field_count} trường, {len(verified.rows)} hàng)."
+        )
     report = {
         "adapter": "p9_p10_actor_owned_mses_exact_source_pair",
         "resource": normalized_name,
@@ -276,9 +370,12 @@ def _merge_p9_p10_actor_owned_rows(
         "base_rows": len(base_table.rows),
         "overlay_rows": len(overlay_table.rows),
         "output_rows": len(verified.rows),
+        "p9_only_rows": len(p9_only),
+        "p10_only_rows": len(p10_only),
         "differing_shared_rows": len(differing),
         "selected_base_owned_rows": selected_base,
         "selected_overlay_owned_rows": selected_overlay,
+        "output_source": output_source or base_source,
         "base_checksum_valid": base_table.checksum_valid,
         "overlay_checksum_valid": overlay_table.checksum_valid,
         "output_checksum_valid": verified.checksum_valid,
@@ -287,7 +384,6 @@ def _merge_p9_p10_actor_owned_rows(
         "verified": True,
     }
     return output, report
-
 
 
 def merge_aov_mses_resource(
