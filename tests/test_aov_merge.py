@@ -250,6 +250,30 @@ class AOVResourceMergeTests(unittest.TestCase):
                 base, overlay, name, allow_p9_p10_label_union=True
             )
 
+    def test_p9_p10_label_union_rejects_unknown_stale_checksum_value(self):
+        name = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
+        rows_a = [
+            struct.pack("<I", key) + f"shared-{key}".encode()
+            for key in range(1, 9)
+        ]
+        rows_b = rows_a + [
+            struct.pack("<I", key) + f"extra-{key}".encode()
+            for key in range(9, 99)
+        ]
+        raw_a = bytearray(table(69, rows_a))
+        raw_b = bytearray(table(69, rows_b))
+        raw_a[0x60:0x80] = b"0" * 32
+        raw_b[0x60:0x80] = b"0" * 32
+        base = encode_aov_resource(bytes(raw_a), name, "aes")
+        overlay = encode_aov_resource(bytes(raw_b), name, "aes")
+
+        with self.assertRaisesRegex(
+            AOVResourceMergeError, "đúng chuỗi checksum cũ"
+        ):
+            merge_aov_mses_resource(
+                base, overlay, name, allow_p9_p10_label_union=True
+            )
+
     def test_p9_p10_label_union_rejects_unrecognized_row_counts(self):
         name = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
         rows_a = [
