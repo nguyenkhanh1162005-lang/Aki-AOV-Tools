@@ -94,7 +94,7 @@ _P9_P10_ACTOR_OWNED_MSES = {
         "p10_actor_ids": {111, 132, 150, 157, 167, 190, 524, 567, 598, 599},
     },
     "Databin/Client/Sound/LobbySound.bytes": {
-        "field_count": 69, "row_count": 959, "actor_id_rule": "sound_1000",
+        "field_count": 69, "row_count": 959, "actor_id_rule": "bank_10000",
         "conflict_count": 183,
         "p9_sha256": "0ef6ff11497eaa28ba9bb2c1dbf3f23f7ce3ac03be9d6a67b2ce8040586df8af",
         "p10_sha256": "4cb175546942bd5f5dda76e82419bf665108735d75821e506bab5db0aaa8eab5",
