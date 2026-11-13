@@ -333,3 +333,47 @@ footer{margin-top:24px;color:#7187a7;font-size:9px;letter-spacing:.14em}
   .advanced-content{padding:0 9px 9px}
   .advanced-group{padding:10px}
 }
+
+
+/* One-button workflow: analyze first, then route to the safe supported merger. */
+.main-grid{grid-template-columns:minmax(0,1fr)}
+.auto-process-card{
+  position:relative;overflow:hidden;margin-top:17px;padding:19px 17px 16px;
+  border:1px solid rgba(94,194,210,.34);border-radius:18px;
+  background:
+    radial-gradient(circle at 100% 0%,rgba(111,112,255,.17),transparent 35%),
+    linear-gradient(135deg,rgba(13,42,61,.96),rgba(19,25,52,.96));
+  box-shadow:0 15px 38px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.07)
+}
+.auto-process-card::after{
+  content:"";position:absolute;top:-65px;right:-45px;width:190px;height:190px;
+  border:1px solid rgba(126,211,232,.15);border-radius:50%;
+  box-shadow:0 0 0 20px rgba(126,211,232,.025),0 0 0 42px rgba(126,211,232,.02);
+  pointer-events:none
+}
+.auto-process-card h2{
+  position:relative;z-index:1;margin:0 0 6px;color:#f0f7ff;
+  font-size:19px;letter-spacing:-.025em
+}
+.auto-process-card p{
+  position:relative;z-index:1;max-width:720px;margin:0;
+  color:#abc0db;font-size:10px;line-height:1.7
+}
+.auto-process-button{
+  position:relative;z-index:1;min-height:52px;margin-top:14px;
+  border-radius:14px;font-size:12px;font-weight:950;letter-spacing:.055em;
+  box-shadow:0 10px 28px rgba(72,193,210,.2),inset 0 1px 0 rgba(255,255,255,.4)
+}
+.auto-process-button:disabled{filter:saturate(.45);box-shadow:none}
+#autoProcessHint{
+  display:block;position:relative;z-index:1;margin-top:9px;
+  color:#8fa9c8;font-size:9px;line-height:1.55
+}
+.drive-box{margin-top:10px}
+@media(max-width:520px){
+  .auto-process-card{margin-top:13px;padding:15px 12px 13px;border-radius:16px}
+  .auto-process-card h2{font-size:17px}
+  .auto-process-card p{font-size:9px}
+  .auto-process-button{min-height:49px;font-size:10px}
+  #autoProcessHint{font-size:8px}
+}
