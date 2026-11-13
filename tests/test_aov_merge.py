@@ -568,6 +568,47 @@ class AOVResourceMergeTests(unittest.TestCase):
             self.assertEqual(report["selected_overlay_owned_rows"], 1)
             self.assertTrue(report["output_checksum_valid"])
 
+
+    def test_p9_p10_lite_bullet_cfg_is_order_independent(self):
+        name = "Databin/Client/Skill/liteBulletCfg.bytes"
+
+        def lite_row(key, actor_id, suffix):
+            path = f"prefab_skill_effects/hero_skill_effects/{actor_id}_hero/{suffix}".encode("ascii")
+            return struct.pack("<I", key) + b"same-prefix" + struct.pack("<I", len(path)) + path
+
+        p9_decoded = table(156, [lite_row(10, 107, "p9.prefab")])
+        p10_decoded = table(158, [
+            lite_row(10, 107, "p10.prefab"),
+            lite_row(30, 111, "p10-only.prefab"),
+        ])
+        spec = {
+            "p9_field_count": 156, "p10_field_count": 158,
+            "p9_row_count": 1, "p10_row_count": 2,
+            "output_source": "P10", "output_field_count": 158,
+            "output_row_count": 2, "conflict_count": 1,
+            "p9_only_keys": set(), "p10_only_keys": {30},
+            "actor_id_rule": "lite_bullet_effect_path",
+            "p9_sha256": hashlib.sha256(p9_decoded).hexdigest(),
+            "p10_sha256": hashlib.sha256(p10_decoded).hexdigest(),
+            "p9_actor_ids": {107}, "p10_actor_ids": {111},
+        }
+        with patch.dict(_P9_P10_ACTOR_OWNED_MSES, {name: spec}):
+            merged, report = merge_aov_mses_resource(
+                encode_aov_resource(p10_decoded, name, "aes"),
+                encode_aov_resource(p9_decoded, name, "aes"),
+                name,
+                base_actor_action_ids={"111"},
+                overlay_actor_action_ids={"107"},
+            )
+            decoded, _ = decode_aov_resource(merged, name)
+            result = parse_mses(decoded)
+            rows = {int.from_bytes(row[:4], "little"): row for row in result.rows}
+            self.assertEqual(result.field_count, 158)
+            self.assertEqual(rows[10], lite_row(10, 107, "p9.prefab"))
+            self.assertEqual(rows[30], lite_row(30, 111, "p10-only.prefab"))
+            self.assertEqual(report["output_source"], "P10")
+
+
     def test_lite_bullet_cfg_rejects_unverifiable_effect_path_layout(self):
         valid = (
             struct.pack("<I", 1)
