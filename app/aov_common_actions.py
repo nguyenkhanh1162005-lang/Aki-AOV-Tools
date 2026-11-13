@@ -280,6 +280,75 @@ def merge_action_xml(
     }
 
 
+def _canonical_xml_bytes(root: ET.Element) -> bytes:
+    clone = copy.deepcopy(root)
+    for node in clone.iter():
+        if node.attrib:
+            node.attrib = dict(sorted(node.attrib.items()))
+        if node.text is not None and not node.text.strip():
+            node.text = None
+        if node.tail is not None and not node.tail.strip():
+            node.tail = None
+    return ET.tostring(clone, encoding="utf-8")
+
+
+def _decode_xml_resource(data: bytes, resource_name: str) -> ET.Element:
+    try:
+        decoded, _ = decode_aov_resource(data, resource_name)
+    except AOVBytesError:
+        # Some CommonActions resources are stored as plain UTF-8 XML.
+        decoded = data
+    try:
+        return ET.fromstring(decoded.lstrip(b"\xef\xbb\xbf"))
+    except ET.ParseError as exc:
+        raise CommonActionsMergeError(
+            f"{resource_name}: XML không giải mã/parse được khi đối chiếu semantic."
+        ) from exc
+
+
+def _xml_resource_is_semantic_subset(
+    base_data: bytes, overlay_data: bytes, resource_name: str
+) -> bool:
+    """Return true only when every overlay XML track is already present in base."""
+    try:
+        base_root = _decode_xml_resource(base_data, resource_name)
+        overlay_root = _decode_xml_resource(overlay_data, resource_name)
+    except CommonActionsMergeError:
+        return False
+    if base_root.tag != overlay_root.tag or base_root.attrib != overlay_root.attrib:
+        return False
+    base_action = base_root.find("Action")
+    overlay_action = overlay_root.find("Action")
+    if (base_action is None) != (overlay_action is None):
+        return False
+    base_non_action = [node for node in list(base_root) if node is not base_action]
+    overlay_non_action = [node for node in list(overlay_root) if node is not overlay_action]
+    if [_canonical_xml_bytes(node) for node in base_non_action] != [
+        _canonical_xml_bytes(node) for node in overlay_non_action
+    ]:
+        return False
+    if base_action is None:
+        return _canonical_xml_bytes(base_root) == _canonical_xml_bytes(overlay_root)
+    if base_action.attrib != overlay_action.attrib:
+        return False
+    base_other = [node for node in list(base_action) if node.tag != "Track"]
+    overlay_other = [node for node in list(overlay_action) if node.tag != "Track"]
+    if [_canonical_xml_bytes(node) for node in base_other] != [
+        _canonical_xml_bytes(node) for node in overlay_other
+    ]:
+        return False
+    from collections import Counter
+    base_tracks = Counter(
+        _canonical_xml_bytes(node)
+        for node in list(base_action) if node.tag == "Track"
+    )
+    overlay_tracks = Counter(
+        _canonical_xml_bytes(node)
+        for node in list(overlay_action) if node.tag == "Track"
+    )
+    return all(base_tracks[key] >= count for key, count in overlay_tracks.items())
+
+
 def merge_common_actions_pkg(
     base_package: bytes,
     overlay_package: bytes,
@@ -322,27 +391,43 @@ def merge_common_actions_pkg(
         for name in set(base_entries) & set(overlay_entries):
             if name in merge_candidates:
                 continue
-            if base_zip.read(base_entries[name]) != overlay_zip.read(overlay_entries[name]):
-                base_zip.close()
-                overlay_zip.close()
-                raise CommonActionsMergeError(
-                    f"{name}: xung đột tệp CommonActions ngoài danh sách XML có parser; "
-                    "không tự chọn bản nền hoặc bản overlay."
-                )
+            base_payload = base_zip.read(base_entries[name])
+            overlay_payload = overlay_zip.read(overlay_entries[name])
+            if base_payload == overlay_payload:
+                continue
+            if name.lower().endswith(".xml") and _xml_resource_is_semantic_subset(
+                base_payload, overlay_payload, name
+            ):
+                continue
+            base_zip.close()
+            overlay_zip.close()
+            raise CommonActionsMergeError(
+                f"{name}: xung đột tệp CommonActions ngoài danh sách XML có parser; "
+                "không tự chọn bản nền hoặc bản overlay."
+            )
 
     try:
         with zipfile.ZipFile(output_buffer, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as out:
             for name, info in base_entries.items():
                 base_data = base_zip.read(info)
                 if name in merge_candidates and name in overlay_entries:
-                    merged, report = merge_action_xml(
-                        base_data,
-                        overlay_zip.read(overlay_entries[name]),
-                        name,
-                        special_ids=special_ids,
+                    overlay_data = overlay_zip.read(overlay_entries[name])
+                    decoded_overlay, _ = decode_aov_resource(overlay_data, name)
+                    overlay_root = ET.fromstring(decoded_overlay)
+                    has_target_gate = any(
+                        node.attrib.get("id") in target_ids
+                        for track in overlay_root.iter("Track")
+                        for node in track.findall("SkinOrAvatarList")
                     )
-                    base_data = merged
-                    merged_files[name] = report
+                    if has_target_gate:
+                        merged, report = merge_action_xml(
+                            base_data,
+                            overlay_data,
+                            name,
+                            special_ids=target_ids,
+                        )
+                        base_data = merged
+                        merged_files[name] = report
                 target = zipfile.ZipInfo(name, date_time=info.date_time)
                 target.compress_type = zipfile.ZIP_DEFLATED
                 target.external_attr = info.external_attr
