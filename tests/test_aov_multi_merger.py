@@ -72,7 +72,7 @@ def _wwise_bank(bank_id, media_id, media_payload, object_id, object_payload=b"no
     body = struct.pack("<I", object_id) + object_payload
     hirc = _wwise_chunk(
         "HIRC",
-        struct.pack("<I", 1) + b"\\x02" + struct.pack("<I", len(body)) + body,
+        struct.pack("<I", 1) + bytes([2]) + struct.pack("<I", len(body)) + body,
     )
     header = _wwise_chunk("BKHD", struct.pack("<II", 135, bank_id))
     return header + didx + data + hirc
