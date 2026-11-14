@@ -76,6 +76,30 @@ _ADAPTERS = (
         "game_compatibility": "inspection_only; not_game_tested",
     },
     {
+        "id": "aov_multi_actor_auto_detect",
+        "name": "AoV nhiều MOD · tự nhận diện Actor (ghép có điều kiện)",
+        "status": "merge_supported_conditional",
+        "formats": [
+            "MOD wrapper + Resources.zip", "MSES v7 đã có schema",
+            "IFix có thể parse/round-trip", "CommonActions SkinOrAvatarList trực tiếp",
+            "Unity AssetBundle resource mới + Packer/Verification metadata",
+            "ZIP package lồng không có xung đột"
+        ],
+        "scope": (
+            "Chỉ nhận ít nhất hai MOD AoV cùng version.txt, có Actor ID được nhận diện "
+            "và ít nhất một wrapper Resources.zip + DanhSachSkin.txt. Một số tài nguyên "
+            "được union khi đường dẫn mới; xung đột chỉ ghép nếu parser tương ứng xác minh."
+        ),
+        "merge_policy": (
+            "MSES dùng schema/Actor-owner đã hỗ trợ; CommonActions chỉ nhận SkinOrAvatarList "
+            "trực tiếp; IFix phải parse và round-trip; AssetBundle mới cần Packer và "
+            "Verification được UnityPy đọc/ghi/đọc lại. AssetBundle trùng đường dẫn khác "
+            "payload, Wwise BNK, IFix/CommonActions không tương thích, version/schema lạ "
+            "và mọi xung đột chưa có parser đều bị chặn. Không tuyên bố hỗ trợ mọi skin."
+        ),
+        "game_compatibility": "structurally_validated; not_game_tested",
+    },
+    {
         "id": "aov_wrapper_inspection",
         "name": "AoV AES / Zstandard wrapper",
         "status": "inspect_only",
