@@ -29,6 +29,9 @@ class AdapterRegistryTests(unittest.TestCase):
         self.assertEqual(result["summary"]["blocked"], 0)
         self.assertEqual(adapters["aov_multi_mod_intake"]["status"], "inspect_only")
         self.assertIn("không phụ thuộc tên P9/P10/TM/VTK", adapters["aov_multi_mod_intake"]["scope"])
+        multi_actor = adapters["aov_multi_actor_auto_detect"]
+        self.assertIn("AssetReferenceSet inspect-only", " ".join(multi_actor["formats"]))
+        self.assertIn("subset serializer", multi_actor["merge_policy"])
         self.assertEqual(adapters["unity_assetbundle"]["status"], "inspect_only")
         self.assertEqual(adapters["wwise_bnk"]["status"], "inspect_only")
         self.assertEqual(adapters["aov_wrapper_inspection"]["status"], "inspect_only")
