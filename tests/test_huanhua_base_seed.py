@@ -103,12 +103,12 @@ class HuanhuaBaseSeedTests(unittest.TestCase):
 
     def test_rejects_donor_from_another_game_build(self):
         with tempfile.TemporaryDirectory() as temp:
-            base, donor, output, hashes, _payloads = self._fixture(Path(temp))
+            base, donor, output, hashes, payloads = self._fixture(Path(temp))
             _make_zip(donor, {
                 VERSION: b"1.64.1.11|1793128",
                 **{
-                    PREFIX + relative: _payload
-                    for relative, _payload in hashes.items()
+                    PREFIX + relative: payload
+                    for relative, payload in payloads.items()
                 },
             })
             with (
