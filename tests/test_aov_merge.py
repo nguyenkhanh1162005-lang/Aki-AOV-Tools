@@ -39,6 +39,90 @@ class AOVResourceMergeTests(unittest.TestCase):
         self.assertEqual(report["verified"], True)
         self.assertEqual(report["appended_keys"], ["0x00000002"])
 
+    def test_merges_battle_bank_rows_by_dynamic_actor_ownership(self):
+        name = "Databin/Client/Sound/BattleBank.bytes"
+        base_593 = struct.pack("<I", 5930001) + b"ZMOD_MaChao_SFX"
+        base_595 = struct.pack("<I", 5950001) + b"Hero_LiXin_SFX"
+        global_row = struct.pack("<I", 1) + b"global"
+        overlay_593 = struct.pack("<I", 5930001) + b"overlay-must-not-win"
+        overlay_595 = struct.pack("<I", 5950001) + b"Hero_LiXin_Skin_C_SFX"
+        overlay_new = struct.pack("<I", 5950002) + b"Hero_LiXin_Skin_C_VO"
+        base = encode_aov_resource(
+            table(59, [base_593, base_595, global_row]), name, "aes"
+        )
+        overlay = encode_aov_resource(
+            table(59, [overlay_593, overlay_595, overlay_new, global_row]),
+            name,
+            "aes",
+        )
+
+        result, report = merge_aov_mses_resource(
+            base,
+            overlay,
+            name,
+            base_actor_action_ids={"593"},
+            overlay_actor_action_ids={"595"},
+        )
+        decoded, mode = decode_aov_resource(result, name)
+        output = parse_mses(decoded)
+        rows = {int.from_bytes(row[:4], "little"): row for row in output.rows}
+
+        self.assertEqual(mode, "aes")
+        self.assertEqual(rows[5930001], base_593)
+        self.assertEqual(rows[5950001], overlay_595)
+        self.assertEqual(rows[5950002], overlay_new)
+        self.assertEqual(rows[1], global_row)
+        self.assertEqual(report["adapter"], "actor_owned_soundbank_union")
+        self.assertEqual(report["base_actor_ids"], [593])
+        self.assertEqual(report["overlay_actor_ids"], [595])
+        self.assertEqual(report["output_rows"], 4)
+        self.assertTrue(report["actor_ownership_verified"])
+        self.assertTrue(report["verified"])
+
+    def test_actor_owned_soundbank_rejects_overlapping_actor_inventories(self):
+        name = "Databin/Client/Sound/LobbyBank.bytes"
+        row = struct.pack("<I", 5930000) + b"Hero_Show"
+        base = encode_aov_resource(table(61, [row]), name, "aes")
+        overlay = encode_aov_resource(table(61, [row]), name, "aes")
+        with self.assertRaisesRegex(AOVResourceMergeError, "giao nhau"):
+            merge_aov_mses_resource(
+                base,
+                overlay,
+                name,
+                base_actor_action_ids={"593"},
+                overlay_actor_action_ids={"593"},
+            )
+
+    def test_actor_owned_soundbank_rejects_unowned_new_rows(self):
+        name = "Databin/Client/Sound/LobbyBank.bytes"
+        base_row = struct.pack("<I", 5930000) + b"base-show"
+        unowned_new = struct.pack("<I", 7000001) + b"unexpected-show"
+        base = encode_aov_resource(table(61, [base_row]), name, "aes")
+        overlay = encode_aov_resource(table(61, [base_row, unowned_new]), name, "aes")
+        with self.assertRaisesRegex(AOVResourceMergeError, "không thuộc Actor"):
+            merge_aov_mses_resource(
+                base,
+                overlay,
+                name,
+                base_actor_action_ids={"593"},
+                overlay_actor_action_ids={"595"},
+            )
+
+    def test_actor_owned_soundbank_rejects_conflicting_global_rows(self):
+        name = "Databin/Client/Sound/BattleBank.bytes"
+        base_global = struct.pack("<I", 999) + b"global-base"
+        overlay_global = struct.pack("<I", 999) + b"global-overlay"
+        base = encode_aov_resource(table(59, [base_global]), name, "aes")
+        overlay = encode_aov_resource(table(59, [overlay_global]), name, "aes")
+        with self.assertRaisesRegex(AOVResourceMergeError, "không xác định được Actor"):
+            merge_aov_mses_resource(
+                base,
+                overlay,
+                name,
+                base_actor_action_ids={"593"},
+                overlay_actor_action_ids={"595"},
+            )
+
     def test_repairs_only_the_known_stale_res_skin_base_checksum(self):
         name = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
         base_rows = [struct.pack("<I", key) + f"row-{key}".encode() for key in range(1, 54)]
