@@ -1205,15 +1205,6 @@ def _merge_actor_prefixed_mses_rows(
         overlay_table.rows, "overlay MSES"
     )
     known_ids = base_ids | overlay_ids
-    overlay_owned = {
-        key for key in overlay_order
-        if _infer_unique_actor_from_mses_key(key, known_ids) in overlay_ids
-    }
-    if not overlay_owned:
-        raise MSESError(
-            "Không tìm thấy khóa hàng overlay có prefix Actor khớp inventory."
-        )
-
     new_keys = set(overlay_map) - set(base_map)
     unowned_new = sorted(
         key for key in new_keys
@@ -1224,6 +1215,15 @@ def _merge_actor_prefixed_mses_rows(
             "Có hàng MSES mới không quy được duy nhất về Actor của overlay: "
             + ", ".join(f"0x{key:08x}" for key in unowned_new[:20])
             + "."
+        )
+
+    overlay_owned = {
+        key for key in overlay_order
+        if _infer_unique_actor_from_mses_key(key, known_ids) in overlay_ids
+    }
+    if not overlay_owned:
+        raise MSESError(
+            "Không tìm thấy khóa hàng overlay có prefix Actor khớp inventory."
         )
 
     differing_common = {
