@@ -693,6 +693,54 @@ def merge_aov_mses_resource(
     actor_owner_requested = (
         base_actor_action_ids is not None or overlay_actor_action_ids is not None
     )
+    if (
+        normalized_name in _ACTOR_OWNED_SOUND_BANKS
+        and base_actor_action_ids is not None
+        and overlay_actor_action_ids is not None
+    ):
+        # Retain the exact source/hash-pinned P9/P10 adapter. Other Actor
+        # inventories use the stricter dynamic bank-row ownership adapter.
+        bank_spec = _P9_P10_ACTOR_OWNED_MSES.get(normalized_name, {})
+        base_ids = _normalise_actor_ids(base_actor_action_ids, "base")
+        overlay_ids = _normalise_actor_ids(overlay_actor_action_ids, "overlay")
+        pinned_p9 = set(bank_spec.get("p9_actor_ids", ()))
+        pinned_p10 = set(bank_spec.get("p10_actor_ids", ()))
+        exact_p9_p10_pair = (
+            (base_ids == pinned_p9 and overlay_ids == pinned_p10)
+            or (base_ids == pinned_p10 and overlay_ids == pinned_p9)
+        )
+        if not exact_p9_p10_pair:
+            try:
+                base_decoded, base_mode = decode_aov_resource(base_resource, resource_name)
+                overlay_decoded, overlay_mode = decode_aov_resource(overlay_resource, resource_name)
+                merged_decoded, report = _merge_actor_owned_soundbank_rows(
+                    base_decoded,
+                    overlay_decoded,
+                    normalized_name,
+                    base_actor_action_ids,
+                    overlay_actor_action_ids,
+                )
+                merged_resource = encode_aov_resource(
+                    merged_decoded, resource_name, base_mode
+                )
+                verify_decoded, verify_mode = decode_aov_resource(
+                    merged_resource, resource_name
+                )
+                verified = parse_mses(verify_decoded)
+                if verify_decoded != merged_decoded or not verified.checksum_valid:
+                    raise MSESError("MSES sound bank sau mã hóa không round-trip chính xác.")
+                report.update({
+                    "base_encoding": base_mode,
+                    "overlay_encoding": overlay_mode,
+                    "output_encoding": verify_mode,
+                    "output_bytes": len(merged_resource),
+                })
+                return merged_resource, report
+            except (AOVBytesError, MSESError) as exc:
+                raise AOVResourceMergeError(
+                    f"{resource_name}: không thể ghép sound bank theo Actor-owner: {exc}"
+                ) from exc
+
     if normalized_name in _P9_P10_ACTOR_OWNED_MSES:
         if base_actor_action_ids is not None and overlay_actor_action_ids is not None:
             try:
