@@ -178,7 +178,7 @@ class MultiActorPipelineIntegrationTests(unittest.TestCase):
             },
             *[
                 {
-                    **_profile(f"Part{part}.zip", "595"),
+                    **_profile(f"Part{part}.zip", "595", version=False),
                     "source_family_hint": "VTK", "source_part_number": part,
                     "has_vtk_ifix": part == 1,
                     "has_595_assets": part in {2, 3},
