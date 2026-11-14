@@ -396,6 +396,37 @@ function renderPreflightDashboard(data){
   }
   preservation.append(preservationGrid);root.append(preservation);
 
+  const wwise=analysis.wwise_analysis||{};
+  if(wwise.state&&wwise.state!=='NO_OVERLAY_BNKS'){
+    const wwiseSection=dashboardElement('section','preflight-group');
+    wwiseSection.append(dashboardElement('h3','','KIỂM TRA WWISE BANK / MEDIA / HIRC ID'));
+    const wwiseState=wwise.state==='APPEND_ONLY_SAFE'?'SAFE':'warning';
+    const stateLabel=wwise.state==='APPEND_ONLY_SAFE'
+      ?'CÓ THỂ THÊM BNK NGUYÊN TRẠNG'
+      :wwise.state==='BLOCKED'?'BỊ CHẶN DO XUNG ĐỘT / THIẾU THAM CHIẾU':'CHƯA CÓ BNK OVERLAY';
+    wwiseSection.append(dashboardElement('span','preflight-tag '+wwiseState,stateLabel));
+    if(wwise.reason)wwiseSection.append(dashboardElement('p','danger',wwise.reason));
+    const summary=[
+      (wwise.bank_count||0)+' BNK đã kiểm tra',
+      (wwise.standalone_wem_count||0)+' WEM rời',
+      (wwise.identical_duplicate_count||0)+' bản trùng byte'
+    ];
+    wwiseSection.append(dashboardElement('p','',summary.join(' · ')));
+    for(const source of (wwise.sources||[])){
+      wwiseSection.append(dashboardElement(
+        'p','',
+        source.source+' · '+source.bank_count+' BNK · '+source.standalone_wem_count+' WEM'
+      ));
+    }
+    if(wwise.assessment){
+      wwiseSection.append(dashboardElement('p','',
+        'Kiểm tra Bank ID, Media ID + SHA-256, HIRC object ID/type/payload và namespace platform/ngôn ngữ. Không sửa/remap BNK.'
+      ));
+    }
+    wwiseSection.append(dashboardElement('p','','Phân tích Wwise chỉ xác nhận cấu trúc và ID namespace; không chứng minh âm thanh phát đúng trong game.'));
+    root.append(wwiseSection);
+  }
+
   const mses=analysis.mses_diagnostics||{};
   if(mses.tables?.length){
     const msesSection=dashboardElement('section','preflight-group');
