@@ -59,6 +59,25 @@ def _base_resources():
     }
 
 
+
+def _wwise_chunk(name, payload):
+    return name.encode("ascii") + struct.pack("<I", len(payload)) + payload
+
+
+def _wwise_bank(bank_id, media_id, media_payload, object_id, object_payload=b"node"):
+    didx = _wwise_chunk(
+        "DIDX", struct.pack("<III", media_id, 0, len(media_payload))
+    )
+    data = _wwise_chunk("DATA", media_payload)
+    body = struct.pack("<I", object_id) + object_payload
+    hirc = _wwise_chunk(
+        "HIRC",
+        struct.pack("<I", 1) + b"\\x02" + struct.pack("<I", len(body)) + body,
+    )
+    header = _wwise_chunk("BKHD", struct.pack("<II", 135, bank_id))
+    return header + didx + data + hirc
+
+
 class AOVMultiMergerTests(unittest.TestCase):
     def test_appends_unique_resources_and_updates_verification_catalog(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -209,6 +228,167 @@ class AOVMultiMergerTests(unittest.TestCase):
                 for row in parse_mses(decoded).rows
             }
             self.assertEqual(keys, {5930001, 5950001})
+
+
+    def test_appends_wwise_bank_when_ids_are_disjoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base_path = Path(directory) / "base.zip"
+            overlay_path = Path(directory) / "creator-audio.zip"
+            output_path = Path(directory) / "merged.zip"
+            _write_wrapper(base_path, _base_resources())
+            _write_direct(overlay_path, {
+                "version.txt": b"1.64.1.12",
+                "Sound/iOS/Creator_Hero_Show.bnk": _wwise_bank(
+                    300, 3001, b"creator-media", 30001
+                ),
+                VERIFICATION: b"overlay-verification",
+                "Ages/Prefab_Characters/Actor_731_Actions.pkg.bytes": b"actor-731",
+            })
+            profiles = [
+                {"name": base_path.name, "actor_action_ids": ["593"]},
+                {"name": overlay_path.name, "actor_action_ids": ["731"]},
+            ]
+
+            def merge_metadata(base, overlay, *, kind, prefer_overlay_paths=None):
+                return base + b"+" + overlay, {
+                    "kind": kind,
+                    "preferred": sorted(prefer_overlay_paths or ()),
+                    "verified": True,
+                }
+
+            with patch(
+                "app.aov_multi_merger.merge_aov_metadata_assetbundle",
+                side_effect=merge_metadata,
+            ):
+                result = merge_multi_actor_aov_archives(
+                    [str(base_path), str(overlay_path)],
+                    str(output_path),
+                    profiles,
+                )
+
+            self.assertTrue(
+                result["resource_reports"]["Sound/iOS/Creator_Hero_Show.bnk"]["verified"]
+            )
+            self.assertEqual(result["resource_reports"][
+                "Sound/iOS/Creator_Hero_Show.bnk"
+            ]["adapter"], "wwise_bnk_append_only_disjoint_id_namespaces")
+            with zipfile.ZipFile(output_path) as outer:
+                inner_bytes = outer.read(
+                    next(i for i in outer.infolist() if i.filename.endswith("Resources.zip"))
+                )
+            with zipfile.ZipFile(io.BytesIO(inner_bytes)) as inner:
+                self.assertEqual(
+                    inner.read(BASE_PREFIX + "Sound/iOS/Creator_Hero_Show.bnk"),
+                    _wwise_bank(300, 3001, b"creator-media", 30001),
+                )
+
+    def test_appends_same_bank_id_in_separate_language_namespaces(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base_path = Path(directory) / "base.zip"
+            overlay_path = Path(directory) / "creator-audio.zip"
+            output_path = Path(directory) / "merged.zip"
+            _write_wrapper(base_path, _base_resources())
+            _write_direct(overlay_path, {
+                "version.txt": b"1.64.1.12",
+                "Sound/iOS/English(US)/Creator_Show.bnk": _wwise_bank(
+                    400, 4001, b"english-media", 40001
+                ),
+                "Sound/iOS/Vietnamese/Creator_Show.bnk": _wwise_bank(
+                    400, 4001, b"vietnamese-media", 40001, b"translated"
+                ),
+                VERIFICATION: b"overlay-verification",
+                "Ages/Prefab_Characters/Actor_731_Actions.pkg.bytes": b"actor-731",
+            })
+            profiles = [
+                {"name": base_path.name, "actor_action_ids": ["593"]},
+                {"name": overlay_path.name, "actor_action_ids": ["731"]},
+            ]
+
+            def merge_metadata(base, overlay, *, kind, prefer_overlay_paths=None):
+                return base + b"+" + overlay, {
+                    "kind": kind,
+                    "preferred": sorted(prefer_overlay_paths or ()),
+                    "verified": True,
+                }
+
+            with patch(
+                "app.aov_multi_merger.merge_aov_metadata_assetbundle",
+                side_effect=merge_metadata,
+            ):
+                result = merge_multi_actor_aov_archives(
+                    [str(base_path), str(overlay_path)],
+                    str(output_path),
+                    profiles,
+                )
+
+            self.assertEqual(result["resource_reports"][
+                "Sound/iOS/English(US)/Creator_Show.bnk"
+            ]["overlay_banks"][0]["scope"], "ios|englishus")
+            with zipfile.ZipFile(output_path) as outer:
+                inner_bytes = outer.read(
+                    next(i for i in outer.infolist() if i.filename.endswith("Resources.zip"))
+                )
+            with zipfile.ZipFile(io.BytesIO(inner_bytes)) as inner:
+                self.assertIn(
+                    BASE_PREFIX + "Sound/iOS/English(US)/Creator_Show.bnk",
+                    inner.namelist(),
+                )
+                self.assertIn(
+                    BASE_PREFIX + "Sound/iOS/Vietnamese/Creator_Show.bnk",
+                    inner.namelist(),
+                )
+
+    def test_rejects_wwise_bank_id_collision_during_archive_merge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base_path = Path(directory) / "base.zip"
+            overlay_path = Path(directory) / "creator-audio.zip"
+            output_path = Path(directory) / "merged.zip"
+            resources = _base_resources()
+            resources["Sound/iOS/Base.bnk"] = _wwise_bank(
+                500, 5001, b"base-media", 50001
+            )
+            _write_wrapper(base_path, resources)
+            _write_direct(overlay_path, {
+                "version.txt": b"1.64.1.12",
+                "Sound/iOS/Creator_Show.bnk": _wwise_bank(
+                    500, 5002, b"new-media", 50002
+                ),
+                "Ages/Prefab_Characters/Actor_731_Actions.pkg.bytes": b"actor-731",
+            })
+            profiles = [
+                {"name": base_path.name, "actor_action_ids": ["593"]},
+                {"name": overlay_path.name, "actor_action_ids": ["731"]},
+            ]
+            with self.assertRaisesRegex(AOVMultiMergeError, "Bank ID 500"):
+                merge_multi_actor_aov_archives(
+                    [str(base_path), str(overlay_path)],
+                    str(output_path),
+                    profiles,
+                )
+            self.assertFalse(output_path.exists())
+
+    def test_rejects_unpaired_wem_during_archive_merge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base_path = Path(directory) / "base.zip"
+            overlay_path = Path(directory) / "creator-audio.zip"
+            output_path = Path(directory) / "merged.zip"
+            _write_wrapper(base_path, _base_resources())
+            _write_direct(overlay_path, {
+                "version.txt": b"1.64.1.12",
+                "Sound/iOS/Creator_Media.wem": b"RIFF-wem-data",
+                "Ages/Prefab_Characters/Actor_731_Actions.pkg.bytes": b"actor-731",
+            })
+            profiles = [
+                {"name": base_path.name, "actor_action_ids": ["593"]},
+                {"name": overlay_path.name, "actor_action_ids": ["731"]},
+            ]
+            with self.assertRaisesRegex(AOVMultiMergeError, "WEM rời"):
+                merge_multi_actor_aov_archives(
+                    [str(base_path), str(overlay_path)],
+                    str(output_path),
+                    profiles,
+                )
+            self.assertFalse(output_path.exists())
 
 
     def test_rejects_unique_wwise_bank_without_reference_remap(self):
