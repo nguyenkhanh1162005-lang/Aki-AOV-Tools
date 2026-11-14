@@ -42,6 +42,7 @@ _AOV_DOWNLOAD_FILENAMES = {
     "aov_p9_p10_skin_union_1.64.1": "Aki-AOV-P9-P10-19Skin.zip",
     "aov_mod_to_mod_vtk_actor595_1.64.1": "Aki-AOV-10Skin-VanTamKiem.zip",
     "aov_kpm100_vtk_actor595_1.64.1": "Aki-AOV-KPM100-VTK.zip",
+    "aov_multi_actor_auto_detect": "Aki-AOV-Multi-Actor-Auto-Merge.zip",
 }
 
 
