@@ -105,7 +105,9 @@ _ADAPTERS = (
         "name": "AoV nhiều MOD · tự nhận diện Actor (ghép có điều kiện)",
         "status": "merge_supported_conditional",
         "formats": [
-            "MOD wrapper + Resources.zip", "MSES v7 đã có schema",
+            "MOD wrapper + Resources.zip",
+            "MSES v7 đã có schema",
+            "MSES ngoài allowlist chỉ-thêm khi prefix khóa hàng quy được duy nhất về Actor",
             "IFix có thể parse/round-trip", "CommonActions SkinOrAvatarList trực tiếp",
             "Unity AssetBundle resource mới + Packer/Verification metadata",
             "ZIP package lồng không có xung đột",
@@ -117,8 +119,10 @@ _ADAPTERS = (
             "được union khi đường dẫn mới; xung đột chỉ ghép nếu parser tương ứng xác minh."
         ),
         "merge_policy": (
-            "MSES dùng schema/Actor-owner đã hỗ trợ; CommonActions chỉ nhận SkinOrAvatarList "
-            "trực tiếp; IFix phải parse và round-trip; AssetBundle mới cần Packer và "
+            "MSES dùng schema/Actor-owner đã hỗ trợ; bảng MSES lạ chỉ dùng adapter dự phòng "
+            "khi schema/version/checksum khớp và prefix khóa hàng quy duy nhất về Actor_Action. "
+            "CommonActions chỉ nhận SkinOrAvatarList trực tiếp; IFix phải parse và round-trip; "
+            "AssetBundle mới cần Packer và "
             "Verification được UnityPy đọc/ghi/đọc lại. AssetBundle trùng đường dẫn khác "
             "payload và WEM rời chưa đối chiếu được đều bị chặn. Wwise BNK chỉ được thêm "
             "nguyên trạng khi Wwise version, Bank ID, Media ID và HIRC object ID không "
