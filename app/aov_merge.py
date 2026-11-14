@@ -409,6 +409,154 @@ def _merge_p9_p10_actor_owned_rows(
     return output, report
 
 
+_ACTOR_OWNED_SOUND_BANKS = {
+    "Databin/Client/Sound/BattleBank.bytes",
+    "Databin/Client/Sound/LobbyBank.bytes",
+}
+
+
+def _merge_actor_owned_soundbank_rows(
+    base_decoded: bytes,
+    overlay_decoded: bytes,
+    resource_name: str,
+    base_actor_action_ids: set[int | str],
+    overlay_actor_action_ids: set[int | str],
+) -> tuple[bytes, dict]:
+    """Merge sound-bank rows only when their key maps to one supplied Actor owner.
+
+    The Actor * 10000 key prefix is used only when it matches an explicitly
+    supplied Actor_Action inventory. Global/unknown records are retained from
+    the base and can never be introduced or replaced by an overlay.
+    """
+    normalized_name = resource_name.replace(chr(92), "/").lstrip("/")
+    if normalized_name not in _ACTOR_OWNED_SOUND_BANKS:
+        raise MSESError("Bảng âm thanh không nằm trong danh sách Actor-owned đã xác minh.")
+
+    base_ids = _normalise_actor_ids(base_actor_action_ids, "base")
+    overlay_ids = _normalise_actor_ids(overlay_actor_action_ids, "overlay")
+    if not base_ids or not overlay_ids:
+        raise MSESError("Cần Actor_Action inventory không rỗng của cả nguồn nền và overlay.")
+    overlap = base_ids & overlay_ids
+    if overlap:
+        raise MSESError(
+            "Actor_Action inventory giao nhau, không xác định được nguồn sở hữu: "
+            + ", ".join(str(value) for value in sorted(overlap))
+            + "."
+        )
+
+    base_table = parse_mses(base_decoded)
+    overlay_table = parse_mses(overlay_decoded)
+    if base_table.version != overlay_table.version:
+        raise MSESError("Phiên bản MSES BattleBank/LobbyBank khác nhau.")
+    if base_table.field_count != overlay_table.field_count:
+        raise MSESError(
+            "Schema MSES BattleBank/LobbyBank khác nhau: "
+            f"base={base_table.field_count}, overlay={overlay_table.field_count}."
+        )
+
+    base_map, base_order = _index_actor_owned_rows(base_table.rows, "base sound bank")
+    overlay_map, overlay_order = _index_actor_owned_rows(
+        overlay_table.rows, "overlay sound bank"
+    )
+    known_ids = base_ids | overlay_ids
+
+    def owner_for_key(key: int) -> int | None:
+        owner = key // 10000
+        return owner if owner in known_ids else None
+
+    base_keys = set(base_map)
+    overlay_keys = set(overlay_map)
+    new_keys = overlay_keys - base_keys
+    invalid_new = sorted(
+        key for key in new_keys
+        if owner_for_key(key) not in overlay_ids
+    )
+    if invalid_new:
+        raise MSESError(
+            "Overlay có hàng mới không thuộc Actor của chính overlay: "
+            + ", ".join(f"0x{key:08x}" for key in invalid_new[:20])
+            + "."
+        )
+
+    differing_common = {
+        key for key in base_keys & overlay_keys
+        if base_map[key] != overlay_map[key]
+    }
+    unresolved = sorted(
+        key for key in differing_common
+        if owner_for_key(key) not in (base_ids | overlay_ids)
+    )
+    if unresolved:
+        raise MSESError(
+            "Có hàng âm thanh xung đột không xác định được Actor sở hữu: "
+            + ", ".join(f"0x{key:08x}" for key in unresolved[:20])
+            + "."
+        )
+
+    merged = dict(base_map)
+    replaced_base_owned = []
+    replaced_overlay_owned = []
+    for key in differing_common:
+        owner = owner_for_key(key)
+        if owner in base_ids:
+            merged[key] = base_map[key]
+            replaced_base_owned.append(key)
+        elif owner in overlay_ids:
+            merged[key] = overlay_map[key]
+            replaced_overlay_owned.append(key)
+        else:  # Defensive; ownership was checked above.
+            raise MSESError(f"Không xác định được Actor sở hữu khóa 0x{key:08x}.")
+
+    appended = []
+    for key in overlay_order:
+        if key in base_map:
+            continue
+        owner = owner_for_key(key)
+        if owner not in overlay_ids:
+            raise MSESError(f"Không được phép thêm khóa âm thanh 0x{key:08x}.")
+        merged[key] = overlay_map[key]
+        appended.append(key)
+
+    ordered_keys = list(base_order)
+    ordered_keys.extend(key for key in overlay_order if key not in base_map)
+    output = build_mses(base_table, [merged[key] for key in ordered_keys])
+    verified = parse_mses(output)
+    if (
+        verified.version != base_table.version
+        or verified.field_count != base_table.field_count
+        or len(verified.rows) != len(ordered_keys)
+        or not verified.checksum_valid
+    ):
+        raise MSESError("MSES output không vượt qua xác minh schema/row/checksum.")
+
+    report = {
+        "adapter": "actor_owned_soundbank_union",
+        "resource": normalized_name,
+        "base_actor_ids": sorted(base_ids),
+        "overlay_actor_ids": sorted(overlay_ids),
+        "ownership_rule": "row_key_divided_by_10000_matches_actor_action_inventory",
+        "base_fields": base_table.field_count,
+        "overlay_fields": overlay_table.field_count,
+        "output_fields": verified.field_count,
+        "base_rows": len(base_table.rows),
+        "overlay_rows": len(overlay_table.rows),
+        "output_rows": len(verified.rows),
+        "appended_keys": [f"0x{key:08x}" for key in appended],
+        "base_owned_conflicts_retained": [
+            f"0x{key:08x}" for key in sorted(replaced_base_owned)
+        ],
+        "overlay_owned_conflicts_selected": [
+            f"0x{key:08x}" for key in sorted(replaced_overlay_owned)
+        ],
+        "source_hashes_pinned": False,
+        "actor_inventory_pinned": False,
+        "actor_ownership_verified": True,
+        "output_checksum_valid": verified.checksum_valid,
+        "verified": True,
+    }
+    return output, report
+
+
 def merge_aov_mses_resource(
     base_resource: bytes,
     overlay_resource: bytes,
@@ -581,9 +729,45 @@ def merge_aov_mses_resource(
             raise AOVResourceMergeError(
                 f"{resource_name}: cần Actor_Action inventory P9/P10 để dùng adapter mới."
             )
+    if normalized_name in _ACTOR_OWNED_SOUND_BANKS and actor_owner_requested:
+        if base_actor_action_ids is None or overlay_actor_action_ids is None:
+            raise AOVResourceMergeError(
+                f"{resource_name}: cần Actor_Action inventory của cả nguồn nền và overlay."
+            )
+        try:
+            base_decoded, base_mode = decode_aov_resource(base_resource, resource_name)
+            overlay_decoded, overlay_mode = decode_aov_resource(overlay_resource, resource_name)
+            merged_decoded, report = _merge_actor_owned_soundbank_rows(
+                base_decoded,
+                overlay_decoded,
+                normalized_name,
+                base_actor_action_ids,
+                overlay_actor_action_ids,
+            )
+            merged_resource = encode_aov_resource(
+                merged_decoded, resource_name, base_mode
+            )
+            verify_decoded, verify_mode = decode_aov_resource(
+                merged_resource, resource_name
+            )
+            verified = parse_mses(verify_decoded)
+            if verify_decoded != merged_decoded or not verified.checksum_valid:
+                raise MSESError("MSES sound bank sau mã hóa không round-trip chính xác.")
+            report.update({
+                "base_encoding": base_mode,
+                "overlay_encoding": overlay_mode,
+                "output_encoding": verify_mode,
+                "output_bytes": len(merged_resource),
+            })
+            return merged_resource, report
+        except (AOVBytesError, MSESError) as exc:
+            raise AOVResourceMergeError(
+                f"{resource_name}: không thể ghép sound bank theo Actor-owner: {exc}"
+            ) from exc
+
     if actor_owner_requested:
         raise AOVResourceMergeError(
-            f"{resource_name}: Actor_Action inventory chỉ dùng cho bốn bảng P9/P10 đã ghim."
+            f"{resource_name}: Actor_Action inventory chỉ được dùng với các bảng có adapter Actor-owner."
         )
 
     try:
