@@ -111,7 +111,8 @@ _ADAPTERS = (
             "IFix có thể parse/round-trip", "CommonActions SkinOrAvatarList trực tiếp",
             "Unity AssetBundle resource mới + Packer/Verification metadata",
             "ZIP package lồng không có xung đột",
-            "Wwise BNK append-only khi Bank/Media/HIRC ID không xung đột"
+            "Wwise BNK append-only khi Bank/Media/HIRC ID không xung đột",
+            "AssetReferenceSet inspect-only; unique path preserved byte-for-byte"
         ],
         "scope": (
             "Chỉ nhận ít nhất hai MOD AoV cùng version.txt, có Actor ID được nhận diện "
