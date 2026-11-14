@@ -780,7 +780,8 @@ class ModPipelineTests(unittest.TestCase):
             general = report["general_analysis"]
 
             self.assertEqual(report["source_count"], 2)
-            self.assertEqual(general["source_package_types"]["aov_mod_unclassified"], 2)
+            self.assertEqual(general["source_package_types"]["aov_actor_mod_candidate"], 1)
+            self.assertEqual(general["source_package_types"]["aov_mod_unclassified"], 1)
             self.assertIn("701", general["actor_ids"])
             self.assertNotIn("702", general["actor_ids"])
             self.assertTrue(general["can_analyze_unlisted_mod_types"])
