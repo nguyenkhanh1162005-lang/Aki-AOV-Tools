@@ -30,13 +30,13 @@ def _mses_resource(path, rows):
 
 def _assetref_payload(label=b"assetref-fixture"):
     return (
-        b"\\x31\\x0a\\x01\\x00"
-        + b"\\x08\\x00\\x00\\x00ROOTC\\x00\\x00\\x00"
-        + b"\\x02\\x00\\x00\\x00\\x0d\\x00\\x00\\x00\\x06\\x00\\x00\\x00"
-        + b"JTCom.\\x00\\x00\\x00\\x08\\x00\\x00\\x00"
+        b"\x31\x0a\x01\x00"
+        + b"\x08\x00\x00\x00ROOTC\x00\x00\x00"
+        + b"\x02\x00\x00\x00\x0d\x00\x00\x00\x06\x00\x00\x00"
+        + b"JTCom.\x00\x00\x00\x08\x00\x00\x00"
         + b"TypeAssetRefAnalyser.AssetReferenceSet"
-        + b"\\x04\\x00\\x00\\x00baseSubset\\x00"
-        + b"VPrefab_Characters/Prefab_Hero/595_LiXin/skill/A1\\x00"
+        + b"\x04\x00\x00\x00baseSubset\x00"
+        + b"VPrefab_Characters/Prefab_Hero/595_LiXin/skill/A1\x00"
         + label
     )
 
