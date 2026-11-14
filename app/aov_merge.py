@@ -517,7 +517,12 @@ def _merge_actor_owned_mses_rows(
         )
     unresolved = sorted(
         key for key, (base_owner, overlay_owner) in conflict_owners.items()
-        if (base_owner or overlay_owner) not in (base_ids | overlay_ids)
+        if (
+            base_owner is None
+            or overlay_owner is None
+            or base_owner != overlay_owner
+            or base_owner not in (base_ids | overlay_ids)
+        )
     )
     if unresolved:
         raise MSESError(
