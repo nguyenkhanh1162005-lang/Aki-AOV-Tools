@@ -15,7 +15,7 @@ _ACTOR_PATTERNS = (
     re.compile(r"(?:^|/)AssetRefs/Hero/(\d{3})_AssetRef\.bytes$", re.IGNORECASE),
     re.compile(r"(?:^|/)assetbundle/(?:[^/]+/)*(\d{3})_[^/]+\.assetbundle$", re.IGNORECASE),
     re.compile(r"(?:^|/)Prefab_Hero/(\d{3})_[^/]+(?:\.bytes|\.pkg\.bytes)$", re.IGNORECASE),
-    re.compile(r"(?:^|/)actor[_-](\d{3})(?:[_/-]|$)", re.IGNORECASE),
+    re.compile(r"(?:^|/)(?:actor|hero)[_-](\d{3})(?:/|$)", re.IGNORECASE),
 )
 
 
