@@ -1044,14 +1044,32 @@ def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
             "safety_rule": "Không ghi đè hoặc ghép AssetBundle chỉ vì tên hay Actor ID giống nhau.",
         }
 
-    if lower.endswith((".bnk", ".wem")) or "/sound/" in lower:
+    if lower.endswith(".bnk"):
+        return {
+            "adapter_state": "append_only_id_namespace",
+            "next_action": (
+                "Có thể thêm nguyên trạng BNK khi Wwise version, Bank ID, Media ID và "
+                "HIRC object ID không xung đột trong namespace platform/ngôn ngữ có thể "
+                "được nạp cùng nhau. Không rewrite hoặc remap ID."
+            ),
+            "safety_rule": (
+                "Từ chối Bank ID trùng, Media/HIRC ID trùng khác payload, unknown chunk, "
+                "external media cần WEM, khác version hoặc path trùng khác nội dung."
+            ),
+        }
+
+    if lower.endswith(".wem"):
         return {
             "adapter_state": "inspect_only",
-            "next_action": (
-                "Có kiểm tra cấu trúc Wwise/BNK và inventory media; chưa có serializer "
-                "remap Event/Action/HIRC/WEM cho nhiều skin."
-            ),
-            "safety_rule": "Không nối byte BNK hoặc thay bank iOS bằng bank Android.",
+            "next_action": "Cần liên kết WEM với Media ID trong BNK và xác minh namespace trước khi thêm.",
+            "safety_rule": "Không thêm WEM rời khi chưa xác minh bank/media reference.",
+        }
+
+    if "/sound/" in lower:
+        return {
+            "adapter_state": "inspect_only",
+            "next_action": "Tài nguyên Sound chưa phải BNK cần adapter riêng theo định dạng.",
+            "safety_rule": "Không đổi nội dung audio theo tên file hoặc phần mở rộng.",
         }
 
     if "assetrefs/" in lower or leaf.endswith("_assetref.bytes"):
