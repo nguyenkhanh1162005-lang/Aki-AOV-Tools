@@ -427,6 +427,47 @@ function renderPreflightDashboard(data){
     root.append(wwiseSection);
   }
 
+  const assetref=analysis.assetref_analysis||{};
+  if(assetref.state&&assetref.state!=='NO_ASSETREFS'){
+    const assetrefSection=dashboardElement('section','preflight-group');
+    assetrefSection.append(dashboardElement('h3','','KIỂM TRA ASSETREFERENCESET / ASSETREF'));
+    const assetrefState=assetref.state==='UNIQUE_PATHS_PASSTHROUGH'?'SAFE':'warning';
+    const assetrefLabel=assetref.state==='UNIQUE_PATHS_PASSTHROUGH'
+      ?'ĐƯỜNG DẪN RIÊNG · GIỮ NGUYÊN BYTE'
+      :'BỊ CHẶN DO TRÙNG ĐƯỜNG DẪN KHÁC NỘI DUNG';
+    assetrefSection.append(dashboardElement('span','preflight-tag '+assetrefState,assetrefLabel));
+    if(assetref.reason)assetrefSection.append(dashboardElement('p','danger',assetref.reason));
+    const assetrefSummary=[
+      (assetref.assetref_count||0)+' file AssetRef',
+      (assetref.unique_path_count||0)+' đường dẫn riêng',
+      (assetref.actor_count||0)+' Actor',
+      (assetref.conflict_count||0)+' xung đột khác byte',
+      (assetref.identical_duplicate_count||0)+' bản trùng byte'
+    ];
+    assetrefSection.append(dashboardElement('p','',assetrefSummary.join(' · ')));
+    if((assetref.actor_ids||[]).length){
+      assetrefSection.append(dashboardElement('p','','Actor ID: '+assetref.actor_ids.join(', ')));
+    }
+    for(const source of (assetref.source_assetref_counts||[])){
+      assetrefSection.append(dashboardElement(
+        'p','',source.source+' · '+source.assetref_count+' AssetRef'
+      ));
+    }
+    for(const conflict of (assetref.conflicts||[])){
+      assetrefSection.append(dashboardElement(
+        'p','danger',conflict.path+' · '+(conflict.sources||[]).join(' / ')
+      ));
+    }
+    assetrefSection.append(dashboardElement(
+      'p','',
+      assetref.note||'AssetRef có đường dẫn mới được giữ nguyên; chưa có bộ ghép subset tổng quát.'
+    ));
+    assetrefSection.append(dashboardElement(
+      'p','','Nhận dạng cấu trúc và giữ nguyên byte không đồng nghĩa đã xác minh tương thích trong game.'
+    ));
+    root.append(assetrefSection);
+  }
+
   const mses=analysis.mses_diagnostics||{};
   if(mses.tables?.length){
     const msesSection=dashboardElement('section','preflight-group');
