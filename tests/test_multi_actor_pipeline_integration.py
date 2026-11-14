@@ -4,7 +4,12 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from app.mod_pipeline import ModPipelineError, _select_adapter, merge_mod_archives
+from app.mod_pipeline import (
+    ModPipelineError,
+    _archive_profile,
+    _select_adapter,
+    merge_mod_archives,
+)
 
 
 ADAPTER = "aov_multi_actor_auto_detect"
@@ -19,6 +24,10 @@ def _profile(name, actor_id, *, wrapper=False, version=True, looks_like_aov=True
         ),
         "has_mod_skin_container": wrapper,
         "has_version_txt": version,
+        "version_marker_values": ["1.64.1.12|1793129"] if version else [],
+        "version_marker_consistent": version,
+        "version_markers": ([{"value": "1.64.1.12|1793129"}] if version else []),
+        "version_marker_errors": [],
         "has_vtk_ifix": False,
         "has_595_assets": False,
         "has_actor593_content": False,
@@ -68,6 +77,70 @@ class MultiActorPipelineIntegrationTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(ModPipelineError, "version"):
             _select_adapter(profiles)
+
+    def test_rejects_candidate_with_mismatched_build_markers(self):
+        profiles = [
+            _profile("creator-one.zip", "731", wrapper=True),
+            _profile("creator-two.zip", "842"),
+        ]
+        profiles[1]["version_marker_values"] = ["1.64.1.13|1793129"]
+        with self.assertRaisesRegex(ModPipelineError, "cùng một build"):
+            _select_adapter(profiles)
+
+    def test_rejects_invalid_or_conflicting_marker_inside_source(self):
+        profiles = [
+            _profile("creator-one.zip", "731", wrapper=True),
+            _profile("creator-two.zip", "842"),
+        ]
+        profiles[1]["version_marker_consistent"] = False
+        with self.assertRaisesRegex(ModPipelineError, "cùng một build"):
+            _select_adapter(profiles)
+
+    def test_profile_reads_nested_resources_version_marker(self):
+        import io
+
+        nested_buffer = io.BytesIO()
+        with zipfile.ZipFile(nested_buffer, "w", zipfile.ZIP_DEFLATED) as nested:
+            nested.writestr("Resources/1.64.1/version.txt", "1.64.1.12|1793129")
+            nested.writestr(
+                "Resources/1.64.1/Ages/Prefab_Characters/Actor_842_Actions.pkg.bytes",
+                b"actor-actions",
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "creator-wrapper.zip"
+            with zipfile.ZipFile(source, "w", zipfile.ZIP_DEFLATED) as outer:
+                outer.writestr("mod/Resources.zip", nested_buffer.getvalue())
+                outer.writestr("mod/DanhSachSkin.txt", "Creator skin")
+            profile = _archive_profile(str(source))
+
+        self.assertTrue(profile["has_version_txt"])
+        self.assertTrue(profile["version_marker_consistent"])
+        self.assertEqual(profile["version_marker_values"], ["1.64.1.12|1793129"])
+        self.assertEqual(profile["version_markers"][0]["container"], "Resources.zip")
+
+    def test_profile_blocks_conflicting_outer_and_nested_version_markers(self):
+        import io
+
+        nested_buffer = io.BytesIO()
+        with zipfile.ZipFile(nested_buffer, "w", zipfile.ZIP_DEFLATED) as nested:
+            nested.writestr("Resources/1.64.1/version.txt", "1.64.1.12|1793129")
+            nested.writestr(
+                "Resources/1.64.1/Ages/Prefab_Characters/Actor_842_Actions.pkg.bytes",
+                b"actor-actions",
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "creator-conflicting-version.zip"
+            with zipfile.ZipFile(source, "w", zipfile.ZIP_DEFLATED) as outer:
+                outer.writestr("mod/Resources.zip", nested_buffer.getvalue())
+                outer.writestr("mod/Resources/version.txt", "1.64.1.13|1793129")
+                outer.writestr("mod/DanhSachSkin.txt", "Creator skin")
+            profile = _archive_profile(str(source))
+
+        self.assertFalse(profile["version_marker_consistent"])
+        self.assertEqual(
+            profile["version_marker_values"],
+            ["1.64.1.12|1793129", "1.64.1.13|1793129"],
+        )
 
     def test_rejects_ordinary_zip_in_mixed_input(self):
         profiles = [
