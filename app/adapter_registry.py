@@ -108,7 +108,8 @@ _ADAPTERS = (
             "MOD wrapper + Resources.zip", "MSES v7 đã có schema",
             "IFix có thể parse/round-trip", "CommonActions SkinOrAvatarList trực tiếp",
             "Unity AssetBundle resource mới + Packer/Verification metadata",
-            "ZIP package lồng không có xung đột"
+            "ZIP package lồng không có xung đột",
+            "Wwise BNK append-only khi Bank/Media/HIRC ID không xung đột"
         ],
         "scope": (
             "Chỉ nhận ít nhất hai MOD AoV cùng version.txt, có Actor ID được nhận diện "
@@ -119,8 +120,11 @@ _ADAPTERS = (
             "MSES dùng schema/Actor-owner đã hỗ trợ; CommonActions chỉ nhận SkinOrAvatarList "
             "trực tiếp; IFix phải parse và round-trip; AssetBundle mới cần Packer và "
             "Verification được UnityPy đọc/ghi/đọc lại. AssetBundle trùng đường dẫn khác "
-            "payload, Wwise BNK, IFix/CommonActions không tương thích, version/schema lạ "
-            "và mọi xung đột chưa có parser đều bị chặn. Không tuyên bố hỗ trợ mọi skin."
+            "payload và WEM rời chưa đối chiếu được đều bị chặn. Wwise BNK chỉ được thêm "
+            "nguyên trạng khi Wwise version, Bank ID, Media ID và HIRC object ID không "
+            "xung đột trong namespace platform/ngôn ngữ có thể tải cùng nhau. Không có "
+            "quy trình remap; unknown chunks và external WEM vẫn bị từ chối. "
+            "Không tuyên bố hỗ trợ mọi skin."
         ),
         "game_compatibility": "structurally_validated; not_game_tested",
     },
