@@ -578,7 +578,7 @@ def merge_multi_actor_aov_archives(
                     included_paths_by_source[source["name"]].add(relative)
                 continue
 
-            if lower.endswith(".bytes") and relative not in _ACTOR_OWNED_MSES_PATHS and relative not in _SUPPORTED_MSES_TABLES:
+            if lower.endswith(".bytes") and not lower.endswith(".pkg.bytes") and relative not in _ACTOR_OWNED_MSES_PATHS and relative not in _SUPPORTED_MSES_TABLES:
                 overlay_chain = []
                 overlay_sources = []
                 for source, payload in distinct:
