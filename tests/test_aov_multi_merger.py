@@ -391,7 +391,7 @@ class AOVMultiMergerTests(unittest.TestCase):
             self.assertFalse(output_path.exists())
 
 
-    def test_rejects_unique_wwise_bank_without_reference_remap(self):
+    def test_rejects_malformed_wwise_bank_before_append_only_merge(self):
         with tempfile.TemporaryDirectory() as directory:
             base_path = Path(directory) / "base.zip"
             overlay_path = Path(directory) / "creator-with-audio.zip"
@@ -406,7 +406,7 @@ class AOVMultiMergerTests(unittest.TestCase):
                 {"name": base_path.name, "actor_action_ids": ["593"]},
                 {"name": overlay_path.name, "actor_action_ids": ["731"]},
             ]
-            with self.assertRaisesRegex(AOVMultiMergeError, "Wwise BNK/WEM"):
+            with self.assertRaisesRegex(AOVMultiMergeError, "Wwise BNK"):
                 merge_multi_actor_aov_archives(
                     [str(base_path), str(overlay_path)],
                     str(output_path),
