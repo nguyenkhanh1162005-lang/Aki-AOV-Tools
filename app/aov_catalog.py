@@ -229,6 +229,17 @@ def merge_aov_metadata_assetbundle(base_bytes: bytes, overlay_bytes: bytes, *, k
         if name not in overlay_objects:
             continue
         _, overlay_tree = overlay_objects[name]
+        base_version = base_tree.get("Version")
+        overlay_version = overlay_tree.get("Version")
+        if (
+            base_version is not None
+            and overlay_version is not None
+            and base_version != overlay_version
+        ):
+            raise AOVCatalogMergeError(
+                f"AssetBundle metadata version mismatch for {name}: "
+                f"{base_version} != {overlay_version}."
+            )
         if kind == "resource_packer" and "AllResourcePackInfo" in base_tree:
             if kind == "resource_verification":
                 merged_tree, report = merge_resource_verification_tree(

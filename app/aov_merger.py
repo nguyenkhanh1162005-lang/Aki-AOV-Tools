@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .aov_bytes import AOVBytesError, decode_aov_resource, encode_aov_resource
+from .aov_mses import MSESError, parse_mses
 from .aov_merge import AOVResourceMergeError, merge_aov_mses_resource
 from .aov_common_actions import (
     CommonActionsMergeError,
@@ -601,6 +602,229 @@ def _write_streamed_entry(out_zip: zipfile.ZipFile, name: str, source_zip: zipfi
     info.file_size = source_info.file_size
     with source_zip.open(source_info, "r") as src, out_zip.open(info, "w", force_zip64=True) as dst:
         _copy_stream(src, dst)
+
+
+HUANHUA_BASE_TABLE_SHA256 = {
+    "Databin/Client/Huanhua/ResBillboardCfg.bytes":
+        "fa1bb68ac64ff3d87d598abddf256f261d85b88cedd012b8f47be9c71d8ed562",
+    "Databin/Client/Huanhua/ResBillboardSkinCfg.bytes":
+        "e91f2f439b7e8a5e6d98e4347db169f03115135db8ee786f72980d1af9868ea8",
+    "Databin/Client/Huanhua/ResKillBillboardCfg.bytes":
+        "d45fd98b9c050dd94112154db1a87eb6122b17b37fa376b6ed886c5f62c36b74",
+}
+HUANHUA_BASE_TABLE_SCHEMA = {
+    "Databin/Client/Huanhua/ResBillboardCfg.bytes": (32, 67),
+    "Databin/Client/Huanhua/ResBillboardSkinCfg.bytes": (16, 67),
+    "Databin/Client/Huanhua/ResKillBillboardCfg.bytes": (48, 67),
+}
+
+
+def seed_huanhua_base_tables(
+    base_wrapper_path: str, donor_path: str, output_path: str
+) -> dict[str, Any]:
+    """Insert hash-pinned 1.64.1.12 base billboard tables into a MOD wrapper.
+
+    The VTK 1.64.1.11 pack carries only Actor 595's MSES delta. The 1.64.1.12
+    table bytes are supplied separately and pinned by SHA-256. Their MSES
+    envelope, checksum, field count, row count and unique row keys are checked
+    before insertion. The subsequent VTK merger appends only the verified
+    Actor 595 key and updates ResourceVerification metadata.
+    """
+    temp_dir = Path(tempfile.mkdtemp(prefix="aki-aov-huanhua-seed-"))
+    opened: list[zipfile.ZipFile] = []
+    staged: Path | None = None
+    try:
+        try:
+            donor = zipfile.ZipFile(donor_path, "r")
+            opened.append(donor)
+            wrapper = zipfile.ZipFile(base_wrapper_path, "r")
+            opened.append(wrapper)
+        except (OSError, zipfile.BadZipFile) as exc:
+            raise AOVMergeError("Không mở được ZIP donor Huanhua hoặc wrapper nền.") from exc
+
+        for label, archive in (("Huanhua donor", donor), ("wrapper MOD", wrapper)):
+            _validate_archive_paths(archive, label)
+            bad = archive.testzip()
+            if bad:
+                raise AOVMergeError(f"{label} lỗi CRC tại {bad}.")
+
+        donor_entries = {
+            info.filename: info for info in donor.infolist() if not info.is_dir()
+        }
+        version_path = BASE_PREFIX + "version.txt"
+        expected_donor_entries = {
+            version_path,
+            *(BASE_PREFIX + relative for relative in HUANHUA_BASE_TABLE_SHA256),
+        }
+        if set(donor_entries) != expected_donor_entries:
+            raise AOVMergeError(
+                "Donor Huanhua phải chứa đúng version.txt và ba bảng nền đã ghim."
+            )
+        donor_version = donor.read(donor_entries[version_path]).decode(
+            "utf-8-sig", errors="replace"
+        ).strip()
+        if donor_version.split("|", 1)[0] != BASE_VERSION:
+            raise AOVMergeError(
+                f"Donor Huanhua sai build {donor_version!r}; cần {BASE_VERSION}."
+            )
+
+        donor_payloads: dict[str, bytes] = {}
+        for relative, expected_hash in HUANHUA_BASE_TABLE_SHA256.items():
+            target = BASE_PREFIX + relative
+            payload = donor.read(donor_entries[target])
+            actual_hash = hashlib.sha256(payload).hexdigest()
+            if actual_hash != expected_hash:
+                raise AOVMergeError(
+                    f"Donor Huanhua không khớp SHA-256 đã kiểm chứng: {relative}."
+                )
+            try:
+                decoded, _mode = decode_aov_resource(payload, relative)
+                table = parse_mses(decoded)
+            except (AOVBytesError, MSESError) as exc:
+                raise AOVMergeError(
+                    f"Donor Huanhua không phải MSES hợp lệ tại {relative}: {exc}"
+                ) from exc
+            fields, rows = HUANHUA_BASE_TABLE_SCHEMA[relative]
+            keys = [int.from_bytes(row[:4], "little") for row in table.rows]
+            if (
+                table.version != 7
+                or table.field_count != fields
+                or len(table.rows) != rows
+                or not table.checksum_valid
+                or len(set(keys)) != rows
+            ):
+                raise AOVMergeError(
+                    f"Donor Huanhua sai schema, số hàng, khóa hoặc checksum: {relative}."
+                )
+            donor_payloads[relative] = payload
+
+        resources_entries = _find_outer_entries(wrapper, "Resources.zip")
+        skin_entries = _find_outer_entries(wrapper, "DanhSachSkin.txt")
+        if len(resources_entries) != 1 or len(skin_entries) != 1:
+            raise AOVMergeError(
+                "Wrapper nền phải có đúng một Resources.zip và một DanhSachSkin.txt."
+            )
+        resources_info = resources_entries[0]
+        inner_path = temp_dir / "base-Resources.zip"
+        with wrapper.open(resources_info, "r") as source, open(inner_path, "wb") as target:
+            _copy_stream(source, target)
+
+        appended: list[str] = []
+        inner_output = temp_dir / "Resources-with-Huanhua-base.zip"
+        with zipfile.ZipFile(inner_path, "r") as inner:
+            _validate_archive_paths(inner, "Resources.zip nền")
+            bad = inner.testzip()
+            if bad:
+                raise AOVMergeError(f"Resources.zip nền lỗi CRC tại {bad}.")
+            inner_names = {
+                info.filename for info in inner.infolist()
+            }
+            if version_path not in inner_names:
+                raise AOVMergeError("Wrapper nền thiếu version.txt 1.64.1.12.")
+            base_version = inner.read(version_path).decode(
+                "utf-8-sig", errors="replace"
+            ).strip()
+            if base_version != donor_version:
+                raise AOVMergeError(
+                    f"Version donor {donor_version!r} khác wrapper nền {base_version!r}."
+                )
+            for relative, payload in donor_payloads.items():
+                target_name = BASE_PREFIX + relative
+                if target_name in inner_names:
+                    existing = inner.read(target_name)
+                    if hashlib.sha256(existing).digest() != hashlib.sha256(payload).digest():
+                        raise AOVMergeError(
+                            f"Wrapper nền đã có bảng Huanhua khác nội dung: {relative}."
+                        )
+
+            with zipfile.ZipFile(
+                inner_output, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True
+            ) as output_inner:
+                for info in inner.infolist():
+                    if info.is_dir():
+                        output_inner.writestr(info, b"")
+                    else:
+                        with inner.open(info, "r") as source, output_inner.open(
+                            info, "w", force_zip64=True
+                        ) as target:
+                            _copy_stream(source, target)
+                for relative, payload in sorted(donor_payloads.items()):
+                    target_name = BASE_PREFIX + relative
+                    if target_name not in inner_names:
+                        output_inner.writestr(target_name, payload)
+                        appended.append(target_name)
+
+        with zipfile.ZipFile(inner_output, "r") as check_inner:
+            _validate_archive_paths(check_inner, "Resources.zip sau bổ sung Huanhua base")
+            bad = check_inner.testzip()
+            expected_names = inner_names | set(appended)
+            actual_names = {info.filename for info in check_inner.infolist()}
+            if bad or actual_names != expected_names:
+                raise AOVMergeError(
+                    "Resources.zip sau bổ sung không giữ đúng inventory hoặc CRC."
+                )
+            for relative, payload in donor_payloads.items():
+                target_name = BASE_PREFIX + relative
+                if check_inner.read(target_name) != payload:
+                    raise AOVMergeError(
+                        f"Không round-trip được bảng Huanhua nền: {relative}."
+                    )
+
+        output_path_obj = Path(output_path)
+        output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+        fd, staged_name = tempfile.mkstemp(
+            prefix=f".{output_path_obj.name}.", suffix=".tmp.zip",
+            dir=str(output_path_obj.parent),
+        )
+        os.close(fd)
+        staged = Path(staged_name)
+        try:
+            with zipfile.ZipFile(
+                staged, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True
+            ) as output_outer:
+                for info in wrapper.infolist():
+                    if info.is_dir():
+                        output_outer.writestr(info, b"")
+                    elif info.filename == resources_info.filename:
+                        with open(inner_output, "rb") as source, output_outer.open(
+                            info, "w", force_zip64=True
+                        ) as target:
+                            _copy_stream(source, target)
+                    else:
+                        with wrapper.open(info, "r") as source, output_outer.open(
+                            info, "w", force_zip64=True
+                        ) as target:
+                            _copy_stream(source, target)
+            _publish_staged_archive(
+                staged, output_path_obj,
+                {info.filename for info in wrapper.infolist()},
+            )
+        finally:
+            if staged is not None:
+                staged.unlink(missing_ok=True)
+
+        return {
+            "version": donor_version,
+            "appended_paths": sorted(appended),
+            "table_sha256": {
+                relative: hashlib.sha256(payload).hexdigest()
+                for relative, payload in donor_payloads.items()
+            },
+            "verified": True,
+        }
+    except AOVMergeError:
+        raise
+    except Exception as exc:
+        raise AOVMergeError(
+            f"Không thể bổ sung bảng Huanhua nền: {type(exc).__name__}: {exc}"
+        ) from exc
+    finally:
+        for archive in reversed(opened):
+            try:
+                archive.close()
+            except Exception:
+                pass
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def merge_aov_archives(archive_paths: list[str], output_path: str) -> dict[str, Any]:

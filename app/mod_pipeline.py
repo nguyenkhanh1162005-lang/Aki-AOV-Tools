@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import re
 import stat
@@ -11,14 +12,28 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .large_merger import MergeError, merge_zip_files
-from .aov_merger import AOVMergeError, merge_aov_archives, merge_p9_p10_archives
+from .aov_merger import (
+    AOVMergeError,
+    merge_aov_archives,
+    merge_p9_p10_archives,
+    seed_huanhua_base_tables,
+)
 from .kpm100_vtk_merger import merge_kpm100_vtk_archives
 from .adapter_registry import get_adapter_capabilities
 from .actor_detector import detect_actor_ids, extract_skin_ids_from_text, extract_skin_name_hints
+from .aov_multi_merger import merge_multi_actor_aov_archives
+from .assetref_inspector import (
+    AssetReferenceSetError,
+    inspect_asset_reference_set,
+    is_asset_reference_set_path,
+)
+from .wwise_bnk import WwiseBNKError, assess_wwise_bnk_overlay_set
 
 MAX_PROFILE_ENTRIES = 20_000
 MAX_PROFILE_UNCOMPRESSED = 1024 * 1024 * 1024
 MAX_PROFILE_ENTRY = 512 * 1024 * 1024
+MAX_VERSION_MARKER_BYTES = 4096
+MAX_VERSION_MARKER_CHARS = 200
 MAX_INPUT_FILES = 10
 MAX_TOTAL_INPUT_BYTES = 500 * 1024 * 1024
 
@@ -46,6 +61,67 @@ def _sha256_file(path: str) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _read_profile_version_marker(
+    archive: zipfile.ZipFile,
+    info: zipfile.ZipInfo,
+    *,
+    container: str,
+) -> dict[str, Any]:
+    """Read a small, explicit build marker without trusting its filename alone."""
+    record: dict[str, Any] = {
+        "path": info.filename.replace("\\", "/"),
+        "container": container,
+    }
+    if info.file_size > MAX_VERSION_MARKER_BYTES:
+        record["error"] = (
+            f"version.txt vượt giới hạn {MAX_VERSION_MARKER_BYTES} byte."
+        )
+        return record
+    try:
+        with archive.open(info, "r") as stream:
+            raw = stream.read(MAX_VERSION_MARKER_BYTES + 1)
+    except (OSError, RuntimeError, zipfile.BadZipFile, zlib.error):
+        record["error"] = "Không đọc được version.txt."
+        return record
+    if len(raw) > MAX_VERSION_MARKER_BYTES:
+        record["error"] = (
+            f"version.txt vượt giới hạn {MAX_VERSION_MARKER_BYTES} byte."
+        )
+        return record
+    try:
+        value = raw.decode("utf-8-sig", errors="strict").strip()
+    except UnicodeDecodeError:
+        record["error"] = "version.txt không phải UTF-8 hợp lệ."
+        return record
+    if (
+        not value
+        or len(value) > MAX_VERSION_MARKER_CHARS
+        or len(value.splitlines()) != 1
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+    ):
+        record["error"] = "version.txt rỗng hoặc có nội dung không hợp lệ."
+        return record
+    record["value"] = value
+    return record
+
+
+def _profiles_share_version_marker(profiles: list[dict[str, Any]]) -> bool:
+    """Require one valid, identical build marker in every source archive."""
+    if not profiles:
+        return False
+    values: list[str] = []
+    for item in profiles:
+        markers = item.get("version_marker_values", [])
+        if (
+            not item.get("version_marker_consistent")
+            or len(markers) != 1
+            or not isinstance(markers[0], str)
+        ):
+            return False
+        values.append(markers[0])
+    return len(set(values)) == 1
 
 
 def _preflight_inputs(paths: list[str]) -> int:
@@ -93,6 +169,371 @@ def _source_family_hint(
     if part_number is not None:
         return f"PART_{part_number}_CANDIDATE", "filename_hint", part_number
     return None, None, None
+
+
+def _wwise_scope_path(resource_path: str) -> str:
+    """Remove game version prefixes while retaining Sound/platform/locale scope."""
+    normalized = resource_path.replace("\\", "/").lstrip("/")
+    parts = [part for part in normalized.split("/") if part]
+    for index, part in enumerate(parts):
+        if part.casefold() == "sound":
+            return "/".join(parts[index:])
+    return normalized
+
+
+def _asset_reference_canonical_path(resource_path: str) -> str | None:
+    normalized = resource_path.replace("\\", "/").lstrip("/")
+    parts = normalized.split("/")
+    for index in range(len(parts) - 2):
+        if parts[index].casefold() == "assetrefs" and parts[index + 1].casefold() == "hero":
+            return "/".join(parts[index:])
+    return None
+
+
+def _assess_asset_reference_sources(archive_paths: list[str]) -> dict[str, Any]:
+    """Read-only AssetReferenceSet inventory and same-path collision preflight."""
+    inventories: list[dict[str, tuple[bytes, str]]] = [
+        {} for _ in archive_paths
+    ]
+    source_counts = [0 for _ in archive_paths]
+    identical_duplicates = 0
+
+    def add_assetref(
+        source_index: int,
+        archive: zipfile.ZipFile,
+        info: zipfile.ZipInfo,
+    ) -> None:
+        nonlocal identical_duplicates
+        canonical = _asset_reference_canonical_path(info.filename)
+        if canonical is None or not is_asset_reference_set_path(canonical):
+            return
+        if info.file_size > 256 * 1024 * 1024:
+            raise AssetReferenceSetError(
+                f"{Path(archive_paths[source_index]).name}:{info.filename}: AssetRef vượt 256 MiB."
+            )
+        payload = archive.read(info)
+        digest = hashlib.sha256(payload).hexdigest()
+        existing = inventories[source_index].get(canonical)
+        if existing is not None:
+            if existing[1] != digest:
+                raise AssetReferenceSetError(
+                    f"{Path(archive_paths[source_index]).name}:{canonical}: "
+                    "một nguồn chứa nhiều payload AssetRef khác nhau cùng đường dẫn."
+                )
+            identical_duplicates += 1
+            return
+        inventories[source_index][canonical] = (payload, digest)
+        source_counts[source_index] += 1
+
+    try:
+        for source_index, archive_path in enumerate(archive_paths):
+            with zipfile.ZipFile(archive_path, "r") as outer:
+                nested_candidates = [
+                    info for info in outer.infolist()
+                    if not info.is_dir()
+                    and PurePosixPath(info.filename.replace(chr(92), "/")).name.casefold()
+                    == "resources.zip"
+                ]
+                if len(nested_candidates) > 1:
+                    raise AssetReferenceSetError(
+                        f"{Path(archive_path).name}: có nhiều Resources.zip; "
+                        "không thể xác định inventory AssetRef."
+                    )
+
+                for info in outer.infolist():
+                    if info.is_dir():
+                        continue
+                    if _asset_reference_canonical_path(info.filename):
+                        add_assetref(source_index, outer, info)
+
+                if nested_candidates:
+                    nested_bytes = outer.read(nested_candidates[0])
+                    with zipfile.ZipFile(io.BytesIO(nested_bytes), "r") as inner:
+                        for info in inner.infolist():
+                            if info.is_dir():
+                                continue
+                            if _asset_reference_canonical_path(info.filename):
+                                add_assetref(source_index, inner, info)
+    except (OSError, RuntimeError, zipfile.BadZipFile, EOFError, AssetReferenceSetError) as exc:
+        return {
+            "state": "BLOCKED",
+            "source_assetref_counts": [
+                {"source": Path(path).name, "assetref_count": source_counts[index]}
+                for index, path in enumerate(archive_paths)
+            ],
+            "reason": f"Không xác minh đủ inventory AssetReferenceSet: {exc}",
+            "passthrough_safe": False,
+            "game_tested": False,
+        }
+
+    by_path: dict[str, list[tuple[int, bytes, str]]] = {}
+    for source_index, inventory in enumerate(inventories):
+        for path, (payload, digest) in inventory.items():
+            by_path.setdefault(path, []).append((source_index, payload, digest))
+
+    conflicts = []
+    identical_cross_source = 0
+    for path, providers in sorted(by_path.items()):
+        digests = {item[2] for item in providers}
+        if len(digests) > 1:
+            conflicts.append({
+                "path": path,
+                "sources": [Path(archive_paths[item[0]]).name for item in providers],
+                "sha256": [item[2] for item in providers],
+            })
+        elif len(providers) > 1:
+            identical_cross_source += len(providers) - 1
+
+    actor_ids = sorted({
+        PurePosixPath(path).name.split("_", 1)[0]
+        for path in by_path
+    })
+    recognized = 0
+    opaque = 0
+    subset_flags = {"base_subset": 0, "skin_subset": 0}
+    samples = []
+    for path, providers in sorted(by_path.items()):
+        try:
+            report = inspect_asset_reference_set(path, providers[0][1])
+        except AssetReferenceSetError:
+            report = {"recognized": False}
+        if report.get("recognized"):
+            recognized += 1
+            subset_flags["base_subset"] += int(bool(report.get("has_base_subset")))
+            subset_flags["skin_subset"] += int(bool(report.get("has_skin_subset")))
+        else:
+            opaque += 1
+        if len(samples) < 12:
+            samples.append({
+                "path": path,
+                "actor_id": PurePosixPath(path).name.split("_", 1)[0],
+                "recognized": bool(report.get("recognized")),
+                "wrapper_mode": report.get("wrapper_mode"),
+                "providers": [Path(archive_paths[item[0]]).name for item in providers],
+                "identical_bytes": len({item[2] for item in providers}) == 1,
+            })
+
+    count = sum(source_counts)
+    return {
+        "state": (
+            "BLOCKED" if conflicts
+            else "UNIQUE_PATHS_PASSTHROUGH" if count
+            else "NO_ASSETREFS"
+        ),
+        "source_assetref_counts": [
+            {"source": Path(path).name, "assetref_count": source_counts[index]}
+            for index, path in enumerate(archive_paths)
+        ],
+        "assetref_count": count,
+        "unique_path_count": len(by_path),
+        "actor_ids": actor_ids,
+        "actor_count": len(actor_ids),
+        "recognized_count": recognized,
+        "opaque_count": opaque,
+        "subset_flags": subset_flags,
+        "identical_duplicate_count": identical_duplicates + identical_cross_source,
+        "conflict_count": len(conflicts),
+        "conflicts": conflicts[:50],
+        "samples": samples,
+        "passthrough_safe": not conflicts,
+        "merge_supported": False,
+        "note": (
+            "AssetReferenceSet có đường dẫn riêng được giữ nguyên byte. "
+            "Không hợp nhất baseSubset/skinSubset cùng đường dẫn; payload khác nhau "
+            "tại cùng đường dẫn sẽ bị chặn."
+        ),
+        "game_tested": False,
+    }
+
+
+def _assess_wwise_bnk_sources(
+    archive_paths: list[str],
+    profiles: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Read-only Wwise preflight over direct ZIP entries and nested Resources.zip."""
+    source_banks: list[list[tuple[str, bytes]]] = [[] for _ in archive_paths]
+    source_wem_counts = [0 for _ in archive_paths]
+    total_banks = 0
+
+    def add_bank(source_index: int, archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> None:
+        nonlocal total_banks
+        if info.file_size > MAX_PROFILE_ENTRY:
+            raise WwiseBNKError(
+                f"{Path(archive_paths[source_index]).name}:{info.filename}: BNK vượt quá 512 MiB."
+            )
+        relative = _wwise_scope_path(info.filename)
+        payload = archive.read(info)
+        existing = next(
+            (item for item in source_banks[source_index] if item[0] == relative),
+            None,
+        )
+        if existing:
+            if hashlib.sha256(existing[1]).digest() != hashlib.sha256(payload).digest():
+                raise WwiseBNKError(
+                    f"{Path(archive_paths[source_index]).name}:{relative}: cùng đường dẫn BNK "
+                    "nhưng hai container có payload khác nhau."
+                )
+            return
+        source_banks[source_index].append((relative, payload))
+        total_banks += 1
+
+    try:
+        for source_index, archive_path in enumerate(archive_paths):
+            with zipfile.ZipFile(archive_path, "r") as outer:
+                nested_candidates = [
+                    info for info in outer.infolist()
+                    if not info.is_dir()
+                    and PurePosixPath(info.filename.replace(chr(92), "/")).name.casefold()
+                    == "resources.zip"
+                ]
+                if len(nested_candidates) > 1:
+                    raise WwiseBNKError(
+                        f"{Path(archive_path).name}: có nhiều Resources.zip; "
+                        "không thể xác định inventory âm thanh."
+                    )
+
+                for info in outer.infolist():
+                    if info.is_dir():
+                        continue
+                    suffix = PurePosixPath(info.filename).suffix.casefold()
+                    if suffix == ".wem":
+                        source_wem_counts[source_index] += 1
+                    elif suffix == ".bnk" and (
+                        not nested_candidates or info.filename != nested_candidates[0].filename
+                    ):
+                        add_bank(source_index, outer, info)
+
+                if nested_candidates:
+                    nested_bytes = outer.read(nested_candidates[0])
+                    with zipfile.ZipFile(io.BytesIO(nested_bytes), "r") as inner:
+                        for info in inner.infolist():
+                            if info.is_dir():
+                                continue
+                            suffix = PurePosixPath(info.filename).suffix.casefold()
+                            if suffix == ".wem":
+                                source_wem_counts[source_index] += 1
+                            elif suffix == ".bnk":
+                                add_bank(source_index, inner, info)
+    except (OSError, RuntimeError, zipfile.BadZipFile, EOFError) as exc:
+        return {
+            "state": "BLOCKED",
+            "bank_count": total_banks,
+            "reason": f"Không đọc đủ inventory Wwise trong ZIP: {exc}",
+            "merge_authorized": False,
+            "game_tested": False,
+        }
+
+    source_summaries = [
+        {
+            "source": Path(path).name,
+            "bank_count": len(source_banks[index]),
+            "standalone_wem_count": source_wem_counts[index],
+        }
+        for index, path in enumerate(archive_paths)
+    ]
+    total_wem = sum(source_wem_counts)
+    if total_wem:
+        return {
+            "state": "BLOCKED",
+            "bank_count": total_banks,
+            "standalone_wem_count": total_wem,
+            "sources": source_summaries,
+            "reason": (
+                f"Phát hiện {total_wem} WEM rời. Chưa có bộ đối chiếu từng WEM với "
+                "Media ID và SoundBank tương ứng nên không tự thêm."
+            ),
+            "merge_authorized": False,
+            "game_tested": False,
+        }
+
+    wrapper_indices = [
+        index for index, profile in enumerate(profiles)
+        if profile.get("has_mod_skin_container")
+    ]
+    base_index = wrapper_indices[0] if wrapper_indices else next(
+        (index for index, banks in enumerate(source_banks) if banks),
+        0,
+    )
+    base_banks = list(source_banks[base_index])
+    base_paths = {path for path, _payload in base_banks}
+    overlay_banks: list[tuple[str, bytes]] = []
+    duplicate_count = 0
+    seen_overlay_paths: dict[str, bytes] = {}
+
+    for source_index, banks in enumerate(source_banks):
+        if source_index == base_index:
+            continue
+        for relative, payload in banks:
+            base_match = next(
+                (item for item in base_banks if item[0] == relative),
+                None,
+            )
+            if base_match is not None:
+                if hashlib.sha256(base_match[1]).digest() == hashlib.sha256(payload).digest():
+                    duplicate_count += 1
+                    continue
+                return {
+                    "state": "BLOCKED",
+                    "bank_count": total_banks,
+                    "sources": source_summaries,
+                    "reason": (
+                        f"{relative}: cùng đường dẫn BNK có payload khác giữa nguồn nền "
+                        f"{Path(archive_paths[base_index]).name} và "
+                        f"{Path(archive_paths[source_index]).name}."
+                    ),
+                    "merge_authorized": False,
+                    "game_tested": False,
+                }
+            prior = seen_overlay_paths.get(relative)
+            if prior is not None:
+                if hashlib.sha256(prior).digest() != hashlib.sha256(payload).digest():
+                    return {
+                        "state": "BLOCKED",
+                        "bank_count": total_banks,
+                        "sources": source_summaries,
+                        "reason": f"{relative}: hai overlay có cùng đường dẫn BNK nhưng payload khác.",
+                        "merge_authorized": False,
+                        "game_tested": False,
+                    }
+                duplicate_count += 1
+                continue
+            seen_overlay_paths[relative] = payload
+            overlay_banks.append((relative, payload))
+
+    if not overlay_banks:
+        return {
+            "state": "NO_OVERLAY_BNKS",
+            "bank_count": total_banks,
+            "base_source": Path(archive_paths[base_index]).name,
+            "sources": source_summaries,
+            "identical_duplicate_count": duplicate_count,
+            "merge_authorized": True,
+            "game_tested": False,
+        }
+
+    try:
+        assessment = assess_wwise_bnk_overlay_set(base_banks, overlay_banks)
+    except WwiseBNKError as exc:
+        return {
+            "state": "BLOCKED",
+            "bank_count": total_banks,
+            "base_source": Path(archive_paths[base_index]).name,
+            "sources": source_summaries,
+            "identical_duplicate_count": duplicate_count,
+            "reason": str(exc),
+            "merge_authorized": False,
+            "game_tested": False,
+        }
+    return {
+        "state": "APPEND_ONLY_SAFE",
+        "bank_count": total_banks,
+        "base_source": Path(archive_paths[base_index]).name,
+        "sources": source_summaries,
+        "identical_duplicate_count": duplicate_count,
+        "assessment": assessment,
+        "merge_authorized": True,
+        "game_tested": False,
+    }
 
 
 def _build_target_set_report(profiles: list[dict[str, Any]]) -> dict[str, Any]:
@@ -152,6 +593,41 @@ def _build_target_set_report(profiles: list[dict[str, Any]]) -> dict[str, Any]:
     missing = [item["label"] for item in summary if item["count"] == 0]
     duplicated = [item["label"] for item in summary if item["count"] > 1]
     complete = not missing and not duplicated and len(profiles) == 6
+    blockers = [
+        "Bộ ghép nhiều MOD P9 + P10 + TM + VTK chưa có adapter đã xác minh. Đây là báo cáo nhận diện nguồn, không phải xác nhận có thể xuất ZIP.",
+        "Các xung đột IFix/MSES/CommonActions/AssetBundle và metadata cần quy tắc parse/ghép riêng; Wwise BNK chỉ được thêm nguyên trạng khi namespace ID không xung đột, còn WEM rời vẫn bị chặn.",
+    ]
+    notes: list[str] = []
+    if complete:
+        donors = [item for item in profiles if item.get("has_huanhua_base_tables")]
+        if len(donors) != 1:
+            has_unpinned_tables = any(
+                item.get("has_huanhua_billboard_tables") for item in profiles
+            )
+            if has_unpinned_tables:
+                blockers.append(
+                    "Thiếu donor Huanhua base build 1.64.1.12 khớp đủ ba SHA-256 đã ghim. "
+                    "Các bảng Huanhua trong VTK Part 1 có payload khác, không thể dùng thay bảng nền."
+                )
+            else:
+                blockers.append(
+                    "Thiếu donor Huanhua base build 1.64.1.12 với ba bảng billboard đã xác minh."
+                )
+        tamyn_sources = [item for item in profiles if item.get("source_family_hint") == "TM"]
+        if len(tamyn_sources) == 1:
+            tamyn = tamyn_sources[0]
+            if not tamyn.get("has_resource_verification_catalog"):
+                blockers.append(
+                    "Tamyn Actor 593 có AssetBundle mới nhưng thiếu "
+                    "ResourceVerificationInfoSetAll; chưa có cách tạo CrcXor đã xác minh."
+                )
+            bank_count = int(tamyn.get("wwise_bank_count", 0))
+            if bank_count:
+                notes.append(
+                    f"Tamyn có {bank_count} Wwise BNK. Web có thể kiểm tra và thêm nguyên trạng "
+                    "khi Wwise version, Bank ID, Media ID và HIRC object ID không xung đột "
+                    "trong namespace platform/ngôn ngữ; unknown chunk và WEM rời vẫn bị chặn."
+                )
 
     return {
         "name": "P9 + P10 + TM Tamyn - Robot + VTK Part 1–3",
@@ -165,10 +641,8 @@ def _build_target_set_report(profiles: list[dict[str, Any]]) -> dict[str, Any]:
         "detected_inputs": detected_inputs,
         "missing": missing,
         "duplicates": duplicated,
-        "blockers": [
-            "Bộ ghép nhiều MOD P9 + P10 + TM + VTK chưa có adapter đã xác minh. Đây là báo cáo nhận diện nguồn, không phải xác nhận có thể xuất ZIP.",
-            "Các xung đột IFix/MSES/CommonActions/metadata/soundbank và AssetBundle cần quy tắc parse/ghép riêng; không được tự chọn file thắng chỉ theo tên hoặc thời gian tải.",
-        ],
+        "blockers": blockers,
+        "notes": notes,
         "evidence_note": (
             "P9/P10/TM/VTK là nhãn gợi ý từ tên ZIP hoặc chữ ký tài nguyên. "
             "Nhãn VTK Part 1–3 chỉ được gán khi có bằng chứng Actor 595 và HeroSkin_2 trong cả bộ nguồn."
@@ -190,6 +664,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
                     f"ZIP vượt giới hạn giải nén 1 GiB: {Path(path).name}"
                 )
             names = []
+            version_marker_records: list[dict[str, Any]] = []
             seen_entry_paths: set[str] = set()
             for info in entries:
                 normalized = info.filename.replace("\\", "/")
@@ -224,6 +699,12 @@ def _archive_profile(path: str) -> dict[str, Any]:
                         f"ZIP vượt giới hạn giải nén 512 MiB: {info.filename}"
                     )
                 names.append(canonical_name)
+                if PurePosixPath(canonical_name).name.casefold() == "version.txt":
+                    version_marker_records.append(
+                        _read_profile_version_marker(
+                            archive, info, container="outer ZIP"
+                        )
+                    )
             bad = archive.testzip()
             if bad:
                 raise ModPipelineError(f"ZIP lỗi CRC tại {bad}: {Path(path).name}")
@@ -302,6 +783,12 @@ def _archive_profile(path: str) -> dict[str, Any]:
                                         f"Mục Resources.zip vượt giới hạn 512 MiB: {inner.filename}"
                                     )
                                 nested_resource_names.append(canonical)
+                                if PurePosixPath(canonical).name.casefold() == "version.txt":
+                                    version_marker_records.append(
+                                        _read_profile_version_marker(
+                                            nested, inner, container="Resources.zip"
+                                        )
+                                    )
                             nested_bad = nested.testzip()
                             if nested_bad:
                                 raise ModPipelineError(
@@ -328,10 +815,20 @@ def _archive_profile(path: str) -> dict[str, Any]:
     resource_names = names + nested_resource_names
     leaves = {PurePosixPath(name).name.lower() for name in resource_names}
     extensions = {PurePosixPath(name).suffix.lower() for name in resource_names}
-    has_resource_tree = any(
-        name.lower().startswith(("resources/", "databin/", "ages/", "thanos/", "assetbundle/"))
+    has_assetbundle_directory_signature = any(
+        PurePosixPath(name).suffix.lower() == ".assetbundle"
+        and name.lower().startswith((
+            "battle/hero/", "show/hero/", "icon/hero/",
+            "commercializenotify/", "uisystem/",
+        ))
         for name in resource_names
     )
+    has_resource_tree = any(
+        name.lower().startswith((
+            "resources/", "databin/", "ages/", "thanos/", "assetbundle/"
+        ))
+        for name in resource_names
+    ) or has_assetbundle_directory_signature
     looks_like_aov = bool(
         leaves.intersection(AOV_MARKERS)
         or (has_resource_tree and extensions.intersection(AOV_EXTENSIONS))
@@ -347,6 +844,54 @@ def _archive_profile(path: str) -> dict[str, Any]:
         PurePosixPath(name).name.casefold() == "danhsachskin.txt" for name in names
     )
     has_mod_skin_container = resources_zip_count == 1 and skin_list_count == 1
+
+    huanhua_donor_hashes = {
+        "Resources/1.64.1/Databin/Client/Huanhua/ResBillboardCfg.bytes":
+            "fa1bb68ac64ff3d87d598abddf256f261d85b88cedd012b8f47be9c71d8ed562",
+        "Resources/1.64.1/Databin/Client/Huanhua/ResBillboardSkinCfg.bytes":
+            "e91f2f439b7e8a5e6d98e4347db169f03115135db8ee786f72980d1af9868ea8",
+        "Resources/1.64.1/Databin/Client/Huanhua/ResKillBillboardCfg.bytes":
+            "d45fd98b9c050dd94112154db1a87eb6122b17b37fa376b6ed886c5f62c36b74",
+    }
+    huanhua_donor_entries = {
+        PurePosixPath(name).as_posix() for name in names
+    }
+    has_huanhua_base_tables = False
+    huanhua_base_version = None
+    huanhua_base_hashes_match = False
+    version_paths = [
+        name for name in resource_names
+        if PurePosixPath(name).as_posix() == "Resources/1.64.1/version.txt"
+    ]
+    if (
+        set(huanhua_donor_hashes).issubset(huanhua_donor_entries)
+        and len(version_paths) == 1
+        and len(names) == 4
+        and all(PurePosixPath(name).as_posix() in huanhua_donor_entries
+                for name in version_paths)
+    ):
+        try:
+            with zipfile.ZipFile(path, "r") as donor_archive:
+                donor_version_info = next(
+                    info for info in donor_archive.infolist()
+                    if info.filename == "Resources/1.64.1/version.txt"
+                )
+                huanhua_base_version = donor_archive.read(donor_version_info).decode(
+                    "utf-8-sig", errors="replace"
+                ).strip()
+                huanhua_base_hashes_match = all(
+                    hashlib.sha256(donor_archive.read(
+                        next(info for info in donor_archive.infolist()
+                             if info.filename == donor_path)
+                    )).hexdigest() == expected_hash
+                    for donor_path, expected_hash in huanhua_donor_hashes.items()
+                )
+                has_huanhua_base_tables = (
+                    huanhua_base_version.split("|", 1)[0] == "1.64.1.12"
+                    and huanhua_base_hashes_match
+                )
+        except (OSError, StopIteration, zipfile.BadZipFile, RuntimeError):
+            has_huanhua_base_tables = False
     has_vtk_ifix = "heroskin_2.bytes" in leaves
     has_base_ifix = "heroskin_1.bytes" in leaves
     kpm_mod_prefix = "Resources/1.64.1/Mod_by_Youtube_KHAM-PHA-MOBILE/KPM_MOD_"
@@ -427,6 +972,8 @@ def _archive_profile(path: str) -> dict[str, Any]:
 
     if not looks_like_aov:
         source_role = "ordinary_zip"
+    elif has_huanhua_base_tables:
+        source_role = "aov_huanhua_base_tables_candidate"
     elif has_mod_skin_container:
         source_role = "aov_skin_mod_container_candidate"
     elif has_kpm100_direct_base:
@@ -446,7 +993,38 @@ def _archive_profile(path: str) -> dict[str, Any]:
         "uncompressed_bytes": total_uncompressed,
         "looks_like_aov": looks_like_aov,
         "source_role": source_role,
+        "has_version_txt": bool(version_marker_records),
+        "version_markers": version_marker_records,
+        "version_marker_values": sorted({
+            str(item["value"]) for item in version_marker_records
+            if isinstance(item.get("value"), str)
+        }),
+        "version_marker_errors": [
+            {key: value for key, value in item.items() if key != "container"}
+            for item in version_marker_records if item.get("error")
+        ],
+        "version_marker_consistent": (
+            bool(version_marker_records)
+            and all(isinstance(item.get("value"), str) for item in version_marker_records)
+            and len({item["value"] for item in version_marker_records if isinstance(item.get("value"), str)}) == 1
+        ),
         "has_mod_skin_container": has_mod_skin_container,
+        "has_huanhua_base_tables": has_huanhua_base_tables,
+        "has_huanhua_billboard_tables": {
+            "resbillboardcfg.bytes",
+            "resbillboardskincfg.bytes",
+            "reskillbillboardcfg.bytes",
+        }.issubset(leaves),
+        "has_resource_packer_catalog": "resourcepackerinfosetall.assetbundle" in leaves,
+        "has_resource_verification_catalog": "resourceverificationinfosetall.assetbundle" in leaves,
+        "wwise_bank_count": sum(
+            PurePosixPath(name).suffix.casefold() == ".bnk" for name in resource_names
+        ),
+        "wwise_media_count": sum(
+            PurePosixPath(name).suffix.casefold() == ".wem" for name in resource_names
+        ),
+        "huanhua_base_version": huanhua_base_version,
+        "huanhua_base_hashes_match": huanhua_base_hashes_match,
         "resources_zip_count": resources_zip_count,
         "skin_list_count": skin_list_count,
         "actor_asset_ids": sorted(actor_asset_ids),
@@ -499,6 +1077,54 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
             and all(item.get("looks_like_aov") for item in profiles)
         ):
             return "aov_p9_p10_skin_union_1.64.1"
+
+        # Exact six-file route: two SHA-pinned MOD wrappers, three VTK split
+        # parts, and one separately supplied SHA-pinned 1.64.1.12 Huanhua base donor.
+        # The donor only seeds known base tables; the VTK stage appends its verified
+        # Actor 595 MSES key and updates ResourceVerification.
+        composite_p9 = p9_inputs
+        composite_p10 = p10_inputs
+        composite_vtk_parts = [
+            item for item in profiles
+            if item.get("source_family_hint") == "VTK"
+            and not item.get("has_mod_skin_container")
+        ]
+        composite_vtk_numbers = {
+            item.get("source_part_number") for item in composite_vtk_parts
+        }
+        composite_huanhua_donors = [
+            item for item in profiles if item.get("has_huanhua_base_tables")
+        ]
+        composite_actor595_scoped = (
+            len(composite_vtk_parts) == 3
+            and composite_vtk_numbers == {1, 2, 3}
+            and all(
+                item.get("looks_like_aov")
+                and set(item.get("actor_asset_ids", [])) <= {"595"}
+                and set(item.get("actor_action_ids", [])) <= {"595"}
+                and not item.get("has_actor593_content")
+                for item in composite_vtk_parts
+            )
+            and any(item.get("has_vtk_ifix") for item in composite_vtk_parts)
+            and any(item.get("has_595_assets") for item in composite_vtk_parts)
+        )
+        if (
+            len(profiles) == 6
+            and len(composite_p9) == 1
+            and len(composite_p10) == 1
+            and len(composite_huanhua_donors) == 1
+            and composite_huanhua_donors[0].get("huanhua_base_version", "").startswith("1.64.1.12")
+            and composite_huanhua_donors[0].get("huanhua_base_hashes_match")
+            and composite_p9[0].get("resources_zip_count") == 1
+            and composite_p9[0].get("skin_list_count") == 1
+            and composite_p10[0].get("resources_zip_count") == 1
+            and composite_p10[0].get("skin_list_count") == 1
+            and set(composite_p9[0].get("actor_action_ids", [])) == p9_expected
+            and set(composite_p10[0].get("actor_action_ids", [])) == p10_expected
+            and composite_actor595_scoped
+            and all(item.get("looks_like_aov") for item in profiles)
+        ):
+            return "aov_p9_p10_vtk_actor595_1.64.1"
 
         kpm_bases = [
             item for item in profiles
@@ -560,14 +1186,33 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
         if supported_pair:
             return "aov_mod_to_mod_vtk_actor595_1.64.1"
 
+        # Conservative generic route: accept only multi-source MOD sets with
+        # actor evidence, a version marker in every source, and at least one
+        # complete user MOD wrapper. The merger still parses every collision
+        # and fails closed for unsupported formats or ambiguous ownership.
+        generic_multi_mod_candidate = (
+            len(profiles) >= 2
+            and all(item.get("looks_like_aov") for item in profiles)
+            and any(item.get("has_mod_skin_container") for item in profiles)
+            and _profiles_share_version_marker(profiles)
+            and all(item.get("actor_ids") for item in profiles)
+            and all(
+                item.get("source_role") not in {
+                    "ordinary_zip", "aov_kpm100_direct_base_candidate"
+                }
+                for item in profiles
+            )
+        )
+        if generic_multi_mod_candidate:
+            return "aov_multi_actor_auto_detect"
+
         names = ", ".join(item["name"] for item in profiles if item["looks_like_aov"])
         raise ModPipelineError(
-            "Phát hiện tài nguyên AoV nhưng chưa có adapter ghép đã xác minh cho bộ này: "
-            f"{names}. Không dùng gói game gốc làm nền và không ghi đè .bytes, "
-            "AssetBundle hoặc soundbank theo kiểu ZIP thường. "
-            "Adapter hiện có chỉ ghép gói mod 10 skin do người dùng cung cấp "
-            "với mod Vấn Tâm Kiếm Actor 595 đúng phiên bản; các mod khác cần "
-            "parser, serializer và quy tắc tương thích riêng."
+            "Phát hiện tài nguyên AoV nhưng chưa có adapter ghép đã xác minh phù hợp cho bộ này: "
+            f"{names}. Cần version.txt hợp lệ và cùng một build ở mọi MOD, ít nhất hai nguồn, "
+            "có bằng chứng Actor và ít nhất một wrapper Resources.zip + DanhSachSkin.txt. "
+            "Không dùng gói game gốc làm nền "
+            "và không ghi đè .bytes, AssetBundle hoặc soundbank theo kiểu ZIP thường."
         )
     return "generic_zip"
 
@@ -774,14 +1419,33 @@ def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
             "safety_rule": "Không ghi đè hoặc ghép AssetBundle chỉ vì tên hay Actor ID giống nhau.",
         }
 
-    if lower.endswith((".bnk", ".wem")) or "/sound/" in lower:
+    if lower.endswith(".bnk"):
+        return {
+            "adapter_state": "append_only_id_namespace",
+            "next_action": (
+                "Có thể thêm nguyên trạng BNK khi Wwise version, Bank ID, Media ID và "
+                "HIRC object ID không xung đột trong namespace platform/ngôn ngữ có thể "
+                "được nạp cùng nhau. Không rewrite hoặc remap ID."
+            ),
+            "safety_rule": (
+                "Không nối byte BNK hoặc remap ID; chỉ thêm nguyên trạng sau khi kiểm tra. "
+                "Từ chối Bank ID trùng, Media/HIRC ID trùng khác payload, unknown chunk, "
+                "external media cần WEM, khác version hoặc path trùng khác nội dung."
+            ),
+        }
+
+    if lower.endswith(".wem"):
         return {
             "adapter_state": "inspect_only",
-            "next_action": (
-                "Có kiểm tra cấu trúc Wwise/BNK và inventory media; chưa có serializer "
-                "remap Event/Action/HIRC/WEM cho nhiều skin."
-            ),
-            "safety_rule": "Không nối byte BNK hoặc thay bank iOS bằng bank Android.",
+            "next_action": "Cần liên kết WEM với Media ID trong BNK và xác minh namespace trước khi thêm.",
+            "safety_rule": "Không thêm WEM rời khi chưa xác minh bank/media reference.",
+        }
+
+    if "/sound/" in lower:
+        return {
+            "adapter_state": "inspect_only",
+            "next_action": "Tài nguyên Sound chưa phải BNK cần adapter riêng theo định dạng.",
+            "safety_rule": "Không đổi nội dung audio theo tên file hoặc phần mở rộng.",
         }
 
     if "assetrefs/" in lower or leaf.endswith("_assetref.bytes"):
@@ -799,6 +1463,21 @@ def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
                 "và kiểm tra tham chiếu/metadata trước khi đưa vào gói đích."
             ),
             "safety_rule": "Không coi việc tên file chưa trùng là đủ để xác nhận dependency hoàn chỉnh.",
+        }
+
+    if lower.endswith(".bytes"):
+        return {
+            "adapter_state": "conditional_actor_prefix_mses",
+            "next_action": (
+                "Nếu payload thực sự là MSES v7, engine có thể thử bộ ghép dự phòng "
+                "theo prefix khóa hàng. Chỉ cho qua khi mọi hàng mới và xung đột đều "
+                "quy được duy nhất về Actor trong Actor_Action inventory."
+            ),
+            "safety_rule": (
+                "Schema/version/checksum phải khớp; khóa có prefix mơ hồ, hàng mới không "
+                "thuộc Actor overlay, hàng chung không xác định chủ sở hữu hoặc payload "
+                "không phải MSES đều bị chặn. Đây là quy tắc có điều kiện, chưa game-test."
+            ),
         }
 
     return {
@@ -1012,7 +1691,11 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
 
     if (
         len(wrapper_profiles) > 1
-        and selected_adapter != "aov_p9_p10_skin_union_1.64.1"
+        and selected_adapter not in {
+            "aov_p9_p10_skin_union_1.64.1",
+            "aov_p9_p10_vtk_actor595_1.64.1",
+            "aov_multi_actor_auto_detect",
+        }
     ):
         blockers.insert(
             0,
@@ -1038,8 +1721,10 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
 
     supported_aov_adapters = {
         "aov_p9_p10_skin_union_1.64.1",
+        "aov_p9_p10_vtk_actor595_1.64.1",
         "aov_kpm100_vtk_actor595_1.64.1",
         "aov_mod_to_mod_vtk_actor595_1.64.1",
+        "aov_multi_actor_auto_detect",
     }
     if selected_adapter == "generic_zip":
         blockers.append(
@@ -1100,7 +1785,19 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             state = item.get("adapter_state", "no_known_adapter")
             guidance_counts[state] = guidance_counts.get(state, 0) + 1
         preservation_gates = _build_preservation_gates(plan["resources"])
+        wwise_analysis = _assess_wwise_bnk_sources(archive_paths, profiles)
+        assetref_analysis = _assess_asset_reference_sources(archive_paths)
+        if (
+            selected_adapter == "aov_multi_actor_auto_detect"
+            and wwise_analysis.get("state") == "BLOCKED"
+        ):
+            blockers.append(
+                "Wwise preflight bị chặn: "
+                + str(wwise_analysis.get("reason", "không xác minh được namespace âm thanh."))
+            )
         resource_analysis = {
+            "wwise_analysis": wwise_analysis,
+            "assetref_analysis": assetref_analysis,
             "available": True,
             "advisory_only": True,
             "merge_authorized": False,
@@ -1124,12 +1821,23 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             ),
         }
     except (ResourceManifestError, CompatibilityPlanError) as exc:
+        wwise_analysis = _assess_wwise_bnk_sources(archive_paths, profiles)
+        if (
+            selected_adapter == "aov_multi_actor_auto_detect"
+            and wwise_analysis.get("state") == "BLOCKED"
+        ):
+            blockers.append(
+                "Wwise preflight bị chặn: "
+                + str(wwise_analysis.get("reason", "không xác minh được namespace âm thanh."))
+            )
         resource_analysis = {
             "available": False,
             "advisory_only": True,
             "merge_authorized": False,
             "format_counts": {},
             "detected_format_counts": {},
+            "wwise_analysis": wwise_analysis,
+            "assetref_analysis": assetref_analysis,
             "error": str(exc),
         }
 
@@ -1197,6 +1905,9 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
                 "actor_ids": item.get("actor_ids", []),
                 "skin_name_hints": item.get("skin_name_hints", []),
                 "skin_id_hints": item.get("skin_id_hints", []),
+                "version_marker_values": item.get("version_marker_values", []),
+                "version_marker_consistent": item.get("version_marker_consistent", False),
+                "version_marker_errors": item.get("version_marker_errors", []),
             }
             for item in profiles
         ],
@@ -1209,7 +1920,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             "nhưng không tự động được cấp quyền ghi."
         ),
         "can_analyze_unlisted_mod_types": True,
-        "can_merge_unlisted_mod_types": False,
+        "can_merge_unlisted_mod_types": selected_adapter == "aov_multi_actor_auto_detect",
         "note": (
             "Phân loại cấu trúc dựa trên nội dung ZIP và chữ ký tài nguyên; tên P9/P10/TM/VTK "
             "chỉ là gợi ý phụ. Actor ID không xác định được sẽ được giữ ở trạng thái chưa phân loại."
@@ -1267,7 +1978,11 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
         ),
         None,
     )
-    allowed_statuses = {"merge_supported", "merge_supported_version_locked"}
+    allowed_statuses = {
+        "merge_supported",
+        "merge_supported_version_locked",
+        "merge_supported_conditional",
+    }
     if capability is None or capability["status"] not in allowed_statuses:
         status = capability["status"] if capability else "unregistered"
         raise ModPipelineError(
@@ -1287,6 +2002,46 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
     try:
         if adapter == "aov_p9_p10_skin_union_1.64.1":
             result = merge_p9_p10_archives(archive_paths, str(temporary))
+        elif adapter == "aov_p9_p10_vtk_actor595_1.64.1":
+            from tempfile import TemporaryDirectory
+            p9_p10_paths = [
+                path for path, profile in zip(archive_paths, profiles)
+                if profile.get("source_family_hint") in {"P9", "P10"}
+            ]
+            vtk_paths = [
+                path for path, profile in zip(archive_paths, profiles)
+                if profile.get("source_family_hint") == "VTK"
+            ]
+            donor_path = next(
+                path for path, profile in zip(archive_paths, profiles)
+                if profile.get("has_huanhua_base_tables")
+            )
+            with TemporaryDirectory(prefix="aki-aov-composite-") as stage_dir:
+                p9_p10_output = Path(stage_dir) / "p9-p10-19-skin.zip"
+                seeded_output = Path(stage_dir) / "p9-p10-huanhua-base.zip"
+                first_stage = merge_p9_p10_archives(
+                    p9_p10_paths, str(p9_p10_output)
+                )
+                donor_stage = seed_huanhua_base_tables(
+                    str(p9_p10_output), donor_path, str(seeded_output)
+                )
+                result = merge_aov_archives(
+                    [str(seeded_output), *vtk_paths], str(temporary)
+                )
+                result["adapter"] = adapter
+                result["composite_stages"] = {
+                    "p9_p10": {
+                        "adapter": "aov_p9_p10_skin_union_1.64.1",
+                        "verified": True,
+                        "skin_count": 19,
+                    },
+                    "huanhua_base_seed": donor_stage,
+                    "vtk_actor595": {
+                        "adapter": "aov_mod_to_mod_vtk_actor595_1.64.1",
+                        "verified": bool(result.get("validation")),
+                        "vtk_version": result.get("vtk_version"),
+                    },
+                }
         elif adapter == "aov_kpm100_vtk_actor595_1.64.1":
             base_path = next(
                 path for path, profile in zip(archive_paths, profiles)
@@ -1302,6 +2057,10 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
             result = merge_kpm100_vtk_archives(base_path, vtk_path, str(temporary))
         elif adapter == "aov_mod_to_mod_vtk_actor595_1.64.1":
             result = merge_aov_archives(archive_paths, str(temporary))
+        elif adapter == "aov_multi_actor_auto_detect":
+            result = merge_multi_actor_aov_archives(
+                archive_paths, str(temporary), profiles
+            )
         else:
             size = merge_zip_files(archive_paths, str(temporary))
             result = {"output_bytes": size, "adapter": adapter}

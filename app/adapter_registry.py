@@ -76,6 +76,66 @@ _ADAPTERS = (
         "game_compatibility": "inspection_only; not_game_tested",
     },
     {
+        "id": "aov_p9_p10_vtk_actor595_1.64.1",
+        "name": "P9 + P10 + Vấn Tâm Kiếm Part 1–3",
+        "status": "merge_supported_conditional",
+        "formats": [
+            "SHA-256 pinned P9/P10 MOD wrappers",
+            "VTK Actor 595 split ZIP Part 1–3",
+            "IFix", "MSES", "CommonActions",
+            "Unity AssetBundle", "Packer/Verification metadata"
+        ],
+        "scope": (
+            "Exact six-source composite only: one known P9, one known P10, exactly "
+            "VTK Part 1, Part 2, Part 3 with Actor 595-only evidence, and one separate "
+            "SHA-256-pinned 1.64.1.12 Huanhua base-table donor. Stage one creates the "
+            "verified 19-skin P9/P10 wrapper, stage two seeds the base billboard tables, "
+            "and stage three applies the locked VTK 1.64.1.11 -> 1.64.1.12 adapter."
+        ),
+        "merge_policy": (
+            "Both stages must pass their source hashes, Actor inventories, exact 10 "
+            "AssetBundle inventory, IFix/MSES/CommonActions and Packer/Verification "
+            "round-trip. The donor's three MSES tables must match pinned hashes/schema "
+            "and share the base build. No TM Actor 593, arbitrary part or cross-build source is allowed."
+        ),
+        "game_compatibility": "structurally_validated; not_game_tested",
+    },
+    {
+        "id": "aov_multi_actor_auto_detect",
+        "name": "AoV nhiều MOD · tự nhận diện Actor (ghép có điều kiện)",
+        "status": "merge_supported_conditional",
+        "formats": [
+            "MOD wrapper + Resources.zip",
+            "MSES v7 đã có schema",
+            "MSES ngoài allowlist chỉ-thêm khi prefix khóa hàng quy được duy nhất về Actor",
+            "IFix có thể parse/round-trip", "CommonActions SkinOrAvatarList trực tiếp",
+            "Unity AssetBundle resource mới + Packer/Verification metadata",
+            "ZIP package lồng không có xung đột",
+            "Wwise BNK append-only khi Bank/Media/HIRC ID không xung đột",
+            "AssetReferenceSet inspect-only; unique path preserved byte-for-byte"
+        ],
+        "scope": (
+            "Chỉ nhận ít nhất hai MOD AoV cùng version.txt, có Actor ID được nhận diện "
+            "và ít nhất một wrapper Resources.zip + DanhSachSkin.txt. Một số tài nguyên "
+            "được union khi đường dẫn mới; xung đột chỉ ghép nếu parser tương ứng xác minh."
+        ),
+        "merge_policy": (
+            "MSES dùng schema/Actor-owner đã hỗ trợ; bảng MSES lạ chỉ dùng adapter dự phòng "
+            "khi schema/version/checksum khớp và prefix khóa hàng quy duy nhất về Actor_Action. "
+            "CommonActions chỉ nhận SkinOrAvatarList trực tiếp; IFix phải parse và round-trip; "
+            "AssetBundle mới cần Packer và "
+            "Verification được UnityPy đọc/ghi/đọc lại. AssetBundle trùng đường dẫn khác "
+            "payload và WEM rời chưa đối chiếu được đều bị chặn. Wwise BNK chỉ được thêm "
+            "nguyên trạng khi Wwise version, Bank ID, Media ID và HIRC object ID không "
+            "xung đột trong namespace platform/ngôn ngữ có thể tải cùng nhau. "
+            "AssetReferenceSet chỉ được nhận dạng và giữ nguyên khi đường dẫn mới; "
+            "cùng đường dẫn khác payload bị chặn vì chưa có subset serializer đã xác minh. "
+            "Không có quy trình remap; unknown chunks và external WEM vẫn bị từ chối. "
+            "Không tuyên bố hỗ trợ mọi skin."
+        ),
+        "game_compatibility": "structurally_validated; not_game_tested",
+    },
+    {
         "id": "aov_wrapper_inspection",
         "name": "AoV AES / Zstandard wrapper",
         "status": "inspect_only",
@@ -151,7 +211,10 @@ def get_adapter_capabilities() -> dict:
         "game_tested": False,
         "adapters": adapters,
         "summary": {
-            "merge_supported": sum(item["status"] == "merge_supported" for item in adapters),
+            "merge_supported": sum(
+                item["status"] in {"merge_supported", "merge_supported_conditional"}
+                for item in adapters
+            ),
             "version_locked": sum(item["status"] == "merge_supported_version_locked" for item in adapters),
             "blocked": sum(item["status"].startswith("blocked_") for item in adapters),
             "inspection_only": sum(item["status"].startswith("inspect_only") for item in adapters),

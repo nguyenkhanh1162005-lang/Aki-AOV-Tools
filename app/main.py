@@ -42,6 +42,8 @@ _AOV_DOWNLOAD_FILENAMES = {
     "aov_p9_p10_skin_union_1.64.1": "Aki-AOV-P9-P10-19Skin.zip",
     "aov_mod_to_mod_vtk_actor595_1.64.1": "Aki-AOV-10Skin-VanTamKiem.zip",
     "aov_kpm100_vtk_actor595_1.64.1": "Aki-AOV-KPM100-VTK.zip",
+    "aov_multi_actor_auto_detect": "Aki-AOV-Multi-Actor-Auto-Merge.zip",
+    "aov_p9_p10_vtk_actor595_1.64.1": "Aki-AOV-P9-P10-VTK-20Skin.zip",
 }
 
 
@@ -982,7 +984,11 @@ async def merge_aov_chunked_upload(upload_id: str):
     if not bundle_count:
         bundle_count = int(report.get("assetbundles", 0) or 0)
     if "added_resources" in report:
-        new_file_count = len(report.get("added_resources") or [])
+        added_resources = report.get("added_resources")
+        if isinstance(added_resources, (list, tuple, set)):
+            new_file_count = len(added_resources)
+        else:
+            new_file_count = int(added_resources or 0)
     else:
         new_file_count = int(report.get("new_files", 0) or 0)
     adapter_id = str(report.get("adapter", ""))
@@ -995,7 +1001,9 @@ async def merge_aov_chunked_upload(upload_id: str):
     result_headers = {
         "X-AOV-Huanhua-Tables-Merged": str(len(huanhua_reports)),
         "X-AOV-Huanhua-Actor595-Rows-Added": str(huanhua_rows_added),
-        "X-AOV-Validation": "passed" if report.get("validation") else "incomplete",
+        "X-AOV-Validation": "passed" if (
+            report.get("validation") or report.get("verified")
+        ) else "incomplete",
         "X-AOV-Game-Tested": "true" if report.get("game_tested") else "false",
         "X-AOV-Base-Version": str(report.get("base_version", "unknown")),
         "X-AOV-VTK-Version": str(report.get("vtk_version", "unknown")),

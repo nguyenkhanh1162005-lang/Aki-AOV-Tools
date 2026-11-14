@@ -396,6 +396,78 @@ function renderPreflightDashboard(data){
   }
   preservation.append(preservationGrid);root.append(preservation);
 
+  const wwise=analysis.wwise_analysis||{};
+  if(wwise.state&&wwise.state!=='NO_OVERLAY_BNKS'){
+    const wwiseSection=dashboardElement('section','preflight-group');
+    wwiseSection.append(dashboardElement('h3','','KIỂM TRA WWISE BANK / MEDIA / HIRC ID'));
+    const wwiseState=wwise.state==='APPEND_ONLY_SAFE'?'SAFE':'warning';
+    const stateLabel=wwise.state==='APPEND_ONLY_SAFE'
+      ?'CÓ THỂ THÊM BNK NGUYÊN TRẠNG'
+      :wwise.state==='BLOCKED'?'BỊ CHẶN DO XUNG ĐỘT / THIẾU THAM CHIẾU':'CHƯA CÓ BNK OVERLAY';
+    wwiseSection.append(dashboardElement('span','preflight-tag '+wwiseState,stateLabel));
+    if(wwise.reason)wwiseSection.append(dashboardElement('p','danger',wwise.reason));
+    const summary=[
+      (wwise.bank_count||0)+' BNK đã kiểm tra',
+      (wwise.standalone_wem_count||0)+' WEM rời',
+      (wwise.identical_duplicate_count||0)+' bản trùng byte'
+    ];
+    wwiseSection.append(dashboardElement('p','',summary.join(' · ')));
+    for(const source of (wwise.sources||[])){
+      wwiseSection.append(dashboardElement(
+        'p','',
+        source.source+' · '+source.bank_count+' BNK · '+source.standalone_wem_count+' WEM'
+      ));
+    }
+    if(wwise.assessment){
+      wwiseSection.append(dashboardElement('p','',
+        'Kiểm tra Bank ID, Media ID + SHA-256, HIRC object ID/type/payload và namespace platform/ngôn ngữ. Không sửa/remap BNK.'
+      ));
+    }
+    wwiseSection.append(dashboardElement('p','','Phân tích Wwise chỉ xác nhận cấu trúc và ID namespace; không chứng minh âm thanh phát đúng trong game.'));
+    root.append(wwiseSection);
+  }
+
+  const assetref=analysis.assetref_analysis||{};
+  if(assetref.state&&assetref.state!=='NO_ASSETREFS'){
+    const assetrefSection=dashboardElement('section','preflight-group');
+    assetrefSection.append(dashboardElement('h3','','KIỂM TRA ASSETREFERENCESET / ASSETREF'));
+    const assetrefState=assetref.state==='UNIQUE_PATHS_PASSTHROUGH'?'SAFE':'warning';
+    const assetrefLabel=assetref.state==='UNIQUE_PATHS_PASSTHROUGH'
+      ?'ĐƯỜNG DẪN RIÊNG · GIỮ NGUYÊN BYTE'
+      :'BỊ CHẶN DO TRÙNG ĐƯỜNG DẪN KHÁC NỘI DUNG';
+    assetrefSection.append(dashboardElement('span','preflight-tag '+assetrefState,assetrefLabel));
+    if(assetref.reason)assetrefSection.append(dashboardElement('p','danger',assetref.reason));
+    const assetrefSummary=[
+      (assetref.assetref_count||0)+' file AssetRef',
+      (assetref.unique_path_count||0)+' đường dẫn riêng',
+      (assetref.actor_count||0)+' Actor',
+      (assetref.conflict_count||0)+' xung đột khác byte',
+      (assetref.identical_duplicate_count||0)+' bản trùng byte'
+    ];
+    assetrefSection.append(dashboardElement('p','',assetrefSummary.join(' · ')));
+    if((assetref.actor_ids||[]).length){
+      assetrefSection.append(dashboardElement('p','','Actor ID: '+assetref.actor_ids.join(', ')));
+    }
+    for(const source of (assetref.source_assetref_counts||[])){
+      assetrefSection.append(dashboardElement(
+        'p','',source.source+' · '+source.assetref_count+' AssetRef'
+      ));
+    }
+    for(const conflict of (assetref.conflicts||[])){
+      assetrefSection.append(dashboardElement(
+        'p','danger',conflict.path+' · '+(conflict.sources||[]).join(' / ')
+      ));
+    }
+    assetrefSection.append(dashboardElement(
+      'p','',
+      assetref.note||'AssetRef có đường dẫn mới được giữ nguyên; chưa có bộ ghép subset tổng quát.'
+    ));
+    assetrefSection.append(dashboardElement(
+      'p','','Nhận dạng cấu trúc và giữ nguyên byte không đồng nghĩa đã xác minh tương thích trong game.'
+    ));
+    root.append(assetrefSection);
+  }
+
   const mses=analysis.mses_diagnostics||{};
   if(mses.tables?.length){
     const msesSection=dashboardElement('section','preflight-group');
@@ -447,7 +519,10 @@ function renderPreflightDashboard(data){
       item.source_family_hint||item.source_role||'Chưa phân loại',
       item.actor_asset_ids?.length?'AssetBundle Actor '+item.actor_asset_ids.join(', '):'',
       item.actor_action_ids?.length?'Actions Actor '+item.actor_action_ids.join(', '):'',
-      item.source_part_number?'Phần '+item.source_part_number:''
+      item.source_part_number?'Phần '+item.source_part_number:'',
+      item.version_marker_values?.length?'Build '+item.version_marker_values.join(' / '):
+        (item.has_version_txt?'version.txt không hợp lệ':
+          item.source_family_hint==='VTK'?'Không có marker riêng · cần adapter VTK ghim nguồn':'Thiếu version.txt')
     ].filter(Boolean);
     card.append(dashboardElement('span','',details.join(' · ')));
     sourceGrid.append(card);
@@ -469,7 +544,19 @@ function renderPreflightDashboard(data){
       card.append(dashboardElement('span','',item.state+(item.files?.length?' · '+item.files.join(', '):'')));
       targetGrid.append(card);
     }
-    targetCard.append(targetGrid);root.append(targetCard);
+    targetCard.append(targetGrid);
+    if(Array.isArray(target.blockers)&&target.blockers.length){
+      const blockerList=dashboardElement('ul','preflight-blockers');
+      for(const reason of target.blockers)blockerList.append(dashboardElement('li','',reason));
+      targetCard.append(blockerList);
+    }
+    if(Array.isArray(target.notes)&&target.notes.length){
+      const notesList=dashboardElement('ul','');
+      for(const note of target.notes)notesList.append(dashboardElement('li','',note));
+      targetCard.append(notesList);
+    }
+    targetCard.append(dashboardElement('p','',target.evidence_note||''));
+    root.append(targetCard);
   }
 
 
@@ -595,16 +682,21 @@ async function loadCapabilities(){
     const adapters=data.adapters||[];
     const mergeableIds=new Set([
       'aov_p9_p10_skin_union_1.64.1',
+      'aov_p9_p10_vtk_actor595_1.64.1',
       'aov_kpm100_vtk_actor595_1.64.1',
-      'aov_mod_to_mod_vtk_actor595_1.64.1'
+      'aov_mod_to_mod_vtk_actor595_1.64.1',
+      'aov_multi_actor_auto_detect'
     ]);
     const supportedAdapters=adapters.filter(item=>
-      mergeableIds.has(item.id)&&item.status==='merge_supported_version_locked'
+      mergeableIds.has(item.id)&&(
+        item.status==='merge_supported_version_locked'||
+        item.status==='merge_supported_conditional'
+      )
     );
     aovAdapterEnabled=supportedAdapters.length>0;
     aovMerge.disabled=!aovAdapterEnabled||input.files.length<2||input.files.length>10;
     driveMerge.disabled=!aovAdapterEnabled;
-    aovMerge.textContent='Ghép AOV: P9 + P10 (19 skin) / KPM100 + Vấn Tâm Kiếm';
+    aovMerge.textContent='Ghép AOV: P9/P10 · Vấn Tâm Kiếm · MOD nhận diện';
     driveMerge.textContent='Ghép mod AOV từ Drive';
     capabilityList.replaceChildren();
     for(const adapter of adapters){
@@ -810,7 +902,9 @@ autoProcessBtn.addEventListener('click',async()=>{
     const supportedAovAdapters=[
       'aov_p9_p10_skin_union_1.64.1',
       'aov_kpm100_vtk_actor595_1.64.1',
-      'aov_mod_to_mod_vtk_actor595_1.64.1'
+      'aov_mod_to_mod_vtk_actor595_1.64.1',
+      'aov_multi_actor_auto_detect',
+      'aov_p9_p10_vtk_actor595_1.64.1'
     ];
     let mergeResponse=null;
     let mergeKind='';
@@ -824,7 +918,9 @@ autoProcessBtn.addEventListener('click',async()=>{
       );
     }else if(analysis.ready_to_merge===true&&supportedAovAdapters.includes(adapter)){
       mergeKind='aov';
-      status.textContent='Đã khớp adapter AoV đã xác minh. Bước 2/2: đang ghép tài nguyên và kiểm tra checksum, bảng dữ liệu, AssetBundle...';
+      status.textContent=adapter==='aov_multi_actor_auto_detect'
+        ?'Đã khớp bộ ghép nhiều Actor có điều kiện. Bước 2/2: máy chủ sẽ kiểm tra parser, version, checksum và metadata; xung đột chưa hỗ trợ sẽ bị chặn...'
+        :'Đã khớp adapter AoV đã xác minh. Bước 2/2: đang ghép tài nguyên và kiểm tra checksum, bảng dữ liệu, AssetBundle...';
       mergeResponse=await fetchWithRetry(
         '/api/upload/'+encodeURIComponent(uploadId)+'/aov-merge',
         {method:'POST'}

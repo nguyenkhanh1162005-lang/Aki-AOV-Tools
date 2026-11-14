@@ -1,0 +1,556 @@
+import io
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+from unittest.mock import patch
+
+from app.mod_pipeline import (
+    ModPipelineError,
+    _archive_profile,
+    _assess_wwise_bnk_sources,
+    _build_target_set_report,
+    _select_adapter,
+    merge_mod_archives,
+)
+
+
+ADAPTER = "aov_multi_actor_auto_detect"
+
+
+def _profile(name, actor_id, *, wrapper=False, version=True, looks_like_aov=True):
+    return {
+        "name": name,
+        "looks_like_aov": looks_like_aov,
+        "source_role": (
+            "aov_skin_mod_container_candidate" if wrapper else "aov_actor_mod_candidate"
+        ),
+        "has_mod_skin_container": wrapper,
+        "has_version_txt": version,
+        "version_marker_values": ["1.64.1.12|1793129"] if version else [],
+        "version_marker_consistent": version,
+        "version_markers": ([{"value": "1.64.1.12|1793129"}] if version else []),
+        "version_marker_errors": [],
+        "has_vtk_ifix": False,
+        "has_595_assets": False,
+        "has_actor593_content": False,
+        "has_kpm100_direct_base": False,
+        "source_family_hint": None,
+        "actor_ids": [actor_id] if actor_id else [],
+        "actor_action_ids": [actor_id] if actor_id else [],
+        "actor_asset_ids": [],
+        "uncompressed_bytes": 1024,
+        "entries": 4,
+    }
+
+
+def _huanhua_donor_profile(name="Huanhua-Base-1.64.1.12.zip"):
+    return {
+        "name": name,
+        "looks_like_aov": True,
+        "source_role": "aov_huanhua_base_tables_candidate",
+        "has_mod_skin_container": False,
+        "has_huanhua_base_tables": True,
+        "huanhua_base_version": "1.64.1.12|1793129",
+        "huanhua_base_hashes_match": True,
+        "actor_ids": [],
+        "actor_action_ids": [],
+        "actor_asset_ids": [],
+        "has_actor593_content": False,
+        "has_vtk_ifix": False,
+        "has_595_assets": False,
+        "source_family_hint": None,
+        "uncompressed_bytes": 2048,
+        "entries": 4,
+    }
+
+
+
+def _wwise_chunk(name, payload):
+    return name.encode("ascii") + len(payload).to_bytes(4, "little") + payload
+
+
+def _wwise_bank(bank_id, media_id, media_payload, object_id, object_payload=b"node"):
+    didx = _wwise_chunk(
+        "DIDX",
+        media_id.to_bytes(4, "little") + (0).to_bytes(4, "little")
+        + len(media_payload).to_bytes(4, "little"),
+    )
+    data = _wwise_chunk("DATA", media_payload)
+    body = object_id.to_bytes(4, "little") + object_payload
+    hirc = _wwise_chunk(
+        "HIRC",
+        (1).to_bytes(4, "little") + bytes([2])
+        + len(body).to_bytes(4, "little") + body,
+    )
+    header = _wwise_chunk("BKHD", (135).to_bytes(4, "little") + bank_id.to_bytes(4, "little"))
+    return header + didx + data + hirc
+
+
+def _write_wwise_wrapper(path: Path, bank_path: str, payload: bytes):
+    inner_buffer = io.BytesIO()
+    with zipfile.ZipFile(inner_buffer, "w", zipfile.ZIP_DEFLATED) as inner:
+        inner.writestr("Resources/1.64.1/" + bank_path, payload)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as outer:
+        outer.writestr("Mod/Resources.zip", inner_buffer.getvalue())
+        outer.writestr("Mod/DanhSachSkin.txt", "Base skin")
+
+
+class MultiActorPipelineIntegrationTests(unittest.TestCase):
+    def test_selects_auto_adapter_for_unlisted_actor_ids(self):
+        profiles = [
+            _profile("creator-one.zip", "731", wrapper=True),
+            _profile("creator-two.zip", "842"),
+        ]
+        self.assertEqual(_select_adapter(profiles), ADAPTER)
+
+    def test_rejects_candidate_without_explicit_version_marker(self):
+        profiles = [
+            _profile("creator-one.zip", "731", wrapper=True),
+            _profile("creator-two.zip", "842", version=False),
+        ]
+        with self.assertRaisesRegex(ModPipelineError, "version"):
+            _select_adapter(profiles)
+
+    def test_rejects_candidate_with_mismatched_build_markers(self):
+        profiles = [
+            _profile("creator-one.zip", "731", wrapper=True),
+            _profile("creator-two.zip", "842"),
+        ]
+        profiles[1]["version_marker_values"] = ["1.64.1.13|1793129"]
+        with self.assertRaisesRegex(ModPipelineError, "cùng một build"):
+            _select_adapter(profiles)
+
+    def test_rejects_invalid_or_conflicting_marker_inside_source(self):
+        profiles = [
+            _profile("creator-one.zip", "731", wrapper=True),
+            _profile("creator-two.zip", "842"),
+        ]
+        profiles[1]["version_marker_consistent"] = False
+        with self.assertRaisesRegex(ModPipelineError, "cùng một build"):
+            _select_adapter(profiles)
+
+    def test_profile_reads_nested_resources_version_marker(self):
+        import io
+
+        nested_buffer = io.BytesIO()
+        with zipfile.ZipFile(nested_buffer, "w", zipfile.ZIP_DEFLATED) as nested:
+            nested.writestr("Resources/1.64.1/version.txt", "1.64.1.12|1793129")
+            nested.writestr(
+                "Resources/1.64.1/Ages/Prefab_Characters/Actor_842_Actions.pkg.bytes",
+                b"actor-actions",
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "creator-wrapper.zip"
+            with zipfile.ZipFile(source, "w", zipfile.ZIP_DEFLATED) as outer:
+                outer.writestr("mod/Resources.zip", nested_buffer.getvalue())
+                outer.writestr("mod/DanhSachSkin.txt", "Creator skin")
+            profile = _archive_profile(str(source))
+
+        self.assertTrue(profile["has_version_txt"])
+        self.assertTrue(profile["version_marker_consistent"])
+        self.assertEqual(profile["version_marker_values"], ["1.64.1.12|1793129"])
+        self.assertEqual(profile["version_markers"][0]["container"], "Resources.zip")
+
+    def test_profile_blocks_conflicting_outer_and_nested_version_markers(self):
+        import io
+
+        nested_buffer = io.BytesIO()
+        with zipfile.ZipFile(nested_buffer, "w", zipfile.ZIP_DEFLATED) as nested:
+            nested.writestr("Resources/1.64.1/version.txt", "1.64.1.12|1793129")
+            nested.writestr(
+                "Resources/1.64.1/Ages/Prefab_Characters/Actor_842_Actions.pkg.bytes",
+                b"actor-actions",
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "creator-conflicting-version.zip"
+            with zipfile.ZipFile(source, "w", zipfile.ZIP_DEFLATED) as outer:
+                outer.writestr("mod/Resources.zip", nested_buffer.getvalue())
+                outer.writestr("mod/Resources/version.txt", "1.64.1.13|1793129")
+                outer.writestr("mod/DanhSachSkin.txt", "Creator skin")
+            profile = _archive_profile(str(source))
+
+        self.assertFalse(profile["version_marker_consistent"])
+        self.assertEqual(
+            profile["version_marker_values"],
+            ["1.64.1.12|1793129", "1.64.1.13|1793129"],
+        )
+
+
+    def test_wwise_preflight_accepts_disjoint_append_only_bank(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / "base.zip"
+            overlay = Path(directory) / "creator.zip"
+            _write_wwise_wrapper(
+                base,
+                "Sound/iOS/Base.bnk",
+                _wwise_bank(100, 1000, b"base-media", 2000),
+            )
+            with zipfile.ZipFile(overlay, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(
+                    "Resources/1.64.1/Sound/iOS/Creator.bnk",
+                    _wwise_bank(101, 1001, b"creator-media", 2001),
+                )
+            profiles = [
+                {"name": base.name, "has_mod_skin_container": True},
+                {"name": overlay.name, "has_mod_skin_container": False},
+            ]
+            report = _assess_wwise_bnk_sources(
+                [str(base), str(overlay)], profiles
+            )
+        self.assertEqual(report["state"], "APPEND_ONLY_SAFE")
+        self.assertTrue(report["merge_authorized"])
+        self.assertEqual(report["bank_count"], 2)
+
+    def test_wwise_preflight_blocks_bank_id_collision_before_merge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / "base.zip"
+            overlay = Path(directory) / "creator.zip"
+            _write_wwise_wrapper(
+                base,
+                "Sound/iOS/Base.bnk",
+                _wwise_bank(100, 1000, b"base-media", 2000),
+            )
+            with zipfile.ZipFile(overlay, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(
+                    "Resources/1.64.1/Sound/iOS/Creator.bnk",
+                    _wwise_bank(100, 1001, b"creator-media", 2001),
+                )
+            profiles = [
+                {"name": base.name, "has_mod_skin_container": True},
+                {"name": overlay.name, "has_mod_skin_container": False},
+            ]
+            report = _assess_wwise_bnk_sources(
+                [str(base), str(overlay)], profiles
+            )
+        self.assertEqual(report["state"], "BLOCKED")
+        self.assertIn("Bank ID 100", report["reason"])
+        self.assertFalse(report["merge_authorized"])
+
+    def test_wwise_preflight_blocks_standalone_wem(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / "base.zip"
+            overlay = Path(directory) / "creator.zip"
+            _write_wwise_wrapper(
+                base,
+                "Sound/iOS/Base.bnk",
+                _wwise_bank(100, 1000, b"base-media", 2000),
+            )
+            with zipfile.ZipFile(overlay, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(
+                    "Resources/1.64.1/Sound/iOS/Creator.wem",
+                    b"external-audio",
+                )
+            profiles = [
+                {"name": base.name, "has_mod_skin_container": True},
+                {"name": overlay.name, "has_mod_skin_container": False},
+            ]
+            report = _assess_wwise_bnk_sources(
+                [str(base), str(overlay)], profiles
+            )
+        self.assertEqual(report["state"], "BLOCKED")
+        self.assertIn("WEM rời", report["reason"])
+
+
+    def test_six_source_target_report_lists_exact_tamyn_blockers(self):
+        profiles = [
+            {
+                **_profile("P9.zip", "107", wrapper=True),
+                "source_family_hint": "P9",
+                "actor_action_ids": ["107"],
+            },
+            {
+                **_profile("P10.zip", "111", wrapper=True),
+                "source_family_hint": "P10",
+                "actor_action_ids": ["111"],
+            },
+            {
+                **_profile("Tamyn-Robot.zip", "593"),
+                "source_family_hint": "TM",
+                "has_resource_verification_catalog": False,
+                "wwise_bank_count": 5,
+            },
+            {
+                **_profile("Part1.zip", "595"),
+                "source_family_hint": "VTK",
+                "source_part_number": 1,
+                "has_vtk_ifix": True,
+                "has_huanhua_billboard_tables": True,
+            },
+            {
+                **_profile("Part2.zip", "595"),
+                "source_family_hint": "VTK",
+                "source_part_number": 2,
+                "has_595_assets": True,
+            },
+            {
+                **_profile("Part3.zip", "595"),
+                "source_family_hint": "VTK",
+                "source_part_number": 3,
+                "has_595_assets": True,
+            },
+        ]
+        report = _build_target_set_report(profiles)
+        self.assertTrue(report["input_set_complete"])
+        self.assertFalse(report["merge_supported"])
+        blockers = " ".join(report["blockers"])
+        self.assertIn("ba SHA-256", blockers)
+        self.assertIn("ResourceVerificationInfoSetAll", blockers)
+        self.assertTrue(any("5 Wwise BNK" in note for note in report["notes"]))
+        self.assertNotIn("Wwise BNK; chưa có bộ remap", blockers)
+
+    def test_rejects_ordinary_zip_in_mixed_input(self):
+        profiles = [
+            _profile("creator-one.zip", "731", wrapper=True),
+            _profile("ordinary.zip", None, looks_like_aov=False),
+        ]
+        with self.assertRaises(ModPipelineError):
+            _select_adapter(profiles)
+
+    def test_merge_pipeline_dispatches_to_multi_actor_engine(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "one.zip"
+            second = Path(directory) / "two.zip"
+            output = Path(directory) / "merged.zip"
+            first.write_bytes(b"source-one")
+            second.write_bytes(b"source-two")
+            profiles = [
+                _profile(first.name, "731", wrapper=True),
+                _profile(second.name, "842"),
+            ]
+
+            def fake_engine(paths, destination, selected_profiles):
+                self.assertEqual(paths, [str(first), str(second)])
+                self.assertEqual(selected_profiles, profiles)
+                with zipfile.ZipFile(destination, "w") as archive:
+                    archive.writestr("Resources.zip", b"fixture")
+                return {"adapter": ADAPTER, "verified": True}
+
+            capabilities = {
+                "adapters": [{"id": ADAPTER, "status": "merge_supported_conditional"}]
+            }
+            with (
+                patch("app.mod_pipeline._preflight_inputs", return_value=20),
+                patch("app.mod_pipeline._archive_profile", side_effect=profiles),
+                patch("app.mod_pipeline.get_adapter_capabilities", return_value=capabilities),
+                patch("app.mod_pipeline.merge_multi_actor_aov_archives", side_effect=fake_engine) as engine,
+            ):
+                report = merge_mod_archives([str(first), str(second)], str(output))
+
+            engine.assert_called_once()
+            self.assertEqual(report["adapter"], ADAPTER)
+            self.assertTrue(report["structurally_validated"])
+            self.assertFalse(report["game_compatibility_tested"])
+            self.assertTrue(output.is_file())
+
+    def test_selects_exact_p9_p10_vtk_split_composite(self):
+        p9_ids = ["107", "130", "137", "163", "509", "510", "518", "540", "597"]
+        p10_ids = ["111", "132", "150", "157", "167", "190", "524", "567", "598", "599"]
+        profiles = [
+            {
+                **_profile("p9.zip", "107", wrapper=True),
+                "source_family_hint": "P9",
+                "resources_zip_count": 1,
+                "skin_list_count": 1,
+                "actor_action_ids": p9_ids,
+            },
+            {
+                **_profile("p10.zip", "111", wrapper=True),
+                "source_family_hint": "P10",
+                "resources_zip_count": 1,
+                "skin_list_count": 1,
+                "actor_action_ids": p10_ids,
+            },
+            {
+                **_profile("Part1.zip", "595"),
+                "source_family_hint": "VTK",
+                "source_part_number": 1,
+                "has_vtk_ifix": True,
+                "has_595_assets": False,
+                "actor_action_ids": ["595"],
+            },
+            {
+                **_profile("Part2.zip", "595"),
+                "source_family_hint": "VTK",
+                "source_part_number": 2,
+                "has_vtk_ifix": False,
+                "has_595_assets": True,
+                "actor_asset_ids": ["595"],
+            },
+            {
+                **_profile("Part3.zip", "595"),
+                "source_family_hint": "VTK",
+                "source_part_number": 3,
+                "has_vtk_ifix": False,
+                "has_595_assets": True,
+                "actor_asset_ids": ["595"],
+            },
+            _huanhua_donor_profile(),
+        ]
+        self.assertEqual(
+            _select_adapter(profiles),
+            "aov_p9_p10_vtk_actor595_1.64.1",
+        )
+
+    def test_exact_p9_p10_vtk_route_requires_matching_huanhua_donor(self):
+        p9_ids = ["107", "130", "137", "163", "509", "510", "518", "540", "597"]
+        p10_ids = ["111", "132", "150", "157", "167", "190", "524", "567", "598", "599"]
+        profiles = [
+            {
+                **_profile("p9.zip", "107", wrapper=True),
+                "source_family_hint": "P9", "resources_zip_count": 1,
+                "skin_list_count": 1, "actor_action_ids": p9_ids,
+            },
+            {
+                **_profile("p10.zip", "111", wrapper=True),
+                "source_family_hint": "P10", "resources_zip_count": 1,
+                "skin_list_count": 1, "actor_action_ids": p10_ids,
+            },
+            *[
+                {
+                    **_profile(f"Part{part}.zip", "595", version=False),
+                    "source_family_hint": "VTK", "source_part_number": part,
+                    "has_vtk_ifix": part == 1,
+                    "has_595_assets": part in {2, 3},
+                    "actor_action_ids": ["595"] if part == 1 else [],
+                    "actor_asset_ids": ["595"] if part in {2, 3} else [],
+                }
+                for part in (1, 2, 3)
+            ],
+        ]
+        with self.assertRaises(ModPipelineError):
+            _select_adapter(profiles)
+
+
+    def test_does_not_include_tamyn_actor593_in_exact_p9_p10_vtk_route(self):
+        p9_ids = ["107", "130", "137", "163", "509", "510", "518", "540", "597"]
+        p10_ids = ["111", "132", "150", "157", "167", "190", "524", "567", "598", "599"]
+        profiles = [
+            {
+                **_profile("p9.zip", "107", wrapper=True),
+                "source_family_hint": "P9", "resources_zip_count": 1,
+                "skin_list_count": 1, "actor_action_ids": p9_ids,
+            },
+            {
+                **_profile("p10.zip", "111", wrapper=True),
+                "source_family_hint": "P10", "resources_zip_count": 1,
+                "skin_list_count": 1, "actor_action_ids": p10_ids,
+            },
+            *[
+                {
+                    **_profile(f"Part{part}.zip", "595", version=False),
+                    "source_family_hint": "VTK", "source_part_number": part,
+                    "has_vtk_ifix": part == 1,
+                    "has_595_assets": part in {2, 3},
+                    "actor_action_ids": ["595"] if part == 1 else [],
+                    "actor_asset_ids": ["595"] if part in {2, 3} else [],
+                }
+                for part in (1, 2, 3)
+            ],
+            {
+                **_profile("Tamyn-Robot.zip", "593"),
+                "source_family_hint": "TM",
+                "has_actor593_content": True,
+                "actor_action_ids": ["593"],
+            },
+            _huanhua_donor_profile(),
+        ]
+        with self.assertRaises(ModPipelineError):
+            _select_adapter(profiles)
+
+    def test_composite_pipeline_runs_p9_p10_then_vtk_specialist(self):
+        composite = "aov_p9_p10_vtk_actor595_1.64.1"
+        p9_ids = ["107", "130", "137", "163", "509", "510", "518", "540", "597"]
+        p10_ids = ["111", "132", "150", "157", "167", "190", "524", "567", "598", "599"]
+        with tempfile.TemporaryDirectory() as directory:
+            source_paths = [
+                Path(directory) / "p9.zip",
+                Path(directory) / "p10.zip",
+                Path(directory) / "Part1.zip",
+                Path(directory) / "Part2.zip",
+                Path(directory) / "Part3.zip",
+                Path(directory) / "Huanhua-Base-1.64.1.12.zip",
+            ]
+            for index, path in enumerate(source_paths):
+                path.write_bytes(f"source-{index}".encode())
+            output = Path(directory) / "merged.zip"
+            profiles = [
+                {
+                    **_profile("p9.zip", "107", wrapper=True),
+                    "source_family_hint": "P9", "resources_zip_count": 1,
+                    "skin_list_count": 1, "actor_action_ids": p9_ids,
+                },
+                {
+                    **_profile("p10.zip", "111", wrapper=True),
+                    "source_family_hint": "P10", "resources_zip_count": 1,
+                    "skin_list_count": 1, "actor_action_ids": p10_ids,
+                },
+                *[
+                    {
+                        **_profile(f"Part{part}.zip", "595"),
+                        "source_family_hint": "VTK", "source_part_number": part,
+                        "has_vtk_ifix": part == 1,
+                        "has_595_assets": part in {2, 3},
+                        "actor_action_ids": ["595"] if part == 1 else [],
+                        "actor_asset_ids": ["595"] if part in {2, 3} else [],
+                    }
+                    for part in (1, 2, 3)
+                ],
+                _huanhua_donor_profile(),
+            ]
+
+            def fake_p9p10(paths, destination):
+                self.assertEqual(set(paths), {str(source_paths[0]), str(source_paths[1])})
+                with zipfile.ZipFile(destination, "w") as archive:
+                    archive.writestr("Resources.zip", b"p9-p10")
+                    archive.writestr("DanhSachSkin.txt", b"19 skins")
+                return {"verified": True}
+
+            def fake_seed(base_wrapper, donor_path, destination):
+                self.assertEqual(Path(base_wrapper).name, "p9-p10-19-skin.zip")
+                self.assertEqual(Path(donor_path), source_paths[5])
+                with zipfile.ZipFile(destination, "w") as archive:
+                    archive.writestr("Resources.zip", b"p9-p10-huanhua-base")
+                    archive.writestr("DanhSachSkin.txt", b"19 skins")
+                return {"verified": True, "appended_paths": ["three tables"]}
+
+            def fake_vtk(paths, destination):
+                self.assertEqual(Path(paths[0]).name, "p9-p10-huanhua-base.zip")
+                self.assertEqual(paths[1:], [str(x) for x in source_paths[2:5]])
+                with zipfile.ZipFile(destination, "w") as archive:
+                    archive.writestr("Resources.zip", b"p9-p10-vtk")
+                    archive.writestr("DanhSachSkin.txt", b"19 skins + VTK")
+                return {
+                    "adapter": "aov_mod_to_mod_vtk_actor595_1.64.1",
+                    "validation": "passed",
+                    "vtk_version": "1.64.1.11",
+                    "assetbundles": 10,
+                    "game_tested": False,
+                }
+
+            capabilities = {
+                "adapters": [{"id": composite, "status": "merge_supported_conditional"}]
+            }
+            with (
+                patch("app.mod_pipeline._preflight_inputs", return_value=100),
+                patch("app.mod_pipeline._archive_profile", side_effect=profiles),
+                patch("app.mod_pipeline.get_adapter_capabilities", return_value=capabilities),
+                patch("app.mod_pipeline.merge_p9_p10_archives", side_effect=fake_p9p10) as p9p10,
+                patch("app.mod_pipeline.seed_huanhua_base_tables", side_effect=fake_seed) as seed,
+                patch("app.mod_pipeline.merge_aov_archives", side_effect=fake_vtk) as vtk,
+            ):
+                report = merge_mod_archives([str(x) for x in source_paths], str(output))
+
+            p9p10.assert_called_once()
+            seed.assert_called_once()
+            vtk.assert_called_once()
+            self.assertEqual(report["adapter"], composite)
+            self.assertEqual(report["composite_stages"]["p9_p10"]["skin_count"], 19)
+            self.assertTrue(report["composite_stages"]["huanhua_base_seed"]["verified"])
+            self.assertTrue(report["structurally_validated"])
+            self.assertFalse(report["game_compatibility_tested"])
+            self.assertTrue(output.is_file())
+
+
+if __name__ == "__main__":
+    unittest.main()
