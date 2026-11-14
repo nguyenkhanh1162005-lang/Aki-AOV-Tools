@@ -25,6 +25,8 @@ from .aov_multi_merger import merge_multi_actor_aov_archives
 MAX_PROFILE_ENTRIES = 20_000
 MAX_PROFILE_UNCOMPRESSED = 1024 * 1024 * 1024
 MAX_PROFILE_ENTRY = 512 * 1024 * 1024
+MAX_VERSION_MARKER_BYTES = 4096
+MAX_VERSION_MARKER_CHARS = 200
 MAX_INPUT_FILES = 10
 MAX_TOTAL_INPUT_BYTES = 500 * 1024 * 1024
 
@@ -52,6 +54,67 @@ def _sha256_file(path: str) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _read_profile_version_marker(
+    archive: zipfile.ZipFile,
+    info: zipfile.ZipInfo,
+    *,
+    container: str,
+) -> dict[str, Any]:
+    """Read a small, explicit build marker without trusting its filename alone."""
+    record: dict[str, Any] = {
+        "path": info.filename.replace("\\\\", "/"),
+        "container": container,
+    }
+    if info.file_size > MAX_VERSION_MARKER_BYTES:
+        record["error"] = (
+            f"version.txt vượt giới hạn {MAX_VERSION_MARKER_BYTES} byte."
+        )
+        return record
+    try:
+        with archive.open(info, "r") as stream:
+            raw = stream.read(MAX_VERSION_MARKER_BYTES + 1)
+    except (OSError, RuntimeError, zipfile.BadZipFile, zlib.error):
+        record["error"] = "Không đọc được version.txt."
+        return record
+    if len(raw) > MAX_VERSION_MARKER_BYTES:
+        record["error"] = (
+            f"version.txt vượt giới hạn {MAX_VERSION_MARKER_BYTES} byte."
+        )
+        return record
+    try:
+        value = raw.decode("utf-8-sig", errors="strict").strip()
+    except UnicodeDecodeError:
+        record["error"] = "version.txt không phải UTF-8 hợp lệ."
+        return record
+    if (
+        not value
+        or len(value) > MAX_VERSION_MARKER_CHARS
+        or len(value.splitlines()) != 1
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+    ):
+        record["error"] = "version.txt rỗng hoặc có nội dung không hợp lệ."
+        return record
+    record["value"] = value
+    return record
+
+
+def _profiles_share_version_marker(profiles: list[dict[str, Any]]) -> bool:
+    """Require one valid, identical build marker in every source archive."""
+    if not profiles:
+        return False
+    values: list[str] = []
+    for item in profiles:
+        markers = item.get("version_marker_values", [])
+        if (
+            not item.get("version_marker_consistent")
+            or len(markers) != 1
+            or not isinstance(markers[0], str)
+        ):
+            return False
+        values.append(markers[0])
+    return len(set(values)) == 1
 
 
 def _preflight_inputs(paths: list[str]) -> int:
@@ -196,6 +259,7 @@ def _archive_profile(path: str) -> dict[str, Any]:
                     f"ZIP vượt giới hạn giải nén 1 GiB: {Path(path).name}"
                 )
             names = []
+            version_marker_records: list[dict[str, Any]] = []
             seen_entry_paths: set[str] = set()
             for info in entries:
                 normalized = info.filename.replace("\\", "/")
@@ -230,6 +294,12 @@ def _archive_profile(path: str) -> dict[str, Any]:
                         f"ZIP vượt giới hạn giải nén 512 MiB: {info.filename}"
                     )
                 names.append(canonical_name)
+                if PurePosixPath(canonical_name).name.casefold() == "version.txt":
+                    version_marker_records.append(
+                        _read_profile_version_marker(
+                            archive, info, container="outer ZIP"
+                        )
+                    )
             bad = archive.testzip()
             if bad:
                 raise ModPipelineError(f"ZIP lỗi CRC tại {bad}: {Path(path).name}")
@@ -308,6 +378,12 @@ def _archive_profile(path: str) -> dict[str, Any]:
                                         f"Mục Resources.zip vượt giới hạn 512 MiB: {inner.filename}"
                                     )
                                 nested_resource_names.append(canonical)
+                                if PurePosixPath(canonical).name.casefold() == "version.txt":
+                                    version_marker_records.append(
+                                        _read_profile_version_marker(
+                                            nested, inner, container="Resources.zip"
+                                        )
+                                    )
                             nested_bad = nested.testzip()
                             if nested_bad:
                                 raise ModPipelineError(
@@ -512,9 +588,20 @@ def _archive_profile(path: str) -> dict[str, Any]:
         "uncompressed_bytes": total_uncompressed,
         "looks_like_aov": looks_like_aov,
         "source_role": source_role,
-        "has_version_txt": any(
-            PurePosixPath(name).name.casefold() == "version.txt"
-            for name in resource_names
+        "has_version_txt": bool(version_marker_records),
+        "version_markers": version_marker_records,
+        "version_marker_values": sorted({
+            str(item["value"]) for item in version_marker_records
+            if isinstance(item.get("value"), str)
+        }),
+        "version_marker_errors": [
+            {key: value for key, value in item.items() if key != "container"}
+            for item in version_marker_records if item.get("error")
+        ],
+        "version_marker_consistent": (
+            bool(version_marker_records)
+            and all(isinstance(item.get("value"), str) for item in version_marker_records)
+            and len({item["value"] for item in version_marker_records if isinstance(item.get("value"), str)}) == 1
         ),
         "has_mod_skin_container": has_mod_skin_container,
         "has_huanhua_base_tables": has_huanhua_base_tables,
@@ -689,7 +776,7 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
             len(profiles) >= 2
             and all(item.get("looks_like_aov") for item in profiles)
             and any(item.get("has_mod_skin_container") for item in profiles)
-            and all(item.get("has_version_txt") for item in profiles)
+            and _profiles_share_version_marker(profiles)
             and all(item.get("actor_ids") for item in profiles)
             and all(
                 item.get("source_role") not in {
@@ -704,7 +791,7 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
         names = ", ".join(item["name"] for item in profiles if item["looks_like_aov"])
         raise ModPipelineError(
             "Phát hiện tài nguyên AoV nhưng chưa có adapter ghép đã xác minh phù hợp cho bộ này: "
-            f"{names}. Cần version.txt hợp lệ trên mọi MOD, ít nhất hai nguồn cùng phiên bản, "
+            f"{names}. Cần version.txt hợp lệ và cùng một build ở mọi MOD, ít nhất hai nguồn, "
             "có bằng chứng Actor và ít nhất một wrapper Resources.zip + DanhSachSkin.txt. "
             "Không dùng gói game gốc làm nền "
             "và không ghi đè .bytes, AssetBundle hoặc soundbank theo kiểu ZIP thường."
@@ -1343,6 +1430,9 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
                 "actor_ids": item.get("actor_ids", []),
                 "skin_name_hints": item.get("skin_name_hints", []),
                 "skin_id_hints": item.get("skin_id_hints", []),
+                "version_marker_values": item.get("version_marker_values", []),
+                "version_marker_consistent": item.get("version_marker_consistent", False),
+                "version_marker_errors": item.get("version_marker_errors", []),
             }
             for item in profiles
         ],
