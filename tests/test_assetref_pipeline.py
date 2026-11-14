@@ -9,13 +9,13 @@ from app.mod_pipeline import _assess_asset_reference_sources
 
 def _assetref_payload(label=b"fixture"):
     return (
-        b"\\x31\\x0a\\x01\\x00"
-        + b"\\x08\\x00\\x00\\x00ROOTC\\x00\\x00\\x00"
-        + b"\\x02\\x00\\x00\\x00\\x0d\\x00\\x00\\x00\\x06\\x00\\x00\\x00"
+        b"\x31\x0a\x01\x00"
+        + b"\x08\x00\x00\x00ROOTC\x00\x00\x00"
+        + b"\x02\x00\x00\x00\x0d\x00\x00\x00\x06\x00\x00\x00"
         + b"JTCom."
-        + b"\\x00\\x00\\x00\\x08\\x00\\x00\\x00"
+        + b"\x00\x00\x00\x08\x00\x00\x00"
         + b"TypeAssetRefAnalyser.AssetReferenceSet"
-        + b"\\x04\\x00\\x00\\x00baseSubset\\x00"
+        + b"\x04\x00\x00\x00baseSubset\x00"
         + label
     )
 
@@ -33,7 +33,7 @@ def _write_wrapper(path: Path, resources: dict[str, bytes]):
             inner.writestr("Resources/1.64.1/" + name, payload)
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as outer:
         outer.writestr("Mod/Resources.zip", buffer.getvalue())
-        outer.writestr("Mod/DanhSachSkin.txt", "Test\\n")
+        outer.writestr("Mod/DanhSachSkin.txt", "Test\n")
 
 
 class AssetReferencePipelineTests(unittest.TestCase):
