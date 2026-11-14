@@ -9,6 +9,7 @@ from app.aov_merge import (
     _actor_id_from_mses_key,
     _lite_bullet_row_identity,
     merge_aov_mses_resource,
+    merge_aov_mses_resource_chain,
 )
 from app.aov_mses import build_mses, MSESTable, parse_mses
 import hashlib
@@ -152,6 +153,41 @@ class AOVResourceMergeTests(unittest.TestCase):
         self.assertEqual(rows[100], base_row)
         self.assertEqual(rows[200], overlay_row)
         self.assertEqual(report["actor_id_rule"], "lite_bullet_effect_path")
+        self.assertTrue(report["verified"])
+
+    def test_merges_three_mses_overlays_with_cumulative_actor_ownership(self):
+        name = "Databin/Client/Sound/HeroSound.bytes"
+        base_593 = struct.pack("<I", 5930001) + b"actor-593"
+        overlay_595 = struct.pack("<I", 5950001) + b"actor-595"
+        overlay_731 = struct.pack("<I", 7310001) + b"actor-731"
+        base_global = struct.pack("<I", 7) + b"global"
+        base = encode_aov_resource(
+            table(69, [base_593, base_global]), name, "aes"
+        )
+        source_595 = encode_aov_resource(
+            table(69, [overlay_595, base_global]), name, "aes"
+        )
+        source_731 = encode_aov_resource(
+            table(69, [overlay_731, base_global]), name, "aes"
+        )
+
+        result, report = merge_aov_mses_resource_chain(
+            base,
+            name,
+            {"593"},
+            [(source_595, {"595"}), (source_731, {"731"})],
+        )
+        decoded, _ = decode_aov_resource(result, name)
+        rows = {
+            int.from_bytes(row[:4], "little"): row
+            for row in parse_mses(decoded).rows
+        }
+        self.assertEqual(rows[5930001], base_593)
+        self.assertEqual(rows[5950001], overlay_595)
+        self.assertEqual(rows[7310001], overlay_731)
+        self.assertEqual(rows[7], base_global)
+        self.assertEqual(report["actor_ids"], [593, 595, 731])
+        self.assertEqual(report["overlay_count"], 2)
         self.assertTrue(report["verified"])
 
     def test_actor_owned_soundbank_rejects_overlapping_actor_inventories(self):
