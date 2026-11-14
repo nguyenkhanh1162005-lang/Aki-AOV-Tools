@@ -588,8 +588,9 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
         names = ", ".join(item["name"] for item in profiles if item["looks_like_aov"])
         raise ModPipelineError(
             "Phát hiện tài nguyên AoV nhưng chưa có adapter ghép đã xác minh phù hợp cho bộ này: "
-            f"{names}. Cần ít nhất hai MOD cùng phiên bản, có bằng chứng Actor và ít nhất "
-            "một wrapper Resources.zip + DanhSachSkin.txt. Không dùng gói game gốc làm nền "
+            f"{names}. Cần version.txt hợp lệ trên mọi MOD, ít nhất hai nguồn cùng phiên bản, "
+            "có bằng chứng Actor và ít nhất một wrapper Resources.zip + DanhSachSkin.txt. "
+            "Không dùng gói game gốc làm nền "
             "và không ghi đè .bytes, AssetBundle hoặc soundbank theo kiểu ZIP thường."
         )
     return "generic_zip"
