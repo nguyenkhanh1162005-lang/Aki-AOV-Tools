@@ -171,9 +171,12 @@ class AOVResourceMergeTests(unittest.TestCase):
     def test_actor_owned_soundbank_rejects_unowned_new_rows(self):
         name = "Databin/Client/Sound/LobbyBank.bytes"
         base_row = struct.pack("<I", 5930000) + b"base-show"
+        overlay_owned = struct.pack("<I", 5950000) + b"overlay-show"
         unowned_new = struct.pack("<I", 7000001) + b"unexpected-show"
         base = encode_aov_resource(table(61, [base_row]), name, "aes")
-        overlay = encode_aov_resource(table(61, [base_row, unowned_new]), name, "aes")
+        overlay = encode_aov_resource(
+            table(61, [base_row, overlay_owned, unowned_new]), name, "aes"
+        )
         with self.assertRaisesRegex(AOVResourceMergeError, "không thuộc Actor"):
             merge_aov_mses_resource(
                 base,
@@ -185,10 +188,16 @@ class AOVResourceMergeTests(unittest.TestCase):
 
     def test_actor_owned_soundbank_rejects_conflicting_global_rows(self):
         name = "Databin/Client/Sound/BattleBank.bytes"
+        base_actor = struct.pack("<I", 5930001) + b"MaChao-base"
+        overlay_actor = struct.pack("<I", 5950001) + b"LiXin-overlay"
         base_global = struct.pack("<I", 999) + b"global-base"
         overlay_global = struct.pack("<I", 999) + b"global-overlay"
-        base = encode_aov_resource(table(59, [base_global]), name, "aes")
-        overlay = encode_aov_resource(table(59, [overlay_global]), name, "aes")
+        base = encode_aov_resource(
+            table(59, [base_actor, base_global]), name, "aes"
+        )
+        overlay = encode_aov_resource(
+            table(59, [overlay_actor, overlay_global]), name, "aes"
+        )
         with self.assertRaisesRegex(AOVResourceMergeError, "không xác định được Actor"):
             merge_aov_mses_resource(
                 base,
