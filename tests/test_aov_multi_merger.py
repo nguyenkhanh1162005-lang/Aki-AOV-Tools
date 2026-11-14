@@ -271,6 +271,40 @@ class AOVMultiMergerTests(unittest.TestCase):
             self.assertEqual(by_key[5930001], base_rows[0])
             self.assertEqual(by_key[7310001], overlay_rows[1])
 
+
+    def test_rejects_unknown_mses_conflict_with_ambiguous_actor_prefix(self):
+        custom_path = "Databin/Client/Skill/CreatorAmbiguousCfg.bytes"
+        base_rows = [struct.pack("<I", 5930001) + b"base-row"]
+        overlay_rows = [
+            struct.pack("<I", 5930001) + b"changed-common-row",
+            struct.pack("<I", 7310001) + b"overlay-owned-row",
+        ]
+        resources = _base_resources()
+        resources[custom_path] = _mses_resource(custom_path, base_rows)
+        with tempfile.TemporaryDirectory() as directory:
+            base_path = Path(directory) / "base.zip"
+            overlay_path = Path(directory) / "creator.zip"
+            output_path = Path(directory) / "merged.zip"
+            _write_wrapper(base_path, resources)
+            _write_direct(overlay_path, {
+                "version.txt": b"1.64.1.12",
+                custom_path: _mses_resource(custom_path, overlay_rows),
+                VERIFICATION: b"overlay-verification",
+                "Ages/Prefab_Characters/Actor_731_Actions.pkg.bytes": b"actor-731",
+            })
+            profiles = [
+                {"name": base_path.name, "actor_action_ids": ["59", "593"]},
+                {"name": overlay_path.name, "actor_action_ids": ["731"]},
+            ]
+            with self.assertRaisesRegex(AOVMultiMergeError, "Actor owner duy nhất"):
+                merge_multi_actor_aov_archives(
+                    [str(base_path), str(overlay_path)],
+                    str(output_path),
+                    profiles,
+                )
+            self.assertFalse(output_path.exists())
+
+
     def test_rejects_unknown_mses_rows_without_actor_prefix_owner(self):
         custom_path = "Databin/Client/Skill/CreatorOpaqueCfg.bytes"
         resources = _base_resources()
