@@ -1,3 +1,4 @@
+import io
 import tempfile
 import unittest
 import zipfile
