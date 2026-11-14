@@ -174,8 +174,12 @@ def _index_actor_owned_rows(rows: tuple[bytes, ...], label: str) -> tuple[dict[i
     return indexed, order
 
 
-def _actor_id_from_mses_key(key: int, spec: dict) -> int | None:
-    """Decode the source-validated Actor ID prefix used by a specific MSES table."""
+def _actor_id_from_mses_key(
+    key: int,
+    spec: dict,
+    allowed_actor_ids: set[int] | None = None,
+) -> int | None:
+    """Decode the Actor ID key prefix using a resource-specific MSES rule."""
     rule = spec.get("actor_id_rule")
     if rule == "bank_10000":
         encoded = key // 10000
@@ -186,7 +190,11 @@ def _actor_id_from_mses_key(key: int, spec: dict) -> int | None:
     if rule == "hero_sound_mixed_scale":
         # HeroSound uses more than one numeric key width. Only accept a unique
         # prefix that belongs to the exact P9/P10 Actor_Action inventories.
-        allowed_actors = set(spec.get("p9_actor_ids", ())) | set(spec.get("p10_actor_ids", ()))
+        allowed_actors = (
+            set(allowed_actor_ids)
+            if allowed_actor_ids is not None
+            else set(spec.get("p9_actor_ids", ())) | set(spec.get("p10_actor_ids", ()))
+        )
         candidates = {
             key // divisor
             for divisor in spec.get("actor_prefix_divisors", ())
@@ -224,11 +232,16 @@ def _lite_bullet_row_identity(row: bytes, label: str) -> tuple[int, bytes, bytes
     return next(iter(matches)), row[:path_start - 4], path
 
 
-def _actor_id_from_mses_row(key: int, row: bytes, spec: dict) -> int | None:
+def _actor_id_from_mses_row(
+    key: int,
+    row: bytes,
+    spec: dict,
+    allowed_actor_ids: set[int] | None = None,
+) -> int | None:
     if spec.get("actor_id_rule") == "lite_bullet_effect_path":
         actor_id, _, _ = _lite_bullet_row_identity(row, f"row 0x{key:08x}")
-        return actor_id
-    return _actor_id_from_mses_key(key, spec)
+        return actor_id if allowed_actor_ids is None or actor_id in allowed_actor_ids else None
+    return _actor_id_from_mses_key(key, spec, allowed_actor_ids)
 
 
 
@@ -409,6 +422,191 @@ def _merge_p9_p10_actor_owned_rows(
     return output, report
 
 
+_ACTOR_OWNED_MSES_PATHS = {
+    path
+    for path, spec in _P9_P10_ACTOR_OWNED_MSES.items()
+    if spec.get("actor_id_rule") or spec.get("actor_divisor")
+}
+
+
+def _merge_actor_owned_mses_rows(
+    base_decoded: bytes,
+    overlay_decoded: bytes,
+    resource_name: str,
+    base_actor_action_ids: set[int | str],
+    overlay_actor_action_ids: set[int | str],
+) -> tuple[bytes, dict]:
+    """Merge actor-owned MSES rows using an explicit, table-specific key rule.
+
+    Only ownership keys that match a supplied Actor_Action inventory are routed.
+    Global/unknown rows are retained from base and cannot be introduced or
+    replaced by an overlay.
+    """
+    normalized_name = resource_name.replace(chr(92), "/").lstrip("/")
+    spec = _P9_P10_ACTOR_OWNED_MSES.get(normalized_name)
+    if normalized_name not in _ACTOR_OWNED_MSES_PATHS or spec is None:
+        raise MSESError("Bảng MSES không có quy tắc Actor-key đã xác minh.")
+
+    base_ids = _normalise_actor_ids(base_actor_action_ids, "base")
+    overlay_ids = _normalise_actor_ids(overlay_actor_action_ids, "overlay")
+    if not base_ids or not overlay_ids:
+        raise MSESError("Cần Actor_Action inventory không rỗng của cả nguồn nền và overlay.")
+    overlap = base_ids & overlay_ids
+    if overlap:
+        raise MSESError(
+            "Actor_Action inventory giao nhau, không xác định được nguồn sở hữu: "
+            + ", ".join(str(value) for value in sorted(overlap))
+            + "."
+        )
+
+    base_table = parse_mses(base_decoded)
+    overlay_table = parse_mses(overlay_decoded)
+    if base_table.version != overlay_table.version:
+        raise MSESError("Phiên bản MSES BattleBank/LobbyBank khác nhau.")
+    if base_table.field_count != overlay_table.field_count:
+        raise MSESError(
+            "Schema MSES BattleBank/LobbyBank khác nhau: "
+            f"base={base_table.field_count}, overlay={overlay_table.field_count}."
+        )
+
+    base_map, base_order = _index_actor_owned_rows(base_table.rows, "base sound bank")
+    overlay_map, overlay_order = _index_actor_owned_rows(
+        overlay_table.rows, "overlay sound bank"
+    )
+    known_ids = base_ids | overlay_ids
+
+    def owner_for_row(key: int, row: bytes) -> int | None:
+        owner = _actor_id_from_mses_row(key, row, spec, known_ids)
+        return owner if owner in known_ids else None
+
+    base_keys = set(base_map)
+    overlay_keys = set(overlay_map)
+    overlay_owned_keys = {
+        key for key, row in overlay_map.items()
+        if owner_for_row(key, row) in overlay_ids
+    }
+    if not overlay_owned_keys:
+        raise MSESError(
+            "Actor_Action inventory không khớp với các hàng MSES của overlay."
+        )
+    new_keys = overlay_keys - base_keys
+    invalid_new = sorted(
+        key for key in new_keys
+        if owner_for_row(key, overlay_map[key]) not in overlay_ids
+    )
+    if invalid_new:
+        raise MSESError(
+            "Overlay có hàng mới không thuộc Actor của chính overlay: "
+            + ", ".join(f"0x{key:08x}" for key in invalid_new[:20])
+            + "."
+        )
+
+    differing_common = {
+        key for key in base_keys & overlay_keys
+        if base_map[key] != overlay_map[key]
+    }
+    conflict_owners = {
+        key: (
+            owner_for_row(key, base_map[key]),
+            owner_for_row(key, overlay_map[key]),
+        )
+        for key in differing_common
+    }
+    owner_mismatches = sorted(
+        key for key, (base_owner, overlay_owner) in conflict_owners.items()
+        if base_owner is not None and overlay_owner is not None
+        and base_owner != overlay_owner
+    )
+    if owner_mismatches:
+        raise MSESError(
+            "Hàng MSES chung trỏ tới Actor khác nhau giữa hai nguồn: "
+            + ", ".join(f"0x{key:08x}" for key in owner_mismatches[:20])
+            + "."
+        )
+    unresolved = sorted(
+        key for key, (base_owner, overlay_owner) in conflict_owners.items()
+        if (
+            base_owner is None
+            or overlay_owner is None
+            or base_owner != overlay_owner
+            or base_owner not in (base_ids | overlay_ids)
+        )
+    )
+    if unresolved:
+        raise MSESError(
+            "Có hàng âm thanh xung đột không xác định được Actor sở hữu: "
+            + ", ".join(f"0x{key:08x}" for key in unresolved[:20])
+            + "."
+        )
+
+    merged = dict(base_map)
+    replaced_base_owned = []
+    replaced_overlay_owned = []
+    for key in differing_common:
+        base_owner, overlay_owner = conflict_owners[key]
+        owner = base_owner or overlay_owner
+        if owner in base_ids:
+            merged[key] = base_map[key]
+            replaced_base_owned.append(key)
+        elif owner in overlay_ids:
+            merged[key] = overlay_map[key]
+            replaced_overlay_owned.append(key)
+        else:  # Defensive; ownership was checked above.
+            raise MSESError(f"Không xác định được Actor sở hữu khóa 0x{key:08x}.")
+
+    appended = []
+    for key in overlay_order:
+        if key in base_map:
+            continue
+        owner = owner_for_row(key, overlay_map[key])
+        if owner not in overlay_ids:
+            raise MSESError(f"Không được phép thêm khóa âm thanh 0x{key:08x}.")
+        merged[key] = overlay_map[key]
+        appended.append(key)
+
+    ordered_keys = list(base_order)
+    ordered_keys.extend(key for key in overlay_order if key not in base_map)
+    output = build_mses(base_table, [merged[key] for key in ordered_keys])
+    verified = parse_mses(output)
+    if (
+        verified.version != base_table.version
+        or verified.field_count != base_table.field_count
+        or len(verified.rows) != len(ordered_keys)
+        or not verified.checksum_valid
+    ):
+        raise MSESError("MSES output không vượt qua xác minh schema/row/checksum.")
+
+    report = {
+        "adapter": "actor_owned_mses_row_union",
+        "resource": normalized_name,
+        "actor_id_rule": spec.get("actor_id_rule") or "actor_divisor",
+        "base_actor_ids": sorted(base_ids),
+        "overlay_actor_ids": sorted(overlay_ids),
+        "ownership_rule": (
+            "resource_specific_actor_key_or_effect_path_matches_actor_action_inventory"
+        ),
+        "base_fields": base_table.field_count,
+        "overlay_fields": overlay_table.field_count,
+        "output_fields": verified.field_count,
+        "base_rows": len(base_table.rows),
+        "overlay_rows": len(overlay_table.rows),
+        "output_rows": len(verified.rows),
+        "appended_keys": [f"0x{key:08x}" for key in appended],
+        "base_owned_conflicts_retained": [
+            f"0x{key:08x}" for key in sorted(replaced_base_owned)
+        ],
+        "overlay_owned_conflicts_selected": [
+            f"0x{key:08x}" for key in sorted(replaced_overlay_owned)
+        ],
+        "source_hashes_pinned": False,
+        "actor_inventory_pinned": False,
+        "actor_ownership_verified": True,
+        "output_checksum_valid": verified.checksum_valid,
+        "verified": True,
+    }
+    return output, report
+
+
 def merge_aov_mses_resource(
     base_resource: bytes,
     overlay_resource: bytes,
@@ -545,6 +743,54 @@ def merge_aov_mses_resource(
     actor_owner_requested = (
         base_actor_action_ids is not None or overlay_actor_action_ids is not None
     )
+    if (
+        normalized_name in _ACTOR_OWNED_MSES_PATHS
+        and base_actor_action_ids is not None
+        and overlay_actor_action_ids is not None
+    ):
+        # Retain the exact source/hash-pinned P9/P10 adapter. Other Actor
+        # inventories use the stricter dynamic bank-row ownership adapter.
+        bank_spec = _P9_P10_ACTOR_OWNED_MSES.get(normalized_name, {})
+        base_ids = _normalise_actor_ids(base_actor_action_ids, "base")
+        overlay_ids = _normalise_actor_ids(overlay_actor_action_ids, "overlay")
+        pinned_p9 = set(bank_spec.get("p9_actor_ids", ()))
+        pinned_p10 = set(bank_spec.get("p10_actor_ids", ()))
+        exact_p9_p10_pair = (
+            (base_ids == pinned_p9 and overlay_ids == pinned_p10)
+            or (base_ids == pinned_p10 and overlay_ids == pinned_p9)
+        )
+        if not exact_p9_p10_pair:
+            try:
+                base_decoded, base_mode = decode_aov_resource(base_resource, resource_name)
+                overlay_decoded, overlay_mode = decode_aov_resource(overlay_resource, resource_name)
+                merged_decoded, report = _merge_actor_owned_mses_rows(
+                    base_decoded,
+                    overlay_decoded,
+                    normalized_name,
+                    base_actor_action_ids,
+                    overlay_actor_action_ids,
+                )
+                merged_resource = encode_aov_resource(
+                    merged_decoded, resource_name, base_mode
+                )
+                verify_decoded, verify_mode = decode_aov_resource(
+                    merged_resource, resource_name
+                )
+                verified = parse_mses(verify_decoded)
+                if verify_decoded != merged_decoded or not verified.checksum_valid:
+                    raise MSESError("MSES sound bank sau mã hóa không round-trip chính xác.")
+                report.update({
+                    "base_encoding": base_mode,
+                    "overlay_encoding": overlay_mode,
+                    "output_encoding": verify_mode,
+                    "output_bytes": len(merged_resource),
+                })
+                return merged_resource, report
+            except (AOVBytesError, MSESError) as exc:
+                raise AOVResourceMergeError(
+                    f"{resource_name}: không thể ghép MSES theo Actor-owner: {exc}"
+                ) from exc
+
     if normalized_name in _P9_P10_ACTOR_OWNED_MSES:
         if base_actor_action_ids is not None and overlay_actor_action_ids is not None:
             try:
@@ -581,9 +827,45 @@ def merge_aov_mses_resource(
             raise AOVResourceMergeError(
                 f"{resource_name}: cần Actor_Action inventory P9/P10 để dùng adapter mới."
             )
+    if normalized_name in _ACTOR_OWNED_MSES_PATHS and actor_owner_requested:
+        if base_actor_action_ids is None or overlay_actor_action_ids is None:
+            raise AOVResourceMergeError(
+                f"{resource_name}: cần Actor_Action inventory của cả nguồn nền và overlay."
+            )
+        try:
+            base_decoded, base_mode = decode_aov_resource(base_resource, resource_name)
+            overlay_decoded, overlay_mode = decode_aov_resource(overlay_resource, resource_name)
+            merged_decoded, report = _merge_actor_owned_mses_rows(
+                base_decoded,
+                overlay_decoded,
+                normalized_name,
+                base_actor_action_ids,
+                overlay_actor_action_ids,
+            )
+            merged_resource = encode_aov_resource(
+                merged_decoded, resource_name, base_mode
+            )
+            verify_decoded, verify_mode = decode_aov_resource(
+                merged_resource, resource_name
+            )
+            verified = parse_mses(verify_decoded)
+            if verify_decoded != merged_decoded or not verified.checksum_valid:
+                raise MSESError("MSES sound bank sau mã hóa không round-trip chính xác.")
+            report.update({
+                "base_encoding": base_mode,
+                "overlay_encoding": overlay_mode,
+                "output_encoding": verify_mode,
+                "output_bytes": len(merged_resource),
+            })
+            return merged_resource, report
+        except (AOVBytesError, MSESError) as exc:
+            raise AOVResourceMergeError(
+                f"{resource_name}: không thể ghép sound bank theo Actor-owner: {exc}"
+            ) from exc
+
     if actor_owner_requested:
         raise AOVResourceMergeError(
-            f"{resource_name}: Actor_Action inventory chỉ dùng cho bốn bảng P9/P10 đã ghim."
+            f"{resource_name}: Actor_Action inventory chỉ được dùng với các bảng có adapter Actor-owner."
         )
 
     try:
@@ -862,3 +1144,75 @@ def merge_aov_mses_resource(
         "overlay_checksum_repaired": overlay_checksum_repaired,
     })
     return merged_resource, report
+
+
+def merge_aov_mses_resource_chain(
+    base_resource: bytes,
+    resource_name: str,
+    base_actor_action_ids: set[int | str],
+    overlays: list[tuple[bytes, set[int | str]]],
+) -> tuple[bytes, dict]:
+    """Merge a sequence of actor-scoped MSES overlays while accumulating ownership.
+
+    Each overlay must contribute a non-empty, previously unseen Actor_Action
+    inventory. The base package's schema and opaque global rows remain the
+    anchor for the whole chain. Every intermediate result is decoded and
+    re-parsed by merge_aov_mses_resource before the next overlay is admitted.
+    """
+    if normalized_name := resource_name.replace(chr(92), "/").lstrip("/"):
+        if normalized_name not in _ACTOR_OWNED_MSES_PATHS:
+            raise AOVResourceMergeError(
+                f"{resource_name}: không có quy tắc Actor-key cho ghép nhiều nguồn."
+            )
+    if not overlays:
+        raise AOVResourceMergeError("Cần ít nhất một overlay MSES.")
+    current = base_resource
+    current_actor_ids = _normalise_actor_ids(
+        set(base_actor_action_ids), "base chain"
+    )
+    if not current_actor_ids:
+        raise AOVResourceMergeError("Nguồn nền phải có Actor_Action inventory.")
+    reports = []
+    for index, (overlay_resource, overlay_actor_action_ids) in enumerate(
+        overlays, start=1
+    ):
+        incoming_ids = _normalise_actor_ids(
+            set(overlay_actor_action_ids), f"overlay {index}"
+        )
+        if not incoming_ids:
+            raise AOVResourceMergeError(
+                f"Overlay {index} không có Actor_Action inventory."
+            )
+        overlap = current_actor_ids & incoming_ids
+        if overlap:
+            raise AOVResourceMergeError(
+                f"Overlay {index} trùng Actor đã có trong chuỗi: "
+                + ", ".join(str(value) for value in sorted(overlap))
+                + "."
+            )
+        try:
+            current, report = merge_aov_mses_resource(
+                current,
+                overlay_resource,
+                normalized_name,
+                base_actor_action_ids=current_actor_ids,
+                overlay_actor_action_ids=incoming_ids,
+            )
+        except AOVResourceMergeError as exc:
+            raise AOVResourceMergeError(
+                f"{resource_name}: dừng tại overlay {index}: {exc}"
+            ) from exc
+        current_actor_ids.update(incoming_ids)
+        reports.append({
+            "overlay_index": index,
+            "overlay_actor_ids": sorted(incoming_ids),
+            "report": report,
+        })
+    return current, {
+        "adapter": "actor_owned_mses_multi_overlay_chain",
+        "resource": normalized_name,
+        "actor_ids": sorted(current_actor_ids),
+        "overlay_count": len(overlays),
+        "overlay_reports": reports,
+        "verified": all(item["report"].get("verified") for item in reports),
+    }
