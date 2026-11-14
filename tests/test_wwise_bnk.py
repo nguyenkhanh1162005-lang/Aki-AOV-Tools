@@ -28,7 +28,7 @@ def make_identity_bank(
     hirc = chunk(
         "HIRC",
         struct.pack("<I", 1)
-        + b"\\x02"
+        + bytes([2])
         + struct.pack("<I", len(body))
         + body,
     )
