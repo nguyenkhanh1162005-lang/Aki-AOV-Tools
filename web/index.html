@@ -449,7 +449,8 @@ function renderPreflightDashboard(data){
       item.actor_action_ids?.length?'Actions Actor '+item.actor_action_ids.join(', '):'',
       item.source_part_number?'Phần '+item.source_part_number:'',
       item.version_marker_values?.length?'Build '+item.version_marker_values.join(' / '):
-        (item.has_version_txt?'version.txt không hợp lệ':'Thiếu version.txt')
+        (item.has_version_txt?'version.txt không hợp lệ':
+          item.source_family_hint==='VTK'?'Không có marker riêng · cần adapter VTK ghim nguồn':'Thiếu version.txt')
     ].filter(Boolean);
     card.append(dashboardElement('span','',details.join(' · ')));
     sourceGrid.append(card);
