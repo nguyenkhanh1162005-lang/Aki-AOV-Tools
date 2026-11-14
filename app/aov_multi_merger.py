@@ -460,6 +460,38 @@ def merge_multi_actor_aov_archives(
                 seen_hashes.add(digest)
                 distinct.append((source, payload))
             if not distinct:
+                # If several overlays contribute the same new path with identical
+                # bytes, keep one copy instead of silently dropping the resource.
+                # Metadata catalogs are handled separately below.
+                if base_provider is not base_source and relative not in metadata_paths:
+                    suffix = PurePosixPath(relative).suffix.casefold()
+                    if _is_unresolved_wwise_payload(relative):
+                        if suffix == ".wem":
+                            raise AOVMultiMergeError(
+                                f"{relative}: Wwise WEM rời chưa được ghép vì chưa xác minh "
+                                "liên kết Media ID với SoundBank tương ứng."
+                            )
+                        if wwise_inventory is None:
+                            wwise_inventory = [
+                                (path, _read_item(item))
+                                for path, item in base_source["resources"].items()
+                                if PurePosixPath(path).suffix.casefold() == ".bnk"
+                            ]
+                        try:
+                            wwise_report = assess_wwise_bnk_overlay_set(
+                                wwise_inventory,
+                                [(relative, base_payload)],
+                            )
+                        except WwiseBNKError as exc:
+                            raise AOVMultiMergeError(
+                                f"{relative}: không thể thêm Wwise BNK theo chế độ append-only: {exc}"
+                            ) from exc
+                        wwise_inventory.append((relative, base_payload))
+                        resource_reports[relative] = wwise_report
+                    added[relative] = base_payload
+                    included_paths_by_source[base_provider["name"]].add(relative)
+                    if relative.startswith("assetbundle/"):
+                        asset_paths_by_source[base_provider["name"]].add(relative)
                 continue
 
             if relative in metadata_paths:
