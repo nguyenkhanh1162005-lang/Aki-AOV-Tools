@@ -15,6 +15,7 @@ from .aov_merger import AOVMergeError, merge_aov_archives, merge_p9_p10_archives
 from .kpm100_vtk_merger import merge_kpm100_vtk_archives
 from .adapter_registry import get_adapter_capabilities
 from .actor_detector import detect_actor_ids, extract_skin_ids_from_text, extract_skin_name_hints
+from .aov_multi_merger import AOVMultiMergeError, merge_multi_actor_aov_archives
 
 MAX_PROFILE_ENTRIES = 20_000
 MAX_PROFILE_UNCOMPRESSED = 1024 * 1024 * 1024
@@ -446,6 +447,10 @@ def _archive_profile(path: str) -> dict[str, Any]:
         "uncompressed_bytes": total_uncompressed,
         "looks_like_aov": looks_like_aov,
         "source_role": source_role,
+        "has_version_txt": any(
+            PurePosixPath(name).name.casefold() == "version.txt"
+            for name in resource_names
+        ),
         "has_mod_skin_container": has_mod_skin_container,
         "resources_zip_count": resources_zip_count,
         "skin_list_count": skin_list_count,
@@ -560,14 +565,32 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
         if supported_pair:
             return "aov_mod_to_mod_vtk_actor595_1.64.1"
 
+        # Conservative generic route: accept only multi-source MOD sets with
+        # actor evidence, a version marker in every source, and at least one
+        # complete user MOD wrapper. The merger still parses every collision
+        # and fails closed for unsupported formats or ambiguous ownership.
+        generic_multi_mod_candidate = (
+            len(profiles) >= 2
+            and all(item.get("looks_like_aov") for item in profiles)
+            and any(item.get("has_mod_skin_container") for item in profiles)
+            and all(item.get("has_version_txt") for item in profiles)
+            and all(item.get("actor_ids") for item in profiles)
+            and all(
+                item.get("source_role") not in {
+                    "ordinary_zip", "aov_kpm100_direct_base_candidate"
+                }
+                for item in profiles
+            )
+        )
+        if generic_multi_mod_candidate:
+            return "aov_multi_actor_auto_detect"
+
         names = ", ".join(item["name"] for item in profiles if item["looks_like_aov"])
         raise ModPipelineError(
-            "Phát hiện tài nguyên AoV nhưng chưa có adapter ghép đã xác minh cho bộ này: "
-            f"{names}. Không dùng gói game gốc làm nền và không ghi đè .bytes, "
-            "AssetBundle hoặc soundbank theo kiểu ZIP thường. "
-            "Adapter hiện có chỉ ghép gói mod 10 skin do người dùng cung cấp "
-            "với mod Vấn Tâm Kiếm Actor 595 đúng phiên bản; các mod khác cần "
-            "parser, serializer và quy tắc tương thích riêng."
+            "Phát hiện tài nguyên AoV nhưng bộ nguồn chưa đủ điều kiện cho adapter đã xác minh: "
+            f"{names}. Cần ít nhất hai MOD cùng phiên bản, có bằng chứng Actor và ít nhất "
+            "một wrapper Resources.zip + DanhSachSkin.txt. Không dùng gói game gốc làm nền "
+            "và không ghi đè .bytes, AssetBundle hoặc soundbank theo kiểu ZIP thường."
         )
     return "generic_zip"
 
@@ -1012,7 +1035,10 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
 
     if (
         len(wrapper_profiles) > 1
-        and selected_adapter != "aov_p9_p10_skin_union_1.64.1"
+        and selected_adapter not in {
+            "aov_p9_p10_skin_union_1.64.1",
+            "aov_multi_actor_auto_detect",
+        }
     ):
         blockers.insert(
             0,
@@ -1040,6 +1066,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
         "aov_p9_p10_skin_union_1.64.1",
         "aov_kpm100_vtk_actor595_1.64.1",
         "aov_mod_to_mod_vtk_actor595_1.64.1",
+        "aov_multi_actor_auto_detect",
     }
     if selected_adapter == "generic_zip":
         blockers.append(
@@ -1209,7 +1236,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             "nhưng không tự động được cấp quyền ghi."
         ),
         "can_analyze_unlisted_mod_types": True,
-        "can_merge_unlisted_mod_types": False,
+        "can_merge_unlisted_mod_types": selected_adapter == "aov_multi_actor_auto_detect",
         "note": (
             "Phân loại cấu trúc dựa trên nội dung ZIP và chữ ký tài nguyên; tên P9/P10/TM/VTK "
             "chỉ là gợi ý phụ. Actor ID không xác định được sẽ được giữ ở trạng thái chưa phân loại."
@@ -1267,7 +1294,11 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
         ),
         None,
     )
-    allowed_statuses = {"merge_supported", "merge_supported_version_locked"}
+    allowed_statuses = {
+        "merge_supported",
+        "merge_supported_version_locked",
+        "merge_supported_conditional",
+    }
     if capability is None or capability["status"] not in allowed_statuses:
         status = capability["status"] if capability else "unregistered"
         raise ModPipelineError(
@@ -1302,6 +1333,10 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
             result = merge_kpm100_vtk_archives(base_path, vtk_path, str(temporary))
         elif adapter == "aov_mod_to_mod_vtk_actor595_1.64.1":
             result = merge_aov_archives(archive_paths, str(temporary))
+        elif adapter == "aov_multi_actor_auto_detect":
+            result = merge_multi_actor_aov_archives(
+                archive_paths, str(temporary), profiles
+            )
         else:
             size = merge_zip_files(archive_paths, str(temporary))
             result = {"output_bytes": size, "adapter": adapter}
