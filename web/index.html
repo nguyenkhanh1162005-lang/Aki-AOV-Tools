@@ -595,16 +595,21 @@ async function loadCapabilities(){
     const adapters=data.adapters||[];
     const mergeableIds=new Set([
       'aov_p9_p10_skin_union_1.64.1',
+      'aov_p9_p10_vtk_actor595_1.64.1',
       'aov_kpm100_vtk_actor595_1.64.1',
-      'aov_mod_to_mod_vtk_actor595_1.64.1'
+      'aov_mod_to_mod_vtk_actor595_1.64.1',
+      'aov_multi_actor_auto_detect'
     ]);
     const supportedAdapters=adapters.filter(item=>
-      mergeableIds.has(item.id)&&item.status==='merge_supported_version_locked'
+      mergeableIds.has(item.id)&&(
+        item.status==='merge_supported_version_locked'||
+        item.status==='merge_supported_conditional'
+      )
     );
     aovAdapterEnabled=supportedAdapters.length>0;
     aovMerge.disabled=!aovAdapterEnabled||input.files.length<2||input.files.length>10;
     driveMerge.disabled=!aovAdapterEnabled;
-    aovMerge.textContent='Ghép AOV: P9 + P10 (19 skin) / KPM100 + Vấn Tâm Kiếm';
+    aovMerge.textContent='Ghép AOV: P9/P10 · Vấn Tâm Kiếm · MOD nhận diện';
     driveMerge.textContent='Ghép mod AOV từ Drive';
     capabilityList.replaceChildren();
     for(const adapter of adapters){
