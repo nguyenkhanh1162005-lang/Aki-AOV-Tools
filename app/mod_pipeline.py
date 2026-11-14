@@ -14,6 +14,7 @@ from .large_merger import MergeError, merge_zip_files
 from .aov_merger import AOVMergeError, merge_aov_archives, merge_p9_p10_archives
 from .kpm100_vtk_merger import merge_kpm100_vtk_archives
 from .adapter_registry import get_adapter_capabilities
+from .actor_detector import detect_actor_ids, extract_skin_ids_from_text, extract_skin_name_hints
 
 MAX_PROFILE_ENTRIES = 20_000
 MAX_PROFILE_UNCOMPRESSED = 1024 * 1024 * 1024
@@ -385,7 +386,36 @@ def _archive_profile(path: str) -> dict[str, Any]:
         )
         if match:
             actor_action_ids.add(match.group(1))
-    has_actor593_content = "593" in actor_asset_ids or "593" in actor_action_ids
+    actor_evidence = detect_actor_ids(resource_names)
+    actor_ref_ids = set(actor_evidence.get("assetrefs", []))
+    detected_actor_ids = (
+        set(actor_asset_ids)
+        | set(actor_action_ids)
+        | set(actor_ref_ids)
+        | set(actor_evidence.get("prefab_paths", []))
+        | set(actor_evidence.get("actor_directories", []))
+    )
+    has_actor593_content = "593" in detected_actor_ids
+
+    skin_list_text = ""
+    if skin_list_count == 1:
+        try:
+            with zipfile.ZipFile(path, "r") as skin_archive:
+                skin_info = next(
+                    info for info in skin_archive.infolist()
+                    if not info.is_dir()
+                    and PurePosixPath(info.filename.replace(chr(92), "/")).name.casefold()
+                    == "danhsachskin.txt"
+                )
+                if skin_info.file_size <= 256 * 1024:
+                    raw_skin_list = skin_archive.read(skin_info)
+                    skin_list_text = raw_skin_list.decode("utf-8-sig", errors="replace")
+        except (OSError, StopIteration, zipfile.BadZipFile, RuntimeError):
+            skin_list_text = ""
+    skin_name_hints = extract_skin_name_hints(skin_list_text)
+    skin_id_hints = extract_skin_ids_from_text(
+        skin_list_text, detected_actor_ids
+    )
 
     source_family_hint, source_family_basis, source_part_number = _source_family_hint(
         Path(path).name,
@@ -405,6 +435,8 @@ def _archive_profile(path: str) -> dict[str, Any]:
         source_role = "aov_actor595_mod_candidate"
     elif has_actor593_content:
         source_role = "aov_actor593_mod_candidate"
+    elif detected_actor_ids:
+        source_role = "aov_actor_mod_candidate"
     else:
         source_role = "aov_mod_unclassified"
 
@@ -419,6 +451,11 @@ def _archive_profile(path: str) -> dict[str, Any]:
         "skin_list_count": skin_list_count,
         "actor_asset_ids": sorted(actor_asset_ids),
         "actor_action_ids": sorted(actor_action_ids),
+        "actor_ref_ids": sorted(actor_ref_ids),
+        "actor_ids": sorted(detected_actor_ids),
+        "actor_detection_evidence": actor_evidence,
+        "skin_id_hints": skin_id_hints,
+        "skin_name_hints": skin_name_hints,
         "nested_resource_entries": nested_resource_entries,
         "nested_resource_scan_warning": nested_resource_scan_warning,
         "has_actor593_content": has_actor593_content,
@@ -960,8 +997,9 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
     actor_ids = sorted({
         actor_id
         for item in profiles
-        for actor_id in (
-            item.get("actor_asset_ids", []) + item.get("actor_action_ids", [])
+        for actor_id in item.get(
+            "actor_ids",
+            item.get("actor_asset_ids", []) + item.get("actor_action_ids", []),
         )
     })
     target_set = _build_target_set_report(profiles)
@@ -1102,6 +1140,47 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
         "resource_formats": resource_analysis.get("format_counts", {}),
         "detected_formats": resource_analysis.get("detected_format_counts", {}),
         "actor_ids": actor_ids,
+        "actor_catalog": [
+            {
+                "actor_id": actor_id,
+                "sources": [
+                    {
+                        "name": item["name"],
+                        "evidence": [
+                            label for label, field in (
+                                ("Actor Actions package", "actor_action_ids"),
+                                ("AssetBundle", "actor_asset_ids"),
+                                ("AssetRef", "actor_ref_ids"),
+                                ("Prefab/path", "actor_detection_evidence"),
+                            )
+                            if (
+                                actor_id in item.get(field, [])
+                                or (
+                                    field == "actor_detection_evidence"
+                                    and actor_id in {
+                                        value
+                                        for values in item.get(field, {}).values()
+                                        for value in values
+                                    }
+                                )
+                            )
+                        ],
+                    }
+                    for item in profiles if actor_id in item.get("actor_ids", [])
+                ],
+            }
+            for actor_id in actor_ids
+        ],
+        "skin_name_hints": list(dict.fromkeys(
+            name
+            for item in profiles
+            for name in item.get("skin_name_hints", [])
+        )),
+        "skin_id_hints": sorted({
+            skin_id
+            for item in profiles
+            for skin_id in item.get("skin_id_hints", [])
+        }),
         "unclassified_aov_source_count": sum(
             1 for item in profiles
             if item.get("looks_like_aov") and not item.get("source_family_hint")
@@ -1114,6 +1193,10 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
                 "role": item.get("source_role"),
                 "actor_asset_ids": item.get("actor_asset_ids", []),
                 "actor_action_ids": item.get("actor_action_ids", []),
+                "actor_ref_ids": item.get("actor_ref_ids", []),
+                "actor_ids": item.get("actor_ids", []),
+                "skin_name_hints": item.get("skin_name_hints", []),
+                "skin_id_hints": item.get("skin_id_hints", []),
             }
             for item in profiles
         ],
