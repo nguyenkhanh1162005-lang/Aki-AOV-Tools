@@ -175,7 +175,10 @@ def get_adapter_capabilities() -> dict:
         "game_tested": False,
         "adapters": adapters,
         "summary": {
-            "merge_supported": sum(item["status"] == "merge_supported" for item in adapters),
+            "merge_supported": sum(
+                item["status"] in {"merge_supported", "merge_supported_conditional"}
+                for item in adapters
+            ),
             "version_locked": sum(item["status"] == "merge_supported_version_locked" for item in adapters),
             "blocked": sum(item["status"].startswith("blocked_") for item in adapters),
             "inspection_only": sum(item["status"].startswith("inspect_only") for item in adapters),
