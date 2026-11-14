@@ -9,7 +9,7 @@ from .aov_bytes import AOVBytesError, decode_aov_resource
 
 
 MAX_ASSET_REFERENCE_BYTES = 256 * 1024 * 1024
-_ASSET_REF_FILENAME = re.compile(r"\\d+_assetref\\.bytes$", re.IGNORECASE)
+_ASSET_REF_FILENAME = re.compile(r"\d+_assetref\.bytes$", re.IGNORECASE)
 _ASSET_REF_TYPE = b"TypeAssetRefAnalyser.AssetReferenceSet"
 
 
@@ -77,7 +77,7 @@ def inspect_asset_reference_set(resource_name: str, data: bytes) -> dict[str, An
         )
 
     filename = PurePosixPath(resource_name.replace("\\", "/")).name
-    actor_match = re.match(r"(\\d+)_AssetRef\\.bytes$", filename, re.IGNORECASE)
+    actor_match = re.match(r"(\d+)_AssetRef\.bytes$", filename, re.IGNORECASE)
     actor_id = actor_match.group(1) if actor_match else None
 
     candidates: set[str] = set()
