@@ -252,6 +252,43 @@ class WwiseBNKInspectorTests(unittest.TestCase):
         with self.assertRaisesRegex(WwiseBNKError, "Bank ID 100"):
             assess_wwise_bnk_overlay_set(base, overlay)
 
+    def test_append_only_platform_default_bank_overlaps_all_locales(self):
+        base = [
+            (
+                "Sound/iOS/English(US)/Locale.bnk",
+                make_identity_bank(100, 1000, b"english-media", 2000),
+            ),
+            (
+                "Sound/iOS/Vietnamese/Locale.bnk",
+                make_identity_bank(101, 1001, b"vietnamese-media", 2001),
+            ),
+        ]
+        overlay = [
+            (
+                "Sound/iOS/Shared_SFX.bnk",
+                make_identity_bank(100, 1002, b"shared-media", 2002),
+            )
+        ]
+        with self.assertRaisesRegex(WwiseBNKError, "Bank ID 100"):
+            assess_wwise_bnk_overlay_set(base, overlay)
+
+    def test_append_only_requires_same_wwise_version_across_locales(self):
+        base = [
+            (
+                "Sound/iOS/English(US)/Locale.bnk",
+                make_identity_bank(100, 1000, b"english-media", 2000, version=135),
+            )
+        ]
+        overlay = [
+            (
+                "Sound/iOS/Vietnamese/Locale.bnk",
+                make_identity_bank(101, 1001, b"vietnamese-media", 2001, version=134),
+            )
+        ]
+        with self.assertRaisesRegex(WwiseBNKError, "Wwise version"):
+            assess_wwise_bnk_overlay_set(base, overlay)
+
+
     def test_append_only_rejects_unknown_chunks(self):
         overlay = [("Sound/iOS/Overlay.bnk", make_bank(chunk("JUNK", b"opaque"), bank_id=400))]
         with self.assertRaisesRegex(WwiseBNKError, "chunk Wwise chưa được giải nghĩa"):
