@@ -357,11 +357,23 @@ def merge_multi_actor_aov_archives(
         # All resources must refer to one client version family. The exact
         # VTK 1.64.1.11 -> 1.64.1.12 adapter remains in its existing dedicated route.
         base_version_item = base_source["resources"].get("version.txt")
-        base_version = _read_item(base_version_item).strip() if base_version_item else None
+        if base_version_item is None:
+            raise AOVMultiMergeError(
+                f"{base_source['name']}: thiếu version.txt; không thể xác nhận build nền."
+            )
+        base_version = _read_item(base_version_item).strip()
+        if not base_version:
+            raise AOVMultiMergeError(
+                f"{base_source['name']}: version.txt rỗng; không thể xác nhận build nền."
+            )
         for source in sources:
             version_item = source["resources"].get("version.txt")
-            candidate = _read_item(version_item).strip() if version_item else None
-            if base_version and candidate and candidate != base_version:
+            if version_item is None:
+                raise AOVMultiMergeError(
+                    f"{source['name']}: thiếu version.txt; dừng ghép để tránh trộn khác build."
+                )
+            candidate = _read_item(version_item).strip()
+            if not candidate or candidate != base_version:
                 raise AOVMultiMergeError(
                     f"{source['name']}: version.txt khác nguồn nền "
                     f"({candidate!r} != {base_version!r})."
