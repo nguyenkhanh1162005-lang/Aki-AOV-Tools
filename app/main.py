@@ -36,6 +36,18 @@ UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 UPLOAD_SESSIONS: dict[str, dict] = {}
 UPLOAD_TTL_SECONDS = 3600
 MAX_ACTIVE_UPLOAD_SESSIONS = 8
+
+
+_AOV_DOWNLOAD_FILENAMES = {
+    "aov_p9_p10_skin_union_1.64.1": "Aki-AOV-P9-P10-19Skin.zip",
+    "aov_mod_to_mod_vtk_actor595_1.64.1": "Aki-AOV-10Skin-VanTamKiem.zip",
+    "aov_kpm100_vtk_actor595_1.64.1": "Aki-AOV-KPM100-VTK.zip",
+}
+
+
+def _aov_download_filename(adapter_id: str) -> str:
+    """Choose an explicit download name for each registered AoV merge adapter."""
+    return _AOV_DOWNLOAD_FILENAMES.get(adapter_id, "Aki-AOV-Merged.zip")
 UPLOAD_STORAGE_DIR = (
     Path(os.environ["AOV_UPLOAD_STORAGE_DIR"]).expanduser()
     if os.environ.get("AOV_UPLOAD_STORAGE_DIR")
@@ -974,11 +986,7 @@ async def merge_aov_chunked_upload(upload_id: str):
     else:
         new_file_count = int(report.get("new_files", 0) or 0)
     adapter_id = str(report.get("adapter", ""))
-    download_name = (
-        "Aki-AOV-10Skin-VanTamKiem.zip"
-        if adapter_id == "aov_mod_to_mod_vtk_actor595_1.64.1"
-        else "Aki-AOV-KPM100-VTK.zip"
-    )
+    download_name = _aov_download_filename(adapter_id)
     huanhua_reports = report.get("huanhua_billboard_reports", {}) or {}
     huanhua_rows_added = sum(
         len(item.get("appended_keys", []))
@@ -994,6 +1002,8 @@ async def merge_aov_chunked_upload(upload_id: str):
         "X-AOV-AssetBundles": str(bundle_count),
         "X-AOV-New-Files": str(new_file_count),
         "X-AOV-Adapter": str(report.get("adapter", "unknown")),
+        "X-AOV-Skin-Count": str(report.get("skin_count", 0) or 0),
+        "X-AOV-Resource-Paths": str(report.get("resource_paths", new_file_count)),
         "X-AOV-Nested-Packages": str(len(report.get("nested_pkg_reports", {}) or {})),
         "X-AOV-Nested-Package-Added-Entries": str(sum(
             int(item.get("added_entries", 0))
