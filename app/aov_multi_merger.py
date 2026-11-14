@@ -20,6 +20,7 @@ from .aov_merge import (
     _SUPPORTED_MSES_TABLES,
     merge_aov_mses_resource,
     merge_aov_mses_resource_chain,
+    merge_actor_prefixed_mses_resource_chain,
 )
 from .aov_merger import (
     AOVMergeError,
@@ -574,6 +575,38 @@ def merge_multi_actor_aov_archives(
                 replacements[relative] = merged
                 resource_reports[relative] = report
                 for source, _ in distinct:
+                    included_paths_by_source[source["name"]].add(relative)
+                continue
+
+            if lower.endswith(".bytes") and relative not in _ACTOR_OWNED_MSES_PATHS and relative not in _SUPPORTED_MSES_TABLES:
+                overlay_chain = []
+                overlay_sources = []
+                for source, payload in distinct:
+                    actor_ids = _actor_ids(source)
+                    if not actor_ids:
+                        raise AOVMultiMergeError(
+                            f"{relative}: {source['name']} không có Actor_Action inventory "
+                            "để xác định quyền sở hữu hàng MSES."
+                        )
+                    overlay_chain.append((payload, actor_ids))
+                    overlay_sources.append(source)
+                base_actor_ids = _actor_ids(base_provider)
+                if not base_actor_ids:
+                    raise AOVMultiMergeError(
+                        f"{relative}: nguồn nền {base_provider['name']} không có Actor_Action inventory."
+                    )
+                try:
+                    merged, report = merge_actor_prefixed_mses_resource_chain(
+                        base_payload,
+                        relative,
+                        base_actor_ids,
+                        overlay_chain,
+                    )
+                except AOVResourceMergeError as exc:
+                    raise AOVMultiMergeError(str(exc)) from exc
+                replacements[relative] = merged
+                resource_reports[relative] = report
+                for source in overlay_sources:
                     included_paths_by_source[source["name"]].add(relative)
                 continue
 
