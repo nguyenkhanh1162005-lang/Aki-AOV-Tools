@@ -15,7 +15,7 @@ from .aov_merger import AOVMergeError, merge_aov_archives, merge_p9_p10_archives
 from .kpm100_vtk_merger import merge_kpm100_vtk_archives
 from .adapter_registry import get_adapter_capabilities
 from .actor_detector import detect_actor_ids, extract_skin_ids_from_text, extract_skin_name_hints
-from .aov_multi_merger import AOVMultiMergeError, merge_multi_actor_aov_archives
+from .aov_multi_merger import merge_multi_actor_aov_archives
 
 MAX_PROFILE_ENTRIES = 20_000
 MAX_PROFILE_UNCOMPRESSED = 1024 * 1024 * 1024
