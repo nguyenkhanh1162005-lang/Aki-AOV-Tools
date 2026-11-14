@@ -32,6 +32,27 @@ def _profile(name, actor_id, *, wrapper=False, version=True, looks_like_aov=True
     }
 
 
+def _huanhua_donor_profile(name="Huanhua-Base-1.64.1.12.zip"):
+    return {
+        "name": name,
+        "looks_like_aov": True,
+        "source_role": "aov_huanhua_base_tables_candidate",
+        "has_mod_skin_container": False,
+        "has_huanhua_base_tables": True,
+        "huanhua_base_version": "1.64.1.12|1793129",
+        "huanhua_base_hashes_match": True,
+        "actor_ids": [],
+        "actor_action_ids": [],
+        "actor_asset_ids": [],
+        "has_actor593_content": False,
+        "has_vtk_ifix": False,
+        "has_595_assets": False,
+        "source_family_hint": None,
+        "uncompressed_bytes": 2048,
+        "entries": 4,
+    }
+
+
 class MultiActorPipelineIntegrationTests(unittest.TestCase):
     def test_selects_auto_adapter_for_unlisted_actor_ids(self):
         profiles = [
@@ -134,11 +155,42 @@ class MultiActorPipelineIntegrationTests(unittest.TestCase):
                 "has_595_assets": True,
                 "actor_asset_ids": ["595"],
             },
+            _huanhua_donor_profile(),
         ]
         self.assertEqual(
             _select_adapter(profiles),
             "aov_p9_p10_vtk_actor595_1.64.1",
         )
+
+    def test_exact_p9_p10_vtk_route_requires_matching_huanhua_donor(self):
+        p9_ids = ["107", "130", "137", "163", "509", "510", "518", "540", "597"]
+        p10_ids = ["111", "132", "150", "157", "167", "190", "524", "567", "598", "599"]
+        profiles = [
+            {
+                **_profile("p9.zip", "107", wrapper=True),
+                "source_family_hint": "P9", "resources_zip_count": 1,
+                "skin_list_count": 1, "actor_action_ids": p9_ids,
+            },
+            {
+                **_profile("p10.zip", "111", wrapper=True),
+                "source_family_hint": "P10", "resources_zip_count": 1,
+                "skin_list_count": 1, "actor_action_ids": p10_ids,
+            },
+            *[
+                {
+                    **_profile(f"Part{part}.zip", "595"),
+                    "source_family_hint": "VTK", "source_part_number": part,
+                    "has_vtk_ifix": part == 1,
+                    "has_595_assets": part in {2, 3},
+                    "actor_action_ids": ["595"] if part == 1 else [],
+                    "actor_asset_ids": ["595"] if part in {2, 3} else [],
+                }
+                for part in (1, 2, 3)
+            ],
+        ]
+        with self.assertRaises(ModPipelineError):
+            _select_adapter(profiles)
+
 
     def test_does_not_include_tamyn_actor593_in_exact_p9_p10_vtk_route(self):
         p9_ids = ["107", "130", "137", "163", "509", "510", "518", "540", "597"]
@@ -171,6 +223,7 @@ class MultiActorPipelineIntegrationTests(unittest.TestCase):
                 "has_actor593_content": True,
                 "actor_action_ids": ["593"],
             },
+            _huanhua_donor_profile(),
         ]
         with self.assertRaises(ModPipelineError):
             _select_adapter(profiles)
@@ -186,6 +239,7 @@ class MultiActorPipelineIntegrationTests(unittest.TestCase):
                 Path(directory) / "Part1.zip",
                 Path(directory) / "Part2.zip",
                 Path(directory) / "Part3.zip",
+                Path(directory) / "Huanhua-Base-1.64.1.12.zip",
             ]
             for index, path in enumerate(source_paths):
                 path.write_bytes(f"source-{index}".encode())
@@ -212,6 +266,7 @@ class MultiActorPipelineIntegrationTests(unittest.TestCase):
                     }
                     for part in (1, 2, 3)
                 ],
+                _huanhua_donor_profile(),
             ]
 
             def fake_p9p10(paths, destination):
@@ -221,9 +276,17 @@ class MultiActorPipelineIntegrationTests(unittest.TestCase):
                     archive.writestr("DanhSachSkin.txt", b"19 skins")
                 return {"verified": True}
 
+            def fake_seed(base_wrapper, donor_path, destination):
+                self.assertEqual(Path(base_wrapper).name, "p9-p10-19-skin.zip")
+                self.assertEqual(Path(donor_path), source_paths[5])
+                with zipfile.ZipFile(destination, "w") as archive:
+                    archive.writestr("Resources.zip", b"p9-p10-huanhua-base")
+                    archive.writestr("DanhSachSkin.txt", b"19 skins")
+                return {"verified": True, "appended_paths": ["three tables"]}
+
             def fake_vtk(paths, destination):
-                self.assertEqual(Path(paths[0]).name, "p9-p10-19-skin.zip")
-                self.assertEqual(paths[1:], [str(x) for x in source_paths[2:]])
+                self.assertEqual(Path(paths[0]).name, "p9-p10-huanhua-base.zip")
+                self.assertEqual(paths[1:], [str(x) for x in source_paths[2:5]])
                 with zipfile.ZipFile(destination, "w") as archive:
                     archive.writestr("Resources.zip", b"p9-p10-vtk")
                     archive.writestr("DanhSachSkin.txt", b"19 skins + VTK")
@@ -243,14 +306,17 @@ class MultiActorPipelineIntegrationTests(unittest.TestCase):
                 patch("app.mod_pipeline._archive_profile", side_effect=profiles),
                 patch("app.mod_pipeline.get_adapter_capabilities", return_value=capabilities),
                 patch("app.mod_pipeline.merge_p9_p10_archives", side_effect=fake_p9p10) as p9p10,
+                patch("app.mod_pipeline.seed_huanhua_base_tables", side_effect=fake_seed) as seed,
                 patch("app.mod_pipeline.merge_aov_archives", side_effect=fake_vtk) as vtk,
             ):
                 report = merge_mod_archives([str(x) for x in source_paths], str(output))
 
             p9p10.assert_called_once()
+            seed.assert_called_once()
             vtk.assert_called_once()
             self.assertEqual(report["adapter"], composite)
             self.assertEqual(report["composite_stages"]["p9_p10"]["skin_count"], 19)
+            self.assertTrue(report["composite_stages"]["huanhua_base_seed"]["verified"])
             self.assertTrue(report["structurally_validated"])
             self.assertFalse(report["game_compatibility_tested"])
             self.assertTrue(output.is_file())
