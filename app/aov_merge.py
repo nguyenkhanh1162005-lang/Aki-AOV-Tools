@@ -481,6 +481,14 @@ def _merge_actor_owned_mses_rows(
 
     base_keys = set(base_map)
     overlay_keys = set(overlay_map)
+    overlay_owned_keys = {
+        key for key, row in overlay_map.items()
+        if owner_for_row(key, row) in overlay_ids
+    }
+    if not overlay_owned_keys:
+        raise MSESError(
+            "Actor_Action inventory không khớp với các hàng MSES của overlay."
+        )
     new_keys = overlay_keys - base_keys
     invalid_new = sorted(
         key for key in new_keys
@@ -819,7 +827,7 @@ def merge_aov_mses_resource(
             raise AOVResourceMergeError(
                 f"{resource_name}: cần Actor_Action inventory P9/P10 để dùng adapter mới."
             )
-    if normalized_name in _ACTOR_OWNED_SOUND_BANKS and actor_owner_requested:
+    if normalized_name in _ACTOR_OWNED_MSES_PATHS and actor_owner_requested:
         if base_actor_action_ids is None or overlay_actor_action_ids is None:
             raise AOVResourceMergeError(
                 f"{resource_name}: cần Actor_Action inventory của cả nguồn nền và overlay."
@@ -827,7 +835,7 @@ def merge_aov_mses_resource(
         try:
             base_decoded, base_mode = decode_aov_resource(base_resource, resource_name)
             overlay_decoded, overlay_mode = decode_aov_resource(overlay_resource, resource_name)
-            merged_decoded, report = _merge_actor_owned_soundbank_rows(
+            merged_decoded, report = _merge_actor_owned_mses_rows(
                 base_decoded,
                 overlay_decoded,
                 normalized_name,
