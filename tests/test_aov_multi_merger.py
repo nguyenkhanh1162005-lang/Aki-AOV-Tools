@@ -149,6 +149,63 @@ class AOVMultiMergerTests(unittest.TestCase):
             self.assertIn("Skin nền", skin_text)
             self.assertIn("Skin Ánh Sao", skin_text)
 
+    def test_keeps_one_copy_of_identical_resource_shared_by_two_overlays(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base_path = Path(directory) / "base.zip"
+            first_path = Path(directory) / "creator-one.zip"
+            second_path = Path(directory) / "creator-two.zip"
+            output_path = Path(directory) / "merged.zip"
+            shared_path = "Ages/CreatorOnly/Shared.bytes"
+            _write_wrapper(base_path, _base_resources())
+            _write_direct(first_path, {
+                "version.txt": b"1.64.1.12",
+                shared_path: b"identical-creator-payload",
+                VERIFICATION: b"verification-one",
+                "Ages/Prefab_Characters/Actor_731_Actions.pkg.bytes": b"actor-731",
+            })
+            _write_direct(second_path, {
+                "version.txt": b"1.64.1.12",
+                shared_path: b"identical-creator-payload",
+                VERIFICATION: b"verification-two",
+                "Ages/Prefab_Characters/Actor_842_Actions.pkg.bytes": b"actor-842",
+            })
+            profiles = [
+                {"name": base_path.name, "actor_action_ids": ["593"]},
+                {"name": first_path.name, "actor_action_ids": ["731"]},
+                {"name": second_path.name, "actor_action_ids": ["842"]},
+            ]
+
+            def merge_metadata(base, overlay, *, kind, prefer_overlay_paths=None):
+                return base + b"+" + overlay, {
+                    "kind": kind,
+                    "preferred": sorted(prefer_overlay_paths or ()),
+                    "verified": True,
+                }
+
+            with patch(
+                "app.aov_multi_merger.merge_aov_metadata_assetbundle",
+                side_effect=merge_metadata,
+            ):
+                result = merge_multi_actor_aov_archives(
+                    [str(base_path), str(first_path), str(second_path)],
+                    str(output_path),
+                    profiles,
+                )
+
+            self.assertEqual(result["added_resources"], 3)
+            with zipfile.ZipFile(output_path) as outer:
+                inner_bytes = outer.read(
+                    next(i for i in outer.infolist() if i.filename.endswith("Resources.zip"))
+                )
+            with zipfile.ZipFile(io.BytesIO(inner_bytes)) as inner:
+                target = BASE_PREFIX + shared_path
+                self.assertEqual(inner.read(target), b"identical-creator-payload")
+                self.assertEqual(
+                    sum(i.filename == target for i in inner.infolist()),
+                    1,
+                )
+
+
     def test_rejects_unknown_conflicting_resource_instead_of_overwriting(self):
         with tempfile.TemporaryDirectory() as directory:
             base_path = Path(directory) / "base.zip"
