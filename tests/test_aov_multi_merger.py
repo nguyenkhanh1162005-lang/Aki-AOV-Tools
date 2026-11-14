@@ -381,6 +381,7 @@ class AOVMultiMergerTests(unittest.TestCase):
                 "version.txt": b"1.64.1.12",
                 assetref_path: assetref,
                 "Ages/Prefab_Characters/Actor_595_Actions.pkg.bytes": b"actor-595",
+                VERIFICATION: b"overlay-verification",
             })
             profiles = [
                 {"name": base_path.name, "actor_action_ids": ["593"]},
