@@ -76,6 +76,29 @@ _ADAPTERS = (
         "game_compatibility": "inspection_only; not_game_tested",
     },
     {
+        "id": "aov_p9_p10_vtk_actor595_1.64.1",
+        "name": "P9 + P10 + Vấn Tâm Kiếm Part 1–3",
+        "status": "merge_supported_conditional",
+        "formats": [
+            "SHA-256 pinned P9/P10 MOD wrappers",
+            "VTK Actor 595 split ZIP Part 1–3",
+            "IFix", "MSES", "CommonActions",
+            "Unity AssetBundle", "Packer/Verification metadata"
+        ],
+        "scope": (
+            "Exact five-source composite only: one known P9, one known P10 and exactly "
+            "VTK Part 1, Part 2, Part 3 with Actor 595-only evidence. Stage one creates "
+            "the verified 19-skin P9/P10 wrapper; stage two applies the locked VTK "
+            "1.64.1.11 -> 1.64.1.12 adapter."
+        ),
+        "merge_policy": (
+            "Both stages must pass their source hashes, Actor inventories, exact 10 "
+            "AssetBundle inventory, IFix/MSES/CommonActions and Packer/Verification "
+            "round-trip. No TM Actor 593, arbitrary part or cross-build source is allowed."
+        ),
+        "game_compatibility": "structurally_validated; not_game_tested",
+    },
+    {
         "id": "aov_multi_actor_auto_detect",
         "name": "AoV nhiều MOD · tự nhận diện Actor (ghép có điều kiện)",
         "status": "merge_supported_conditional",
