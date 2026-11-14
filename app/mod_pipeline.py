@@ -221,6 +221,39 @@ def _build_target_set_report(profiles: list[dict[str, Any]]) -> dict[str, Any]:
     missing = [item["label"] for item in summary if item["count"] == 0]
     duplicated = [item["label"] for item in summary if item["count"] > 1]
     complete = not missing and not duplicated and len(profiles) == 6
+    blockers = [
+        "Bộ ghép nhiều MOD P9 + P10 + TM + VTK chưa có adapter đã xác minh. Đây là báo cáo nhận diện nguồn, không phải xác nhận có thể xuất ZIP.",
+        "Các xung đột IFix/MSES/CommonActions/metadata/soundbank và AssetBundle cần quy tắc parse/ghép riêng; không được tự chọn file thắng chỉ theo tên hoặc thời gian tải.",
+    ]
+    if complete:
+        donors = [item for item in profiles if item.get("has_huanhua_base_tables")]
+        if len(donors) != 1:
+            has_unpinned_tables = any(
+                item.get("has_huanhua_billboard_tables") for item in profiles
+            )
+            if has_unpinned_tables:
+                blockers.append(
+                    "Thiếu donor Huanhua base build 1.64.1.12 khớp đủ ba SHA-256 đã ghim. "
+                    "Các bảng Huanhua trong VTK Part 1 có payload khác, không thể dùng thay bảng nền."
+                )
+            else:
+                blockers.append(
+                    "Thiếu donor Huanhua base build 1.64.1.12 với ba bảng billboard đã xác minh."
+                )
+        tamyn_sources = [item for item in profiles if item.get("source_family_hint") == "TM"]
+        if len(tamyn_sources) == 1:
+            tamyn = tamyn_sources[0]
+            if not tamyn.get("has_resource_verification_catalog"):
+                blockers.append(
+                    "Tamyn Actor 593 có AssetBundle mới nhưng thiếu "
+                    "ResourceVerificationInfoSetAll; chưa có cách tạo CrcXor đã xác minh."
+                )
+            bank_count = int(tamyn.get("wwise_bank_count", 0))
+            if bank_count:
+                blockers.append(
+                    f"Tamyn có {bank_count} Wwise BNK; chưa có bộ remap Bank/Media/HIRC "
+                    "và tham chiếu Event/Action, nên chưa thể thêm âm thanh an toàn."
+                )
 
     return {
         "name": "P9 + P10 + TM Tamyn - Robot + VTK Part 1–3",
@@ -234,10 +267,7 @@ def _build_target_set_report(profiles: list[dict[str, Any]]) -> dict[str, Any]:
         "detected_inputs": detected_inputs,
         "missing": missing,
         "duplicates": duplicated,
-        "blockers": [
-            "Bộ ghép nhiều MOD P9 + P10 + TM + VTK chưa có adapter đã xác minh. Đây là báo cáo nhận diện nguồn, không phải xác nhận có thể xuất ZIP.",
-            "Các xung đột IFix/MSES/CommonActions/metadata/soundbank và AssetBundle cần quy tắc parse/ghép riêng; không được tự chọn file thắng chỉ theo tên hoặc thời gian tải.",
-        ],
+        "blockers": blockers,
         "evidence_note": (
             "P9/P10/TM/VTK là nhãn gợi ý từ tên ZIP hoặc chữ ký tài nguyên. "
             "Nhãn VTK Part 1–3 chỉ được gán khi có bằng chứng Actor 595 và HeroSkin_2 trong cả bộ nguồn."
@@ -605,6 +635,19 @@ def _archive_profile(path: str) -> dict[str, Any]:
         ),
         "has_mod_skin_container": has_mod_skin_container,
         "has_huanhua_base_tables": has_huanhua_base_tables,
+        "has_huanhua_billboard_tables": {
+            "resbillboardcfg.bytes",
+            "resbillboardskincfg.bytes",
+            "reskillbillboardcfg.bytes",
+        }.issubset(leaves),
+        "has_resource_packer_catalog": "resourcepackerinfosetall.assetbundle" in leaves,
+        "has_resource_verification_catalog": "resourceverificationinfosetall.assetbundle" in leaves,
+        "wwise_bank_count": sum(
+            PurePosixPath(name).suffix.casefold() == ".bnk" for name in resource_names
+        ),
+        "wwise_media_count": sum(
+            PurePosixPath(name).suffix.casefold() == ".wem" for name in resource_names
+        ),
         "huanhua_base_version": huanhua_base_version,
         "huanhua_base_hashes_match": huanhua_base_hashes_match,
         "resources_zip_count": resources_zip_count,
