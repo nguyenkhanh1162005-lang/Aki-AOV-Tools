@@ -1,0 +1,1 @@
+Temporary validation-only file. This branch mirrors the guarded multi-Actor web feature head so GitHub Actions can run the full test, compile, JS, Docker build, and smoke suite. Do not merge or deploy this validation branch.
