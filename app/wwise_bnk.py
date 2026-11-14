@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import struct
 from dataclasses import dataclass
 from typing import Any
@@ -296,7 +297,7 @@ def _wwise_identity_scope(resource_path: str) -> str:
         )
         is_language = (
             normalized_locale in _LANGUAGE_SEGMENTS
-            or bool(__import__("re").fullmatch(
+            or bool(re.fullmatch(
                 r"[a-z]{2,3}(?:[-_][a-z0-9]{2,8})?",
                 possible_locale.casefold(),
             ))
