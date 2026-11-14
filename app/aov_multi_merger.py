@@ -9,6 +9,11 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .aov_catalog import AOVCatalogMergeError, merge_aov_metadata_assetbundle
+from .assetref_inspector import (
+    AssetReferenceSetError,
+    inspect_asset_reference_set,
+    is_asset_reference_set_path,
+)
 from .aov_common_actions import (
     CommonActionsMergeError,
     analyze_common_actions_overlay_set,
@@ -58,6 +63,29 @@ def _is_unresolved_wwise_payload(resource_name: str) -> bool:
     return PurePosixPath(resource_name.replace("\\", "/")).suffix.casefold() in {
         ".bnk",
         ".wem",
+    }
+
+
+def _asset_reference_passthrough_report(
+    resource_name: str, payload: bytes
+) -> dict[str, Any]:
+    """Record safe unchanged inclusion for a unique AssetReferenceSet path."""
+    try:
+        report = inspect_asset_reference_set(resource_name, payload)
+    except AssetReferenceSetError as exc:
+        return {
+            "format": "aov_asset_reference_set",
+            "adapter": "asset_reference_set_opaque_passthrough",
+            "recognized": False,
+            "inspection_error": str(exc),
+            "merge_supported": False,
+            "preserved_unchanged": True,
+            "game_tested": False,
+        }
+    return {
+        **report,
+        "adapter": "asset_reference_set_unique_passthrough",
+        "preserved_unchanged": True,
     }
 
 
@@ -418,6 +446,10 @@ def merge_multi_actor_aov_archives(
             base_payload = _read_item(base_provider["resources"][relative])
             if len(providers) == 1:
                 if base_provider is not base_source:
+                    if is_asset_reference_set_path(relative):
+                        resource_reports[relative] = _asset_reference_passthrough_report(
+                            relative, base_payload
+                        )
                     suffix = PurePosixPath(relative).suffix.casefold()
                     if _is_unresolved_wwise_payload(relative):
                         if suffix == ".wem":
@@ -465,6 +497,10 @@ def merge_multi_actor_aov_archives(
                 # bytes, keep one copy instead of silently dropping the resource.
                 # Metadata catalogs are handled separately below.
                 if base_provider is not base_source and relative not in metadata_paths:
+                    if is_asset_reference_set_path(relative):
+                        resource_reports[relative] = _asset_reference_passthrough_report(
+                            relative, base_payload
+                        )
                     suffix = PurePosixPath(relative).suffix.casefold()
                     if _is_unresolved_wwise_payload(relative):
                         if suffix == ".wem":
@@ -580,6 +616,26 @@ def merge_multi_actor_aov_archives(
                 for source, _ in distinct:
                     included_paths_by_source[source["name"]].add(relative)
                 continue
+
+            if is_asset_reference_set_path(relative):
+                try:
+                    base_assetref = inspect_asset_reference_set(relative, base_payload)
+                    overlay_assetrefs = [
+                        inspect_asset_reference_set(relative, payload)
+                        for _, payload in distinct
+                    ]
+                except AssetReferenceSetError as exc:
+                    raise AOVMultiMergeError(
+                        f"{relative}: AssetRef trùng đường dẫn nhưng không xác minh được "
+                        f"cấu trúc AssetReferenceSet ({exc}). Không ghi đè."
+                    ) from exc
+                actor_id = base_assetref.get("actor_id") or "không rõ"
+                raise AOVMultiMergeError(
+                    f"{relative}: AssetReferenceSet của Actor {actor_id} có payload khác "
+                    "giữa các nguồn. Đã nhận dạng baseSubset/skinSubset, nhưng chưa có "
+                    "parser/serializer đã xác minh để hợp nhất các subset an toàn. "
+                    "Từ chối ghi đè hoặc xử lý nhầm thành MSES."
+                )
 
             if lower.endswith(".bytes") and not lower.endswith(".pkg.bytes") and relative not in _ACTOR_OWNED_MSES_PATHS and relative not in _SUPPORTED_MSES_TABLES:
                 overlay_chain = []
