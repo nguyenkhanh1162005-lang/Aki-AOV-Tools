@@ -53,7 +53,7 @@ class AOVMultiMergeError(ValueError):
 
 def _is_unresolved_wwise_payload(resource_name: str) -> bool:
     """Identify Wwise banks/media that cannot be admitted by a ZIP-path union."""
-    return PurePosixPath(resource_name.replace("\\\\", "/")).suffix.casefold() in {
+    return PurePosixPath(resource_name.replace("\\", "/")).suffix.casefold() in {
         ".bnk",
         ".wem",
     }
