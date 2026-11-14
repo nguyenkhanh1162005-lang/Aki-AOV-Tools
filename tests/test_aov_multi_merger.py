@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from app.aov_bytes import decode_aov_resource, encrypt_aes_resource
 from app.aov_mses import MSESTable, build_mses
+from app.assetref_inspector import inspect_asset_reference_set
 from app.aov_multi_merger import (
     AOVMultiMergeError,
     merge_multi_actor_aov_archives,
@@ -25,6 +26,19 @@ def _mses_resource(path, rows):
     header[:4] = b"MSES"
     table = MSESTable(7, 69, tuple(), bytes(header), True)
     return encrypt_aes_resource(build_mses(table, rows), path)
+
+
+def _assetref_payload(label=b"assetref-fixture"):
+    return (
+        b"\\x31\\x0a\\x01\\x00"
+        + b"\\x08\\x00\\x00\\x00ROOTC\\x00\\x00\\x00"
+        + b"\\x02\\x00\\x00\\x00\\x0d\\x00\\x00\\x00\\x06\\x00\\x00\\x00"
+        + b"JTCom.\\x00\\x00\\x00\\x08\\x00\\x00\\x00"
+        + b"TypeAssetRefAnalyser.AssetReferenceSet"
+        + b"\\x04\\x00\\x00\\x00baseSubset\\x00"
+        + b"VPrefab_Characters/Prefab_Hero/595_LiXin/skill/A1\\x00"
+        + label
+    )
 
 
 def _write_inner(path, resources):
@@ -340,6 +354,87 @@ class AOVMultiMergerTests(unittest.TestCase):
                 )
             self.assertFalse(output_path.exists())
 
+
+    def test_inspects_wrapped_asset_reference_set(self):
+        path = "AssetRefs/Hero/595_AssetRef.bytes"
+        payload = _assetref_payload()
+        wrapped = encrypt_aes_resource(payload, path)
+
+        report = inspect_asset_reference_set(path, wrapped)
+
+        self.assertTrue(report["recognized"])
+        self.assertEqual(report["wrapper_mode"], "aes")
+        self.assertEqual(report["actor_id"], "595")
+        self.assertTrue(report["has_base_subset"])
+        self.assertFalse(report["merge_supported"])
+        self.assertGreater(report["reference_path_candidates"], 0)
+
+    def test_preserves_unique_asset_reference_set_without_rewriting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base_path = Path(directory) / "base.zip"
+            overlay_path = Path(directory) / "robot.zip"
+            output_path = Path(directory) / "merged.zip"
+            assetref_path = "AssetRefs/Hero/595_AssetRef.bytes"
+            assetref = encrypt_aes_resource(_assetref_payload(), assetref_path)
+            _write_wrapper(base_path, _base_resources())
+            _write_direct(overlay_path, {
+                "version.txt": b"1.64.1.12",
+                assetref_path: assetref,
+                "Ages/Prefab_Characters/Actor_595_Actions.pkg.bytes": b"actor-595",
+            })
+            profiles = [
+                {"name": base_path.name, "actor_action_ids": ["593"]},
+                {"name": overlay_path.name, "actor_action_ids": ["595"]},
+            ]
+
+            result = merge_multi_actor_aov_archives(
+                [str(base_path), str(overlay_path)], str(output_path), profiles
+            )
+
+            report = result["resource_reports"][assetref_path]
+            self.assertEqual(report["adapter"], "asset_reference_set_unique_passthrough")
+            self.assertTrue(report["recognized"])
+            self.assertTrue(report["preserved_unchanged"])
+            with zipfile.ZipFile(output_path) as outer:
+                inner_info = next(
+                    item for item in outer.infolist()
+                    if item.filename.endswith("Resources.zip")
+                )
+                with zipfile.ZipFile(io.BytesIO(outer.read(inner_info))) as inner:
+                    self.assertEqual(
+                        inner.read(BASE_PREFIX + assetref_path), assetref
+                    )
+
+    def test_rejects_conflicting_asset_reference_set_without_mses_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base_path = Path(directory) / "base.zip"
+            overlay_path = Path(directory) / "robot.zip"
+            output_path = Path(directory) / "merged.zip"
+            assetref_path = "AssetRefs/Hero/593_AssetRef.bytes"
+            base_assetref = encrypt_aes_resource(
+                _assetref_payload(b"base"), assetref_path
+            )
+            overlay_assetref = encrypt_aes_resource(
+                _assetref_payload(b"overlay"), assetref_path
+            )
+            base_resources = _base_resources()
+            base_resources[assetref_path] = base_assetref
+            _write_wrapper(base_path, base_resources)
+            _write_direct(overlay_path, {
+                "version.txt": b"1.64.1.12",
+                assetref_path: overlay_assetref,
+                "Ages/Prefab_Characters/Actor_595_Actions.pkg.bytes": b"actor-595",
+            })
+            profiles = [
+                {"name": base_path.name, "actor_action_ids": ["593"]},
+                {"name": overlay_path.name, "actor_action_ids": ["595"]},
+            ]
+
+            with self.assertRaisesRegex(AOVMultiMergeError, "AssetReferenceSet"):
+                merge_multi_actor_aov_archives(
+                    [str(base_path), str(overlay_path)], str(output_path), profiles
+                )
+            self.assertFalse(output_path.exists())
 
     def test_rejects_unknown_conflicting_resource_instead_of_overwriting(self):
         with tempfile.TemporaryDirectory() as directory:
