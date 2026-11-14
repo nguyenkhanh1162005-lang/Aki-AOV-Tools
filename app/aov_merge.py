@@ -1144,3 +1144,75 @@ def merge_aov_mses_resource(
         "overlay_checksum_repaired": overlay_checksum_repaired,
     })
     return merged_resource, report
+
+
+def merge_aov_mses_resource_chain(
+    base_resource: bytes,
+    resource_name: str,
+    base_actor_action_ids: set[int | str],
+    overlays: list[tuple[bytes, set[int | str]]],
+) -> tuple[bytes, dict]:
+    """Merge a sequence of actor-scoped MSES overlays while accumulating ownership.
+
+    Each overlay must contribute a non-empty, previously unseen Actor_Action
+    inventory. The base package's schema and opaque global rows remain the
+    anchor for the whole chain. Every intermediate result is decoded and
+    re-parsed by merge_aov_mses_resource before the next overlay is admitted.
+    """
+    if normalized_name := resource_name.replace(chr(92), "/").lstrip("/"):
+        if normalized_name not in _ACTOR_OWNED_MSES_PATHS:
+            raise AOVResourceMergeError(
+                f"{resource_name}: không có quy tắc Actor-key cho ghép nhiều nguồn."
+            )
+    if not overlays:
+        raise AOVResourceMergeError("Cần ít nhất một overlay MSES.")
+    current = base_resource
+    current_actor_ids = _normalise_actor_ids(
+        set(base_actor_action_ids), "base chain"
+    )
+    if not current_actor_ids:
+        raise AOVResourceMergeError("Nguồn nền phải có Actor_Action inventory.")
+    reports = []
+    for index, (overlay_resource, overlay_actor_action_ids) in enumerate(
+        overlays, start=1
+    ):
+        incoming_ids = _normalise_actor_ids(
+            set(overlay_actor_action_ids), f"overlay {index}"
+        )
+        if not incoming_ids:
+            raise AOVResourceMergeError(
+                f"Overlay {index} không có Actor_Action inventory."
+            )
+        overlap = current_actor_ids & incoming_ids
+        if overlap:
+            raise AOVResourceMergeError(
+                f"Overlay {index} trùng Actor đã có trong chuỗi: "
+                + ", ".join(str(value) for value in sorted(overlap))
+                + "."
+            )
+        try:
+            current, report = merge_aov_mses_resource(
+                current,
+                overlay_resource,
+                normalized_name,
+                base_actor_action_ids=current_actor_ids,
+                overlay_actor_action_ids=incoming_ids,
+            )
+        except AOVResourceMergeError as exc:
+            raise AOVResourceMergeError(
+                f"{resource_name}: dừng tại overlay {index}: {exc}"
+            ) from exc
+        current_actor_ids.update(incoming_ids)
+        reports.append({
+            "overlay_index": index,
+            "overlay_actor_ids": sorted(incoming_ids),
+            "report": report,
+        })
+    return current, {
+        "adapter": "actor_owned_mses_multi_overlay_chain",
+        "resource": normalized_name,
+        "actor_ids": sorted(current_actor_ids),
+        "overlay_count": len(overlays),
+        "overlay_reports": reports,
+        "verified": all(item["report"].get("verified") for item in reports),
+    }
