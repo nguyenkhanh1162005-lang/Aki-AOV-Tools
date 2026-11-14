@@ -57,6 +57,12 @@ class P9P10WebAdapterRoutingTests(unittest.TestCase):
             "Aki-AOV-P9-P10-19Skin.zip",
         )
 
+    def test_unknown_adapter_keeps_the_legacy_filename_fallback(self):
+        self.assertEqual(
+            _aov_download_filename("unknown-adapter"),
+            "Aki-AOV-KPM100-VTK.zip",
+        )
+
     def test_every_merge_capability_is_wired_into_both_web_flows(self):
         html = WEB_INDEX.read_text(encoding="utf-8")
         expected = {
