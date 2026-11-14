@@ -223,8 +223,9 @@ def _build_target_set_report(profiles: list[dict[str, Any]]) -> dict[str, Any]:
     complete = not missing and not duplicated and len(profiles) == 6
     blockers = [
         "Bộ ghép nhiều MOD P9 + P10 + TM + VTK chưa có adapter đã xác minh. Đây là báo cáo nhận diện nguồn, không phải xác nhận có thể xuất ZIP.",
-        "Các xung đột IFix/MSES/CommonActions/metadata/soundbank và AssetBundle cần quy tắc parse/ghép riêng; không được tự chọn file thắng chỉ theo tên hoặc thời gian tải.",
+        "Các xung đột IFix/MSES/CommonActions/AssetBundle và metadata cần quy tắc parse/ghép riêng; Wwise BNK chỉ được thêm nguyên trạng khi namespace ID không xung đột, còn WEM rời vẫn bị chặn.",
     ]
+    notes: list[str] = []
     if complete:
         donors = [item for item in profiles if item.get("has_huanhua_base_tables")]
         if len(donors) != 1:
@@ -250,9 +251,10 @@ def _build_target_set_report(profiles: list[dict[str, Any]]) -> dict[str, Any]:
                 )
             bank_count = int(tamyn.get("wwise_bank_count", 0))
             if bank_count:
-                blockers.append(
-                    f"Tamyn có {bank_count} Wwise BNK; chưa có bộ remap Bank/Media/HIRC "
-                    "và tham chiếu Event/Action, nên chưa thể thêm âm thanh an toàn."
+                notes.append(
+                    f"Tamyn có {bank_count} Wwise BNK. Web có thể kiểm tra và thêm nguyên trạng "
+                    "khi Wwise version, Bank ID, Media ID và HIRC object ID không xung đột "
+                    "trong namespace platform/ngôn ngữ; unknown chunk và WEM rời vẫn bị chặn."
                 )
 
     return {
@@ -268,6 +270,7 @@ def _build_target_set_report(profiles: list[dict[str, Any]]) -> dict[str, Any]:
         "missing": missing,
         "duplicates": duplicated,
         "blockers": blockers,
+        "notes": notes,
         "evidence_note": (
             "P9/P10/TM/VTK là nhãn gợi ý từ tên ZIP hoặc chữ ký tài nguyên. "
             "Nhãn VTK Part 1–3 chỉ được gán khi có bằng chứng Actor 595 và HeroSkin_2 trong cả bộ nguồn."
@@ -1053,6 +1056,7 @@ def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
                 "được nạp cùng nhau. Không rewrite hoặc remap ID."
             ),
             "safety_rule": (
+                "Không nối byte BNK hoặc remap ID; chỉ thêm nguyên trạng sau khi kiểm tra. "
                 "Từ chối Bank ID trùng, Media/HIRC ID trùng khác payload, unknown chunk, "
                 "external media cần WEM, khác version hoặc path trùng khác nội dung."
             ),
