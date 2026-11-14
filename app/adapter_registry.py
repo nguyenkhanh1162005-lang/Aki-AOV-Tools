@@ -86,15 +86,17 @@ _ADAPTERS = (
             "Unity AssetBundle", "Packer/Verification metadata"
         ],
         "scope": (
-            "Exact five-source composite only: one known P9, one known P10 and exactly "
-            "VTK Part 1, Part 2, Part 3 with Actor 595-only evidence. Stage one creates "
-            "the verified 19-skin P9/P10 wrapper; stage two applies the locked VTK "
-            "1.64.1.11 -> 1.64.1.12 adapter."
+            "Exact six-source composite only: one known P9, one known P10, exactly "
+            "VTK Part 1, Part 2, Part 3 with Actor 595-only evidence, and one separate "
+            "SHA-256-pinned 1.64.1.12 Huanhua base-table donor. Stage one creates the "
+            "verified 19-skin P9/P10 wrapper, stage two seeds the base billboard tables, "
+            "and stage three applies the locked VTK 1.64.1.11 -> 1.64.1.12 adapter."
         ),
         "merge_policy": (
             "Both stages must pass their source hashes, Actor inventories, exact 10 "
             "AssetBundle inventory, IFix/MSES/CommonActions and Packer/Verification "
-            "round-trip. No TM Actor 593, arbitrary part or cross-build source is allowed."
+            "round-trip. The donor's three MSES tables must match pinned hashes/schema "
+            "and share the base build. No TM Actor 593, arbitrary part or cross-build source is allowed."
         ),
         "game_compatibility": "structurally_validated; not_game_tested",
     },
