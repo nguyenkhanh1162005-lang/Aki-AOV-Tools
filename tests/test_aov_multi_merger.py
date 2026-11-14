@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from app.aov_bytes import encrypt_aes_resource
+from app.aov_bytes import decode_aov_resource, encrypt_aes_resource
 from app.aov_mses import MSESTable, build_mses
 from app.aov_multi_merger import (
     AOVMultiMergeError,
@@ -204,6 +204,107 @@ class AOVMultiMergerTests(unittest.TestCase):
                     sum(i.filename == target for i in inner.infolist()),
                     1,
                 )
+
+
+    def test_merges_unknown_mses_table_only_when_actor_prefixes_are_unique(self):
+        custom_path = "Databin/Client/Skill/CreatorCustomCfg.bytes"
+        base_rows = [
+            struct.pack("<I", 5930001) + b"base-593-row",
+            struct.pack("<I", 5930002) + b"base-593-row-two",
+        ]
+        overlay_rows = [
+            struct.pack("<I", 5930001) + b"overlay-cannot-overwrite-base",
+            struct.pack("<I", 7310001) + b"overlay-731-row",
+            struct.pack("<I", 7310002) + b"overlay-731-row-two",
+        ]
+        resources = _base_resources()
+        resources[custom_path] = _mses_resource(custom_path, base_rows)
+        with tempfile.TemporaryDirectory() as directory:
+            base_path = Path(directory) / "base.zip"
+            overlay_path = Path(directory) / "creator.zip"
+            output_path = Path(directory) / "merged.zip"
+            _write_wrapper(base_path, resources)
+            _write_direct(overlay_path, {
+                "version.txt": b"1.64.1.12",
+                custom_path: _mses_resource(custom_path, overlay_rows),
+                VERIFICATION: b"overlay-verification",
+                "Ages/Prefab_Characters/Actor_731_Actions.pkg.bytes": b"actor-731",
+            })
+            profiles = [
+                {"name": base_path.name, "actor_action_ids": ["593"]},
+                {"name": overlay_path.name, "actor_action_ids": ["731"]},
+            ]
+
+            def merge_metadata(base, overlay, *, kind, prefer_overlay_paths=None):
+                return base + b"+" + overlay, {
+                    "kind": kind,
+                    "preferred": sorted(prefer_overlay_paths or ()),
+                    "verified": True,
+                }
+
+            with patch(
+                "app.aov_multi_merger.merge_aov_metadata_assetbundle",
+                side_effect=merge_metadata,
+            ):
+                result = merge_multi_actor_aov_archives(
+                    [str(base_path), str(overlay_path)],
+                    str(output_path),
+                    profiles,
+                )
+
+            self.assertEqual(
+                result["resource_reports"][custom_path]["adapter"],
+                "heuristic_actor_prefix_mses_multi_source_chain",
+            )
+            self.assertTrue(result["resource_reports"][custom_path]["verified"])
+            with zipfile.ZipFile(output_path) as outer:
+                inner_bytes = outer.read(
+                    next(i for i in outer.infolist() if i.filename.endswith("Resources.zip"))
+                )
+            with zipfile.ZipFile(io.BytesIO(inner_bytes)) as inner:
+                merged_bytes = inner.read(BASE_PREFIX + custom_path)
+            decoded, _mode = decode_aov_resource(merged_bytes, custom_path)
+            from app.aov_mses import parse_mses
+            table = parse_mses(decoded)
+            by_key = {int.from_bytes(row[:4], "little"): row for row in table.rows}
+            self.assertEqual(set(by_key), {5930001, 5930002, 7310001, 7310002})
+            self.assertEqual(by_key[5930001], base_rows[0])
+            self.assertEqual(by_key[7310001], overlay_rows[1])
+
+    def test_rejects_unknown_mses_rows_without_actor_prefix_owner(self):
+        custom_path = "Databin/Client/Skill/CreatorOpaqueCfg.bytes"
+        resources = _base_resources()
+        resources[custom_path] = _mses_resource(
+            custom_path, [struct.pack("<I", 5930001) + b"base-row"]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            base_path = Path(directory) / "base.zip"
+            overlay_path = Path(directory) / "creator.zip"
+            output_path = Path(directory) / "merged.zip"
+            _write_wrapper(base_path, resources)
+            _write_direct(overlay_path, {
+                "version.txt": b"1.64.1.12",
+                custom_path: _mses_resource(
+                    custom_path,
+                    [
+                        struct.pack("<I", 5930001) + b"base-row",
+                        struct.pack("<I", 123456) + b"unowned-row",
+                    ],
+                ),
+                VERIFICATION: b"overlay-verification",
+                "Ages/Prefab_Characters/Actor_731_Actions.pkg.bytes": b"actor-731",
+            })
+            profiles = [
+                {"name": base_path.name, "actor_action_ids": ["593"]},
+                {"name": overlay_path.name, "actor_action_ids": ["731"]},
+            ]
+            with self.assertRaisesRegex(AOVMultiMergeError, "không quy được duy nhất"):
+                merge_multi_actor_aov_archives(
+                    [str(base_path), str(overlay_path)],
+                    str(output_path),
+                    profiles,
+                )
+            self.assertFalse(output_path.exists())
 
 
     def test_rejects_unknown_conflicting_resource_instead_of_overwriting(self):
