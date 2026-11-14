@@ -187,7 +187,8 @@ class MultiActorPipelineIntegrationTests(unittest.TestCase):
         blockers = " ".join(report["blockers"])
         self.assertIn("ba SHA-256", blockers)
         self.assertIn("ResourceVerificationInfoSetAll", blockers)
-        self.assertIn("5 Wwise BNK", blockers)
+        self.assertTrue(any("5 Wwise BNK" in note for note in report["notes"]))
+        self.assertNotIn("Wwise BNK; chưa có bộ remap", blockers)
 
     def test_rejects_ordinary_zip_in_mixed_input(self):
         profiles = [
