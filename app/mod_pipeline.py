@@ -64,7 +64,7 @@ def _read_profile_version_marker(
 ) -> dict[str, Any]:
     """Read a small, explicit build marker without trusting its filename alone."""
     record: dict[str, Any] = {
-        "path": info.filename.replace("\\\\", "/"),
+        "path": info.filename.replace("\\", "/"),
         "container": container,
     }
     if info.file_size > MAX_VERSION_MARKER_BYTES:
