@@ -972,7 +972,10 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
     except ModPipelineError as exc:
         blockers.append(str(exc))
 
-    if len(wrapper_profiles) > 1:
+    if (
+        len(wrapper_profiles) > 1
+        and selected_adapter != "aov_p9_p10_skin_union_1.64.1"
+    ):
         blockers.insert(
             0,
             "Có nhiều MOD wrapper chứa Resources.zip + DanhSachSkin.txt "
@@ -996,6 +999,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
         )
 
     supported_aov_adapters = {
+        "aov_p9_p10_skin_union_1.64.1",
         "aov_kpm100_vtk_actor595_1.64.1",
         "aov_mod_to_mod_vtk_actor595_1.64.1",
     }
