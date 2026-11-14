@@ -51,6 +51,14 @@ class AOVMultiMergeError(ValueError):
     pass
 
 
+def _is_unresolved_wwise_payload(resource_name: str) -> bool:
+    """Identify Wwise banks/media that cannot be admitted by a ZIP-path union."""
+    return PurePosixPath(resource_name.replace("\\\\", "/")).suffix.casefold() in {
+        ".bnk",
+        ".wem",
+    }
+
+
 def _entry_hash(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> str:
     digest = hashlib.sha256()
     with archive.open(info, "r") as stream:
@@ -407,6 +415,12 @@ def merge_multi_actor_aov_archives(
             base_payload = _read_item(base_provider["resources"][relative])
             if len(providers) == 1:
                 if base_provider is not base_source:
+                    if _is_unresolved_wwise_payload(relative):
+                        raise AOVMultiMergeError(
+                            f"{relative}: Wwise BNK/WEM chỉ đang được kiểm tra cấu trúc; "
+                            "chưa có bộ remap Bank/Media/HIRC và tham chiếu Event/Action. "
+                            "Không thể tự thêm soundbank mới bằng ZIP union."
+                        )
                     added[relative] = base_payload
                     included_paths_by_source[base_provider["name"]].add(relative)
                     if relative.startswith("assetbundle/") and relative not in metadata_paths:
