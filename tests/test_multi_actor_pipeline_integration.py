@@ -7,6 +7,7 @@ from unittest.mock import patch
 from app.mod_pipeline import (
     ModPipelineError,
     _archive_profile,
+    _assess_wwise_bnk_sources,
     _build_target_set_report,
     _select_adapter,
     merge_mod_archives,
@@ -61,6 +62,37 @@ def _huanhua_donor_profile(name="Huanhua-Base-1.64.1.12.zip"):
         "uncompressed_bytes": 2048,
         "entries": 4,
     }
+
+
+
+def _wwise_chunk(name, payload):
+    return name.encode("ascii") + len(payload).to_bytes(4, "little") + payload
+
+
+def _wwise_bank(bank_id, media_id, media_payload, object_id, object_payload=b"node"):
+    didx = _wwise_chunk(
+        "DIDX",
+        media_id.to_bytes(4, "little") + (0).to_bytes(4, "little")
+        + len(media_payload).to_bytes(4, "little"),
+    )
+    data = _wwise_chunk("DATA", media_payload)
+    body = object_id.to_bytes(4, "little") + object_payload
+    hirc = _wwise_chunk(
+        "HIRC",
+        (1).to_bytes(4, "little") + bytes([2])
+        + len(body).to_bytes(4, "little") + body,
+    )
+    header = _wwise_chunk("BKHD", (135).to_bytes(4, "little") + bank_id.to_bytes(4, "little"))
+    return header + didx + data + hirc
+
+
+def _write_wwise_wrapper(path: Path, bank_path: str, payload: bytes):
+    inner_buffer = io.BytesIO()
+    with zipfile.ZipFile(inner_buffer, "w", zipfile.ZIP_DEFLATED) as inner:
+        inner.writestr("Resources/1.64.1/" + bank_path, payload)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as outer:
+        outer.writestr("Mod/Resources.zip", inner_buffer.getvalue())
+        outer.writestr("Mod/DanhSachSkin.txt", "Base skin")
 
 
 class MultiActorPipelineIntegrationTests(unittest.TestCase):
@@ -142,6 +174,82 @@ class MultiActorPipelineIntegrationTests(unittest.TestCase):
             profile["version_marker_values"],
             ["1.64.1.12|1793129", "1.64.1.13|1793129"],
         )
+
+
+    def test_wwise_preflight_accepts_disjoint_append_only_bank(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / "base.zip"
+            overlay = Path(directory) / "creator.zip"
+            _write_wwise_wrapper(
+                base,
+                "Sound/iOS/Base.bnk",
+                _wwise_bank(100, 1000, b"base-media", 2000),
+            )
+            with zipfile.ZipFile(overlay, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(
+                    "Resources/1.64.1/Sound/iOS/Creator.bnk",
+                    _wwise_bank(101, 1001, b"creator-media", 2001),
+                )
+            profiles = [
+                {"name": base.name, "has_mod_skin_container": True},
+                {"name": overlay.name, "has_mod_skin_container": False},
+            ]
+            report = _assess_wwise_bnk_sources(
+                [str(base), str(overlay)], profiles
+            )
+        self.assertEqual(report["state"], "APPEND_ONLY_SAFE")
+        self.assertTrue(report["merge_authorized"])
+        self.assertEqual(report["bank_count"], 2)
+
+    def test_wwise_preflight_blocks_bank_id_collision_before_merge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / "base.zip"
+            overlay = Path(directory) / "creator.zip"
+            _write_wwise_wrapper(
+                base,
+                "Sound/iOS/Base.bnk",
+                _wwise_bank(100, 1000, b"base-media", 2000),
+            )
+            with zipfile.ZipFile(overlay, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(
+                    "Resources/1.64.1/Sound/iOS/Creator.bnk",
+                    _wwise_bank(100, 1001, b"creator-media", 2001),
+                )
+            profiles = [
+                {"name": base.name, "has_mod_skin_container": True},
+                {"name": overlay.name, "has_mod_skin_container": False},
+            ]
+            report = _assess_wwise_bnk_sources(
+                [str(base), str(overlay)], profiles
+            )
+        self.assertEqual(report["state"], "BLOCKED")
+        self.assertIn("Bank ID 100", report["reason"])
+        self.assertFalse(report["merge_authorized"])
+
+    def test_wwise_preflight_blocks_standalone_wem(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / "base.zip"
+            overlay = Path(directory) / "creator.zip"
+            _write_wwise_wrapper(
+                base,
+                "Sound/iOS/Base.bnk",
+                _wwise_bank(100, 1000, b"base-media", 2000),
+            )
+            with zipfile.ZipFile(overlay, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(
+                    "Resources/1.64.1/Sound/iOS/Creator.wem",
+                    b"external-audio",
+                )
+            profiles = [
+                {"name": base.name, "has_mod_skin_container": True},
+                {"name": overlay.name, "has_mod_skin_container": False},
+            ]
+            report = _assess_wwise_bnk_sources(
+                [str(base), str(overlay)], profiles
+            )
+        self.assertEqual(report["state"], "BLOCKED")
+        self.assertIn("WEM rời", report["reason"])
+
 
     def test_six_source_target_report_lists_exact_tamyn_blockers(self):
         profiles = [
