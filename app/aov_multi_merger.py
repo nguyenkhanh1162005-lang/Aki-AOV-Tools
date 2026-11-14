@@ -547,18 +547,18 @@ def merge_multi_actor_aov_archives(
             source_included = included_paths_by_source[source["name"]]
             if not source_assets and not source_included:
                 continue
-            if PACKER_PATH not in source["resources"] or VERIFICATION_PATH not in source["resources"]:
-                if source_assets:
-                    raise AOVMultiMergeError(
-                        f"{source['name']}: có AssetBundle mới nhưng thiếu Packer/Verification metadata."
-                    )
-                # A loose resource can still be covered by the existing
-                # base verification table if it introduces no new AssetBundle.
-                continue
-            overlay_packer = _read_item(source["resources"][PACKER_PATH])
+            if VERIFICATION_PATH not in source["resources"]:
+                raise AOVMultiMergeError(
+                    f"{source['name']}: có tài nguyên mới/đã ghép nhưng thiếu Verification metadata."
+                )
+            if source_assets and PACKER_PATH not in source["resources"]:
+                raise AOVMultiMergeError(
+                    f"{source['name']}: có AssetBundle mới nhưng thiếu Packer metadata."
+                )
             overlay_verification = _read_item(source["resources"][VERIFICATION_PATH])
             try:
                 if source_assets:
+                    overlay_packer = _read_item(source["resources"][PACKER_PATH])
                     current_packer, packer_report = merge_aov_metadata_assetbundle(
                         current_packer,
                         overlay_packer,
@@ -593,10 +593,16 @@ def merge_multi_actor_aov_archives(
 
         inner_base = base_source["inner"]
         assert inner_base is not None
-        base_prefix = BASE_PREFIX if any(
-            info.filename.replace("\\", "/").startswith(BASE_PREFIX)
-            for info in inner_base.infolist() if not info.is_dir()
-        ) else ""
+        base_prefix = ""
+        for info in inner_base.infolist():
+            if info.is_dir():
+                continue
+            normalized = info.filename.replace("\\", "/")
+            if normalized.startswith("Resources/"):
+                parts = normalized.split("/", 2)
+                if len(parts) == 3:
+                    base_prefix = f"Resources/{parts[1]}/"
+                    break
         temp_dir = Path(tempfile.mkdtemp(prefix="aki-aov-multi-"))
         try:
             inner_output_path = temp_dir / "Resources-merged.zip"
