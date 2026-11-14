@@ -11,7 +11,12 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .large_merger import MergeError, merge_zip_files
-from .aov_merger import AOVMergeError, merge_aov_archives, merge_p9_p10_archives
+from .aov_merger import (
+    AOVMergeError,
+    merge_aov_archives,
+    merge_p9_p10_archives,
+    seed_huanhua_base_tables,
+)
 from .kpm100_vtk_merger import merge_kpm100_vtk_archives
 from .adapter_registry import get_adapter_capabilities
 from .actor_detector import detect_actor_ids, extract_skin_ids_from_text, extract_skin_name_hints
@@ -358,6 +363,54 @@ def _archive_profile(path: str) -> dict[str, Any]:
         PurePosixPath(name).name.casefold() == "danhsachskin.txt" for name in names
     )
     has_mod_skin_container = resources_zip_count == 1 and skin_list_count == 1
+
+    huanhua_donor_hashes = {
+        "Resources/1.64.1/Databin/Client/Huanhua/ResBillboardCfg.bytes":
+            "fa1bb68ac64ff3d87d598abddf256f261d85b88cedd012b8f47be9c71d8ed562",
+        "Resources/1.64.1/Databin/Client/Huanhua/ResBillboardSkinCfg.bytes":
+            "e91f2f439b7e8a5e6d98e4347db169f03115135db8ee786f72980d1af9868ea8",
+        "Resources/1.64.1/Databin/Client/Huanhua/ResKillBillboardCfg.bytes":
+            "d45fd98b9c050dd94112154db1a87eb6122b17b37fa376b6ed886c5f62c36b74",
+    }
+    huanhua_donor_entries = {
+        PurePosixPath(name).as_posix() for name in names
+    }
+    has_huanhua_base_tables = False
+    huanhua_base_version = None
+    huanhua_base_hashes_match = False
+    version_paths = [
+        name for name in resource_names
+        if PurePosixPath(name).as_posix() == "Resources/1.64.1/version.txt"
+    ]
+    if (
+        set(huanhua_donor_hashes).issubset(huanhua_donor_entries)
+        and len(version_paths) == 1
+        and len(names) == 4
+        and all(PurePosixPath(name).as_posix() in huanhua_donor_entries
+                for name in version_paths)
+    ):
+        try:
+            with zipfile.ZipFile(path, "r") as donor_archive:
+                donor_version_info = next(
+                    info for info in donor_archive.infolist()
+                    if info.filename == "Resources/1.64.1/version.txt"
+                )
+                huanhua_base_version = donor_archive.read(donor_version_info).decode(
+                    "utf-8-sig", errors="replace"
+                ).strip()
+                huanhua_base_hashes_match = all(
+                    hashlib.sha256(donor_archive.read(
+                        next(info for info in donor_archive.infolist()
+                             if info.filename == donor_path)
+                    )).hexdigest() == expected_hash
+                    for donor_path, expected_hash in huanhua_donor_hashes.items()
+                )
+                has_huanhua_base_tables = (
+                    huanhua_base_version.split("|", 1)[0] == "1.64.1.12"
+                    and huanhua_base_hashes_match
+                )
+        except (OSError, StopIteration, zipfile.BadZipFile, RuntimeError):
+            has_huanhua_base_tables = False
     has_vtk_ifix = "heroskin_2.bytes" in leaves
     has_base_ifix = "heroskin_1.bytes" in leaves
     kpm_mod_prefix = "Resources/1.64.1/Mod_by_Youtube_KHAM-PHA-MOBILE/KPM_MOD_"
@@ -438,6 +491,8 @@ def _archive_profile(path: str) -> dict[str, Any]:
 
     if not looks_like_aov:
         source_role = "ordinary_zip"
+    elif has_huanhua_base_tables:
+        source_role = "aov_huanhua_base_tables_candidate"
     elif has_mod_skin_container:
         source_role = "aov_skin_mod_container_candidate"
     elif has_kpm100_direct_base:
@@ -462,6 +517,9 @@ def _archive_profile(path: str) -> dict[str, Any]:
             for name in resource_names
         ),
         "has_mod_skin_container": has_mod_skin_container,
+        "has_huanhua_base_tables": has_huanhua_base_tables,
+        "huanhua_base_version": huanhua_base_version,
+        "huanhua_base_hashes_match": huanhua_base_hashes_match,
         "resources_zip_count": resources_zip_count,
         "skin_list_count": skin_list_count,
         "actor_asset_ids": sorted(actor_asset_ids),
@@ -515,10 +573,10 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
         ):
             return "aov_p9_p10_skin_union_1.64.1"
 
-        # Exact composite route: first merge the SHA-pinned P9/P10 wrappers,
-        # then apply the already version-locked VTK Actor 595 split-part adapter.
-        # The VTK stage verifies the exact 10 AssetBundles and the 1.64.1.11 ->
-        # 1.64.1.12 Packer/Verification metadata transition.
+        # Exact six-file route: two SHA-pinned MOD wrappers, three VTK split
+        # parts, and one separately supplied SHA-pinned 1.64.1.12 Huanhua base donor.
+        # The donor only seeds known base tables; the VTK stage appends its verified
+        # Actor 595 MSES key and updates ResourceVerification.
         composite_p9 = p9_inputs
         composite_p10 = p10_inputs
         composite_vtk_parts = [
@@ -529,6 +587,9 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
         composite_vtk_numbers = {
             item.get("source_part_number") for item in composite_vtk_parts
         }
+        composite_huanhua_donors = [
+            item for item in profiles if item.get("has_huanhua_base_tables")
+        ]
         composite_actor595_scoped = (
             len(composite_vtk_parts) == 3
             and composite_vtk_numbers == {1, 2, 3}
@@ -543,9 +604,12 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
             and any(item.get("has_595_assets") for item in composite_vtk_parts)
         )
         if (
-            len(profiles) == 5
+            len(profiles) == 6
             and len(composite_p9) == 1
             and len(composite_p10) == 1
+            and len(composite_huanhua_donors) == 1
+            and composite_huanhua_donors[0].get("huanhua_base_version", "").startswith("1.64.1.12")
+            and composite_huanhua_donors[0].get("huanhua_base_hashes_match")
             and composite_p9[0].get("resources_zip_count") == 1
             and composite_p9[0].get("skin_list_count") == 1
             and composite_p10[0].get("resources_zip_count") == 1
@@ -1374,7 +1438,6 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
         if adapter == "aov_p9_p10_skin_union_1.64.1":
             result = merge_p9_p10_archives(archive_paths, str(temporary))
         elif adapter == "aov_p9_p10_vtk_actor595_1.64.1":
-            import shutil
             from tempfile import TemporaryDirectory
             p9_p10_paths = [
                 path for path, profile in zip(archive_paths, profiles)
@@ -1384,20 +1447,30 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
                 path for path, profile in zip(archive_paths, profiles)
                 if profile.get("source_family_hint") == "VTK"
             ]
+            donor_path = next(
+                path for path, profile in zip(archive_paths, profiles)
+                if profile.get("has_huanhua_base_tables")
+            )
             with TemporaryDirectory(prefix="aki-aov-composite-") as stage_dir:
                 p9_p10_output = Path(stage_dir) / "p9-p10-19-skin.zip"
+                seeded_output = Path(stage_dir) / "p9-p10-huanhua-base.zip"
                 first_stage = merge_p9_p10_archives(
                     p9_p10_paths, str(p9_p10_output)
                 )
-                result = merge_aov_archives(
-                    [str(p9_p10_output), *vtk_paths], str(temporary)
+                donor_stage = seed_huanhua_base_tables(
+                    str(p9_p10_output), donor_path, str(seeded_output)
                 )
+                result = merge_aov_archives(
+                    [str(seeded_output), *vtk_paths], str(temporary)
+                )
+                result["adapter"] = adapter
                 result["composite_stages"] = {
                     "p9_p10": {
                         "adapter": "aov_p9_p10_skin_union_1.64.1",
                         "verified": True,
                         "skin_count": 19,
                     },
+                    "huanhua_base_seed": donor_stage,
                     "vtk_actor595": {
                         "adapter": "aov_mod_to_mod_vtk_actor595_1.64.1",
                         "verified": bool(result.get("validation")),
