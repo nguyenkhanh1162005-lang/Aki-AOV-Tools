@@ -68,6 +68,8 @@ class P9P10WebAdapterRoutingTests(unittest.TestCase):
         expected = {
             "aov_kpm100_vtk_actor595_1.64.1",
             "aov_mod_to_mod_vtk_actor595_1.64.1",
+            "aov_p9_p10_vtk_actor595_1.64.1",
+            "aov_multi_actor_auto_detect",
             P9_P10_ADAPTER,
         }
         auto_match = re.search(
@@ -84,6 +86,8 @@ class P9P10WebAdapterRoutingTests(unittest.TestCase):
             with self.subTest(adapter=adapter_id):
                 self.assertIn(adapter_id, auto_match.group(1))
                 self.assertIn(adapter_id, capability_match.group(1))
+        self.assertIn("merge_supported_conditional", html)
+
 
 
 if __name__ == "__main__":
