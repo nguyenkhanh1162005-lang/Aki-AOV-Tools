@@ -1295,6 +1295,21 @@ def _resource_merge_guidance(resource_path: str) -> dict[str, str]:
             "safety_rule": "Không coi việc tên file chưa trùng là đủ để xác nhận dependency hoàn chỉnh.",
         }
 
+    if lower.endswith(".bytes"):
+        return {
+            "adapter_state": "conditional_actor_prefix_mses",
+            "next_action": (
+                "Nếu payload thực sự là MSES v7, engine có thể thử bộ ghép dự phòng "
+                "theo prefix khóa hàng. Chỉ cho qua khi mọi hàng mới và xung đột đều "
+                "quy được duy nhất về Actor trong Actor_Action inventory."
+            ),
+            "safety_rule": (
+                "Schema/version/checksum phải khớp; khóa có prefix mơ hồ, hàng mới không "
+                "thuộc Actor overlay, hàng chung không xác định chủ sở hữu hoặc payload "
+                "không phải MSES đều bị chặn. Đây là quy tắc có điều kiện, chưa game-test."
+            ),
+        }
+
     return {
         "adapter_state": "no_known_adapter",
         "next_action": "Chưa có adapter chuyên biệt được xác minh cho đường dẫn này; tiếp tục chỉ kiểm kê.",
