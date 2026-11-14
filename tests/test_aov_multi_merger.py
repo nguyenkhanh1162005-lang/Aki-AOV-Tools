@@ -388,9 +388,20 @@ class AOVMultiMergerTests(unittest.TestCase):
                 {"name": overlay_path.name, "actor_action_ids": ["595"]},
             ]
 
-            result = merge_multi_actor_aov_archives(
-                [str(base_path), str(overlay_path)], str(output_path), profiles
-            )
+            def merge_metadata(base, overlay, *, kind, prefer_overlay_paths=None):
+                return base + b"+" + overlay, {
+                    "kind": kind,
+                    "preferred": sorted(prefer_overlay_paths or ()),
+                    "verified": True,
+                }
+
+            with patch(
+                "app.aov_multi_merger.merge_aov_metadata_assetbundle",
+                side_effect=merge_metadata,
+            ):
+                result = merge_multi_actor_aov_archives(
+                    [str(base_path), str(overlay_path)], str(output_path), profiles
+                )
 
             report = result["resource_reports"][assetref_path]
             self.assertEqual(report["adapter"], "asset_reference_set_unique_passthrough")
