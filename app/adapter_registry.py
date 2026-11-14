@@ -127,7 +127,7 @@ _ADAPTERS = (
             "Verification được UnityPy đọc/ghi/đọc lại. AssetBundle trùng đường dẫn khác "
             "payload và WEM rời chưa đối chiếu được đều bị chặn. Wwise BNK chỉ được thêm "
             "nguyên trạng khi Wwise version, Bank ID, Media ID và HIRC object ID không "
-            "xung đột trong namespace platform/ngôn ngữ có thể tải cùng nhau. Không có "
+            "xung đột trong namespace platform/ngôn ngữ có thể tải cùng nhau. "
             "AssetReferenceSet chỉ được nhận dạng và giữ nguyên khi đường dẫn mới; "
             "cùng đường dẫn khác payload bị chặn vì chưa có subset serializer đã xác minh. "
             "Không có quy trình remap; unknown chunks và external WEM vẫn bị từ chối. "
