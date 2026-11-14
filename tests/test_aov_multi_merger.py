@@ -211,5 +211,28 @@ class AOVMultiMergerTests(unittest.TestCase):
             self.assertEqual(keys, {5930001, 5950001})
 
 
+    def test_rejects_overlay_without_version_txt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base_path = Path(directory) / "base.zip"
+            overlay_path = Path(directory) / "creator-no-version.zip"
+            output_path = Path(directory) / "merged.zip"
+            _write_wrapper(base_path, _base_resources())
+            _write_direct(overlay_path, {
+                "Ages/CreatorOnly/Actor_731_Custom.bytes": b"creator-resource",
+                "Ages/Prefab_Characters/Actor_731_Actions.pkg.bytes": b"actor-731",
+            })
+            profiles = [
+                {"name": base_path.name, "actor_action_ids": ["593"]},
+                {"name": overlay_path.name, "actor_action_ids": ["731"]},
+            ]
+            with self.assertRaisesRegex(AOVMultiMergeError, "thiếu version.txt"):
+                merge_multi_actor_aov_archives(
+                    [str(base_path), str(overlay_path)],
+                    str(output_path),
+                    profiles,
+                )
+            self.assertFalse(output_path.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
