@@ -26,6 +26,25 @@ class ModPipelineTests(unittest.TestCase):
                 archive.writestr(entry, payload)
         return buffer.getvalue()
 
+    def test_unknown_actor_skin_pack_is_detected_without_known_family_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            source = self._zip(folder, "creator-pack.zip", {
+                "Resources/1.64.1/AssetRefs/Hero/731_AssetRef.bytes": b"asset-ref",
+                "Resources/1.64.1/assetbundle/battle/hero/731_custom_battle_base.assetbundle": b"bundle",
+                "Resources/1.64.1/Ages/Prefab_Characters/Actor_731_Actions.pkg.bytes": b"actions",
+                "DanhSachSkin.txt": "Tướng thử nghiệm - Skin Ánh Sao\n".encode("utf-8"),
+            })
+            profile = _archive_profile(source)
+            self.assertTrue(profile["looks_like_aov"])
+            self.assertEqual(profile["source_role"], "aov_actor_mod_candidate")
+            self.assertEqual(profile["actor_ids"], ["731"])
+            self.assertEqual(profile["actor_ref_ids"], ["731"])
+            self.assertEqual(
+                profile["skin_name_hints"],
+                ["Tướng thử nghiệm - Skin Ánh Sao"],
+            )
+
     def test_rejects_more_than_ten_inputs_before_opening_files(self):
         with self.assertRaisesRegex(ModPipelineError, "tối đa 10"):
             _preflight_inputs([f"missing-{index}.zip" for index in range(11)])
@@ -761,7 +780,8 @@ class ModPipelineTests(unittest.TestCase):
             general = report["general_analysis"]
 
             self.assertEqual(report["source_count"], 2)
-            self.assertEqual(general["source_package_types"]["aov_mod_unclassified"], 2)
+            self.assertEqual(general["source_package_types"]["aov_actor_mod_candidate"], 1)
+            self.assertEqual(general["source_package_types"]["aov_mod_unclassified"], 1)
             self.assertIn("701", general["actor_ids"])
             self.assertNotIn("702", general["actor_ids"])
             self.assertTrue(general["can_analyze_unlisted_mod_types"])
