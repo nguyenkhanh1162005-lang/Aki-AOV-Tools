@@ -471,7 +471,14 @@ function renderPreflightDashboard(data){
       card.append(dashboardElement('span','',item.state+(item.files?.length?' · '+item.files.join(', '):'')));
       targetGrid.append(card);
     }
-    targetCard.append(targetGrid);root.append(targetCard);
+    targetCard.append(targetGrid);
+    if(Array.isArray(target.blockers)&&target.blockers.length){
+      const blockerList=dashboardElement('ul','preflight-blockers');
+      for(const reason of target.blockers)blockerList.append(dashboardElement('li','',reason));
+      targetCard.append(blockerList);
+    }
+    targetCard.append(dashboardElement('p','',target.evidence_note||''));
+    root.append(targetCard);
   }
 
 
