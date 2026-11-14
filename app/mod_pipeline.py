@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import re
 import stat
@@ -21,6 +22,7 @@ from .kpm100_vtk_merger import merge_kpm100_vtk_archives
 from .adapter_registry import get_adapter_capabilities
 from .actor_detector import detect_actor_ids, extract_skin_ids_from_text, extract_skin_name_hints
 from .aov_multi_merger import merge_multi_actor_aov_archives
+from .wwise_bnk import WwiseBNKError, assess_wwise_bnk_overlay_set
 
 MAX_PROFILE_ENTRIES = 20_000
 MAX_PROFILE_UNCOMPRESSED = 1024 * 1024 * 1024
@@ -162,6 +164,206 @@ def _source_family_hint(
     if part_number is not None:
         return f"PART_{part_number}_CANDIDATE", "filename_hint", part_number
     return None, None, None
+
+
+def _wwise_scope_path(resource_path: str) -> str:
+    """Remove game version prefixes while retaining Sound/platform/locale scope."""
+    normalized = resource_path.replace("\\", "/").lstrip("/")
+    parts = [part for part in normalized.split("/") if part]
+    for index, part in enumerate(parts):
+        if part.casefold() == "sound":
+            return "/".join(parts[index:])
+    return normalized
+
+
+def _assess_wwise_bnk_sources(
+    archive_paths: list[str],
+    profiles: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Read-only Wwise preflight over direct ZIP entries and nested Resources.zip."""
+    source_banks: list[list[tuple[str, bytes]]] = [[] for _ in archive_paths]
+    source_wem_counts = [0 for _ in archive_paths]
+    total_banks = 0
+
+    def add_bank(source_index: int, archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> None:
+        nonlocal total_banks
+        if info.file_size > MAX_PROFILE_ENTRY:
+            raise WwiseBNKError(
+                f"{Path(archive_paths[source_index]).name}:{info.filename}: BNK vượt quá 512 MiB."
+            )
+        relative = _wwise_scope_path(info.filename)
+        payload = archive.read(info)
+        existing = next(
+            (item for item in source_banks[source_index] if item[0] == relative),
+            None,
+        )
+        if existing:
+            if hashlib.sha256(existing[1]).digest() != hashlib.sha256(payload).digest():
+                raise WwiseBNKError(
+                    f"{Path(archive_paths[source_index]).name}:{relative}: cùng đường dẫn BNK "
+                    "nhưng hai container có payload khác nhau."
+                )
+            return
+        source_banks[source_index].append((relative, payload))
+        total_banks += 1
+
+    try:
+        for source_index, archive_path in enumerate(archive_paths):
+            with zipfile.ZipFile(archive_path, "r") as outer:
+                nested_candidates = [
+                    info for info in outer.infolist()
+                    if not info.is_dir()
+                    and PurePosixPath(info.filename.replace(chr(92), "/")).name.casefold()
+                    == "resources.zip"
+                ]
+                if len(nested_candidates) > 1:
+                    raise WwiseBNKError(
+                        f"{Path(archive_path).name}: có nhiều Resources.zip; "
+                        "không thể xác định inventory âm thanh."
+                    )
+
+                for info in outer.infolist():
+                    if info.is_dir():
+                        continue
+                    suffix = PurePosixPath(info.filename).suffix.casefold()
+                    if suffix == ".wem":
+                        source_wem_counts[source_index] += 1
+                    elif suffix == ".bnk" and (
+                        not nested_candidates or info.filename != nested_candidates[0].filename
+                    ):
+                        add_bank(source_index, outer, info)
+
+                if nested_candidates:
+                    nested_bytes = outer.read(nested_candidates[0])
+                    with zipfile.ZipFile(io.BytesIO(nested_bytes), "r") as inner:
+                        for info in inner.infolist():
+                            if info.is_dir():
+                                continue
+                            suffix = PurePosixPath(info.filename).suffix.casefold()
+                            if suffix == ".wem":
+                                source_wem_counts[source_index] += 1
+                            elif suffix == ".bnk":
+                                add_bank(source_index, inner, info)
+    except (OSError, RuntimeError, zipfile.BadZipFile, EOFError) as exc:
+        return {
+            "state": "BLOCKED",
+            "bank_count": total_banks,
+            "reason": f"Không đọc đủ inventory Wwise trong ZIP: {exc}",
+            "merge_authorized": False,
+            "game_tested": False,
+        }
+
+    source_summaries = [
+        {
+            "source": Path(path).name,
+            "bank_count": len(source_banks[index]),
+            "standalone_wem_count": source_wem_counts[index],
+        }
+        for index, path in enumerate(archive_paths)
+    ]
+    total_wem = sum(source_wem_counts)
+    if total_wem:
+        return {
+            "state": "BLOCKED",
+            "bank_count": total_banks,
+            "standalone_wem_count": total_wem,
+            "sources": source_summaries,
+            "reason": (
+                f"Phát hiện {total_wem} WEM rời. Chưa có bộ đối chiếu từng WEM với "
+                "Media ID và SoundBank tương ứng nên không tự thêm."
+            ),
+            "merge_authorized": False,
+            "game_tested": False,
+        }
+
+    wrapper_indices = [
+        index for index, profile in enumerate(profiles)
+        if profile.get("has_mod_skin_container")
+    ]
+    base_index = wrapper_indices[0] if wrapper_indices else next(
+        (index for index, banks in enumerate(source_banks) if banks),
+        0,
+    )
+    base_banks = list(source_banks[base_index])
+    base_paths = {path for path, _payload in base_banks}
+    overlay_banks: list[tuple[str, bytes]] = []
+    duplicate_count = 0
+    seen_overlay_paths: dict[str, bytes] = {}
+
+    for source_index, banks in enumerate(source_banks):
+        if source_index == base_index:
+            continue
+        for relative, payload in banks:
+            base_match = next(
+                (item for item in base_banks if item[0] == relative),
+                None,
+            )
+            if base_match is not None:
+                if hashlib.sha256(base_match[1]).digest() == hashlib.sha256(payload).digest():
+                    duplicate_count += 1
+                    continue
+                return {
+                    "state": "BLOCKED",
+                    "bank_count": total_banks,
+                    "sources": source_summaries,
+                    "reason": (
+                        f"{relative}: cùng đường dẫn BNK có payload khác giữa nguồn nền "
+                        f"{Path(archive_paths[base_index]).name} và "
+                        f"{Path(archive_paths[source_index]).name}."
+                    ),
+                    "merge_authorized": False,
+                    "game_tested": False,
+                }
+            prior = seen_overlay_paths.get(relative)
+            if prior is not None:
+                if hashlib.sha256(prior).digest() != hashlib.sha256(payload).digest():
+                    return {
+                        "state": "BLOCKED",
+                        "bank_count": total_banks,
+                        "sources": source_summaries,
+                        "reason": f"{relative}: hai overlay có cùng đường dẫn BNK nhưng payload khác.",
+                        "merge_authorized": False,
+                        "game_tested": False,
+                    }
+                duplicate_count += 1
+                continue
+            seen_overlay_paths[relative] = payload
+            overlay_banks.append((relative, payload))
+
+    if not overlay_banks:
+        return {
+            "state": "NO_OVERLAY_BNKS",
+            "bank_count": total_banks,
+            "base_source": Path(archive_paths[base_index]).name,
+            "sources": source_summaries,
+            "identical_duplicate_count": duplicate_count,
+            "merge_authorized": True,
+            "game_tested": False,
+        }
+
+    try:
+        assessment = assess_wwise_bnk_overlay_set(base_banks, overlay_banks)
+    except WwiseBNKError as exc:
+        return {
+            "state": "BLOCKED",
+            "bank_count": total_banks,
+            "base_source": Path(archive_paths[base_index]).name,
+            "sources": source_summaries,
+            "identical_duplicate_count": duplicate_count,
+            "reason": str(exc),
+            "merge_authorized": False,
+            "game_tested": False,
+        }
+    return {
+        "state": "APPEND_ONLY_SAFE",
+        "bank_count": total_banks,
+        "base_source": Path(archive_paths[base_index]).name,
+        "sources": source_summaries,
+        "identical_duplicate_count": duplicate_count,
+        "assessment": assessment,
+        "merge_authorized": True,
+        "game_tested": False,
+    }
 
 
 def _build_target_set_report(profiles: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1398,7 +1600,17 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             state = item.get("adapter_state", "no_known_adapter")
             guidance_counts[state] = guidance_counts.get(state, 0) + 1
         preservation_gates = _build_preservation_gates(plan["resources"])
+        wwise_analysis = _assess_wwise_bnk_sources(archive_paths, profiles)
+        if (
+            selected_adapter == "aov_multi_actor_auto_detect"
+            and wwise_analysis.get("state") == "BLOCKED"
+        ):
+            blockers.append(
+                "Wwise preflight bị chặn: "
+                + str(wwise_analysis.get("reason", "không xác minh được namespace âm thanh."))
+            )
         resource_analysis = {
+            "wwise_analysis": wwise_analysis,
             "available": True,
             "advisory_only": True,
             "merge_authorized": False,
@@ -1422,12 +1634,22 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             ),
         }
     except (ResourceManifestError, CompatibilityPlanError) as exc:
+        wwise_analysis = _assess_wwise_bnk_sources(archive_paths, profiles)
+        if (
+            selected_adapter == "aov_multi_actor_auto_detect"
+            and wwise_analysis.get("state") == "BLOCKED"
+        ):
+            blockers.append(
+                "Wwise preflight bị chặn: "
+                + str(wwise_analysis.get("reason", "không xác minh được namespace âm thanh."))
+            )
         resource_analysis = {
             "available": False,
             "advisory_only": True,
             "merge_authorized": False,
             "format_counts": {},
             "detected_format_counts": {},
+            "wwise_analysis": wwise_analysis,
             "error": str(exc),
         }
 
