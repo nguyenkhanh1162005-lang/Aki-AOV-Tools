@@ -478,6 +478,11 @@ function renderPreflightDashboard(data){
       for(const reason of target.blockers)blockerList.append(dashboardElement('li','',reason));
       targetCard.append(blockerList);
     }
+    if(Array.isArray(target.notes)&&target.notes.length){
+      const notesList=dashboardElement('ul','');
+      for(const note of target.notes)notesList.append(dashboardElement('li','',note));
+      targetCard.append(notesList);
+    }
     targetCard.append(dashboardElement('p','',target.evidence_note||''));
     root.append(targetCard);
   }
