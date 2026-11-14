@@ -72,11 +72,86 @@ class AOVResourceMergeTests(unittest.TestCase):
         self.assertEqual(rows[5950001], overlay_595)
         self.assertEqual(rows[5950002], overlay_new)
         self.assertEqual(rows[1], global_row)
-        self.assertEqual(report["adapter"], "actor_owned_soundbank_union")
+        self.assertEqual(report["adapter"], "actor_owned_mses_row_union")
         self.assertEqual(report["base_actor_ids"], [593])
         self.assertEqual(report["overlay_actor_ids"], [595])
         self.assertEqual(report["output_rows"], 4)
         self.assertTrue(report["actor_ownership_verified"])
+        self.assertTrue(report["verified"])
+
+    def test_dynamic_actor_owned_chat_sound_uses_thousand_key_scale(self):
+        name = "Databin/Client/Sound/ChatSound.bytes"
+        base_row = struct.pack("<I", 593001) + b"MaChao-chat"
+        overlay_row = struct.pack("<I", 595001) + b"LiXin-chat"
+        base = encode_aov_resource(table(65, [base_row]), name, "aes")
+        overlay = encode_aov_resource(table(65, [overlay_row]), name, "aes")
+
+        result, report = merge_aov_mses_resource(
+            base,
+            overlay,
+            name,
+            base_actor_action_ids={"593"},
+            overlay_actor_action_ids={"595"},
+        )
+        decoded, _ = decode_aov_resource(result, name)
+        rows = {int.from_bytes(row[:4], "little"): row for row in parse_mses(decoded).rows}
+        self.assertEqual(rows[593001], base_row)
+        self.assertEqual(rows[595001], overlay_row)
+        self.assertEqual(report["actor_id_rule"], "sound_1000")
+        self.assertTrue(report["verified"])
+
+    def test_dynamic_actor_owned_hero_sound_uses_unique_mixed_key_scale(self):
+        name = "Databin/Client/Sound/HeroSound.bytes"
+        base_row = struct.pack("<I", 5930001) + b"MaChao-hero-sound"
+        overlay_row = struct.pack("<I", 5950001) + b"LiXin-hero-sound"
+        base = encode_aov_resource(table(69, [base_row]), name, "aes")
+        overlay = encode_aov_resource(table(69, [overlay_row]), name, "aes")
+
+        result, report = merge_aov_mses_resource(
+            base,
+            overlay,
+            name,
+            base_actor_action_ids={"593"},
+            overlay_actor_action_ids={"595"},
+        )
+        decoded, _ = decode_aov_resource(result, name)
+        rows = {int.from_bytes(row[:4], "little"): row for row in parse_mses(decoded).rows}
+        self.assertEqual(rows[5930001], base_row)
+        self.assertEqual(rows[5950001], overlay_row)
+        self.assertEqual(report["actor_id_rule"], "hero_sound_mixed_scale")
+        self.assertTrue(report["verified"])
+
+    def test_dynamic_actor_owned_lite_bullet_uses_actor_in_effect_path(self):
+        name = "Databin/Client/Skill/liteBulletCfg.bytes"
+
+        def effect_row(key, actor_id, suffix):
+            path = (
+                f"prefab_skill_effects/hero_skill_effects/{actor_id}_skill_{suffix}"
+            ).encode("ascii")
+            return (
+                struct.pack("<I", key)
+                + b"data"
+                + struct.pack("<I", len(path))
+                + path
+            )
+
+        base_row = effect_row(100, 593, "base")
+        overlay_row = effect_row(200, 595, "overlay")
+        base = encode_aov_resource(table(158, [base_row]), name, "aes")
+        overlay = encode_aov_resource(table(158, [overlay_row]), name, "aes")
+
+        result, report = merge_aov_mses_resource(
+            base,
+            overlay,
+            name,
+            base_actor_action_ids={"593"},
+            overlay_actor_action_ids={"595"},
+        )
+        decoded, _ = decode_aov_resource(result, name)
+        rows = {int.from_bytes(row[:4], "little"): row for row in parse_mses(decoded).rows}
+        self.assertEqual(rows[100], base_row)
+        self.assertEqual(rows[200], overlay_row)
+        self.assertEqual(report["actor_id_rule"], "lite_bullet_effect_path")
         self.assertTrue(report["verified"])
 
     def test_actor_owned_soundbank_rejects_overlapping_actor_inventories(self):
