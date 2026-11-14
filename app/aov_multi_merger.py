@@ -606,7 +606,10 @@ def merge_multi_actor_aov_archives(
                         overlay_chain,
                     )
                 except AOVResourceMergeError as exc:
-                    raise AOVMultiMergeError(str(exc)) from exc
+                    raise AOVMultiMergeError(
+                        f"{relative}: xung đột payload chưa có parser MSES Actor-owner "
+                        f"được xác minh. {exc}"
+                    ) from exc
                 replacements[relative] = merged
                 resource_reports[relative] = report
                 for source in overlay_sources:
