@@ -47,7 +47,7 @@ _AOV_DOWNLOAD_FILENAMES = {
 
 def _aov_download_filename(adapter_id: str) -> str:
     """Choose an explicit download name for each registered AoV merge adapter."""
-    return _AOV_DOWNLOAD_FILENAMES.get(adapter_id, "Aki-AOV-Merged.zip")
+    return _AOV_DOWNLOAD_FILENAMES.get(adapter_id, "Aki-AOV-KPM100-VTK.zip")
 UPLOAD_STORAGE_DIR = (
     Path(os.environ["AOV_UPLOAD_STORAGE_DIR"]).expanduser()
     if os.environ.get("AOV_UPLOAD_STORAGE_DIR")
