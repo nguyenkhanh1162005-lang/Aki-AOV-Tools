@@ -22,6 +22,11 @@ from .kpm100_vtk_merger import merge_kpm100_vtk_archives
 from .adapter_registry import get_adapter_capabilities
 from .actor_detector import detect_actor_ids, extract_skin_ids_from_text, extract_skin_name_hints
 from .aov_multi_merger import merge_multi_actor_aov_archives
+from .assetref_inspector import (
+    AssetReferenceSetError,
+    inspect_asset_reference_set,
+    is_asset_reference_set_path,
+)
 from .wwise_bnk import WwiseBNKError, assess_wwise_bnk_overlay_set
 
 MAX_PROFILE_ENTRIES = 20_000
@@ -174,6 +179,171 @@ def _wwise_scope_path(resource_path: str) -> str:
         if part.casefold() == "sound":
             return "/".join(parts[index:])
     return normalized
+
+
+def _asset_reference_canonical_path(resource_path: str) -> str | None:
+    normalized = resource_path.replace("\\", "/").lstrip("/")
+    parts = normalized.split("/")
+    for index in range(len(parts) - 2):
+        if parts[index].casefold() == "assetrefs" and parts[index + 1].casefold() == "hero":
+            return "/".join(parts[index:])
+    return None
+
+
+def _assess_asset_reference_sources(archive_paths: list[str]) -> dict[str, Any]:
+    """Read-only AssetReferenceSet inventory and same-path collision preflight."""
+    inventories: list[dict[str, tuple[bytes, str]]] = [
+        {} for _ in archive_paths
+    ]
+    source_counts = [0 for _ in archive_paths]
+    identical_duplicates = 0
+
+    def add_assetref(
+        source_index: int,
+        archive: zipfile.ZipFile,
+        info: zipfile.ZipInfo,
+    ) -> None:
+        nonlocal identical_duplicates
+        canonical = _asset_reference_canonical_path(info.filename)
+        if canonical is None or not is_asset_reference_set_path(canonical):
+            return
+        if info.file_size > 256 * 1024 * 1024:
+            raise AssetReferenceSetError(
+                f"{Path(archive_paths[source_index]).name}:{info.filename}: AssetRef vượt 256 MiB."
+            )
+        payload = archive.read(info)
+        digest = hashlib.sha256(payload).hexdigest()
+        existing = inventories[source_index].get(canonical)
+        if existing is not None:
+            if existing[1] != digest:
+                raise AssetReferenceSetError(
+                    f"{Path(archive_paths[source_index]).name}:{canonical}: "
+                    "một nguồn chứa nhiều payload AssetRef khác nhau cùng đường dẫn."
+                )
+            identical_duplicates += 1
+            return
+        inventories[source_index][canonical] = (payload, digest)
+        source_counts[source_index] += 1
+
+    try:
+        for source_index, archive_path in enumerate(archive_paths):
+            with zipfile.ZipFile(archive_path, "r") as outer:
+                nested_candidates = [
+                    info for info in outer.infolist()
+                    if not info.is_dir()
+                    and PurePosixPath(info.filename.replace(chr(92), "/")).name.casefold()
+                    == "resources.zip"
+                ]
+                if len(nested_candidates) > 1:
+                    raise AssetReferenceSetError(
+                        f"{Path(archive_path).name}: có nhiều Resources.zip; "
+                        "không thể xác định inventory AssetRef."
+                    )
+
+                for info in outer.infolist():
+                    if info.is_dir():
+                        continue
+                    if _asset_reference_canonical_path(info.filename):
+                        add_assetref(source_index, outer, info)
+
+                if nested_candidates:
+                    nested_bytes = outer.read(nested_candidates[0])
+                    with zipfile.ZipFile(io.BytesIO(nested_bytes), "r") as inner:
+                        for info in inner.infolist():
+                            if info.is_dir():
+                                continue
+                            if _asset_reference_canonical_path(info.filename):
+                                add_assetref(source_index, inner, info)
+    except (OSError, RuntimeError, zipfile.BadZipFile, EOFError, AssetReferenceSetError) as exc:
+        return {
+            "state": "BLOCKED",
+            "source_assetref_counts": [
+                {"source": Path(path).name, "assetref_count": source_counts[index]}
+                for index, path in enumerate(archive_paths)
+            ],
+            "reason": f"Không xác minh đủ inventory AssetReferenceSet: {exc}",
+            "passthrough_safe": False,
+            "game_tested": False,
+        }
+
+    by_path: dict[str, list[tuple[int, bytes, str]]] = {}
+    for source_index, inventory in enumerate(inventories):
+        for path, (payload, digest) in inventory.items():
+            by_path.setdefault(path, []).append((source_index, payload, digest))
+
+    conflicts = []
+    identical_cross_source = 0
+    for path, providers in sorted(by_path.items()):
+        digests = {item[2] for item in providers}
+        if len(digests) > 1:
+            conflicts.append({
+                "path": path,
+                "sources": [Path(archive_paths[item[0]]).name for item in providers],
+                "sha256": [item[2] for item in providers],
+            })
+        elif len(providers) > 1:
+            identical_cross_source += len(providers) - 1
+
+    actor_ids = sorted({
+        PurePosixPath(path).name.split("_", 1)[0]
+        for path in by_path
+    })
+    recognized = 0
+    opaque = 0
+    subset_flags = {"base_subset": 0, "skin_subset": 0}
+    samples = []
+    for path, providers in sorted(by_path.items()):
+        try:
+            report = inspect_asset_reference_set(path, providers[0][1])
+        except AssetReferenceSetError:
+            report = {"recognized": False}
+        if report.get("recognized"):
+            recognized += 1
+            subset_flags["base_subset"] += int(bool(report.get("has_base_subset")))
+            subset_flags["skin_subset"] += int(bool(report.get("has_skin_subset")))
+        else:
+            opaque += 1
+        if len(samples) < 12:
+            samples.append({
+                "path": path,
+                "actor_id": PurePosixPath(path).name.split("_", 1)[0],
+                "recognized": bool(report.get("recognized")),
+                "wrapper_mode": report.get("wrapper_mode"),
+                "providers": [Path(archive_paths[item[0]]).name for item in providers],
+                "identical_bytes": len({item[2] for item in providers}) == 1,
+            })
+
+    count = sum(source_counts)
+    return {
+        "state": (
+            "BLOCKED" if conflicts
+            else "UNIQUE_PATHS_PASSTHROUGH" if count
+            else "NO_ASSETREFS"
+        ),
+        "source_assetref_counts": [
+            {"source": Path(path).name, "assetref_count": source_counts[index]}
+            for index, path in enumerate(archive_paths)
+        ],
+        "assetref_count": count,
+        "unique_path_count": len(by_path),
+        "actor_ids": actor_ids,
+        "actor_count": len(actor_ids),
+        "recognized_count": recognized,
+        "opaque_count": opaque,
+        "subset_flags": subset_flags,
+        "identical_duplicate_count": identical_duplicates + identical_cross_source,
+        "conflict_count": len(conflicts),
+        "conflicts": conflicts[:50],
+        "samples": samples,
+        "passthrough_safe": not conflicts,
+        "merge_supported": False,
+        "note": (
+            "AssetReferenceSet có đường dẫn riêng được giữ nguyên byte. "
+            "Không hợp nhất baseSubset/skinSubset cùng đường dẫn; payload khác nhau "
+            "tại cùng đường dẫn sẽ bị chặn."
+        ),
+        "game_tested": False,
+    }
 
 
 def _assess_wwise_bnk_sources(
@@ -1616,6 +1786,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             guidance_counts[state] = guidance_counts.get(state, 0) + 1
         preservation_gates = _build_preservation_gates(plan["resources"])
         wwise_analysis = _assess_wwise_bnk_sources(archive_paths, profiles)
+        assetref_analysis = _assess_asset_reference_sources(archive_paths)
         if (
             selected_adapter == "aov_multi_actor_auto_detect"
             and wwise_analysis.get("state") == "BLOCKED"
@@ -1626,6 +1797,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             )
         resource_analysis = {
             "wwise_analysis": wwise_analysis,
+            "assetref_analysis": assetref_analysis,
             "available": True,
             "advisory_only": True,
             "merge_authorized": False,
@@ -1665,6 +1837,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
             "format_counts": {},
             "detected_format_counts": {},
             "wwise_analysis": wwise_analysis,
+            "assetref_analysis": assetref_analysis,
             "error": str(exc),
         }
 
