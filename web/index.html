@@ -810,7 +810,8 @@ autoProcessBtn.addEventListener('click',async()=>{
     const supportedAovAdapters=[
       'aov_p9_p10_skin_union_1.64.1',
       'aov_kpm100_vtk_actor595_1.64.1',
-      'aov_mod_to_mod_vtk_actor595_1.64.1'
+      'aov_mod_to_mod_vtk_actor595_1.64.1',
+      'aov_multi_actor_auto_detect'
     ];
     let mergeResponse=null;
     let mergeKind='';
@@ -824,7 +825,9 @@ autoProcessBtn.addEventListener('click',async()=>{
       );
     }else if(analysis.ready_to_merge===true&&supportedAovAdapters.includes(adapter)){
       mergeKind='aov';
-      status.textContent='Đã khớp adapter AoV đã xác minh. Bước 2/2: đang ghép tài nguyên và kiểm tra checksum, bảng dữ liệu, AssetBundle...';
+      status.textContent=adapter==='aov_multi_actor_auto_detect'
+        ?'Đã khớp bộ ghép nhiều Actor có điều kiện. Bước 2/2: máy chủ sẽ kiểm tra parser, version, checksum và metadata; xung đột chưa hỗ trợ sẽ bị chặn...'
+        :'Đã khớp adapter AoV đã xác minh. Bước 2/2: đang ghép tài nguyên và kiểm tra checksum, bảng dữ liệu, AssetBundle...';
       mergeResponse=await fetchWithRetry(
         '/api/upload/'+encodeURIComponent(uploadId)+'/aov-merge',
         {method:'POST'}
