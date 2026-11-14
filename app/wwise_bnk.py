@@ -310,7 +310,17 @@ def _wwise_identity_scope(resource_path: str) -> str:
 
 
 def _wwise_scopes_overlap(left: str, right: str) -> bool:
-    return left == "global" or right == "global" or left == right
+    if left == "global" or right == "global":
+        return True
+    left_platform, left_locale = left.split("|", 1)
+    right_platform, right_locale = right.split("|", 1)
+    if left_platform != right_platform:
+        return False
+    return (
+        left_locale == "default"
+        or right_locale == "default"
+        or left_locale == right_locale
+    )
 
 
 def assess_wwise_bnk_overlay_set(
@@ -377,14 +387,14 @@ def assess_wwise_bnk_overlay_set(
     for index, current in enumerate(inventories):
         current_report = current["report"]
         for previous in inventories[:index]:
-            if not _wwise_scopes_overlap(current["scope"], previous["scope"]):
-                continue
             previous_report = previous["report"]
             if current_report["version"] != previous_report["version"]:
                 raise WwiseBNKError(
                     f"{current['path']}: Wwise version {current_report['version']} "
                     f"không khớp {previous['path']} ({previous_report['version']})."
                 )
+            if not _wwise_scopes_overlap(current["scope"], previous["scope"]):
+                continue
             if current_report["bank_id"] == previous_report["bank_id"]:
                 raise WwiseBNKError(
                     f"{current['path']}: Bank ID {current_report['bank_id']} "
