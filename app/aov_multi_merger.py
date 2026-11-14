@@ -38,6 +38,7 @@ from .aov_merger import (
     _validate_archive_paths,
     _write_streamed_entry,
 )
+from .wwise_bnk import WwiseBNKError, assess_wwise_bnk_overlay_set
 from .ifix_merger import (
     IFixMergeError,
     merge_ifix_actor_scoped_patches,
@@ -403,6 +404,7 @@ def merge_multi_actor_aov_archives(
             source["name"]: set() for source in ordered_sources[1:]
         }
         metadata_paths = {PACKER_PATH, VERIFICATION_PATH}
+        wwise_inventory: list[tuple[str, bytes]] | None = None
 
         for relative in all_paths:
             providers = [
@@ -415,12 +417,30 @@ def merge_multi_actor_aov_archives(
             base_payload = _read_item(base_provider["resources"][relative])
             if len(providers) == 1:
                 if base_provider is not base_source:
+                    suffix = PurePosixPath(relative).suffix.casefold()
                     if _is_unresolved_wwise_payload(relative):
-                        raise AOVMultiMergeError(
-                            f"{relative}: Wwise BNK/WEM chỉ đang được kiểm tra cấu trúc; "
-                            "chưa có bộ remap Bank/Media/HIRC và tham chiếu Event/Action. "
-                            "Không thể tự thêm soundbank mới bằng ZIP union."
-                        )
+                        if suffix == ".wem":
+                            raise AOVMultiMergeError(
+                                f"{relative}: Wwise WEM rời chưa được ghép vì chưa xác minh "
+                                "liên kết Media ID với SoundBank tương ứng."
+                            )
+                        if wwise_inventory is None:
+                            wwise_inventory = [
+                                (path, _read_item(item))
+                                for path, item in base_source["resources"].items()
+                                if PurePosixPath(path).suffix.casefold() == ".bnk"
+                            ]
+                        try:
+                            wwise_report = assess_wwise_bnk_overlay_set(
+                                wwise_inventory,
+                                [(relative, base_payload)],
+                            )
+                        except WwiseBNKError as exc:
+                            raise AOVMultiMergeError(
+                                f"{relative}: không thể thêm Wwise BNK theo chế độ append-only: {exc}"
+                            ) from exc
+                        wwise_inventory.append((relative, base_payload))
+                        resource_reports[relative] = wwise_report
                     added[relative] = base_payload
                     included_paths_by_source[base_provider["name"]].add(relative)
                     if relative.startswith("assetbundle/") and relative not in metadata_paths:
