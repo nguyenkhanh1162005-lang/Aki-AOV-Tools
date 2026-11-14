@@ -329,10 +329,20 @@ def _archive_profile(path: str) -> dict[str, Any]:
     resource_names = names + nested_resource_names
     leaves = {PurePosixPath(name).name.lower() for name in resource_names}
     extensions = {PurePosixPath(name).suffix.lower() for name in resource_names}
-    has_resource_tree = any(
-        name.lower().startswith(("resources/", "databin/", "ages/", "thanos/", "assetbundle/"))
+    has_assetbundle_directory_signature = any(
+        PurePosixPath(name).suffix.lower() == ".assetbundle"
+        and name.lower().startswith((
+            "battle/hero/", "show/hero/", "icon/hero/",
+            "commercializenotify/", "uisystem/",
+        ))
         for name in resource_names
     )
+    has_resource_tree = any(
+        name.lower().startswith((
+            "resources/", "databin/", "ages/", "thanos/", "assetbundle/"
+        ))
+        for name in resource_names
+    ) or has_assetbundle_directory_signature
     looks_like_aov = bool(
         leaves.intersection(AOV_MARKERS)
         or (has_resource_tree and extensions.intersection(AOV_EXTENSIONS))
@@ -504,6 +514,48 @@ def _select_adapter(profiles: list[dict[str, Any]]) -> str:
             and all(item.get("looks_like_aov") for item in profiles)
         ):
             return "aov_p9_p10_skin_union_1.64.1"
+
+        # Exact composite route: first merge the SHA-pinned P9/P10 wrappers,
+        # then apply the already version-locked VTK Actor 595 split-part adapter.
+        # The VTK stage verifies the exact 10 AssetBundles and the 1.64.1.11 ->
+        # 1.64.1.12 Packer/Verification metadata transition.
+        composite_p9 = p9_inputs
+        composite_p10 = p10_inputs
+        composite_vtk_parts = [
+            item for item in profiles
+            if item.get("source_family_hint") == "VTK"
+            and not item.get("has_mod_skin_container")
+        ]
+        composite_vtk_numbers = {
+            item.get("source_part_number") for item in composite_vtk_parts
+        }
+        composite_actor595_scoped = (
+            len(composite_vtk_parts) == 3
+            and composite_vtk_numbers == {1, 2, 3}
+            and all(
+                item.get("looks_like_aov")
+                and set(item.get("actor_asset_ids", [])) <= {"595"}
+                and set(item.get("actor_action_ids", [])) <= {"595"}
+                and not item.get("has_actor593_content")
+                for item in composite_vtk_parts
+            )
+            and any(item.get("has_vtk_ifix") for item in composite_vtk_parts)
+            and any(item.get("has_595_assets") for item in composite_vtk_parts)
+        )
+        if (
+            len(profiles) == 5
+            and len(composite_p9) == 1
+            and len(composite_p10) == 1
+            and composite_p9[0].get("resources_zip_count") == 1
+            and composite_p9[0].get("skin_list_count") == 1
+            and composite_p10[0].get("resources_zip_count") == 1
+            and composite_p10[0].get("skin_list_count") == 1
+            and set(composite_p9[0].get("actor_action_ids", [])) == p9_expected
+            and set(composite_p10[0].get("actor_action_ids", [])) == p10_expected
+            and composite_actor595_scoped
+            and all(item.get("looks_like_aov") for item in profiles)
+        ):
+            return "aov_p9_p10_vtk_actor595_1.64.1"
 
         kpm_bases = [
             item for item in profiles
@@ -1038,6 +1090,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
         len(wrapper_profiles) > 1
         and selected_adapter not in {
             "aov_p9_p10_skin_union_1.64.1",
+            "aov_p9_p10_vtk_actor595_1.64.1",
             "aov_multi_actor_auto_detect",
         }
     ):
@@ -1065,6 +1118,7 @@ def analyze_aov_input_set(archive_paths: list[str]) -> dict[str, Any]:
 
     supported_aov_adapters = {
         "aov_p9_p10_skin_union_1.64.1",
+        "aov_p9_p10_vtk_actor595_1.64.1",
         "aov_kpm100_vtk_actor595_1.64.1",
         "aov_mod_to_mod_vtk_actor595_1.64.1",
         "aov_multi_actor_auto_detect",
@@ -1319,6 +1373,37 @@ def merge_mod_archives(archive_paths: list[str], output_path: str) -> dict[str, 
     try:
         if adapter == "aov_p9_p10_skin_union_1.64.1":
             result = merge_p9_p10_archives(archive_paths, str(temporary))
+        elif adapter == "aov_p9_p10_vtk_actor595_1.64.1":
+            import shutil
+            from tempfile import TemporaryDirectory
+            p9_p10_paths = [
+                path for path, profile in zip(archive_paths, profiles)
+                if profile.get("source_family_hint") in {"P9", "P10"}
+            ]
+            vtk_paths = [
+                path for path, profile in zip(archive_paths, profiles)
+                if profile.get("source_family_hint") == "VTK"
+            ]
+            with TemporaryDirectory(prefix="aki-aov-composite-") as stage_dir:
+                p9_p10_output = Path(stage_dir) / "p9-p10-19-skin.zip"
+                first_stage = merge_p9_p10_archives(
+                    p9_p10_paths, str(p9_p10_output)
+                )
+                result = merge_aov_archives(
+                    [str(p9_p10_output), *vtk_paths], str(temporary)
+                )
+                result["composite_stages"] = {
+                    "p9_p10": {
+                        "adapter": "aov_p9_p10_skin_union_1.64.1",
+                        "verified": True,
+                        "skin_count": 19,
+                    },
+                    "vtk_actor595": {
+                        "adapter": "aov_mod_to_mod_vtk_actor595_1.64.1",
+                        "verified": bool(result.get("validation")),
+                        "vtk_version": result.get("vtk_version"),
+                    },
+                }
         elif adapter == "aov_kpm100_vtk_actor595_1.64.1":
             base_path = next(
                 path for path, profile in zip(archive_paths, profiles)
