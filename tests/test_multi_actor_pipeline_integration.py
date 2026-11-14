@@ -7,6 +7,7 @@ from unittest.mock import patch
 from app.mod_pipeline import (
     ModPipelineError,
     _archive_profile,
+    _build_target_set_report,
     _select_adapter,
     merge_mod_archives,
 )
@@ -141,6 +142,52 @@ class MultiActorPipelineIntegrationTests(unittest.TestCase):
             profile["version_marker_values"],
             ["1.64.1.12|1793129", "1.64.1.13|1793129"],
         )
+
+    def test_six_source_target_report_lists_exact_tamyn_blockers(self):
+        profiles = [
+            {
+                **_profile("P9.zip", "107", wrapper=True),
+                "source_family_hint": "P9",
+                "actor_action_ids": ["107"],
+            },
+            {
+                **_profile("P10.zip", "111", wrapper=True),
+                "source_family_hint": "P10",
+                "actor_action_ids": ["111"],
+            },
+            {
+                **_profile("Tamyn-Robot.zip", "593"),
+                "source_family_hint": "TM",
+                "has_resource_verification_catalog": False,
+                "wwise_bank_count": 5,
+            },
+            {
+                **_profile("Part1.zip", "595"),
+                "source_family_hint": "VTK",
+                "source_part_number": 1,
+                "has_vtk_ifix": True,
+                "has_huanhua_billboard_tables": True,
+            },
+            {
+                **_profile("Part2.zip", "595"),
+                "source_family_hint": "VTK",
+                "source_part_number": 2,
+                "has_595_assets": True,
+            },
+            {
+                **_profile("Part3.zip", "595"),
+                "source_family_hint": "VTK",
+                "source_part_number": 3,
+                "has_595_assets": True,
+            },
+        ]
+        report = _build_target_set_report(profiles)
+        self.assertTrue(report["input_set_complete"])
+        self.assertFalse(report["merge_supported"])
+        blockers = " ".join(report["blockers"])
+        self.assertIn("ba SHA-256", blockers)
+        self.assertIn("ResourceVerificationInfoSetAll", blockers)
+        self.assertIn("5 Wwise BNK", blockers)
 
     def test_rejects_ordinary_zip_in_mixed_input(self):
         profiles = [
