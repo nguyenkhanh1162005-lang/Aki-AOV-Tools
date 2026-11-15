@@ -193,6 +193,7 @@ enum AoVMSESParser {
                 overlay: overlayTable,
                 allowedNewKeys: [0x253],
                 requiredOverlayKeys: [0x253],
+                rejectConflictingKeys: [0x253],
                 allowSchemaMismatch: true
             )
             adapter = "verified_huanhua_key_0x253"
@@ -203,6 +204,7 @@ enum AoVMSESParser {
                 overlay: overlayTable,
                 allowedNewKeys: keys,
                 requiredOverlayKeys: keys,
+                rejectConflictingKeys: keys,
                 allowSchemaMismatch: true
             )
             adapter = "verified_skillcombine_key_allowlist"
@@ -212,6 +214,7 @@ enum AoVMSESParser {
                 overlay: overlayTable,
                 allowedNewKeys: [59_500],
                 requiredOverlayKeys: [59_500],
+                rejectConflictingKeys: [59_500],
                 allowSchemaMismatch: true
             )
             adapter = "verified_res_skin_59500"
@@ -224,6 +227,7 @@ enum AoVMSESParser {
                 overlay: overlayTable,
                 allowedNewKeys: nil,
                 requiredOverlayKeys: [],
+                rejectAnyConflicts: true,
                 allowSchemaMismatch: false
             )
             adapter = "same_schema_character_component_union"
@@ -281,6 +285,8 @@ enum AoVMSESParser {
         overlay: AoVMSESTable,
         allowedNewKeys: Set<UInt32>?,
         requiredOverlayKeys: Set<UInt32>,
+        rejectConflictingKeys: Set<UInt32> = [],
+        rejectAnyConflicts: Bool = false,
         allowSchemaMismatch: Bool
     ) throws -> (Data, [UInt32], [UInt32]) {
         guard base.version == overlay.version else { throw AoVMSESError.schemaMismatch }
@@ -305,7 +311,12 @@ enum AoVMSESParser {
         for key in overlayMap.keys.sorted() {
             guard let candidate = overlayMap[key] else { continue }
             if let existing = result[key] {
-                if existing != candidate { retained.append(key) }
+                if existing != candidate {
+                    if rejectAnyConflicts || rejectConflictingKeys.contains(key) {
+                        throw AoVMSESError.unresolvedConflict([key])
+                    }
+                    retained.append(key)
+                }
             } else {
                 result[key] = candidate
                 appended.append(key)
@@ -500,7 +511,7 @@ enum AoVMSESParser {
     }
 
     private static func normalizedActorIDs(_ values: Set<String>) throws -> Set<Int> {
-        let ids = Set(values.compactMap(Int.init))
+        let ids = Set(values.compactMap { Int($0) })
         guard ids.count == values.count, ids.allSatisfy({ 0 < $0 && $0 <= 999 }) else {
             throw AoVMSESError.actorInventoryMissing
         }
