@@ -156,43 +156,43 @@ enum ArchiveScanner {
 
         for url in urls {
             let archive = try Archive(url: url, accessMode: .read)
-            for entry in archive where entry.type == .file && entry.path.lowercased().hasSuffix(".bytes") {
-                guard entry.uncompressedSize <= maximumAESInspectInputBytes else {
+            try scanAESFiles(
+                in: archive,
+                sourceName: url.lastPathComponent,
+                pathPrefix: "",
+                decoded: &decoded,
+                unsupportedZstd: &unsupportedZstd,
+                otherBytes: &otherBytes,
+                tooLarge: &tooLarge,
+                invalidAES: &invalidAES
+            )
+
+            // MOD wrappers commonly keep game resources in a nested Resources.zip.
+            // Extract only that ZIP to a temporary file, then scan it entry-by-entry.
+            for entry in archive where entry.type == .file &&
+                (entry.path as NSString).lastPathComponent.lowercased() == "resources.zip" {
+                guard entry.uncompressedSize <= maximumArchiveExpandedBytes else {
                     tooLarge += 1
                     continue
                 }
-
-                var resourceData = Data()
+                let nestedURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("aov-resources-\(UUID().uuidString).zip")
+                defer { try? FileManager.default.removeItem(at: nestedURL) }
                 do {
-                    _ = try archive.extract(entry, bufferSize: 64 * 1024, consumer: { chunk in
-                        resourceData.append(chunk)
-                    })
+                    _ = try archive.extract(entry, to: nestedURL, bufferSize: 64 * 1024)
+                    let nestedArchive = try Archive(url: nestedURL, accessMode: .read)
+                    try scanAESFiles(
+                        in: nestedArchive,
+                        sourceName: url.lastPathComponent,
+                        pathPrefix: "\(entry.path)!/",
+                        decoded: &decoded,
+                        unsupportedZstd: &unsupportedZstd,
+                        otherBytes: &otherBytes,
+                        tooLarge: &tooLarge,
+                        invalidAES: &invalidAES
+                    )
                 } catch {
                     throw ArchiveScanError.crcFailure(url.lastPathComponent, entry.path)
-                }
-
-                guard AoVBytesDecoder.isAESResource(resourceData) else {
-                    otherBytes += 1
-                    continue
-                }
-
-                do {
-                    let payload = try AoVBytesDecoder.decodeAESOnly(resourceData, resourceName: entry.path)
-                    let digest = SHA256.hash(data: payload)
-                    decoded.append(
-                        DecodedAESResource(
-                            archiveName: url.lastPathComponent,
-                            path: entry.path,
-                            decodedBytes: UInt64(payload.count),
-                            sha256: digest.map { String(format: "%02x", $0) }.joined()
-                        )
-                    )
-                } catch AoVBytesDecodeError.aesZstdUnsupported {
-                    unsupportedZstd += 1
-                } catch {
-                    if invalidAES.count < 30 {
-                        invalidAES.append("\(url.lastPathComponent): \(entry.path) — \(error.localizedDescription)")
-                    }
                 }
             }
         }
@@ -204,6 +204,58 @@ enum ArchiveScanner {
             tooLargeToInspect: tooLarge,
             invalidAES: invalidAES
         )
+    }
+
+    private static func scanAESFiles(
+        in archive: Archive,
+        sourceName: String,
+        pathPrefix: String,
+        decoded: inout [DecodedAESResource],
+        unsupportedZstd: inout Int,
+        otherBytes: inout Int,
+        tooLarge: inout Int,
+        invalidAES: inout [String]
+    ) throws {
+        for entry in archive where entry.type == .file && entry.path.lowercased().hasSuffix(".bytes") {
+            let displayPath = pathPrefix + entry.path
+            guard entry.uncompressedSize <= maximumAESInspectInputBytes else {
+                tooLarge += 1
+                continue
+            }
+
+            var resourceData = Data()
+            do {
+                _ = try archive.extract(entry, bufferSize: 64 * 1024, consumer: { chunk in
+                    resourceData.append(chunk)
+                })
+            } catch {
+                throw ArchiveScanError.crcFailure(sourceName, displayPath)
+            }
+
+            guard AoVBytesDecoder.isAESResource(resourceData) else {
+                otherBytes += 1
+                continue
+            }
+
+            do {
+                let payload = try AoVBytesDecoder.decodeAESOnly(resourceData, resourceName: entry.path)
+                let digest = SHA256.hash(data: payload)
+                decoded.append(
+                    DecodedAESResource(
+                        archiveName: sourceName,
+                        path: displayPath,
+                        decodedBytes: UInt64(payload.count),
+                        sha256: digest.map { String(format: "%02x", $0) }.joined()
+                    )
+                )
+            } catch AoVBytesDecodeError.aesZstdUnsupported {
+                unsupportedZstd += 1
+            } catch {
+                if invalidAES.count < 30 {
+                    invalidAES.append("\(sourceName): \(displayPath) — \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     private static func scanOne(_ url: URL) throws -> ArchiveInventory {
