@@ -450,8 +450,6 @@ def merge_action_xml(
         append_track(filtered_track, filtered_key, name)
         condition_appended.append(name)
 
-        )
-
     output_xml = ET.tostring(base_root, encoding="utf-8", xml_declaration=True)
     try:
         output = encode_aov_resource(output_xml, resource_name, base_mode)
