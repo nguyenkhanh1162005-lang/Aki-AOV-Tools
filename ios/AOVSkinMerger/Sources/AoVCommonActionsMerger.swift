@@ -686,18 +686,18 @@ struct AoVCommonActionsPackageReport: Sendable {
 
 extension AoVCommonActionsMerger {
     private static let packageXMLCandidates: Set<String> = [
-        "commonresource/Back.xml",
-        "commonresource/BackFast.xml",
-        "commonresource/Born.xml",
-        "commonresource/Dance.xml",
-        "commonresource/DanceBullet.xml",
-        "commonresource/Dead_Born.xml",
-        "commonresource/HasteE1.xml",
-        "commonresource/HasteE1_leave.xml",
-        "commonresource/HasteE1_super.xml",
-        "commonresource/HasteE2.xml",
-        "commonresource/HasteE3.xml",
-        "commonresource/QuickBack.xml"
+        "commonresource/back.xml",
+        "commonresource/backfast.xml",
+        "commonresource/born.xml",
+        "commonresource/dance.xml",
+        "commonresource/dancebullet.xml",
+        "commonresource/dead_born.xml",
+        "commonresource/hastee1.xml",
+        "commonresource/hastee1_leave.xml",
+        "commonresource/hastee1_super.xml",
+        "commonresource/hastee2.xml",
+        "commonresource/hastee3.xml",
+        "commonresource/quickback.xml"
     ]
 
     static func inspectActorSkinIDs(
