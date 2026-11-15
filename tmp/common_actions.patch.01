@@ -1,0 +1,171 @@
+--- /tmp/aki_baseline/app/aov_common_actions.py	2026-11-14 18:12:31.000000000 +0000
++++ /mnt/data/aki_latest/app/aov_common_actions.py	2026-11-15 03:12:54.760371816 +0000
+@@ -62,6 +62,168 @@
+     )
+
+
++_SKIN_CONDITION_EVENT_TYPES = {"CheckSkinIdTick", "CheckSkinIdVirtualTick"}
++
++
++def _condition_skin_info(
++    track: ET.Element,
++    actor_prefixes: set[str] | None,
++) -> dict | None:
++    """Recognize the direct scalar/array skin-ID condition forms used by AoV XML.
++
++    Only a single direct Event with a matching eventType and a direct targetId
++    TemplateObject is accepted. Unknown/nested condition layouts fail closed.
++    """
++    event_type = track.attrib.get("eventType", "")
++    if event_type not in _SKIN_CONDITION_EVENT_TYPES:
++        return None
++    if any(node.tag == "SkinOrAvatarList" for node in track.iter()):
++        return None
++    events = track.findall("Event")
++    if len(events) != 1:
++        raise CommonActionsMergeError(
++            f"Track {_normalized_track_name(track)}: {event_type} phải có đúng một Event trực tiếp."
++        )
++    event = events[0]
++    if event.attrib.get("eventName") != event_type:
++        raise CommonActionsMergeError(
++            f"Track {_normalized_track_name(track)}: eventName không khớp eventType {event_type}."
++        )
++    target_nodes = [
++        node for node in list(event)
++        if node.tag == "TemplateObject" and node.attrib.get("name") == "targetId"
++    ]
++    if len(target_nodes) != 1 or target_nodes[0].attrib.get("objectName") not in {"self", "target"}:
++        raise CommonActionsMergeError(
++            f"Track {_normalized_track_name(track)}: targetId không thuộc layout đã hỗ trợ."
++        )
+
++    scalar_nodes = [
++        node for node in list(event)
++        if node.tag == "int" and node.attrib.get("name") == "skinId"
++    ]
++    array_nodes = [
++        node for node in list(event)
++        if node.tag == "Array" and node.attrib.get("name") == "skinIdArray"
++    ]
++    if len(scalar_nodes) > 1 or len(array_nodes) > 1 or (not scalar_nodes and not array_nodes):
++        raise CommonActionsMergeError(
++            f"Track {_normalized_track_name(track)}: skinId/skinIdArray bị thiếu hoặc lặp."
++        )
+
++    scalar_id = None
++    if scalar_nodes:
++        scalar_id = scalar_nodes[0].attrib.get("value", "")
++        if not scalar_id.isdigit():
++            raise CommonActionsMergeError(
++                f"Track {_normalized_track_name(track)}: skinId không phải số."
++            )
+
++    array_values: list[str] = []
++    array_node = array_nodes[0] if array_nodes else None
++    if array_node is not None:
++        if array_node.attrib.get("type") != "int":
++            raise CommonActionsMergeError(
++                f"Track {_normalized_track_name(track)}: skinIdArray không phải Array<int>."
++            )
++        children = list(array_node)
++        if not children or any(node.tag != "int" for node in children):
++            raise CommonActionsMergeError(
++                f"Track {_normalized_track_name(track)}: skinIdArray có child không hỗ trợ."
++            )
++        array_values = [node.attrib.get("value", "") for node in children]
++        if any(not value.isdigit() for value in array_values):
++            raise CommonActionsMergeError(
++                f"Track {_normalized_track_name(track)}: skinIdArray có phần tử không phải số."
++            )
++        if len(array_values) != len(set(array_values)):
++            raise CommonActionsMergeError(
++                f"Track {_normalized_track_name(track)}: skinIdArray có skin ID trùng."
++            )
++        negate_nodes = [
++            node for node in list(event)
++            if node.tag == "bool" and node.attrib.get("name") == "useNegateValue"
++        ]
++        if len(negate_nodes) > 1 or (
++            negate_nodes and negate_nodes[0].attrib.get("value") not in {"true", "false"}
++        ):
++            raise CommonActionsMergeError(
++                f"Track {_normalized_track_name(track)}: useNegateValue không hợp lệ."
++            )
+
++    def is_owned(value: str) -> bool:
++        return actor_prefixes is None or value in actor_prefixes or value[:3] in actor_prefixes
+
++    owned_ids = {
++        value for value in ([scalar_id] if scalar_id else []) + array_values
++        if is_owned(value)
++    }
++    if not owned_ids:
++        return None
+
++    # An array-based condition can be safely unioned only when its scalar
++    # discriminator is not itself actor-owned. The combined owned-scalar +
++    # array variant is held back because its conjunction semantics need a
++    # separate schema fixture.
++    if array_node is not None and scalar_id and actor_prefixes is not None and is_owned(scalar_id):
++        raise CommonActionsMergeError(
++            f"Track {_normalized_track_name(track)}: kết hợp scalar skinId và skinIdArray "
++            "cùng thuộc Actor chưa có quy tắc ghép đã xác minh."
++        )
+
++    return {
++        "kind": "array" if array_node is not None else "scalar",
++        "event_type": event_type,
++        "scalar_id": scalar_id,
++        "array_values": array_values,
++        "owned_ids": owned_ids,
++        "array_node": array_node,
++    }
++
+
++def _condition_array_template_signature(track: ET.Element) -> str:
++    clone = copy.deepcopy(track)
++    for event in clone.findall("Event"):
++        for array_node in list(event.findall("Array")):
++            if array_node.attrib.get("name") == "skinIdArray":
++                for child in list(array_node):
++                    array_node.remove(child)
++    return _track_signature(clone)
++
+
++def _condition_array_key(track: ET.Element) -> tuple[str, str, str]:
++    return (
++        _normalized_track_name(track),
++        track.attrib.get("eventType", ""),
++        _condition_array_template_signature(track),
++    )
++
+
++def _track_actor_gate_ids(
++    track: ET.Element,
++    actor_prefixes: set[str] | None,
++) -> set[str]:
++    skin_nodes = list(track.iter("SkinOrAvatarList"))
++    direct_nodes = track.findall("SkinOrAvatarList")
++    if skin_nodes and len(skin_nodes) != len(direct_nodes):
++        raise CommonActionsMergeError(
++            f"Track {_normalized_track_name(track)} có SkinOrAvatarList lồng ở vị trí chưa hỗ trợ."
++        )
++    if skin_nodes:
++        result = set()
++        for node in direct_nodes:
++            value = node.attrib.get("id", "")
++            if not value.isdigit():
++                raise CommonActionsMergeError(
++                    f"Track {_normalized_track_name(track)} có SkinOrAvatarList ID không phải số."
++                )
++            if actor_prefixes is None or value in actor_prefixes or value[:3] in actor_prefixes:
++                result.add(value)
++        return result
++    condition = _condition_skin_info(track, actor_prefixes)
++    return set(condition["owned_ids"]) if condition else set()
++
+
+ def _unique_track_name(original: str, used: set[str], next_index: list[int]) -> str:
+     if original and original not in used:
+         return original
