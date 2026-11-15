@@ -363,7 +363,7 @@ final class AoVBytesDecoderTests: XCTestCase {
                 "version.txt": Data("1.64.1.12".utf8),
                 commonPath: Data(contentsOf: overlayCommon),
                 "Actor_593_Actions.pkg.bytes": Data("actor593".utf8),
-                "Databin/Client/Actor/593_NewResource.bytes": Data("unique-overlay-resource".utf8)
+                "Ages/Prefab_Characters/Prefab_Hero/Actor593/NewResource.bytes": Data("unique-overlay-resource".utf8)
             ]
         )
 
@@ -411,7 +411,7 @@ final class AoVBytesDecoderTests: XCTestCase {
 
         let resources = try Archive(url: mergedResourcesURL, accessMode: .read)
         guard let commonEntry = resources.first(where: { $0.path == commonPath }),
-              resources.first(where: { $0.path == "Databin/Client/Actor/593_NewResource.bytes" }) != nil else {
+              resources.first(where: { $0.path == "Ages/Prefab_Characters/Prefab_Hero/Actor593/NewResource.bytes" }) != nil else {
             return XCTFail("Output Resources.zip is missing merged/added resources")
         }
         var packageData = Data()
