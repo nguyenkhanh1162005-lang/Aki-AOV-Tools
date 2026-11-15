@@ -6,6 +6,12 @@ on:
       - feat/ios-offline-app-prototype
     paths:
       - '.github/workflows/ios-quick-ipa.yml'
+  pull_request:
+    branches:
+      - feat/multi-actor-aov-archive-merge
+    paths:
+      - '.github/workflows/ios-quick-ipa.yml'
+      - 'ios/AOVSkinMerger/**'
   workflow_dispatch:
 
 permissions:
