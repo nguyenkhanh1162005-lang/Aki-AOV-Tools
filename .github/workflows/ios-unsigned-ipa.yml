@@ -7,13 +7,19 @@ on:
     paths:
       - 'ios/AOVSkinMerger/**'
       - '.github/workflows/ios-unsigned-ipa.yml'
+  pull_request:
+    branches:
+      - feat/multi-actor-aov-archive-merge
+    paths:
+      - 'ios/AOVSkinMerger/**'
+      - '.github/workflows/ios-unsigned-ipa.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: aki-aov-skin-ios-${{ github.ref }}
+  group: aki-aov-skin-ios-${{ github.event.pull_request.head.ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
