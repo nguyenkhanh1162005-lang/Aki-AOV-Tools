@@ -64,6 +64,11 @@ struct AoVIFixField: Equatable, Sendable {
     var extra: Data
 }
 
+struct AoVIFixStaticField: Equatable, Sendable {
+    var typeID: Int32
+    var constructorIndex: Int32
+}
+
 struct AoVIFixAnonymousClass: Equatable, Sendable {
     var fields: [Int32]
     var constructor: Int32
@@ -89,7 +94,7 @@ struct AoVIFixPatch: Equatable, Sendable {
     var externalMethods: [AoVIFixMethodReference]
     var strings: [String]
     var fields: [AoVIFixField]
-    var staticFields: [(Int32, Int32)]
+    var staticFields: [AoVIFixStaticField]
     var anonymousClasses: [AoVIFixAnonymousClass]
     var wrappers: String
     var assembly: String
@@ -419,7 +424,7 @@ enum AoVIFixMerger {
         }
 
         let staticFields = try (0..<reader.count("bản ghi")).map { _ in
-            (try reader.int32(), try reader.int32())
+            AoVIFixStaticField(typeID: try reader.int32(), constructorIndex: try reader.int32())
         }
         var anonymousClasses: [AoVIFixAnonymousClass] = []
         for _ in 0..<reader.count("bản ghi") {
@@ -531,9 +536,9 @@ enum AoVIFixMerger {
             if field.isNew { writer.data.append(field.extra) }
         }
         writer.int32(Int32(patch.staticFields.count))
-        for (typeID, cctorID) in patch.staticFields {
-            writer.int32(typeID)
-            writer.int32(cctorID)
+        for item in patch.staticFields {
+            writer.int32(item.typeID)
+            writer.int32(item.constructorIndex)
         }
         writer.int32(Int32(patch.anonymousClasses.count))
         for item in patch.anonymousClasses {
@@ -612,8 +617,8 @@ enum AoVIFixMerger {
         for field in patch.fields where !validType(field.typeID) {
             throw AoVIFixError.invalidReference("Field type")
         }
-        for (typeID, cctorID) in patch.staticFields {
-            guard validType(typeID), cctorID < 0 || validMethod(cctorID) else {
+        for item in patch.staticFields {
+            guard validType(item.typeID), item.constructorIndex < 0 || validMethod(item.constructorIndex) else {
                 throw AoVIFixError.invalidReference("Static field")
             }
         }
@@ -723,10 +728,10 @@ enum AoVIFixMerger {
             }
             incoming.fields[index].typeID = mapped
         }
-        incoming.staticFields = try incoming.staticFields.map { pair in
-            guard let type = typeMap[pair.0] else { throw AoVIFixError.invalidReference("static type") }
-            let method = pair.1 >= 0 ? (methodMap[pair.1] ?? pair.1) : pair.1
-            return (type, method)
+        incoming.staticFields = try incoming.staticFields.map { item in
+            guard let type = typeMap[item.typeID] else { throw AoVIFixError.invalidReference("static type") }
+            let method = item.constructorIndex >= 0 ? (methodMap[item.constructorIndex] ?? item.constructorIndex) : item.constructorIndex
+            return AoVIFixStaticField(typeID: type, constructorIndex: method)
         }
         for index in incoming.anonymousClasses.indices {
             var item = incoming.anonymousClasses[index]
@@ -823,7 +828,7 @@ enum AoVIFixMerger {
         guard base.magic == incoming.magic, base.bridge == incoming.bridge,
               base.types == incoming.types, base.externalMethods == incoming.externalMethods,
               base.strings == incoming.strings, base.fields == incoming.fields,
-              base.staticFields.elementsEqual(incoming.staticFields, by: ==),
+              base.staticFields == incoming.staticFields,
               base.anonymousClasses == incoming.anonymousClasses,
               base.fixes == incoming.fixes, base.newClasses == incoming.newClasses,
               base.wrappers == incoming.wrappers, base.assembly == incoming.assembly else {
