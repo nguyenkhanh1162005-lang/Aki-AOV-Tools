@@ -655,18 +655,6 @@ enum AoVModArchiveMerger {
                 }
                 emitted.insert(relative)
             }
-            // Preserve loose Resources/ entries stored beside the wrapper's Resources.zip.
-            // They are part of the base source even though they are not inside resourceArchive.
-            for (relative, reference) in base.resources where !emitted.contains(relative) {
-                let outputPath = prefix + relative
-                if let payload = replacements[relative] {
-                    try addData(payload, to: output, path: outputPath, tempRoot: tempRoot)
-                } else {
-                    try copyEntry(reference.entry, from: reference.archive, to: output,
-                                  path: outputPath, tempRoot: tempRoot)
-                }
-                emitted.insert(relative)
-            }
             for (relative, reference) in added where !emitted.contains(relative) {
                 let outputPath = prefix + relative
                 try copyEntry(reference.entry, from: reference.archive, to: output,
