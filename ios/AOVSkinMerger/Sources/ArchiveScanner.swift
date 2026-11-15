@@ -392,7 +392,7 @@ enum ArchiveScanner {
             decodedBytes: UInt64(payload.count),
             sha256: digest,
             hasBaseSubset: true,
-            hasSkinSubset: payload.range(of: Data(skinSubsetSignature)) != nil,
+            hasSkinSubset: find(skinSubsetSignature, lower: 0, upper: payload.count) != nil,
             referencePathCandidates: candidates.count,
             sampleReferences: candidates.sorted().prefix(5).map { $0 }
         )
