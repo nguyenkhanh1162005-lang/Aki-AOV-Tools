@@ -47,8 +47,24 @@ struct DecodedAESResource: Codable, Identifiable, Sendable {
     var id: String { "\(archiveName)|\(path)" }
 }
 
+struct AssetRefInspection: Codable, Identifiable, Sendable {
+    let archiveName: String
+    let path: String
+    let actorID: String?
+    let wrapperMode: String
+    let decodedBytes: UInt64
+    let sha256: String
+    let hasBaseSubset: Bool
+    let hasSkinSubset: Bool
+    let referencePathCandidates: Int
+    let sampleReferences: [String]
+    var id: String { "\(archiveName)|\(path)" }
+}
+
 struct AESScanReport: Codable, Sendable {
     let decoded: [DecodedAESResource]
+    let assetReferenceSets: [AssetRefInspection]
+    let unrecognizedAssetRefCount: Int
     let otherBytesFiles: Int
     let tooLargeToInspect: Int
     let invalidAES: [String]
@@ -152,6 +168,8 @@ enum ArchiveScanner {
 
     static func inspectAESResources(_ urls: [URL]) throws -> AESScanReport {
         var decoded: [DecodedAESResource] = []
+        var assetReferenceSets: [AssetRefInspection] = []
+        var unrecognizedAssetRefs = 0
         var otherBytes = 0
         var tooLarge = 0
         var invalidAES: [String] = []
@@ -163,6 +181,8 @@ enum ArchiveScanner {
                 sourceName: url.lastPathComponent,
                 pathPrefix: "",
                 decoded: &decoded,
+                assetReferenceSets: &assetReferenceSets,
+                unrecognizedAssetRefs: &unrecognizedAssetRefs,
                 otherBytes: &otherBytes,
                 tooLarge: &tooLarge,
                 invalidAES: &invalidAES
@@ -187,6 +207,8 @@ enum ArchiveScanner {
                         sourceName: url.lastPathComponent,
                         pathPrefix: "\(entry.path)!/",
                         decoded: &decoded,
+                        assetReferenceSets: &assetReferenceSets,
+                        unrecognizedAssetRefs: &unrecognizedAssetRefs,
                         otherBytes: &otherBytes,
                         tooLarge: &tooLarge,
                         invalidAES: &invalidAES
@@ -199,6 +221,8 @@ enum ArchiveScanner {
 
         return AESScanReport(
             decoded: decoded,
+            assetReferenceSets: assetReferenceSets,
+            unrecognizedAssetRefCount: unrecognizedAssetRefs,
             otherBytesFiles: otherBytes,
             tooLargeToInspect: tooLarge,
             invalidAES: invalidAES
@@ -210,6 +234,8 @@ enum ArchiveScanner {
         sourceName: String,
         pathPrefix: String,
         decoded: inout [DecodedAESResource],
+        assetReferenceSets: inout [AssetRefInspection],
+        unrecognizedAssetRefs: inout Int,
         otherBytes: inout Int,
         tooLarge: inout Int,
         invalidAES: inout [String]
@@ -230,8 +256,22 @@ enum ArchiveScanner {
                 throw ArchiveScanError.crcFailure(sourceName, displayPath)
             }
 
-            guard AoVBytesDecoder.isAoVWrappedResource(resourceData) else {
-                otherBytes += 1
+            let isAssetRef = isAssetReferenceSetPath(displayPath)
+            if !AoVBytesDecoder.isAoVWrappedResource(resourceData) {
+                if isAssetRef {
+                    if let report = inspectAssetReferenceSet(
+                        resourceData,
+                        archiveName: sourceName,
+                        path: displayPath,
+                        wrapperMode: "raw"
+                    ) {
+                        assetReferenceSets.append(report)
+                    } else {
+                        unrecognizedAssetRefs += 1
+                    }
+                } else {
+                    otherBytes += 1
+                }
                 continue
             }
 
@@ -248,12 +288,114 @@ enum ArchiveScanner {
                         wrapperMode: decodedResource.wrapperMode
                     )
                 )
+                if isAssetRef {
+                    if let report = inspectAssetReferenceSet(
+                        payload,
+                        archiveName: sourceName,
+                        path: displayPath,
+                        wrapperMode: decodedResource.wrapperMode
+                    ) {
+                        assetReferenceSets.append(report)
+                    } else {
+                        unrecognizedAssetRefs += 1
+                    }
+                }
             } catch {
+                if isAssetRef { unrecognizedAssetRefs += 1 }
                 if invalidAES.count < 30 {
                     invalidAES.append("\(sourceName): \(displayPath) — \(error.localizedDescription)")
                 }
             }
         }
+    }
+
+    private static func isAssetReferenceSetPath(_ path: String) -> Bool {
+        let normalized = path.replacingOccurrences(of: "\\", with: "/")
+        let parts = normalized.split(separator: "/").map { $0.lowercased() }
+        guard parts.contains("assetrefs"), parts.contains("hero") else { return false }
+        let filename = (normalized as NSString).lastPathComponent
+        let pattern = #"^\d+_AssetRef\.bytes$"#
+        return filename.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    private static func inspectAssetReferenceSet(
+        _ payload: Data,
+        archiveName: String,
+        path: String,
+        wrapperMode: String
+    ) -> AssetRefInspection? {
+        let rootSignature = Array("ROOTC".utf8)
+        let typeSignature = Array("TypeAssetRefAnalyser.AssetReferenceSet".utf8)
+        let baseSubsetSignature = Array("baseSubset".utf8)
+        let skinSubsetSignature = Array("skinSubset".utf8)
+
+        func find(_ needle: [UInt8], lower: Int, upper: Int) -> Int? {
+            guard lower >= 0, upper <= payload.count, upper - lower >= needle.count else {
+                return nil
+            }
+            for offset in lower...(upper - needle.count) {
+                var matched = true
+                for index in needle.indices where payload[offset + index] != needle[index] {
+                    matched = false
+                    break
+                }
+                if matched { return offset }
+            }
+            return nil
+        }
+
+        guard let root = find(rootSignature, lower: 0, upper: min(64, payload.count)),
+              let type = find(typeSignature, lower: root, upper: min(payload.count, root + 1024)),
+              find(baseSubsetSignature, lower: type, upper: min(payload.count, type + 2048)) != nil else {
+            return nil
+        }
+
+        var candidates = Set<String>()
+        var index = 0
+        while index < payload.count && candidates.count < 500 {
+            let byte = payload[index]
+            if byte == 86 || byte == 118 {
+                let start = index
+                var end = index
+                while end < payload.count && end - start <= 240 {
+                    let value = payload[end]
+                    let isLetter = (65...90).contains(value) || (97...122).contains(value)
+                    let isDigit = (48...57).contains(value)
+                    if isLetter || isDigit || value == 95 || value == 45 || value == 46 || value == 47 {
+                        end += 1
+                    } else {
+                        break
+                    }
+                }
+                if end - start >= 7 {
+                    let slice = payload[start..<end]
+                    if slice.contains(47), let candidate = String(bytes: slice, encoding: .ascii) {
+                        candidates.insert(candidate)
+                    }
+                    index = end
+                    continue
+                }
+            }
+            index += 1
+        }
+
+        let filename = (path.replacingOccurrences(of: "\\", with: "/") as NSString).lastPathComponent
+        let actor = filename.range(of: #"^\d+(?=_AssetRef\.bytes$)"#,
+                                   options: [.regularExpression, .caseInsensitive])
+            .map { String(filename[$0]) }
+        let digest = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
+        return AssetRefInspection(
+            archiveName: archiveName,
+            path: path,
+            actorID: actor,
+            wrapperMode: wrapperMode,
+            decodedBytes: UInt64(payload.count),
+            sha256: digest,
+            hasBaseSubset: true,
+            hasSkinSubset: payload.range(of: Data(skinSubsetSignature)) != nil,
+            referencePathCandidates: candidates.count,
+            sampleReferences: candidates.sorted().prefix(5).map { $0 }
+        )
     }
 
     private static func scanOne(_ url: URL) throws -> ArchiveInventory {
