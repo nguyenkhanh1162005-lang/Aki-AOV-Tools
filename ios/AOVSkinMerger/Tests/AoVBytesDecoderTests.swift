@@ -17,6 +17,15 @@ final class AoVBytesDecoderTests: XCTestCase {
         )
         XCTAssertEqual(decoded.wrapperMode, "aes")
         XCTAssertEqual(decoded.data.count, 717)
+        let rebuilt = try AoVBytesDecoder.encodeResource(
+            decoded.data,
+            resourceName: "ResSkinSeniorLabelCfg.bytes",
+            wrapperMode: "aes"
+        )
+        XCTAssertEqual(
+            try AoVBytesDecoder.decodeResource(rebuilt, resourceName: "ResSkinSeniorLabelCfg.bytes").data,
+            decoded.data
+        )
     }
 
     func testDecryptsKnownRealAoVAESZstdFixtureWithDictionary() throws {
@@ -32,6 +41,14 @@ final class AoVBytesDecoderTests: XCTestCase {
         )
         XCTAssertEqual(decoded.wrapperMode, "aes+zstd")
         XCTAssertEqual(decoded.data.count, 2205)
+        let rebuilt = try AoVBytesDecoder.encodeResource(
+            decoded.data,
+            resourceName: "Independent_lua.bytes",
+            wrapperMode: "aes+zstd"
+        )
+        let roundTrip = try AoVBytesDecoder.decodeResource(rebuilt, resourceName: "Independent_lua.bytes")
+        XCTAssertEqual(roundTrip.wrapperMode, "aes+zstd")
+        XCTAssertEqual(roundTrip.data, decoded.data)
     }
 
     func testDecodesKnownRealAoVStandaloneZstdResource() throws {
@@ -47,6 +64,14 @@ final class AoVBytesDecoderTests: XCTestCase {
         )
         XCTAssertEqual(decoded.wrapperMode, "zstd")
         XCTAssertEqual(decoded.data.count, 3396)
+        let rebuilt = try AoVBytesDecoder.encodeResource(
+            decoded.data,
+            resourceName: "ResBillboard.bytes",
+            wrapperMode: "zstd"
+        )
+        let roundTrip = try AoVBytesDecoder.decodeResource(rebuilt, resourceName: "ResBillboard.bytes")
+        XCTAssertEqual(roundTrip.wrapperMode, "zstd")
+        XCTAssertEqual(roundTrip.data, decoded.data)
     }
 
     func testRejectsUnknownAESFlag() {
