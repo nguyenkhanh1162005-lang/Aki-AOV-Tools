@@ -1,4 +1,4 @@
-# AOV Skin Merger for iOS — prototype 0.2.0
+# AKI AOV SKIN for iOS — prototype 0.3.0
 
 This is an **unsigned iOS device build prototype**, not a finished AoV skin merger.
 
@@ -50,3 +50,10 @@ xcodebuild -project AOVSkinMerger.xcodeproj \\
 \`\`\`
 
 CI packages the unsigned device app into an \`.ipa\` artifact. **Unsigned IPA cannot be installed directly**: it must be signed with the user's own Apple development identity and provisioning profile, or re-signed with a sideloading tool such as AltStore/Sideloadly. No Apple signing credentials are stored in this repository.
+
+
+## App branding 0.3.0
+
+- iOS home-screen display name: `AKI AOV SKIN`.
+- App icon is generated from the image supplied by the user at build time.
+- The exported artifact is named `AKI AOV SKIN.ipa`.
