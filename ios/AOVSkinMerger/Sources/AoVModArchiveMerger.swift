@@ -95,7 +95,7 @@ enum AoVModArchiveMerger {
     private static let maximumInputs = 10
     private static let maximumInputBytes: UInt64 = 500 * 1024 * 1024
     private static let maximumEntries = 20_000
-    private static let maximumSingleEntry: UInt64 = 256 * 1024 * 1024
+    private static let maximumSingleEntry: UInt64 = 512 * 1024 * 1024
     private static let maximumExpandedPerArchive: UInt64 = 1024 * 1024 * 1024
     private static let commonActionsPath = "Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes"
     private static let packerPath = "assetbundle/resourcepackerinfosetall.assetbundle"
