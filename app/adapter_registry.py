@@ -108,7 +108,7 @@ _ADAPTERS = (
             "MOD wrapper + Resources.zip",
             "MSES v7 đã có schema",
             "MSES ngoài allowlist chỉ-thêm khi prefix khóa hàng quy được duy nhất về Actor",
-            "IFix có thể parse/round-trip", "CommonActions SkinOrAvatarList trực tiếp",
+            "IFix có thể parse/round-trip", "CommonActions SkinOrAvatarList + CheckSkinIdTick scalar/Array<int>"
             "Unity AssetBundle resource mới + Packer/Verification metadata",
             "ZIP package lồng không có xung đột",
             "Wwise BNK append-only khi Bank/Media/HIRC ID không xung đột",
@@ -122,7 +122,7 @@ _ADAPTERS = (
         "merge_policy": (
             "MSES dùng schema/Actor-owner đã hỗ trợ; bảng MSES lạ chỉ dùng adapter dự phòng "
             "khi schema/version/checksum khớp và prefix khóa hàng quy duy nhất về Actor_Action. "
-            "CommonActions chỉ nhận SkinOrAvatarList trực tiếp; IFix phải parse và round-trip; "
+            "CommonActions nhận SkinOrAvatarList trực tiếp và CheckSkinIdTick/CheckSkinIdVirtualTick ""với targetId trực tiếp, skinId scalar hoặc Array<int> skinIdArray; chỉ thêm ID thuộc ""Actor overlay và union array khi điều kiện còn lại giống nhau. Nested/combined ""condition chưa hỗ trợ sẽ bị chặn. IFix phải parse và round-trip; "
             "AssetBundle mới cần Packer và "
             "Verification được UnityPy đọc/ghi/đọc lại. AssetBundle trùng đường dẫn khác "
             "payload và WEM rời chưa đối chiếu được đều bị chặn. Wwise BNK chỉ được thêm "
