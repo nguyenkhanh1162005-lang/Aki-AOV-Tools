@@ -345,6 +345,17 @@ final class AoVBytesDecoderTests: XCTestCase {
         let packerPath = "assetbundle/resourcepackerinfosetall.assetbundle"
         let verificationPath = "assetbundle/resourceverificationinfosetall.assetbundle"
         let resSkinPath = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
+        let ifixPath = "Thanos/HeroSkin_1.bytes"
+        let baseIFix = try AoVBytesDecoder.encodeResource(
+            AoVIFixMerger.serialize(makeIFixPatch(name: "BaseFix")),
+            resourceName: ifixPath,
+            wrapperMode: "aes"
+        )
+        let overlayIFix = try AoVBytesDecoder.encodeResource(
+            AoVIFixMerger.serialize(makeIFixPatch(name: "OverlayFix")),
+            resourceName: ifixPath,
+            wrapperMode: "aes"
+        )
         let baseResourcesURL = try makeArchive(
             root: root,
             name: "base-resources.zip",
@@ -353,7 +364,8 @@ final class AoVBytesDecoderTests: XCTestCase {
                 commonPath: Data(contentsOf: baseCommon),
                 packerPath: Data("packer-placeholder".utf8),
                 verificationPath: Data("verification-placeholder".utf8),
-                resSkinPath: Data("base-res-skin".utf8)
+                resSkinPath: Data("base-res-skin".utf8),
+                ifixPath: baseIFix
             ]
         )
         let overlayResourcesURL = try makeArchive(
@@ -363,7 +375,8 @@ final class AoVBytesDecoderTests: XCTestCase {
                 "version.txt": Data("1.64.1.12".utf8),
                 commonPath: Data(contentsOf: overlayCommon),
                 "Actor_593_Actions.pkg.bytes": Data("actor593".utf8),
-                "Ages/Prefab_Characters/Prefab_Hero/Actor593/NewResource.bytes": Data("unique-overlay-resource".utf8)
+                "Ages/Prefab_Characters/Prefab_Hero/Actor593/NewResource.bytes": Data("unique-overlay-resource".utf8),
+                ifixPath: overlayIFix
             ]
         )
 
@@ -389,6 +402,7 @@ final class AoVBytesDecoderTests: XCTestCase {
         XCTAssertFalse(report.gameCompatibilityTested)
         XCTAssertEqual(report.baseSource, "base.zip")
         XCTAssertEqual(report.commonActionsFiles, [commonPath])
+        XCTAssertEqual(report.mergedIFixPatches, [ifixPath])
         XCTAssertEqual(report.addedResources, 2)
         XCTAssertTrue(FileManager.default.fileExists(atPath: report.outputURL.path))
 
@@ -428,6 +442,33 @@ final class AoVBytesDecoderTests: XCTestCase {
         let xmlText = String(data: decodedXML.data, encoding: .utf8) ?? ""
         XCTAssertTrue(xmlText.contains("SkinOrAvatarList"))
         XCTAssertTrue(xmlText.contains("59300"))
+    }
+
+    private func makeIFixPatch(name: String) -> AoVIFixPatch {
+        AoVIFixPatch(
+            magic: 123456789,
+            bridge: "Project_d",
+            types: ["\(name)Type"],
+            methods: [AoVIFixMethod(instructions: [
+                AoVIFixInstruction(opcode: 103, operand: 0)
+            ], handlers: [])],
+            externalMethods: [],
+            strings: [],
+            fields: [],
+            staticFields: [],
+            anonymousClasses: [],
+            wrappers: "Wrappers",
+            assembly: "Project_d",
+            fixes: [AoVIFixFixInfo(
+                isGeneric: false,
+                typeID: 0,
+                name: name,
+                genericArguments: [],
+                parameters: [],
+                patchIndex: 0
+            )],
+            newClasses: []
+        )
     }
 
     private func makeArchive(root: URL, name: String, files: [String: Data]) throws -> URL {
