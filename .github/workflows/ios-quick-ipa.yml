@@ -1,0 +1,78 @@
+name: Build iOS IPA artifact (no simulator launch)
+
+on:
+  push:
+    branches:
+      - feat/ios-offline-app-prototype
+    paths:
+      - '.github/workflows/ios-quick-ipa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-unsigned-ipa:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios/AOVSkinMerger
+        run: xcodegen generate
+
+      - name: Resolve Swift packages
+        working-directory: ios/AOVSkinMerger
+        run: >-
+          xcodebuild -resolvePackageDependencies
+          -project AOVSkinMerger.xcodeproj
+          -scheme AOVSkinMerger
+
+      - name: Compile simulator test bundle without launching simulator
+        working-directory: ios/AOVSkinMerger
+        run: >-
+          xcodebuild build-for-testing
+          -project AOVSkinMerger.xcodeproj
+          -scheme AOVSkinMerger
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/AOVTestDerivedData"
+
+      - name: Build unsigned iOS device app
+        working-directory: ios/AOVSkinMerger
+        run: >-
+          xcodebuild build
+          -project AOVSkinMerger.xcodeproj
+          -scheme AOVSkinMerger
+          -configuration Release
+          -sdk iphoneos
+          -destination 'generic/platform=iOS'
+          -derivedDataPath "$RUNNER_TEMP/AOVDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH="$RUNNER_TEMP/AOVDerivedData/Build/Products/Release-iphoneos/AOVSkinMerger.app"
+          test -d "$APP_PATH"
+          PACKAGE_DIR="$RUNNER_TEMP/AOVIPAPackage"
+          mkdir -p "$PACKAGE_DIR/Payload"
+          ditto "$APP_PATH" "$PACKAGE_DIR/Payload/AOVSkinMerger.app"
+          (
+            cd "$PACKAGE_DIR"
+            /usr/bin/zip -qry "$GITHUB_WORKSPACE/AOVSkinMerger-unsigned.ipa" Payload
+          )
+          shasum -a 256 "$GITHUB_WORKSPACE/AOVSkinMerger-unsigned.ipa"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AOVSkinMerger-0.2.0-unsigned-IPA
+          path: AOVSkinMerger-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
