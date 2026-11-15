@@ -47,7 +47,7 @@ struct ContentView: View {
                             }.frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
-                        .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding)
+                        .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding || isCopyingFiles || isMerging)
                         Button(action: runAESScan) {
                             HStack {
                                 if isDecoding { ProgressView() }
@@ -56,7 +56,7 @@ struct ContentView: View {
                             }.frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
-                        .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding)
+                        .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding || isCopyingFiles || isMerging)
                         Text("Chọn ZIP trong ứng dụng Tệp. App sẽ sao chép file vào bộ nhớ iPhone trước, rồi mới quét hoặc ghép. Hãy đợi tên file xuất hiện trong danh sách.")
                             .font(.caption2).foregroundColor(.secondary)
                         Button(action: runModMerge) {
@@ -68,7 +68,7 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(selectedURLs.count < 2 || isAnalyzing || isDecoding || isMerging)
+                        .disabled(selectedURLs.count < 2 || isAnalyzing || isDecoding || isMerging || isCopyingFiles)
                     }
                     .panel()
 

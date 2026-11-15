@@ -44,7 +44,7 @@ final class AoVSourceFileImporterTests: XCTestCase {
         }
 
         XCTAssertThrowsError(try AoVSourceFileImporter.copy(urls, into: appFolder))
-        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: appFolder.path).count, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: appFolder.path))
     }
 
     func testReportsNonZipSelectionWithoutCopyingIt() throws {
