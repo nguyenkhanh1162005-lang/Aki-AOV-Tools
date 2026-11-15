@@ -159,7 +159,7 @@
 -            node.attrib.get("id")
 -            for node in track.iter("SkinOrAvatarList")
 -            if node.attrib.get("id") in target_ids
-        )
+         )
 -    for source_track in overlay_action.iter("Track"):
 -        if not _is_special_track(source_track, target_ids):
 -            continue
