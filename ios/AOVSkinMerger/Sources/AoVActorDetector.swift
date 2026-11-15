@@ -73,9 +73,9 @@ enum AoVActorDetector {
         var seen = Set<String>()
         let lines = text.replacingOccurrences(of: "\r", with: "\n").components(separatedBy: "\n")
         for rawLine in lines {
-            let value = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-                .drop(while: { "-*•· ".contains($0) })
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let stripped = String(rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                .drop(while: { "-*•· ".contains($0) }))
+            let value = stripped.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty, value.count <= 160 else { continue }
             guard value.rangeOfCharacter(from: .letters) != nil else { continue }
             let key = value.lowercased()
