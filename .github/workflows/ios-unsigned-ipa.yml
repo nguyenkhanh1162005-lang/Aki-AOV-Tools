@@ -1,0 +1,106 @@
+name: Build iOS unsigned IPA
+
+on:
+  push:
+    branches:
+      - feat/ios-offline-app-prototype
+    paths:
+      - 'ios/AOVSkinMerger/**'
+      - '.github/workflows/ios-unsigned-ipa.yml'
+  pull_request:
+    branches:
+      - feat/multi-actor-aov-archive-merge
+    paths:
+      - 'ios/AOVSkinMerger/**'
+      - '.github/workflows/ios-unsigned-ipa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aki-aov-skin-ios-${{ github.event.pull_request.head.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-unsigned-ipa:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate 1024px app icon from supplied artwork
+        shell: bash
+        run: |
+          set -euo pipefail
+          ICON_DIR="ios/AOVSkinMerger/Sources/Assets.xcassets/AppIcon.appiconset"
+          export ICON_OUTPUT="$RUNNER_TEMP/aki-aov-skin-icon.jpg"
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+          source = Path("ios/AOVSkinMerger/IconSource/app-icon.jpg.base64").read_text().strip()
+          Path(os.environ["ICON_OUTPUT"]).write_bytes(base64.b64decode(source, validate=True))
+          PY
+          sips -s format png -z 1024 1024 "$ICON_OUTPUT" --out "$ICON_DIR/AppIcon.png"
+          test -s "$ICON_DIR/AppIcon.png"
+
+      - name: Generate Xcode project
+        working-directory: ios/AOVSkinMerger
+        run: xcodegen generate
+
+      - name: Resolve Swift packages
+        working-directory: ios/AOVSkinMerger
+        run: >-
+          xcodebuild -resolvePackageDependencies
+          -project AOVSkinMerger.xcodeproj
+          -scheme AOVSkinMerger
+
+      - name: Run iOS unit tests
+        working-directory: ios/AOVSkinMerger
+        run: >-
+          xcodebuild test
+          -project AOVSkinMerger.xcodeproj
+          -scheme AOVSkinMerger
+          -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+          -derivedDataPath "$RUNNER_TEMP/AOVTestDerivedData"
+
+      - name: Build unsigned iOS device app
+        working-directory: ios/AOVSkinMerger
+        run: >-
+          xcodebuild
+          -project AOVSkinMerger.xcodeproj
+          -scheme AOVSkinMerger
+          -configuration Release
+          -sdk iphoneos
+          -destination 'generic/platform=iOS'
+          -derivedDataPath "$RUNNER_TEMP/AOVDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH="$RUNNER_TEMP/AOVDerivedData/Build/Products/Release-iphoneos/AOVSkinMerger.app"
+          test -d "$APP_PATH"
+          PACKAGE_DIR="$RUNNER_TEMP/AOVIPAPackage"
+          mkdir -p "$PACKAGE_DIR/Payload"
+          ditto "$APP_PATH" "$PACKAGE_DIR/Payload/AOVSkinMerger.app"
+          (
+            cd "$PACKAGE_DIR"
+            /usr/bin/zip -qry "$GITHUB_WORKSPACE/AKI AOV SKIN.ipa" Payload
+          )
+          shasum -a 256 "$GITHUB_WORKSPACE/AKI AOV SKIN.ipa"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AKI-AOV-SKIN-0.4.1-IPA
+          path: AKI AOV SKIN.ipa
+          if-no-files-found: error
+          retention-days: 14
