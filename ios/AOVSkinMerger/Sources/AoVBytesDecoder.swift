@@ -50,6 +50,23 @@ struct AoVDecodedResource: Sendable {
 
 private final class AoVBytesDecoderBundleToken {}
 
+private final class AoVZstdDictionaryCache: @unchecked Sendable {
+    let handle: OpaquePointer
+
+    init?(data: Data) {
+        let created: OpaquePointer? = data.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else { return nil }
+            return ZSTD_createDDict(baseAddress, data.count)
+        }
+        guard let created else { return nil }
+        handle = created
+    }
+
+    deinit {
+        _ = ZSTD_freeDDict(handle)
+    }
+}
+
 enum AoVBytesDecoder {
     private static let aesHeader: [UInt8] = [0x22, 0x4A, 0x67]
     private static let zstdHeader: [UInt8] = [0x22, 0x4A, 0x00, 0xEF]
@@ -59,6 +76,18 @@ enum AoVBytesDecoder {
         0xB7, 0x7D, 0xB6, 0xA7, 0x54, 0x90, 0x8B, 0x73
     ]
     private static let maximumDecodedBytes: UInt32 = 32 * 1024 * 1024
+    private static let dictionaryCache: AoVZstdDictionaryCache? = {
+        let url = Bundle.main.url(forResource: "AoVZstdDictionary", withExtension: "base64")
+            ?? Bundle(for: AoVBytesDecoderBundleToken.self).url(forResource: "AoVZstdDictionary", withExtension: "base64")
+        guard let url,
+              let base64 = try? String(contentsOf: url, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              let data = Data(base64Encoded: base64),
+              data.count >= 8 else {
+            return nil
+        }
+        return AoVZstdDictionaryCache(data: data)
+    }()
 
     static func isAESResource(_ data: Data) -> Bool {
         data.count >= 4 && Array(data.prefix(3)) == aesHeader
@@ -158,23 +187,9 @@ enum AoVBytesDecoder {
         guard expectedSize <= maximumDecodedBytes else {
             throw AoVBytesDecodeError.resourceTooLarge
         }
-        let bundleURL = Bundle.main.url(forResource: "AoVZstdDictionary", withExtension: "base64")
-            ?? Bundle(for: AoVBytesDecoderBundleToken.self).url(forResource: "AoVZstdDictionary", withExtension: "base64")
-        guard let bundleURL else { throw AoVBytesDecodeError.dictionaryMissing }
-
-        let base64 = try String(contentsOf: bundleURL, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let dictionary = Data(base64Encoded: base64),
-              dictionary.count >= 8 else {
-            throw AoVBytesDecodeError.dictionaryInvalid
+        guard let dictionaryHandle = dictionaryCache?.handle else {
+            throw AoVBytesDecodeError.dictionaryMissing
         }
-
-        let dictionaryHandle: OpaquePointer? = dictionary.withUnsafeBytes { dictionaryBytes in
-            guard let baseAddress = dictionaryBytes.baseAddress else { return nil }
-            return ZSTD_createDDict(baseAddress, dictionary.count)
-        }
-        guard let dictionaryHandle else { throw AoVBytesDecodeError.dictionaryInvalid }
-        defer { _ = ZSTD_freeDDict(dictionaryHandle) }
 
         guard let context = ZSTD_createDCtx() else {
             throw AoVBytesDecodeError.zstdDecodeFailed("Không tạo được decompression context.")
