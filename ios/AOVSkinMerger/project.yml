@@ -16,8 +16,6 @@ targets:
     platform: iOS
     sources:
       - path: Sources
-    resources:
-      - path: Resources/AoVZstdDictionary.base64
     dependencies:
       - package: ZIPFoundation
       - package: zstd
@@ -39,8 +37,6 @@ targets:
     platform: iOS
     sources:
       - path: Tests
-    resources:
-      - path: Resources/AoVZstdDictionary.base64
     dependencies:
       - target: AOVSkinMerger
     settings:
