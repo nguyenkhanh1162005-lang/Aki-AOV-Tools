@@ -110,7 +110,7 @@ struct ContentView: View {
                 .padding(16)
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("AOV Skin Merger")
+            .navigationTitle("AKI AOV SKIN")
             .navigationBarTitleDisplayMode(.inline)
             .fileImporter(isPresented: $isImporting, allowedContentTypes: [.zip],
                           allowsMultipleSelection: true, onCompletion: importFiles)
@@ -125,8 +125,8 @@ struct ContentView: View {
             HStack(spacing: 10) {
                 Image(systemName: "archivebox.fill").font(.system(size: 28)).foregroundColor(.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("AOV Skin Merger").font(.title2.bold())
-                    Text("Bản iOS thử nghiệm 0.2.0").font(.caption).foregroundColor(.secondary)
+                    Text("AKI AOV SKIN").font(.title2.bold())
+                    Text("Bản iOS thử nghiệm 0.3.0").font(.caption).foregroundColor(.secondary)
                 }
             }
             Text("Kiểm tra payload ZIP và giải mã thử một nhánh AES AoV trực tiếp trên iPhone. Chưa phải bộ ghép skin hoàn chỉnh.")
