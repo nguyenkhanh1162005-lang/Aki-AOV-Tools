@@ -180,6 +180,13 @@ enum AoVModArchiveMerger {
 
             if distinct.isEmpty {
                 if baseProvider.0.id != base.id {
+                    let lowerPath = path.lowercased()
+                    if lowerPath == "thanos/heroskin_1.bytes" || lowerPath == "thanos/heroskin_2.bytes" {
+                        throw AoVModArchiveMergeError.unsupportedConflict(
+                            path,
+                            "IFix chỉ có ở overlay, chưa có patch nền để remap index."
+                        )
+                    }
                     try classifyNewResource(path, sourceName: baseProvider.0.name)
                     added[path] = baseProvider.1
                     if isAssetReferencePath(path) { assetRefUnique.append(path) }
