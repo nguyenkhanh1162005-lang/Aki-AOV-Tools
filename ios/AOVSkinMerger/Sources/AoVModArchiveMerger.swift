@@ -68,6 +68,7 @@ private struct AoVResourceReference {
 }
 
 private struct AoVModSource {
+    let id: UUID
     let name: String
     let outerArchive: Archive
     let resourceArchive: Archive
@@ -120,7 +121,7 @@ enum AoVModArchiveMerger {
         let wrappers = sources.filter(\.isWrapper)
         guard !wrappers.isEmpty else { throw AoVModArchiveMergeError.noBaseWrapper }
         let base = wrappers.max { lhs, rhs in
-            sourceCompleteness(lhs) < sourceCompleteness(rhs)
+            isLessComplete(lhs, rhs)
         }!
         guard base.outerResourcesEntry != nil,
               base.outerSkinEntry != nil else {
@@ -139,7 +140,7 @@ enum AoVModArchiveMerger {
             }
         }
 
-        let ordered = [base] + sources.filter { $0.name != base.name }
+        let ordered = [base] + sources.filter { $0.id != base.id }
         let allPaths = Set(ordered.flatMap { Array($0.resources.keys) }).sorted()
         var added: [String: AoVResourceReference] = [:]
         var replacements: [String: Data] = [:]
@@ -254,7 +255,8 @@ enum AoVModArchiveMerger {
             "AKI_AOV_SKIN_\(UUID().uuidString.prefix(8)).zip"
         )
         let stagedURL = tempRoot.appendingPathComponent("AKI-AOV-output.zip")
-        try writeOuterArchive(base: base, innerURL: innerOutputURL, outputURL: stagedURL, sources: ordered, tempRoot: tempRoot)
+        try writeOuterArchive(base: base, innerURL: innerOutputURL, outputURL: stagedURL,
+                              sources: ordered, replacements: replacements, tempRoot: tempRoot)
         try verifyArchive(stagedURL, label: "ZIP ngoài")
         try FileManager.default.moveItem(at: stagedURL, to: finalURL)
 
@@ -278,6 +280,14 @@ enum AoVModArchiveMerger {
         let paths = Set(source.resources.keys)
         let required = [commonActionsPath, packerPath, verificationPath, resSkinPath, "version.txt"]
         return (required.filter { paths.contains($0) }.count, paths.count, source.uncompressedBytes)
+    }
+
+    private static func isLessComplete(_ lhs: AoVModSource, _ rhs: AoVModSource) -> Bool {
+        let a = sourceCompleteness(lhs)
+        let b = sourceCompleteness(rhs)
+        if a.0 != b.0 { return a.0 < b.0 }
+        if a.1 != b.1 { return a.1 < b.1 }
+        return a.2 < b.2
     }
 
     private static func makeSource(_ url: URL, tempRoot: URL) throws -> AoVModSource {
@@ -353,6 +363,7 @@ enum AoVModArchiveMerger {
         }
 
         return AoVModSource(
+            id: UUID(),
             name: url.lastPathComponent,
             outerArchive: outer,
             resourceArchive: resourceArchive,
@@ -556,6 +567,7 @@ enum AoVModArchiveMerger {
         innerURL: URL,
         outputURL: URL,
         sources: [AoVModSource],
+        replacements: [String: Data],
         tempRoot: URL
     ) throws {
         guard let resourcesEntry = base.outerResourcesEntry,
@@ -571,6 +583,10 @@ enum AoVModArchiveMerger {
                                     compressionMethod: .deflate, bufferSize: 64 * 1024)
             } else if entry.path == skinEntry.path {
                 try addData(skinData, to: output, path: entry.path, tempRoot: tempRoot)
+            } else if entry.path.replacingOccurrences(of: "\\", with: "/").hasPrefix("Resources/"),
+                      let relative = try? normalizeResourcePath(entry.path),
+                      let replacement = replacements[relative] {
+                try addData(replacement, to: output, path: entry.path, tempRoot: tempRoot)
             } else {
                 try copyEntry(entry, from: base.outerArchive, to: output,
                               path: entry.path, tempRoot: tempRoot)
