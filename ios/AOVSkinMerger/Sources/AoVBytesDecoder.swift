@@ -48,8 +48,6 @@ struct AoVDecodedResource: Sendable {
     let wrapperMode: String
 }
 
-private final class AoVBytesDecoderBundleToken {}
-
 private final class AoVZstdDictionaryCache: @unchecked Sendable {
     let data: Data
     let handle: OpaquePointer
@@ -79,15 +77,7 @@ enum AoVBytesDecoder {
     ]
     private static let maximumDecodedBytes: UInt32 = 32 * 1024 * 1024
     private static let dictionaryCache: AoVZstdDictionaryCache? = {
-        let url = Bundle.main.url(forResource: "AoVZstdDictionary", withExtension: "base64")
-            ?? Bundle(for: AoVBytesDecoderBundleToken.self).url(forResource: "AoVZstdDictionary", withExtension: "base64")
-        guard let url,
-              let base64 = try? String(contentsOf: url, encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-              let data = Data(base64Encoded: base64),
-              data.count >= 8 else {
-            return nil
-        }
+        guard let data = AoVZstdDictionary.data, data.count >= 8 else { return nil }
         return AoVZstdDictionaryCache(data: data)
     }()
 
