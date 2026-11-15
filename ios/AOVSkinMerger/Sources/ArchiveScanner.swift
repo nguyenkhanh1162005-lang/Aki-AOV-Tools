@@ -54,6 +54,7 @@ struct AESScanReport: Codable, Sendable {
     let invalidAES: [String]
     var aesDecodedCount: Int { decoded.filter { $0.wrapperMode == "aes" }.count }
     var aesZstdDecodedCount: Int { decoded.filter { $0.wrapperMode == "aes+zstd" }.count }
+    var zstdDecodedCount: Int { decoded.filter { $0.wrapperMode == "zstd" }.count }
 }
 
 enum ArchiveScanError: LocalizedError {
@@ -229,7 +230,7 @@ enum ArchiveScanner {
                 throw ArchiveScanError.crcFailure(sourceName, displayPath)
             }
 
-            guard AoVBytesDecoder.isAESResource(resourceData) else {
+            guard AoVBytesDecoder.isAoVWrappedResource(resourceData) else {
                 otherBytes += 1
                 continue
             }
