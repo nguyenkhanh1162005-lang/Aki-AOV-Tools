@@ -34,6 +34,21 @@ final class AoVBytesDecoderTests: XCTestCase {
         XCTAssertEqual(decoded.data.count, 2205)
     }
 
+    func testDecodesKnownRealAoVStandaloneZstdResource() throws {
+        let hex = "224a00ef440d000028b52ffd63e755430b440c8d080063cd2b77a6f0df8879dc03ac97ad2a45a729c92d9187de81758034878b83bda15e6a679534ce961ce1eccb16562dd486f9640d91869633d817aa0bb485c9825c21aad05938a670fb041851b026d4122809730429420ca141e00f6063b957ac955a85529953a407514a47612890517852c375629bd41dca64eac89c88d337346839002c8016d6225406d3360c2868d2c2f908096193962a72396144438c369396ed6d59bb4ab38b6d10d698711d86dd8abd048093a811a037b4ff06c09532cc01821082866008212817be1174fcfe1924f7a43e65d5dfe210613fd391e5b9ffa86f67efb035cd103d3925ad4f3ff03fd998e6934f57463e3f421595544a5c397608a7f5b62402b7e67fa7a00133c1eb7407"
+        let bytes = stride(from: 0, to: hex.count, by: 2).map { offset -> UInt8 in
+            let start = hex.index(hex.startIndex, offsetBy: offset)
+            let end = hex.index(start, offsetBy: 2)
+            return UInt8(hex[start..<end], radix: 16)!
+        }
+        let decoded = try AoVBytesDecoder.decodeResource(
+            Data(bytes),
+            resourceName: "ResBillboard.bytes"
+        )
+        XCTAssertEqual(decoded.wrapperMode, "zstd")
+        XCTAssertEqual(decoded.data.count, 3396)
+    }
+
     func testRejectsUnknownAESFlag() {
         var data = Data([0x22, 0x4A, 0x67, 0x01, 0x01, 0, 0, 0])
         data.append(Data(repeating: 0, count: 16))
