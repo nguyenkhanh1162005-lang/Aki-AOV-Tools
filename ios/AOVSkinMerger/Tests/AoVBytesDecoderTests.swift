@@ -78,6 +78,38 @@ final class AoVBytesDecoderTests: XCTestCase {
         XCTAssertEqual(conflictReport.conflictingPaths, 1)
     }
 
+    func testRecognizesRawAssetReferenceSetAndActorID() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AOVAssetRefTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        var payload = Data(repeating: 0, count: 512)
+        let type = Data("TypeAssetRefAnalyser.AssetReferenceSet".utf8)
+        let base = Data("baseSubset".utf8)
+        let skin = Data("skinSubset".utf8)
+        let reference = Data("VPrefabs/SkillEffects/TestEffect".utf8)
+        payload.replaceSubrange(0..<5, with: Data("ROOTC".utf8))
+        payload.replaceSubrange(16..<(16 + type.count), with: type)
+        payload.replaceSubrange(120..<(120 + base.count), with: base)
+        payload.replaceSubrange(160..<(160 + skin.count), with: skin)
+        payload.replaceSubrange(220..<(220 + reference.count), with: reference)
+
+        let zipURL = try makeArchive(
+            root: root,
+            name: "assetref.zip",
+            path: "Resources/AssetRefs/Hero/593_AssetRef.bytes",
+            payload: payload
+        )
+        let report = try ArchiveScanner.inspectAESResources([zipURL])
+        XCTAssertEqual(report.assetReferenceSets.count, 1)
+        XCTAssertEqual(report.assetReferenceSets.first?.actorID, "593")
+        XCTAssertEqual(report.assetReferenceSets.first?.wrapperMode, "raw")
+        XCTAssertTrue(report.assetReferenceSets.first?.hasBaseSubset ?? false)
+        XCTAssertTrue(report.assetReferenceSets.first?.hasSkinSubset ?? false)
+        XCTAssertEqual(report.assetReferenceSets.first?.referencePathCandidates, 1)
+    }
+
     private func makeArchive(root: URL, name: String, path: String, payload: Data) throws -> URL {
         let source = root.appendingPathComponent(UUID().uuidString + ".bin")
         try payload.write(to: source)
