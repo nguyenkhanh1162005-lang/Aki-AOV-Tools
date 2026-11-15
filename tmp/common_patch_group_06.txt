@@ -73,7 +73,7 @@
 -                            f"khác nhau cho skin ID {skin_id} tại track "
 -                            f"{track_key[0]}."
 -                        )
--                        signatures[key] = digest
+-                    signatures[key] = digest
 +                signatures[key] = digest
      finally:
          archive.close()
