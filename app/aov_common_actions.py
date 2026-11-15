@@ -855,10 +855,23 @@ def merge_common_actions_packages(
         for key, digest in signatures.items():
             previous = seen_conditions.get(key)
             if previous is not None and previous[0] != digest:
-                name, track_key, skin_id = key
+                name = key[0]
+                condition_kind = key[1] if len(key) > 1 else "unknown"
+                track_identity = key[2] if len(key) > 2 else "unknown"
+                track_name = (
+                    track_identity[0]
+                    if isinstance(track_identity, tuple) and track_identity
+                    else str(track_identity)
+                )
+                if condition_kind in {"SkinOrAvatarList", "CheckSkinIdScalar"} and len(key) > 3:
+                    condition_label = f"skin ID {key[3]}"
+                elif condition_kind == "CheckSkinIdArray":
+                    condition_label = "skinIdArray"
+                else:
+                    condition_label = "điều kiện skin"
                 raise CommonActionsMergeError(
                     f"{name}: nhiều overlay định nghĩa điều kiện khác nhau cho "
-                    f"skin ID {skin_id} tại track {track_key[0]} "
+                    f"{condition_label} tại track {track_name} "
                     f"(overlay {previous[1]} và {index}); không tự chọn bản thắng."
                 )
             seen_conditions[key] = (digest, index)
