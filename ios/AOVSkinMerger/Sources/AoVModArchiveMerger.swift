@@ -233,6 +233,12 @@ enum AoVModArchiveMerger {
             if path.lowercased().hasSuffix(".assetbundle") {
                 throw AoVModArchiveMergeError.assetBundleMetadataRequired(path)
             }
+            if path.lowercased().hasSuffix(".pkg.bytes") {
+                throw AoVModArchiveMergeError.unsupportedConflict(
+                    path,
+                    "Package nhị phân trùng đường dẫn nhưng chưa có adapter chuyên biệt; từ chối ghi đè."
+                )
+            }
             if path.lowercased().hasSuffix(".bytes") {
                 guard baseProvider.0.id == base.id else {
                     throw AoVModArchiveMergeError.unsupportedConflict(
@@ -270,12 +276,6 @@ enum AoVModArchiveMerger {
                         "\(path): \(error.localizedDescription)"
                     )
                 }
-            }
-            if path.lowercased().hasSuffix(".pkg.bytes") {
-                throw AoVModArchiveMergeError.unsupportedConflict(
-                    path,
-                    "Package nhị phân trùng đường dẫn nhưng chưa có adapter chuyên biệt; từ chối ghi đè."
-                )
             }
             throw AoVModArchiveMergeError.unsupportedConflict(
                 path,

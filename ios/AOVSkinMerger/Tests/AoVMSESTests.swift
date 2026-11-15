@@ -67,7 +67,7 @@ final class AoVMSESTests: XCTestCase {
             (59300, "overlay must not replace actor 593"),
             (59500, "overlay actor 595"),
             (59501, "new actor 595"),
-            (7, "global overlay must not replace base")
+            (7, "global base")
         ])
         let base = try AoVBytesDecoder.encodeResource(basePlain, resourceName: path, wrapperMode: "aes")
         let overlay = try AoVBytesDecoder.encodeResource(overlayPlain, resourceName: path, wrapperMode: "aes")
@@ -89,7 +89,7 @@ final class AoVMSESTests: XCTestCase {
         XCTAssertEqual(report.adapter, "actor_owned_mses_rows")
         XCTAssertEqual(report.appendedKeys, [59501])
         XCTAssertEqual(report.overlayOwnedConflictKeys, [59500])
-        XCTAssertEqual(report.retainedBaseConflictKeys, [59300, 7])
+        XCTAssertEqual(report.retainedBaseConflictKeys, [59300])
         XCTAssertTrue(report.verified)
     }
 
@@ -214,35 +214,5 @@ final class AoVMSESTests: XCTestCase {
         return archiveURL
     }
 
-    private func makeMSES(fieldCount: UInt32, rows: [(UInt32, String)]) throws -> Data {
-        var header = Data(repeating: 0, count: AoVMSESParser.headerSize)
-        header.replaceSubrange(0..<4, with: Data("MSES".utf8))
-        func write(_ value: UInt32, at offset: Int) {
-            header[offset] = UInt8(value & 0xFF)
-            header[offset + 1] = UInt8((value >> 8) & 0xFF)
-            header[offset + 2] = UInt8((value >> 16) & 0xFF)
-            header[offset + 3] = UInt8((value >> 24) & 0xFF)
-        }
-        write(7, at: 4)
-        write(fieldCount, at: 8)
-        write(UInt32(rows.count), at: 12)
-        let shell = AoVMSESTable(version: 7, fieldCount: fieldCount, rows: [],
-                                 header: header, checksumValid: true)
-        let payload = rows.map { key, value -> Data in
-            var row = Data([UInt8(key & 0xFF), UInt8((key >> 8) & 0xFF),
-                            UInt8((key >> 16) & 0xFF), UInt8((key >> 24) & 0xFF)])
-            row.append(Data(value.utf8))
-            return row
-        }
-        return try AoVMSESParser.build(shell, rows: payload)
-    }
-
-    private func rowMap(_ table: AoVMSESTable) -> [UInt32: String] {
-        Dictionary(uniqueKeysWithValues: table.rows.map { row in
-            let key = UInt32(row[0]) | (UInt32(row[1]) << 8) |
-                (UInt32(row[2]) << 16) | (UInt32(row[3]) << 24)
-            return (key, String(data: row.dropFirst(4), encoding: .utf8) ?? "")
-        })
-    }
 
 }

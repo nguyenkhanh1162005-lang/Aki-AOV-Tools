@@ -295,6 +295,13 @@ enum AoVMSESParser {
         }
         let baseMap = try indexRows(base.rows)
         let overlayMap = try indexRows(overlay.rows)
+        if base.fieldCount != overlay.fieldCount {
+            let sharedKeys = Set(baseMap.keys).intersection(overlayMap.keys)
+            let differing = sharedKeys.filter { baseMap[$0] != overlayMap[$0] }
+            if !differing.isEmpty {
+                throw AoVMSESError.unresolvedConflict(differing.sorted())
+            }
+        }
         guard requiredOverlayKeys.isSubset(of: Set(overlayMap.keys)) else {
             throw AoVMSESError.allowlistViolation(Array(requiredOverlayKeys.subtracting(overlayMap.keys)).sorted())
         }
