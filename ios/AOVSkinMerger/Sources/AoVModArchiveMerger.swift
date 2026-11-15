@@ -179,10 +179,15 @@ enum AoVModArchiveMerger {
             }
 
             if distinct.isEmpty {
-                if baseProvider.0.name != base.name {
+                if baseProvider.0.id != base.id {
                     try classifyNewResource(path, sourceName: baseProvider.0.name)
                     added[path] = baseProvider.1
-                    let lowerPath = path.lowercased()
+                    if isAssetReferencePath(path) { assetRefUnique.append(path) }
+                }
+                continue
+            }
+
+            let lowerPath = path.lowercased()
             if lowerPath == "thanos/heroskin_1.bytes" || lowerPath == "thanos/heroskin_2.bytes" {
                 guard baseProvider.0.id == base.id else {
                     throw AoVModArchiveMergeError.unsupportedConflict(
@@ -210,10 +215,6 @@ enum AoVModArchiveMerger {
                         "\(path): \(error.localizedDescription)"
                     )
                 }
-            }
-            if isAssetReferencePath(path) { assetRefUnique.append(path) }
-                }
-                continue
             }
 
             if path == commonActionsPath {
