@@ -366,14 +366,14 @@ enum AoVIFixMerger {
         var reader = AoVIFixReader(data: data)
         let magic = try reader.uint64()
         let bridge = try reader.string()
-        let types = try (0..<reader.count("bản ghi")).map { _ in try reader.string() }
+        let types = try (0..<(try reader.count("bản ghi"))).map { _ in try reader.string() }
 
         var methods: [AoVIFixMethod] = []
-        for _ in 0..<reader.count("bản ghi") {
-            let instructions = try (0..<reader.count("bản ghi")).map { _ in
+        for _ in 0..<(try reader.count("bản ghi")) {
+            let instructions = try (0..<(try reader.count("bản ghi"))).map { _ in
                 AoVIFixInstruction(opcode: try reader.int32(), operand: try reader.int32())
             }
-            let handlers = try (0..<reader.count("bản ghi")).map { _ in
+            let handlers = try (0..<(try reader.count("bản ghi"))).map { _ in
                 AoVIFixExceptionHandler(values: try (0..<6).map { _ in try reader.int32() })
             }
             methods.append(AoVIFixMethod(instructions: instructions, handlers: handlers))
@@ -387,7 +387,7 @@ enum AoVIFixMerger {
             var parameters: [AoVIFixParameter] = []
             if isGeneric {
                 genericArguments = try reader.intArray()
-                for _ in 0..<reader.count("bản ghi") {
+                for _ in 0..<(try reader.count("bản ghi")) {
                     if try reader.boolean() {
                         parameters.append(.string(try reader.string()))
                     } else {
@@ -407,13 +407,13 @@ enum AoVIFixMerger {
         }
 
         var externalMethods: [AoVIFixMethodReference] = []
-        for _ in 0..<reader.count("bản ghi") {
+        for _ in 0..<(try reader.count("bản ghi")) {
             externalMethods.append(try readReference(&reader, hasPatchIndex: false))
         }
-        let strings = try (0..<reader.count("bản ghi")).map { _ in try reader.string() }
+        let strings = try (0..<(try reader.count("bản ghi"))).map { _ in try reader.string() }
 
         var fields: [AoVIFixField] = []
-        for _ in 0..<reader.count("bản ghi") {
+        for _ in 0..<(try reader.count("bản ghi")) {
             let isNew = try reader.boolean()
             let typeID = try reader.int32()
             let name = try reader.string()
@@ -423,11 +423,11 @@ enum AoVIFixMerger {
             ))
         }
 
-        let staticFields = try (0..<reader.count("bản ghi")).map { _ in
+        let staticFields = try (0..<(try reader.count("bản ghi"))).map { _ in
             AoVIFixStaticField(typeID: try reader.int32(), constructorIndex: try reader.int32())
         }
         var anonymousClasses: [AoVIFixAnonymousClass] = []
-        for _ in 0..<reader.count("bản ghi") {
+        for _ in 0..<(try reader.count("bản ghi")) {
             anonymousClasses.append(AoVIFixAnonymousClass(
                 fields: try reader.intArray(),
                 constructor: try reader.int32(),
@@ -440,7 +440,7 @@ enum AoVIFixMerger {
         let assembly = try reader.string()
 
         var fixes: [AoVIFixFixInfo] = []
-        for _ in 0..<reader.count("bản ghi") {
+        for _ in 0..<(try reader.count("bản ghi")) {
             let isGeneric = try reader.boolean()
             let typeID = try reader.int32()
             let name = try reader.string()
@@ -448,7 +448,7 @@ enum AoVIFixMerger {
             var parameters: [AoVIFixParameter] = []
             if isGeneric {
                 genericArguments = try reader.intArray()
-                for _ in 0..<reader.count("bản ghi") {
+                for _ in 0..<(try reader.count("bản ghi")) {
                     if try reader.boolean() {
                         parameters.append(.string(try reader.string()))
                     } else {
@@ -464,7 +464,7 @@ enum AoVIFixMerger {
                 patchIndex: try reader.int32()
             ))
         }
-        let newClasses = try (0..<reader.count("bản ghi")).map { _ in try reader.string() }
+        let newClasses = try (0..<(try reader.count("bản ghi"))).map { _ in try reader.string() }
         guard reader.offset == data.count else { throw AoVIFixError.trailingBytes }
 
         let patch = AoVIFixPatch(
@@ -736,17 +736,29 @@ enum AoVIFixMerger {
         for index in incoming.anonymousClasses.indices {
             var item = incoming.anonymousClasses[index]
             item.fields = try item.fields.map { value in
-                value >= 0 ? (typeMap[value] ?? { throw AoVIFixError.invalidReference("anon field") }()) : value
+                if value >= 0 {
+                    guard let mapped = typeMap[value] else { throw AoVIFixError.invalidReference("anon field") }
+                    return mapped
+                }
+                return value
             }
             if item.constructor >= 0 {
                 guard let mapped = methodMap[item.constructor] else { throw AoVIFixError.invalidReference("anon ctor") }
                 item.constructor = mapped
             }
             item.interfaces = try item.interfaces.map { value in
-                value >= 0 ? (typeMap[value] ?? { throw AoVIFixError.invalidReference("anon interface") }()) : value
+                if value >= 0 {
+                    guard let mapped = typeMap[value] else { throw AoVIFixError.invalidReference("anon interface") }
+                    return mapped
+                }
+                return value
             }
             item.vtable = try item.vtable.map { value in
-                value >= 0 ? (methodMap[value] ?? { throw AoVIFixError.invalidReference("anon vtable") }()) : value
+                if value >= 0 {
+                    guard let mapped = methodMap[value] else { throw AoVIFixError.invalidReference("anon vtable") }
+                    return mapped
+                }
+                return value
             }
             incoming.anonymousClasses[index] = item
         }
