@@ -108,7 +108,7 @@ _ADAPTERS = (
             "MOD wrapper + Resources.zip",
             "MSES v7 đã có schema",
             "MSES ngoài allowlist chỉ-thêm khi prefix khóa hàng quy được duy nhất về Actor",
-            "IFix có thể parse/round-trip", "CommonActions SkinOrAvatarList + CheckSkinIdTick scalar/Array<int>"
+            "IFix có thể parse/round-trip", "CommonActions SkinOrAvatarList + CheckSkinIdTick/CheckSkinIdVirtualTick scalar/Array<int>"
             "Unity AssetBundle resource mới + Packer/Verification metadata",
             "ZIP package lồng không có xung đột",
             "Wwise BNK append-only khi Bank/Media/HIRC ID không xung đột",
