@@ -245,6 +245,69 @@ final class AoVBytesDecoderTests: XCTestCase {
         ))
     }
 
+    func testMergesCommonActionsPackageZipAndPreservesVerifiedXML() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AOVCommonActionsPackageTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let path = "commonresource/Back.xml"
+        let baseXML = Data("""
+        <Project><TemplateObjectList/><RefParamList/><Action length="1.000" loop="false">
+          <Track trackName="TriggerParticleTick0" eventType="TriggerParticleTick" enabled="true">
+            <Event eventName="TriggerParticleTick" time="0.000" isDuration="false"/>
+          </Track>
+        </Action></Project>
+        """.utf8)
+        let overlayXML = Data("""
+        <Project><TemplateObjectList/><RefParamList/><Action length="1.000" loop="false">
+          <Track trackName="0_TriggerParticleTick0" eventType="TriggerParticleTick" enabled="true">
+            <Event eventName="TriggerParticleTick" time="0.000" isDuration="false"/>
+            <SkinOrAvatarList id="59500"/>
+          </Track>
+        </Action></Project>
+        """.utf8)
+        let baseResource = try AoVBytesDecoder.encodeResource(baseXML, resourceName: path, wrapperMode: "zstd")
+        let overlayResource = try AoVBytesDecoder.encodeResource(overlayXML, resourceName: path, wrapperMode: "zstd")
+        let baseURL = try makeArchive(root: root, name: "base.pkg.zip", path: path, payload: baseResource)
+        let overlayURL = try makeArchive(root: root, name: "overlay.pkg.zip", path: path, payload: overlayResource)
+
+        let (mergedPackage, report) = try AoVCommonActionsMerger.mergeCommonActionsPackage(
+            basePackage: Data(contentsOf: baseURL),
+            overlayPackage: Data(contentsOf: overlayURL),
+            specialSkinIDs: ["59500"]
+        )
+        XCTAssertTrue(report.verified)
+        XCTAssertEqual(report.mergedFiles, [path])
+
+        let outputURL = root.appendingPathComponent("merged.pkg.zip")
+        try mergedPackage.write(to: outputURL)
+        let outputArchive = try Archive(url: outputURL, accessMode: .read)
+        guard let mergedEntry = outputArchive.first(where: { $0.path == path }) else {
+            return XCTFail("Merged CommonActions XML entry missing")
+        }
+        var xml = Data()
+        _ = try outputArchive.extract(mergedEntry, consumer: { xml.append($0) })
+        let decoded = try AoVBytesDecoder.decodeResource(xml, resourceName: path)
+        let outputText = String(data: decoded.data, encoding: .utf8) ?? ""
+        XCTAssertTrue(outputText.contains("SkinOrAvatarList"))
+        XCTAssertTrue(outputText.contains("59500"))
+    }
+
+    func testCommonActionsPackageFailsOnOpaqueSamePathConflict() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AOVCommonActionsConflictTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let baseURL = try makeArchive(root: root, name: "base.zip", path: "commonresource/Other.bytes", payload: Data("base".utf8))
+        let overlayURL = try makeArchive(root: root, name: "overlay.zip", path: "commonresource/Other.bytes", payload: Data("overlay".utf8))
+        XCTAssertThrowsError(try AoVCommonActionsMerger.mergeCommonActionsPackage(
+            basePackage: Data(contentsOf: baseURL),
+            overlayPackage: Data(contentsOf: overlayURL),
+            specialSkinIDs: ["59300"]
+        ))
+    }
+
     private func makeArchive(root: URL, name: String, path: String, payload: Data) throws -> URL {
         let source = root.appendingPathComponent(UUID().uuidString + ".bin")
         try payload.write(to: source)
