@@ -839,13 +839,14 @@ async def scan_chunked_aov_notices(upload_id: str):
         "notice_assetbundles_skipped": report.get("notice_assetbundles_skipped", 0),
         "notice_assetbundle_scan_errors": report.get("notice_assetbundle_scan_errors", []),
         "unsupported_resources": len(report.get("unsupported", [])),
+        "oversized_entries_skipped": report.get("oversized_entries_skipped", 0),
         "nested_packages_expanded": report.get("nested_packages_expanded", 0),
         "scope": report.get("notice_scan_scope", ""),
         "warning": (
             "Đây là quét từ khóa chỉ đọc, không chứng minh chuỗi tìm được là popup "
-            "đang hiển thị. AssetBundle UnityFS được quét metadata có giới hạn; bundle quá lớn, "
-            "payload nhị phân opaque và định dạng chưa giải mã có thể bị bỏ qua. "
-            "Chế độ quét giới hạn 256 MiB dữ liệu .bytes đã giải mã và không ghi ZIP tạm. "
+            "đang hiển thị. AssetBundle UnityFS được quét metadata có giới hạn; bundle quá 16 MiB và entry quá 16 MiB sẽ bị bỏ qua, "
+            "payload nhị phân opaque và định dạng chưa giải mã có thể bị bỏ qua. Số entry quá lớn bị bỏ qua được trả trong báo cáo. "
+            "Chế độ quét giới hạn 48 MiB dữ liệu .bytes đã giải mã, tối đa 100 object mỗi bundle và không ghi ZIP tạm. "
             "Chỉ các script thuộc luồng login/startup mới được gắn nhãn ứng viên; "
             "commercializenotify và các bảng billboard được phân loại bảo vệ riêng. "
             "GameEntryControl/LobbyView/CLobbySystem có thể được nhận diện header Lua tùy biến "
@@ -877,13 +878,14 @@ async def scan_chunked_aov_branding(upload_id: str):
         "assetbundles_scanned": report.get("notice_assetbundles_scanned", 0),
         "assetbundles_skipped": report.get("notice_assetbundles_skipped", 0),
         "unsupported_resources": len(report.get("unsupported", [])),
+        "oversized_entries_skipped": report.get("oversized_entries_skipped", 0),
         "nested_packages_expanded": report.get("nested_packages_expanded", 0),
         "terms": report.get("branding_scan_terms", []),
         "candidates": report.get("branding_candidates", []),
         "truncated": report.get("branding_candidates_truncated", False),
         "warning": (
             "Quét chỉ đọc các tệp văn bản, .bytes giải mã được và metadata object "
-            "Unity AssetBundle có giới hạn. Dữ liệu opaque, bundle vượt giới hạn "
+            "Unity AssetBundle có giới hạn 16 MiB. Dữ liệu opaque, entry vượt 16 MiB, bundle vượt giới hạn "
             "hoặc tài nguyên chưa giải mã có thể không được quét. Kết quả xác định "
             "vị trí chuỗi, không chứng minh popup đang hiển thị và không sửa ZIP."
         ),
