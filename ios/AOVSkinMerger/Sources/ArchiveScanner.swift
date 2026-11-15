@@ -1,34 +1,68 @@
 import Foundation
+import CryptoKit
 import ZIPFoundation
 
-struct ArchiveInventory: Identifiable, Sendable {
+struct ArchivePathDigest: Codable, Hashable, Sendable, Identifiable {
+    let archiveName: String
+    let path: String
+    let sha256: String
+    let uncompressedBytes: UInt64
+    var id: String { "\(archiveName)|\(path)|\(sha256)" }
+}
+
+struct ArchiveInventory: Codable, Identifiable, Sendable {
     let id: UUID
     let fileName: String
     let fileSize: UInt64
     let fileCount: Int
     let uncompressedBytes: UInt64
     let paths: [String]
+    let pathDigests: [ArchivePathDigest]
 }
 
-struct ArchiveOverlap: Identifiable, Sendable {
+struct ArchiveOverlap: Codable, Identifiable, Sendable {
     let path: String
-    let sourceNames: [String]
+    let payloads: [ArchivePathDigest]
+    let identicalPayload: Bool
+    var sourceNames: [String] { Array(Set(payloads.map(\.archiveName))).sorted() }
     var id: String { path }
 }
 
-struct ArchiveAnalysis: Sendable {
+struct ArchiveAnalysis: Codable, Sendable {
     let archives: [ArchiveInventory]
     let overlappingPaths: [ArchiveOverlap]
     let totalInputBytes: UInt64
     let totalUncompressedBytes: UInt64
+    let crcValidatedFiles: Int
+    let identicalDuplicatePaths: Int
+    let conflictingPaths: Int
+}
+
+struct DecodedAESResource: Codable, Identifiable, Sendable {
+    let archiveName: String
+    let path: String
+    let decodedBytes: UInt64
+    let sha256: String
+    var id: String { "\(archiveName)|\(path)" }
+}
+
+struct AESScanReport: Codable, Sendable {
+    let decoded: [DecodedAESResource]
+    let unsupportedZstd: Int
+    let otherBytesFiles: Int
+    let tooLargeToInspect: Int
+    let invalidAES: [String]
 }
 
 enum ArchiveScanError: LocalizedError {
     case tooManyEntries(String)
     case entryTooLarge(String, String)
     case archiveTooLarge(String)
+    case totalInputTooLarge
     case unsafePath(String, String)
     case symbolicLink(String, String)
+    case duplicatePathInsideArchive(String, String)
+    case crcFailure(String, String)
 
     var errorDescription: String? {
         switch self {
@@ -37,11 +71,17 @@ enum ArchiveScanError: LocalizedError {
         case .entryTooLarge(let name, let path):
             return "\(name): mục \(path) vượt giới hạn 256 MiB."
         case .archiveTooLarge(let name):
-            return "\(name): dữ liệu giải nén khai báo vượt 1 GiB."
+            return "\(name): dữ liệu giải nén khai báo vượt giới hạn 1 GiB."
+        case .totalInputTooLarge:
+            return "Tổng dung lượng ZIP đầu vào vượt giới hạn 500 MiB của bản iOS thử nghiệm."
         case .unsafePath(let name, let path):
             return "\(name): đường dẫn không an toàn: \(path)"
         case .symbolicLink(let name, let path):
             return "\(name): symbolic link chưa được hỗ trợ: \(path)"
+        case .duplicatePathInsideArchive(let name, let path):
+            return "\(name): có nhiều mục cùng đường dẫn \(path); cần kiểm tra riêng."
+        case .crcFailure(let name, let path):
+            return "\(name): không đọc/kiểm tra CRC được mục \(path)."
         }
     }
 }
@@ -50,6 +90,8 @@ enum ArchiveScanner {
     private static let maximumEntries = 20_000
     private static let maximumEntryBytes: UInt64 = 256 * 1024 * 1024
     private static let maximumArchiveExpandedBytes: UInt64 = 1024 * 1024 * 1024
+    private static let maximumTotalInputBytes: UInt64 = 500 * 1024 * 1024
+    private static let maximumAESInspectInputBytes: UInt64 = 32 * 1024 * 1024
 
     static func analyze(_ urls: [URL]) throws -> ArchiveAnalysis {
         var inventories: [ArchiveInventory] = []
@@ -57,40 +99,118 @@ enum ArchiveScanner {
         var totalExpanded: UInt64 = 0
 
         for url in urls {
-            let inventory = try scanOne(url)
-            inventories.append(inventory)
-
-            let inputSum = totalInput.addingReportingOverflow(inventory.fileSize)
-            let expandedSum = totalExpanded.addingReportingOverflow(inventory.uncompressedBytes)
-            guard !inputSum.overflow, !expandedSum.overflow else {
-                throw ArchiveScanError.archiveTooLarge(url.lastPathComponent)
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+            let inputSum = totalInput.addingReportingOverflow(size)
+            guard !inputSum.overflow, inputSum.partialValue <= maximumTotalInputBytes else {
+                throw ArchiveScanError.totalInputTooLarge
             }
             totalInput = inputSum.partialValue
+
+            let inventory = try scanOne(url)
+            inventories.append(inventory)
+            let expandedSum = totalExpanded.addingReportingOverflow(inventory.uncompressedBytes)
+            guard !expandedSum.overflow, expandedSum.partialValue <= 2 * maximumArchiveExpandedBytes else {
+                throw ArchiveScanError.archiveTooLarge(url.lastPathComponent)
+            }
             totalExpanded = expandedSum.partialValue
         }
 
-        var owners: [String: Set<String>] = [:]
-        for archive in inventories {
-            for path in Set(archive.paths) {
-                owners[path, default: []].insert(archive.fileName)
+        var owners: [String: [ArchivePathDigest]] = [:]
+        for inventory in inventories {
+            for record in inventory.pathDigests {
+                owners[record.path, default: []].append(record)
             }
         }
         let overlaps = owners
             .filter { $0.value.count > 1 }
-            .map { ArchiveOverlap(path: $0.key, sourceNames: $0.value.sorted()) }
+            .map { path, payloads in
+                ArchiveOverlap(
+                    path: path,
+                    payloads: payloads.sorted {
+                        if $0.archiveName != $1.archiveName { return $0.archiveName < $1.archiveName }
+                        return $0.sha256 < $1.sha256
+                    },
+                    identicalPayload: Set(payloads.map(\.sha256)).count == 1
+                )
+            }
             .sorted { $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending }
 
         return ArchiveAnalysis(
             archives: inventories,
             overlappingPaths: overlaps,
             totalInputBytes: totalInput,
-            totalUncompressedBytes: totalExpanded
+            totalUncompressedBytes: totalExpanded,
+            crcValidatedFiles: inventories.reduce(0) { $0 + $1.fileCount },
+            identicalDuplicatePaths: overlaps.filter(\.identicalPayload).count,
+            conflictingPaths: overlaps.filter { !$0.identicalPayload }.count
+        )
+    }
+
+    static func inspectAESResources(_ urls: [URL]) throws -> AESScanReport {
+        var decoded: [DecodedAESResource] = []
+        var unsupportedZstd = 0
+        var otherBytes = 0
+        var tooLarge = 0
+        var invalidAES: [String] = []
+
+        for url in urls {
+            let archive = try Archive(url: url, accessMode: .read)
+            for entry in archive where entry.type == .file && entry.path.lowercased().hasSuffix(".bytes") {
+                guard entry.uncompressedSize <= maximumAESInspectInputBytes else {
+                    tooLarge += 1
+                    continue
+                }
+
+                var resourceData = Data()
+                do {
+                    _ = try archive.extract(entry, bufferSize: 64 * 1024, consumer: { chunk in
+                        resourceData.append(chunk)
+                    })
+                } catch {
+                    throw ArchiveScanError.crcFailure(url.lastPathComponent, entry.path)
+                }
+
+                guard AoVBytesDecoder.isAESResource(resourceData) else {
+                    otherBytes += 1
+                    continue
+                }
+
+                do {
+                    let payload = try AoVBytesDecoder.decodeAESOnly(resourceData, resourceName: entry.path)
+                    let digest = SHA256.hash(data: payload)
+                    decoded.append(
+                        DecodedAESResource(
+                            archiveName: url.lastPathComponent,
+                            path: entry.path,
+                            decodedBytes: UInt64(payload.count),
+                            sha256: digest.map { String(format: "%02x", $0) }.joined()
+                        )
+                    )
+                } catch AoVBytesDecodeError.aesZstdUnsupported {
+                    unsupportedZstd += 1
+                } catch {
+                    if invalidAES.count < 30 {
+                        invalidAES.append("\(url.lastPathComponent): \(entry.path) — \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+
+        return AESScanReport(
+            decoded: decoded,
+            unsupportedZstd: unsupportedZstd,
+            otherBytesFiles: otherBytes,
+            tooLargeToInspect: tooLarge,
+            invalidAES: invalidAES
         )
     }
 
     private static func scanOne(_ url: URL) throws -> ArchiveInventory {
         let archive = try Archive(url: url, accessMode: .read)
+        var pathDigests: [ArchivePathDigest] = []
         var paths: [String] = []
+        var seenPaths = Set<String>()
         var expandedBytes: UInt64 = 0
         var entryCount = 0
 
@@ -114,6 +234,10 @@ enum ArchiveScanner {
                 throw ArchiveScanError.unsafePath(url.lastPathComponent, entry.path)
             }
 
+            guard seenPaths.insert(path).inserted else {
+                throw ArchiveScanError.duplicatePathInsideArchive(url.lastPathComponent, path)
+            }
+
             let entryBytes = entry.uncompressedSize
             guard entryBytes <= maximumEntryBytes else {
                 throw ArchiveScanError.entryTooLarge(url.lastPathComponent, entry.path)
@@ -123,7 +247,25 @@ enum ArchiveScanner {
                 throw ArchiveScanError.archiveTooLarge(url.lastPathComponent)
             }
             expandedBytes = sum.partialValue
+
+            var hasher = SHA256()
+            do {
+                _ = try archive.extract(entry, bufferSize: 64 * 1024, consumer: { chunk in
+                    hasher.update(data: chunk)
+                })
+            } catch {
+                throw ArchiveScanError.crcFailure(url.lastPathComponent, entry.path)
+            }
+            let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
             paths.append(path)
+            pathDigests.append(
+                ArchivePathDigest(
+                    archiveName: url.lastPathComponent,
+                    path: path,
+                    sha256: digest,
+                    uncompressedBytes: entryBytes
+                )
+            )
         }
 
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
@@ -134,7 +276,8 @@ enum ArchiveScanner {
             fileSize: fileSize,
             fileCount: entryCount,
             uncompressedBytes: expandedBytes,
-            paths: paths.sorted()
+            paths: paths.sorted(),
+            pathDigests: pathDigests
         )
     }
 }
