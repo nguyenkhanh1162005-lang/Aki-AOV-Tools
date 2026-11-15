@@ -184,6 +184,25 @@ struct ContentView: View {
             metric("Zstandard độc lập giải mã được", "\(report.zstdDecodedCount)")
             metric("File .bytes khác / chưa nhận diện", "\(report.otherBytesFiles)")
             metric("Quá lớn để quét an toàn", "\(report.tooLargeToInspect)")
+            metric("AssetReferenceSet nhận diện", "\(report.assetReferenceSets.count)")
+            metric("AssetRef chưa nhận diện", "\(report.unrecognizedAssetRefCount)")
+            if !report.assetReferenceSets.isEmpty {
+                Text("AssetReferenceSet (kiểm kê đọc-only)").font(.subheadline.weight(.semibold))
+                ForEach(report.assetReferenceSets) { item in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(item.path).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        Text("Actor \(item.actorID ?? "không rõ") · \(item.wrapperMode) · \(formatByteCount(item.decodedBytes))")
+                            .font(.caption2).foregroundColor(.secondary)
+                        Text("baseSubset: có · skinSubset: \(item.hasSkinSubset ? "có" : "không thấy") · ref path: \(item.referencePathCandidates)")
+                            .font(.caption2).foregroundColor(.secondary)
+                        ForEach(item.sampleReferences, id: \\.self) { reference in
+                            Text(reference).font(.caption2.monospaced()).textSelection(.enabled)
+                        }
+                    }
+                    .padding(.vertical, 5)
+                    Divider()
+                }
+            }
             if !report.decoded.isEmpty {
                 Text("Payload đã giải mã (chỉ đọc)").font(.subheadline.weight(.semibold))
                 ForEach(report.decoded) { item in
