@@ -179,8 +179,8 @@ struct ContentView: View {
     private func aesReportView(_ report: AESScanReport) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Kết quả giải mã AoV AES", systemImage: "lock.open.fill").font(.headline)
-            metric("AES thường giải mã được", "\(report.decoded.count)")
-            metric("AES+Zstandard chưa hỗ trợ", "\(report.unsupportedZstd)")
+            metric("AES thường giải mã được", "\(report.aesDecodedCount)")
+            metric("AES+Zstandard giải mã được", "\(report.aesZstdDecodedCount)")
             metric("File .bytes khác / chưa nhận diện", "\(report.otherBytesFiles)")
             metric("Quá lớn để quét an toàn", "\(report.tooLargeToInspect)")
             if !report.decoded.isEmpty {
@@ -188,7 +188,7 @@ struct ContentView: View {
                 ForEach(report.decoded) { item in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.path).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                        Text("\(formatByteCount(item.decodedBytes)) · SHA-256 \(String(item.sha256.prefix(20)))…")
+                        Text("\(item.wrapperMode) · \(formatByteCount(item.decodedBytes)) · SHA-256 \(String(item.sha256.prefix(20)))…")
                             .font(.caption2).foregroundColor(.secondary).textSelection(.enabled)
                     }
                 }
@@ -199,7 +199,7 @@ struct ContentView: View {
                     Text(item).font(.caption2).foregroundColor(.orange).textSelection(.enabled)
                 }
             }
-            Text("Giải mã này chỉ tạo kết quả kiểm tra trong bộ nhớ, không sửa ZIP nguồn, không sửa AssetRef/MSES và không tạo skin mod.")
+            Text("Giải mã này chỉ tạo kết quả kiểm tra trong bộ nhớ, không sửa ZIP nguồn, không sửa AssetRef/MSES và chưa tạo skin mod.")
                 .font(.footnote).foregroundColor(.orange)
         }
         .panel()
