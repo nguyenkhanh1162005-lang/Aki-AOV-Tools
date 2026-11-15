@@ -385,6 +385,7 @@ final class AoVBytesDecoderTests: XCTestCase {
             name: "base.zip",
             files: [
                 "Resources.zip": Data(contentsOf: baseResourcesURL),
+                "Resources/1.64.1/LooseBase.bytes": Data("keep-this-loose-file".utf8),
                 "DanhSachSkin.txt": Data("Base Skin\n".utf8)
             ]
         )
@@ -425,7 +426,8 @@ final class AoVBytesDecoderTests: XCTestCase {
 
         let resources = try Archive(url: mergedResourcesURL, accessMode: .read)
         guard let commonEntry = resources.first(where: { $0.path == commonPath }),
-              resources.first(where: { $0.path == "Ages/Prefab_Characters/Prefab_Hero/Actor593/NewResource.bytes" }) != nil else {
+              resources.first(where: { $0.path == "Ages/Prefab_Characters/Prefab_Hero/Actor593/NewResource.bytes" }) != nil,
+              resources.first(where: { $0.path == "LooseBase.bytes" }) != nil else {
             return XCTFail("Output Resources.zip is missing merged/added resources")
         }
         var packageData = Data()
