@@ -51,6 +51,7 @@ struct AoVDecodedResource: Sendable {
 private final class AoVBytesDecoderBundleToken {}
 
 private final class AoVZstdDictionaryCache: @unchecked Sendable {
+    let data: Data
     let handle: OpaquePointer
 
     init?(data: Data) {
@@ -59,6 +60,7 @@ private final class AoVZstdDictionaryCache: @unchecked Sendable {
             return ZSTD_createDDict(baseAddress, data.count)
         }
         guard let created else { return nil }
+        self.data = data
         handle = created
     }
 
@@ -224,6 +226,129 @@ enum AoVBytesDecoder {
             throw AoVBytesDecodeError.sizeMismatch(expected: expectedSize, actual: decodedSize)
         }
         return output
+    }
+
+    static func encodeResource(
+        _ payload: Data,
+        resourceName: String,
+        wrapperMode: String
+    ) throws -> Data {
+        guard payload.count <= Int(maximumDecodedBytes) else {
+            throw AoVBytesDecodeError.resourceTooLarge
+        }
+        switch wrapperMode {
+        case "aes":
+            return try encryptAES(payload, resourceName: resourceName, flag: 0x00)
+        case "aes+zstd":
+            let compressed = try compressZstdWithAoVDictionary(payload)
+            return try encryptAES(compressed, resourceName: resourceName, flag: 0xEF,
+                                  declaredDecodedSize: payload.count)
+        case "zstd":
+            let compressed = try compressZstdWithAoVDictionary(payload)
+            return Data(zstdHeader + littleEndian(UInt32(payload.count))) + compressed
+        default:
+            throw AoVBytesDecodeError.unsupportedAESFlag(0xFF)
+        }
+    }
+
+    private static func encryptAES(
+        _ plaintext: Data,
+        resourceName: String,
+        flag: UInt8,
+        declaredDecodedSize: Int? = nil
+    ) throws -> Data {
+        let declared = declaredDecodedSize ?? plaintext.count
+        guard declared >= 0, declared <= Int(maximumDecodedBytes) else {
+            throw AoVBytesDecodeError.resourceTooLarge
+        }
+        let key = derivedKey(resourceName: resourceName)
+        let iv = Data(repeating: 0, count: kCCBlockSizeAES128)
+        var ciphertext = Data(count: plaintext.count + kCCBlockSizeAES128)
+        var ciphertextLength = 0
+
+        let input = plaintext.isEmpty ? Data([0]) : plaintext
+        let status: CCCryptorStatus = key.withUnsafeBytes { keyBytes in
+            iv.withUnsafeBytes { ivBytes in
+                input.withUnsafeBytes { inputBytes in
+                    ciphertext.withUnsafeMutableBytes { outputBytes in
+                        CCCrypt(
+                            CCOperation(kCCEncrypt),
+                            CCAlgorithm(kCCAlgorithmAES),
+                            CCOptions(kCCOptionPKCS7Padding),
+                            keyBytes.baseAddress,
+                            key.count,
+                            ivBytes.baseAddress,
+                            inputBytes.baseAddress,
+                            plaintext.count,
+                            outputBytes.baseAddress,
+                            outputBytes.count,
+                            &ciphertextLength
+                        )
+                    }
+                }
+            }
+        }
+        guard status == kCCSuccess else { throw AoVBytesDecodeError.decryptFailed }
+        ciphertext.removeSubrange(ciphertextLength..<ciphertext.count)
+
+        var header = Data(aesHeader + [flag])
+        header.append(littleEndian(UInt32(declared)))
+        return header + ciphertext
+    }
+
+    private static func compressZstdWithAoVDictionary(_ payload: Data) throws -> Data {
+        guard let cache = dictionaryCache else {
+            throw AoVBytesDecodeError.dictionaryMissing
+        }
+        let dictionaryHandle: OpaquePointer? = cache.data.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else { return nil }
+            return ZSTD_createCDict(baseAddress, cache.data.count, 17)
+        }
+        guard let dictionaryHandle else { throw AoVBytesDecodeError.dictionaryInvalid }
+        defer { _ = ZSTD_freeCDict(dictionaryHandle) }
+
+        guard let context = ZSTD_createCCtx() else {
+            throw AoVBytesDecodeError.zstdDecodeFailed("Không tạo được compression context.")
+        }
+        defer { _ = ZSTD_freeCCtx(context) }
+
+        let input = payload.isEmpty ? Data([0]) : payload
+        let outputCapacity = ZSTD_compressBound(payload.count)
+        var output = Data(count: outputCapacity)
+        let compressedSize: Int = input.withUnsafeBytes { inputBytes in
+            output.withUnsafeMutableBytes { outputBytes in
+                guard let inputBase = inputBytes.baseAddress,
+                      let outputBase = outputBytes.baseAddress else {
+                    return -1
+                }
+                return ZSTD_compress_usingCDict(
+                    context,
+                    outputBase,
+                    outputCapacity,
+                    inputBase,
+                    payload.count,
+                    dictionaryHandle
+                )
+            }
+        }
+
+        if ZSTD_isError(compressedSize) != 0 {
+            let errorName = ZSTD_getErrorName(compressedSize).map {
+                String(cString: $0)
+            } ?? "Zstandard error"
+            throw AoVBytesDecodeError.zstdDecodeFailed(errorName)
+        }
+        output.removeSubrange(compressedSize..<output.count)
+        return output
+    }
+
+    private static func littleEndian(_ value: UInt32) -> Data {
+        Data([
+            UInt8(value & 0xFF),
+            UInt8((value >> 8) & 0xFF),
+            UInt8((value >> 16) & 0xFF),
+            UInt8((value >> 24) & 0xFF)
+        ])
     }
 
     private static func derivedKey(resourceName: String) -> Data {
