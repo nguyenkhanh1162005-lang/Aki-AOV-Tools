@@ -214,7 +214,7 @@ struct ContentView: View {
                             .font(.caption2).foregroundColor(.secondary)
                         Text("baseSubset: có · skinSubset: \(item.hasSkinSubset ? "có" : "không thấy") · ref path: \(item.referencePathCandidates)")
                             .font(.caption2).foregroundColor(.secondary)
-                        ForEach(item.sampleReferences, id: \\.self) { reference in
+                        ForEach(item.sampleReferences, id: \.self) { reference in
                             Text(reference).font(.caption2.monospaced()).textSelection(.enabled)
                         }
                     }
