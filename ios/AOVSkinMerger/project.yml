@@ -17,7 +17,7 @@ targets:
     sources:
       - path: Sources
     resources:
-      - path: Resources
+      - path: Resources/AoVZstdDictionary.base64
     dependencies:
       - package: ZIPFoundation
       - package: zstd
