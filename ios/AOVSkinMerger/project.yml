@@ -7,14 +7,21 @@ packages:
   ZIPFoundation:
     url: https://github.com/weichsel/ZIPFoundation.git
     from: 0.9.20
+  zstd:
+    url: https://github.com/meta/zstd.git
+    revision: a599a71c4cf5d142ffce772c0d16a5a7b755d83c
 targets:
   AOVSkinMerger:
     type: application
     platform: iOS
     sources:
       - path: Sources
+    resources:
+      - path: Resources
     dependencies:
       - package: ZIPFoundation
+      - package: zstd
+        product: libzstd
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aki.aovskinmerger
