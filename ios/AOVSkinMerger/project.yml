@@ -39,6 +39,8 @@ targets:
     platform: iOS
     sources:
       - path: Tests
+    resources:
+      - path: Resources/AoVZstdDictionary.base64
     dependencies:
       - target: AOVSkinMerger
     settings:
