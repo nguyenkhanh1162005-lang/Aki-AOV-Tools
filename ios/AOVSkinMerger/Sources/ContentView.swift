@@ -8,6 +8,8 @@ struct ContentView: View {
     @State private var isAnalyzing = false
     @State private var selectedURLs: [URL] = []
     @State private var analysis: ArchiveAnalysis?
+    @State private var aesReport: AESScanReport?
+    @State private var isDecoding = false
     @State private var alertText = ""
     @State private var showAlert = false
     @State private var updateMessage = "Chưa kiểm tra cập nhật"
@@ -29,12 +31,23 @@ struct ContentView: View {
                         Button(action: runAnalysis) {
                             HStack {
                                 if isAnalyzing { ProgressView().tint(.white) }
-                                Label(isAnalyzing ? "Đang kiểm tra…" : "Kiểm tra cấu trúc ZIP",
+                                Label(isAnalyzing ? "Đang kiểm tra…" : "Kiểm tra cấu trúc và nội dung ZIP",
                                       systemImage: "doc.text.magnifyingglass")
                             }.frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
-                        .disabled(selectedURLs.isEmpty || isAnalyzing)
+                        .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding)
+                        Button(action: runAESScan) {
+                            HStack {
+                                if isDecoding { ProgressView() }
+                                Label(isDecoding ? "Đang quét AES…" : "Quét giải mã AoV AES thường",
+                                      systemImage: "lock.open")
+                            }.frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding)
+                        Text("Chỉ giải mã đọc thử header AES 22 4A 67 00. AES+Zstandard và các định dạng khác sẽ được báo chưa hỗ trợ.")
+                            .font(.caption2).foregroundColor(.secondary)
                     }
                     .panel()
 
@@ -68,6 +81,7 @@ struct ContentView: View {
                     }
 
                     if let analysis { analysisView(analysis) }
+                    if let aesReport { aesReportView(aesReport) }
 
                     VStack(alignment: .leading, spacing: 9) {
                         Label("Tiến độ phát triển", systemImage: "hammer.fill").font(.headline)
@@ -112,10 +126,10 @@ struct ContentView: View {
                 Image(systemName: "archivebox.fill").font(.system(size: 28)).foregroundColor(.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("AOV Skin Merger").font(.title2.bold())
-                    Text("Bản iOS thử nghiệm 0.1.0").font(.caption).foregroundColor(.secondary)
+                    Text("Bản iOS thử nghiệm 0.2.0").font(.caption).foregroundColor(.secondary)
                 }
             }
-            Text("Kiểm tra gói tài nguyên trực tiếp trên iPhone. Chưa có bộ ghép AoV hoàn chỉnh.")
+            Text("Kiểm tra payload ZIP và giải mã thử một nhánh AES AoV trực tiếp trên iPhone. Chưa phải bộ ghép skin hoàn chỉnh.")
                 .font(.subheadline).foregroundColor(.secondary)
         }.panel()
     }
@@ -127,7 +141,9 @@ struct ContentView: View {
             metric("Tổng số file", "\(report.archives.reduce(0) { $0 + $1.fileCount })")
             metric("Dung lượng ZIP", formatByteCount(report.totalInputBytes))
             metric("Dung lượng giải nén khai báo", formatByteCount(report.totalUncompressedBytes))
-            metric("Đường dẫn trùng giữa các gói", "\(report.overlappingPaths.count)")
+            metric("File đã đọc và kiểm CRC", "\(report.crcValidatedFiles)")
+            metric("Đường dẫn trùng, payload giống", "\(report.identicalDuplicatePaths)")
+            metric("Đường dẫn trùng, payload khác", "\(report.conflictingPaths)")
             ForEach(report.archives) { archive in
                 VStack(alignment: .leading, spacing: 3) {
                     Text(archive.fileName).font(.subheadline.weight(.semibold)).lineLimit(1)
@@ -137,16 +153,56 @@ struct ContentView: View {
             }
             if !report.overlappingPaths.isEmpty {
                 Text("Đường dẫn xuất hiện ở nhiều gói").font(.subheadline.weight(.semibold))
-                ForEach(report.overlappingPaths.prefix(30)) { overlap in
-                    VStack(alignment: .leading, spacing: 2) {
+                ForEach(report.overlappingPaths.prefix(50)) { overlap in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Image(systemName: overlap.identicalPayload ? "equal.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundColor(overlap.identicalPayload ? .green : .orange)
+                            Text(overlap.identicalPayload ? "Payload giống hệt" : "Payload khác nhau")
+                                .font(.caption.weight(.semibold))
+                        }
                         Text(overlap.path).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                        Text(overlap.sourceNames.joined(separator: " · ")).font(.caption2).foregroundColor(.secondary)
+                        ForEach(overlap.payloads) { payload in
+                            Text("\(payload.archiveName) · SHA-256 \(String(payload.sha256.prefix(16)))…")
+                                .font(.caption2).foregroundColor(.secondary).textSelection(.enabled)
+                        }
+                    }
+                    .padding(.vertical, 5)
+                    Divider()
+                }
+            }
+            Text("Quét đã đọc từng payload và xác minh CRC. Đường dẫn có payload khác nhau chỉ được đánh dấu xung đột, chưa tự chọn bản để ghi đè. Bản này chưa tạo ZIP skin hoàn chỉnh.")
+                .font(.footnote).foregroundColor(.orange)
+        }.panel()
+    }
+
+    private func aesReportView(_ report: AESScanReport) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Kết quả giải mã AoV AES", systemImage: "lock.open.fill").font(.headline)
+            metric("AES thường giải mã được", "\(report.decoded.count)")
+            metric("AES+Zstandard chưa hỗ trợ", "\(report.unsupportedZstd)")
+            metric("File .bytes khác / chưa nhận diện", "\(report.otherBytesFiles)")
+            metric("Quá lớn để quét an toàn", "\(report.tooLargeToInspect)")
+            if !report.decoded.isEmpty {
+                Text("Payload đã giải mã (chỉ đọc)").font(.subheadline.weight(.semibold))
+                ForEach(report.decoded) { item in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.path).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        Text("\(formatByteCount(item.decodedBytes)) · SHA-256 \(String(item.sha256.prefix(20)))…")
+                            .font(.caption2).foregroundColor(.secondary).textSelection(.enabled)
                     }
                 }
             }
-            Text("Đường dẫn trùng chưa cho biết payload giống hay khác. Bản này chưa giải mã tài nguyên AoV và chưa tạo ZIP ghép.")
+            if !report.invalidAES.isEmpty {
+                Text("Không giải mã được").font(.subheadline.weight(.semibold))
+                ForEach(Array(report.invalidAES.enumerated()), id: \.offset) { _, item in
+                    Text(item).font(.caption2).foregroundColor(.orange).textSelection(.enabled)
+                }
+            }
+            Text("Giải mã này chỉ tạo kết quả kiểm tra trong bộ nhớ, không sửa ZIP nguồn, không sửa AssetRef/MSES và không tạo skin mod.")
                 .font(.footnote).foregroundColor(.orange)
-        }.panel()
+        }
+        .panel()
     }
 
     private func metric(_ title: String, _ value: String) -> some View {
@@ -218,6 +274,24 @@ struct ContentView: View {
                 showAlert = true
             }
             isAnalyzing = false
+        }
+    }
+
+    private func runAESScan() {
+        guard !selectedURLs.isEmpty else { return }
+        isDecoding = true
+        aesReport = nil
+        let urls = selectedURLs
+        Task {
+            do {
+                aesReport = try await Task.detached(priority: .userInitiated) {
+                    try ArchiveScanner.inspectAESResources(urls)
+                }.value
+            } catch {
+                alertText = error.localizedDescription
+                showAlert = true
+            }
+            isDecoding = false
         }
     }
 
