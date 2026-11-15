@@ -3,7 +3,7 @@ import CommonCrypto
 import libzstd
 
 enum AoVBytesDecodeError: LocalizedError, Equatable {
-    case notAES
+    case notAoVWrapped
     case unsupportedAESFlag(UInt8)
     case invalidHeader
     case resourceTooLarge
@@ -17,8 +17,8 @@ enum AoVBytesDecodeError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .notAES:
-            return "Tài nguyên không có header AES AoV 22 4A 67."
+        case .notAoVWrapped:
+            return "Tài nguyên không có wrapper AoV 22 4A đã nhận diện."
         case .unsupportedAESFlag(let flag):
             return String(format: "Flag AES AoV chưa hỗ trợ: 0x%02X.", flag)
         case .invalidHeader:
@@ -52,6 +52,7 @@ private final class AoVBytesDecoderBundleToken {}
 
 enum AoVBytesDecoder {
     private static let aesHeader: [UInt8] = [0x22, 0x4A, 0x67]
+    private static let zstdHeader: [UInt8] = [0x22, 0x4A, 0x00, 0xEF]
     private static let zstdMagic: [UInt8] = [0x28, 0xB5, 0x2F, 0xFD]
     private static let aesBaseKey: [UInt8] = [
         0x99, 0x64, 0xB1, 0xB0, 0x6B, 0x03, 0x8D, 0x7F,
@@ -63,8 +64,28 @@ enum AoVBytesDecoder {
         data.count >= 4 && Array(data.prefix(3)) == aesHeader
     }
 
+    static func isAoVWrappedResource(_ data: Data) -> Bool {
+        isAESResource(data) || (data.count >= 4 && Array(data.prefix(4)) == zstdHeader)
+    }
+
     static func decodeResource(_ data: Data, resourceName: String) throws -> AoVDecodedResource {
-        guard isAESResource(data) else { throw AoVBytesDecodeError.notAES }
+        if data.count >= 4 && Array(data.prefix(4)) == zstdHeader {
+            guard data.count >= 12, Array(data[8..<12]) == zstdMagic else {
+                throw AoVBytesDecodeError.invalidZstdFrame
+            }
+            let expected = UInt32(data[4]) |
+                (UInt32(data[5]) << 8) |
+                (UInt32(data[6]) << 16) |
+                (UInt32(data[7]) << 24)
+            guard expected <= maximumDecodedBytes else {
+                throw AoVBytesDecodeError.resourceTooLarge
+            }
+            let frame = Data(data.dropFirst(8))
+            let decoded = try decompressZstdWithAoVDictionary(frame, expectedSize: expected)
+            return AoVDecodedResource(data: decoded, wrapperMode: "zstd")
+        }
+
+        guard isAESResource(data) else { throw AoVBytesDecodeError.notAoVWrapped }
         guard data.count >= 24 else { throw AoVBytesDecodeError.invalidHeader }
 
         let flag = data[3]
