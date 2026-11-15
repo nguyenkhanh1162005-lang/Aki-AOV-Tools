@@ -139,7 +139,7 @@
 +        filtered_array = next(
 +            node for node in filtered_track.find("Event").findall("Array")
 +            if node.attrib.get("name") == "skinIdArray"
-        )
+         )
 +        child_template = copy.deepcopy(list(filtered_array)[0])
 +        for child in list(filtered_array):
 +            filtered_array.remove(child)
