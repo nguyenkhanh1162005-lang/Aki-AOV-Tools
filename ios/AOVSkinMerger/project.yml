@@ -19,6 +19,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aki.aovskinmerger
         INFOPLIST_KEY_CFBundleDisplayName: AOV Skin Merger
+        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: "2"
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_VERSION: "5.0"
