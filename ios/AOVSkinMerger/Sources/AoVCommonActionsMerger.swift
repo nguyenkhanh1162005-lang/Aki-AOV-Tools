@@ -1,5 +1,4 @@
 import Foundation
-import FoundationXML
 import CryptoKit
 import ZIPFoundation
 
