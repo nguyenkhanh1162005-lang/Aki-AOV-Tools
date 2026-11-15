@@ -313,6 +313,7 @@ struct ContentView: View {
             metric("Tài nguyên mới", "\(report.addedResources)")
             metric("Tài nguyên thay thế", "\(report.replacedResources)")
             metric("CommonActions đã ghép", "\(report.commonActionsFiles.count)")
+            metric("Bảng MSES đã ghép", "\(report.mergedMSESTables.count)")
             metric("AssetRef duy nhất giữ nguyên", "\(report.preservedAssetReferenceSets.count)")
             ShareLink(item: report.outputURL) {
                 Label("Chia sẻ / lưu ZIP kết quả", systemImage: "square.and.arrow.up")

@@ -17,6 +17,7 @@ enum AoVModArchiveMergeError: LocalizedError {
     case wwiseNotSupported(String)
     case assetReferenceConflict(String)
     case commonActionsFailure(String)
+    case msesFailure(String)
     case outputValidation(String)
 
     var errorDescription: String? {
@@ -41,6 +42,8 @@ enum AoVModArchiveMergeError: LocalizedError {
             return "\(path): AssetReferenceSet cùng đường dẫn nhưng payload khác. Chưa có parser subset để hợp nhất an toàn."
         case .commonActionsFailure(let reason):
             return "CommonActions không ghép được an toàn: \(reason)"
+        case .msesFailure(let reason):
+            return "MSES không ghép được an toàn: \(reason)"
         case .outputValidation(let reason):
             return "ZIP đầu ra không vượt qua kiểm tra: \(reason)"
         }
@@ -55,6 +58,7 @@ struct AoVModMergeReport: Sendable {
     let addedResources: Int
     let replacedResources: Int
     let commonActionsFiles: [String]
+    let mergedMSESTables: [String]
     let preservedAssetReferenceSets: [String]
     let structurallyValidated: Bool
     let gameCompatibilityTested: Bool
@@ -150,6 +154,7 @@ enum AoVModArchiveMerger {
         var added: [String: AoVResourceReference] = [:]
         var replacements: [String: Data] = [:]
         var commonActionsFiles: [String] = []
+        var mergedMSESTables: [String] = []
         var assetRefUnique: [String] = []
 
         for path in allPaths {
@@ -228,10 +233,43 @@ enum AoVModArchiveMerger {
             if path.lowercased().hasSuffix(".assetbundle") {
                 throw AoVModArchiveMergeError.assetBundleMetadataRequired(path)
             }
-            if path.lowercased().hasSuffix(".bytes") || path.lowercased().hasSuffix(".pkg.bytes") {
+            if path.lowercased().hasSuffix(".bytes") {
+                guard baseProvider.0.id == base.id else {
+                    throw AoVModArchiveMergeError.unsupportedConflict(
+                        path,
+                        "Tài nguyên chỉ xuất hiện ở các overlay, chưa có bản nền để so sánh."
+                    )
+                }
+                do {
+                    let baseData = try readData(baseProvider.1)
+                    let overlayData = try readData(distinct[0].1)
+                    let basePayload = try AoVBytesDecoder.decodeResource(baseData, resourceName: path)
+                    let overlayPayload = try AoVBytesDecoder.decodeResource(overlayData, resourceName: path)
+                    guard AoVMSESParser.isMSES(basePayload.data),
+                          AoVMSESParser.isMSES(overlayPayload.data) else {
+                        throw AoVMSESError.unsupportedTable("Payload không phải MSES v7.")
+                    }
+                    let (merged, report) = try AoVMSESParser.mergeResource(
+                        baseResource: baseData,
+                        overlayResource: overlayData,
+                        resourcePath: path,
+                        baseActorIDs: baseProvider.0.actorEvidence.allActorIDs,
+                        overlayActorIDs: distinct[0].0.actorEvidence.allActorIDs
+                    )
+                    guard report.verified else { throw AoVMSESError.encodeVerificationFailed }
+                    replacements[path] = merged
+                    mergedMSESTables.append(path)
+                    continue
+                } catch {
+                    throw AoVModArchiveMergeError.msesFailure(
+                        "\(path) [\(baseProvider.0.name) + \(distinct[0].0.name)]: \(error.localizedDescription)"
+                    )
+                }
+            }
+            if path.lowercased().hasSuffix(".pkg.bytes") {
                 throw AoVModArchiveMergeError.unsupportedConflict(
                     path,
-                    "Tài nguyên AoV trùng đường dẫn nhưng khác payload; MSES/IFix/AssetBundle parser phù hợp chưa được tích hợp."
+                    "Package nhị phân trùng đường dẫn nhưng chưa có adapter chuyên biệt; từ chối ghi đè."
                 )
             }
             throw AoVModArchiveMergeError.unsupportedConflict(
@@ -267,7 +305,7 @@ enum AoVModArchiveMerger {
 
         var actorSummary: [String: [String]] = [:]
         for (index, source) in ordered.enumerated() {
-            actorSummary["(index + 1):(source.name)"] = source.actorEvidence.allActorIDs.sorted()
+            actorSummary["\(index + 1):\(source.name)"] = source.actorEvidence.allActorIDs.sorted()
         }
         return AoVModMergeReport(
             outputURL: finalURL,
@@ -277,6 +315,7 @@ enum AoVModArchiveMerger {
             addedResources: added.count,
             replacedResources: replacements.count,
             commonActionsFiles: commonActionsFiles,
+            mergedMSESTables: mergedMSESTables,
             preservedAssetReferenceSets: assetRefUnique,
             structurallyValidated: true,
             gameCompatibilityTested: false
@@ -479,6 +518,12 @@ enum AoVModArchiveMerger {
         }
         if path.lowercased().hasSuffix(".bnk") || path.lowercased().hasSuffix(".wem") {
             throw AoVModArchiveMergeError.wwiseNotSupported(path)
+        }
+        if path.lowercased().hasPrefix("databin/"), path.lowercased().hasSuffix(".bytes") {
+            throw AoVModArchiveMergeError.unsupportedConflict(
+                path,
+                "\(sourceName): tài nguyên Databin mới cần cập nhật Verification/Packer metadata trước khi thêm."
+            )
         }
         _ = sourceName
     }
