@@ -1,0 +1,26 @@
+name: AOVSkinMerger
+options:
+  bundleIdPrefix: com.aki
+  deploymentTarget:
+    iOS: "16.0"
+packages:
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation.git
+    from: 0.9.20
+targets:
+  AOVSkinMerger:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    dependencies:
+      - package: ZIPFoundation
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aki.aovskinmerger
+        INFOPLIST_KEY_CFBundleDisplayName: AOV Skin Merger
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+        TARGETED_DEVICE_FAMILY: "1"
