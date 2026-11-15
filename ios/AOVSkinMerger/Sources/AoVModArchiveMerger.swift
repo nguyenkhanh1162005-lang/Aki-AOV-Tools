@@ -241,28 +241,33 @@ enum AoVModArchiveMerger {
                     )
                 }
                 do {
-                    let baseData = try readData(baseProvider.1)
-                    let overlayData = try readData(distinct[0].1)
-                    let basePayload = try AoVBytesDecoder.decodeResource(baseData, resourceName: path)
-                    let overlayPayload = try AoVBytesDecoder.decodeResource(overlayData, resourceName: path)
-                    guard AoVMSESParser.isMSES(basePayload.data),
-                          AoVMSESParser.isMSES(overlayPayload.data) else {
-                        throw AoVMSESError.unsupportedTable("Payload không phải MSES v7.")
+                    var current = try readData(baseProvider.1)
+                    var accumulatedActorIDs = baseProvider.0.actorEvidence.allActorIDs
+                    for (source, reference, _) in distinct {
+                        let overlayData = try readData(reference)
+                        let basePayload = try AoVBytesDecoder.decodeResource(current, resourceName: path)
+                        let overlayPayload = try AoVBytesDecoder.decodeResource(overlayData, resourceName: path)
+                        guard AoVMSESParser.isMSES(basePayload.data),
+                              AoVMSESParser.isMSES(overlayPayload.data) else {
+                            throw AoVMSESError.unsupportedTable("Payload không phải MSES v7.")
+                        }
+                        let (merged, report) = try AoVMSESParser.mergeResource(
+                            baseResource: current,
+                            overlayResource: overlayData,
+                            resourcePath: path,
+                            baseActorIDs: accumulatedActorIDs,
+                            overlayActorIDs: source.actorEvidence.allActorIDs
+                        )
+                        guard report.verified else { throw AoVMSESError.encodeVerificationFailed }
+                        current = merged
+                        accumulatedActorIDs.formUnion(source.actorEvidence.allActorIDs)
                     }
-                    let (merged, report) = try AoVMSESParser.mergeResource(
-                        baseResource: baseData,
-                        overlayResource: overlayData,
-                        resourcePath: path,
-                        baseActorIDs: baseProvider.0.actorEvidence.allActorIDs,
-                        overlayActorIDs: distinct[0].0.actorEvidence.allActorIDs
-                    )
-                    guard report.verified else { throw AoVMSESError.encodeVerificationFailed }
-                    replacements[path] = merged
+                    replacements[path] = current
                     mergedMSESTables.append(path)
                     continue
                 } catch {
                     throw AoVModArchiveMergeError.msesFailure(
-                        "\(path) [\(baseProvider.0.name) + \(distinct[0].0.name)]: \(error.localizedDescription)"
+                        "\(path): \(error.localizedDescription)"
                     )
                 }
             }
