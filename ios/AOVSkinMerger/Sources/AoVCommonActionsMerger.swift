@@ -1,6 +1,7 @@
 import Foundation
 import FoundationXML
 import CryptoKit
+import ZIPFoundation
 
 enum AoVCommonActionsError: LocalizedError {
     case invalidSkinIDs
