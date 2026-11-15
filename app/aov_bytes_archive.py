@@ -19,16 +19,17 @@ from .aov_mses import MSESError, parse_mses
 from .ifix_merger import IFixMergeError, parse_ifix_patch
 
 MAX_ARCHIVE_ENTRIES = 20000
-MAX_ARCHIVE_UNCOMPRESSED = 1024 * 1024 * 1024
-MAX_ENTRY_UNCOMPRESSED = 256 * 1024 * 1024
-MAX_DECODED_RESOURCE = 256 * 1024 * 1024
-MAX_TOTAL_DECODED_BYTES = 1024 * 1024 * 1024
-MAX_SCAN_DECODED_BYTES = 256 * 1024 * 1024
+MAX_ARCHIVE_UNCOMPRESSED = 512 * 1024 * 1024
+MAX_ENTRY_UNCOMPRESSED = 64 * 1024 * 1024
+MAX_SCAN_ENTRY_BYTES = 16 * 1024 * 1024
+MAX_DECODED_RESOURCE = 64 * 1024 * 1024
+MAX_TOTAL_DECODED_BYTES = 128 * 1024 * 1024
+MAX_SCAN_DECODED_BYTES = 48 * 1024 * 1024
 MAX_NESTED_ZIP_DEPTH = 2
 MAX_NOTICE_CANDIDATES = 100
 MAX_NOTICE_SNIPPET = 180
-MAX_NOTICE_ASSETBUNDLE_BYTES = 64 * 1024 * 1024
-MAX_NOTICE_ASSETBUNDLE_OBJECTS = 500
+MAX_NOTICE_ASSETBUNDLE_BYTES = 16 * 1024 * 1024
+MAX_NOTICE_ASSETBUNDLE_OBJECTS = 100
 MAX_NOTICE_ASSETBUNDLE_NODES = 20000
 MAX_NOTICE_ASSETBUNDLE_TEXT_CHARS = 200000
 NOTICE_TEXT_EXTENSIONS = {
@@ -536,6 +537,7 @@ def decode_archive_resources(
         "decoded": [],
         "unsupported": [],
         "ignored_files": 0,
+        "oversized_entries_skipped": 0,
         "total_entries": 0,
         "decoded_bytes": 0,
         "nested_packages_expanded": 0,
@@ -551,7 +553,7 @@ def decode_archive_resources(
         "branding_candidates": [],
         "branding_candidates_truncated": False,
         "branding_scan_terms": [term for _, term in BRANDING_TERMS],
-        "notice_scan_scope": "Text-like Lua/XML/JSON/TXT/config/CSV, decoded non-MSES .bytes, bounded custom Lua-family header/string inventory for selected lobby scripts, raw ZIP-based .pkg.bytes packages, and bounded UnityFS AssetBundle object text (MonoBehaviour/TextAsset/ScriptableObject, up to 64 MiB and 500 objects per bundle). Opaque binary remains unscanned.",
+        "notice_scan_scope": "Text-like Lua/XML/JSON/TXT/config/CSV, decoded non-MSES .bytes, bounded custom Lua-family header/string inventory for selected lobby scripts, raw ZIP-based .pkg.bytes packages, and bounded UnityFS AssetBundle object text (MonoBehaviour/TextAsset/ScriptableObject, up to 16 MiB and 100 objects per bundle). Opaque binary and oversized entries remain unscanned.",
         "advisory_only": True,
         "merge_authorized": False,
         "game_tested": False,
@@ -591,10 +593,14 @@ def decode_archive_resources(
             if info.is_dir():
                 continue
             if info.file_size > MAX_ENTRY_UNCOMPRESSED:
-                raise AOVBytesArchiveError(f"ZIP entry vượt giới hạn 256 MiB: {path}")
+                raise AOVBytesArchiveError(f"ZIP entry vượt giới hạn 64 MiB: {path}")
             total_uncompressed += info.file_size
             if total_uncompressed > MAX_ARCHIVE_UNCOMPRESSED:
-                raise AOVBytesArchiveError("Tổng dữ liệu giải nén vượt giới hạn 1 GiB.")
+                raise AOVBytesArchiveError("Tổng dữ liệu giải nén vượt giới hạn 512 MiB.")
+            if scan_only and info.file_size > MAX_SCAN_ENTRY_BYTES:
+                report["oversized_entries_skipped"] += 1
+                report["ignored_files"] += 1
+                continue
             try:
                 raw = archive.read(info)
             except (RuntimeError, zipfile.BadZipFile, OSError, EOFError) as exc:
@@ -731,7 +737,7 @@ def decode_archive_resources(
                 continue
             decoded_limit = MAX_SCAN_DECODED_BYTES if scan_only else MAX_TOTAL_DECODED_BYTES
             if report["decoded_bytes"] + len(decoded) > decoded_limit:
-                limit_label = "256 MiB cho chế độ quét chỉ đọc" if scan_only else "1 GiB"
+                limit_label = "48 MiB cho chế độ quét chỉ đọc" if scan_only else "128 MiB"
                 raise AOVBytesArchiveError(
                     f"Tổng dữ liệu sau giải mã vượt giới hạn {limit_label}."
                 )
