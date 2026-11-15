@@ -664,4 +664,266 @@ enum AoVCommonActionsMerger {
             verified: true
         ))
     }
+
+struct AoVCommonActionsPackageReport: Sendable {
+    let baseEntries: Int
+    let overlayEntries: Int
+    let outputEntries: Int
+    let mergedFiles: [String]
+    let appendedFiles: [String]
+    let identicalFiles: [String]
+    let wrapperMode: String
+    let verified: Bool
+}
+
+extension AoVCommonActionsMerger {
+    private static let packageXMLCandidates: Set<String> = [
+        "commonresource/Back.xml",
+        "commonresource/BackFast.xml",
+        "commonresource/Born.xml",
+        "commonresource/Dance.xml",
+        "commonresource/DanceBullet.xml",
+        "commonresource/Dead_Born.xml",
+        "commonresource/HasteE1.xml",
+        "commonresource/HasteE1_leave.xml",
+        "commonresource/HasteE1_super.xml",
+        "commonresource/HasteE2.xml",
+        "commonresource/HasteE3.xml",
+        "commonresource/QuickBack.xml"
+    ]
+
+    private static let maximumPackageBytes = 512 * 1024 * 1024
+    private static let maximumPackageEntries = 20_000
+    private static let maximumPackageExpandedBytes: UInt64 = 1024 * 1024 * 1024
+    private static let maximumCandidateXMLBytes: UInt64 = 16 * 1024 * 1024
+
+    static func mergeCommonActionsPackage(
+        basePackage: Data,
+        overlayPackage: Data,
+        resourceName: String = "CommonActions.pkg.bytes",
+        specialSkinIDs: Set<String>
+    ) throws -> (Data, AoVCommonActionsPackageReport) {
+        guard basePackage.count <= maximumPackageBytes,
+              overlayPackage.count <= maximumPackageBytes else {
+            throw AoVCommonActionsError.invalidXML("\(resourceName): package vượt giới hạn 512 MiB")
+        }
+        let baseWrapper = try unwrapPackage(basePackage, resourceName: resourceName)
+        let overlayWrapper = try unwrapPackage(overlayPackage, resourceName: resourceName)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-CommonActions-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let baseURL = directory.appendingPathComponent("base.pkg.zip")
+        let overlayURL = directory.appendingPathComponent("overlay.pkg.zip")
+        let outputURL = directory.appendingPathComponent("merged.pkg.zip")
+        try baseWrapper.data.write(to: baseURL, options: .atomic)
+        try overlayWrapper.data.write(to: overlayURL, options: .atomic)
+
+        let baseArchive = try Archive(url: baseURL, accessMode: .read)
+        let overlayArchive = try Archive(url: overlayURL, accessMode: .read)
+        let baseEntries = try entryMap(baseArchive, label: "base")
+        let overlayEntries = try entryMap(overlayArchive, label: "overlay")
+        let totalExpanded = baseEntries.values.reduce(UInt64(0)) { $0 + $1.uncompressedSize }
+            .addingReportingOverflow(overlayEntries.values.reduce(UInt64(0)) { $0 + $1.uncompressedSize })
+        guard !totalExpanded.overflow, totalExpanded.partialValue <= 2 * maximumPackageExpandedBytes else {
+            throw AoVCommonActionsError.invalidXML("\(resourceName): tổng dữ liệu giải nén vượt giới hạn")
+        }
+
+        var mergedNames: [String] = []
+        var appendedNames: [String] = []
+        var identicalNames: [String] = []
+
+        do {
+            let outputArchive = try Archive(url: outputURL, accessMode: .create)
+            for (path, baseEntry) in baseEntries.sorted(by: { $0.key < $1.key }) {
+                guard let overlayEntry = overlayEntries[path] else {
+                    try copyEntry(baseEntry, from: baseArchive, to: outputArchive,
+                                  path: path, scratchDirectory: directory)
+                    continue
+                }
+
+                if packageXMLCandidates.contains(path.lowercased()) {
+                    let baseData = try readCandidate(baseEntry, from: baseArchive, path: path)
+                    let overlayData = try readCandidate(overlayEntry, from: overlayArchive, path: path)
+                    if SHA256.hash(data: baseData) == SHA256.hash(data: overlayData) {
+                        try addData(baseData, to: outputArchive, path: path,
+                                    scratchDirectory: directory)
+                        identicalNames.append(path)
+                        continue
+                    }
+                    do {
+                        let (merged, report) = try mergeActionXML(
+                            baseBytes: baseData,
+                            overlayBytes: overlayData,
+                            resourceName: path,
+                            specialSkinIDs: specialSkinIDs
+                        )
+                        guard report.verified else {
+                            throw AoVCommonActionsError.roundTripFailed(path)
+                        }
+                        try addData(merged, to: outputArchive, path: path,
+                                    scratchDirectory: directory)
+                        mergedNames.append(path)
+                    } catch AoVCommonActionsError.noSupportedOverlayTracks {
+                        // The candidate XML contains no actor-owned gate for this overlay.
+                        try addData(baseData, to: outputArchive, path: path,
+                                    scratchDirectory: directory)
+                    }
+                    continue
+                }
+
+                let baseDigest = try sha256(baseEntry, in: baseArchive)
+                let overlayDigest = try sha256(overlayEntry, in: overlayArchive)
+                guard baseDigest == overlayDigest else {
+                    throw AoVCommonActionsError.conflictingSkinEntry(path, "opaque resource")
+                }
+                try copyEntry(baseEntry, from: baseArchive, to: outputArchive,
+                              path: path, scratchDirectory: directory)
+                identicalNames.append(path)
+            }
+
+            for (path, entry) in overlayEntries.sorted(by: { $0.key < $1.key })
+                where baseEntries[path] == nil {
+                try copyEntry(entry, from: overlayArchive, to: outputArchive,
+                              path: path, scratchDirectory: directory)
+                appendedNames.append(path)
+            }
+        }
+
+        let verifyArchive = try Archive(url: outputURL, accessMode: .read)
+        let verifiedEntries = try entryMap(verifyArchive, label: "output")
+        for entry in verifiedEntries.values {
+            _ = try verifyArchive.extract(entry, bufferSize: 64 * 1024, consumer: { _ in })
+        }
+        let outputZIP = try Data(contentsOf: outputURL)
+        let result: Data
+        if baseWrapper.mode == "raw_zip" {
+            result = outputZIP
+        } else {
+            result = try AoVBytesDecoder.encodeResource(
+                outputZIP,
+                resourceName: resourceName,
+                wrapperMode: baseWrapper.mode
+            )
+        }
+        let roundTrip: Data
+        if baseWrapper.mode == "raw_zip" {
+            roundTrip = result
+        } else {
+            roundTrip = try AoVBytesDecoder.decodeResource(result, resourceName: resourceName).data
+        }
+        guard SHA256.hash(data: roundTrip) == SHA256.hash(data: outputZIP) else {
+            throw AoVCommonActionsError.roundTripFailed(resourceName)
+        }
+
+        return (result, AoVCommonActionsPackageReport(
+            baseEntries: baseEntries.count,
+            overlayEntries: overlayEntries.count,
+            outputEntries: verifiedEntries.count,
+            mergedFiles: mergedNames,
+            appendedFiles: appendedNames,
+            identicalFiles: identicalNames,
+            wrapperMode: baseWrapper.mode,
+            verified: true
+        ))
+    }
+
+    private static func unwrapPackage(
+        _ data: Data,
+        resourceName: String
+    ) throws -> (data: Data, mode: String) {
+        if data.count >= 4,
+           data[0] == 0x50, data[1] == 0x4B,
+           (data[2] == 0x03 || data[2] == 0x05 || data[2] == 0x07) {
+            return (data, "raw_zip")
+        }
+        let decoded = try AoVBytesDecoder.decodeResource(data, resourceName: resourceName)
+        return (decoded.data, decoded.wrapperMode)
+    }
+
+    private static func entryMap(_ archive: Archive, label: String) throws -> [String: Entry] {
+        var result: [String: Entry] = [:]
+        var count = 0
+        var expanded: UInt64 = 0
+        for entry in archive {
+            if entry.type == .directory { continue }
+            guard entry.type == .file else {
+                throw AoVCommonActionsError.invalidXML("\(label): symbolic link không được hỗ trợ")
+            }
+            let path = entry.path.replacingOccurrences(of: "\\", with: "/")
+            let components = path.split(separator: "/", omittingEmptySubsequences: false)
+            guard !path.hasPrefix("/"), !path.hasPrefix("~"),
+                  !components.contains(".."), !components.contains("."),
+                  !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+                throw AoVCommonActionsError.invalidXML("\(label): đường dẫn ZIP không an toàn: \(path)")
+            }
+            guard result[path] == nil else {
+                throw AoVCommonActionsError.conflictingSkinEntry(path, "duplicate entry")
+            }
+            count += 1
+            guard count <= maximumPackageEntries else {
+                throw AoVCommonActionsError.invalidXML("\(label): ZIP có quá nhiều entry")
+            }
+            let sum = expanded.addingReportingOverflow(entry.uncompressedSize)
+            guard !sum.overflow, sum.partialValue <= maximumPackageExpandedBytes else {
+                throw AoVCommonActionsError.invalidXML("\(label): ZIP vượt giới hạn giải nén")
+            }
+            expanded = sum.partialValue
+            result[path] = entry
+        }
+        return result
+    }
+
+    private static func readCandidate(
+        _ entry: Entry,
+        from archive: Archive,
+        path: String
+    ) throws -> Data {
+        guard entry.uncompressedSize <= maximumCandidateXMLBytes else {
+            throw AoVCommonActionsError.invalidXML("\(path): XML vượt giới hạn 16 MiB")
+        }
+        var data = Data()
+        _ = try archive.extract(entry, bufferSize: 64 * 1024, consumer: { chunk in
+            data.append(chunk)
+        })
+        return data
+    }
+
+    private static func sha256(_ entry: Entry, in archive: Archive) throws -> Data {
+        var hasher = SHA256()
+        _ = try archive.extract(entry, bufferSize: 64 * 1024, consumer: { chunk in
+            hasher.update(data: chunk)
+        })
+        return Data(hasher.finalize())
+    }
+
+    private static func copyEntry(
+        _ entry: Entry,
+        from source: Archive,
+        to destination: Archive,
+        path: String,
+        scratchDirectory: URL
+    ) throws {
+        let scratch = scratchDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        _ = try source.extract(entry, to: scratch, bufferSize: 64 * 1024)
+        try destination.addEntry(with: path, fileURL: scratch, compressionMethod: .deflate,
+                                 bufferSize: 64 * 1024)
+    }
+
+    private static func addData(
+        _ data: Data,
+        to destination: Archive,
+        path: String,
+        scratchDirectory: URL
+    ) throws {
+        let scratch = scratchDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        try data.write(to: scratch, options: .atomic)
+        try destination.addEntry(with: path, fileURL: scratch, compressionMethod: .deflate,
+                                 bufferSize: 64 * 1024)
+    }
+}
+
 }
