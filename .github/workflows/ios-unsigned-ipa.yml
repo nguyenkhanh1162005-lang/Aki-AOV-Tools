@@ -1,9 +1,9 @@
 name: Build iOS unsigned IPA
 
 on:
-  pull_request:
+  push:
     branches:
-      - feat/multi-actor-aov-archive-merge
+      - feat/ios-offline-app-prototype
     paths:
       - 'ios/AOVSkinMerger/**'
       - '.github/workflows/ios-unsigned-ipa.yml'
