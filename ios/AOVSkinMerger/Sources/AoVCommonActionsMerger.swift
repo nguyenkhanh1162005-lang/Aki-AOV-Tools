@@ -80,6 +80,15 @@ private final class AoVXMLNode {
         }
     }
 
+    func replaceDirectChild(_ target: AoVXMLNode, with replacement: AoVXMLNode) {
+        for index in content.indices {
+            if case .child(let node) = content[index], node === target {
+                content[index] = .child(replacement)
+                return
+            }
+        }
+    }
+
     func clone() -> AoVXMLNode {
         let node = AoVXMLNode(name: name, attributes: attributes)
         for part in content {
@@ -476,8 +485,7 @@ enum AoVCommonActionsMerger {
                         if let current = existing[skinID] {
                             if current.attributes != sourceNode.attributes {
                                 let replacement = sourceNode.clone()
-                                target.removeDirectChild(current)
-                                target.append(replacement)
+                                target.replaceDirectChild(current, with: replacement)
                                 existing[skinID] = replacement
                                 changed = true
                             }
@@ -603,13 +611,43 @@ enum AoVCommonActionsMerger {
             let ids = Set(sourceTrack.directChildren("SkinOrAvatarList").compactMap {
                 $0.attributes["id"]
             }.filter { specialSkinIDs.contains($0) })
-            if ids.isEmpty { continue }
-            let key = trackKey(sourceTrack)
-            let present = Set(verifiedAction.directChildren("Track")
-                .filter { trackKey($0) == key }
-                .flatMap { $0.directChildren("SkinOrAvatarList").compactMap { $0.attributes["id"] } })
-            guard ids.isSubset(of: present) else {
-                throw AoVCommonActionsError.roundTripFailed(resourceName)
+            if !ids.isEmpty {
+                let key = trackKey(sourceTrack)
+                let present = Set(verifiedAction.directChildren("Track")
+                    .filter { trackKey($0) == key }
+                    .flatMap { $0.directChildren("SkinOrAvatarList").compactMap { $0.attributes["id"] } })
+                guard ids.isSubset(of: present) else {
+                    throw AoVCommonActionsError.roundTripFailed(resourceName)
+                }
+                continue
+            }
+
+            guard let sourceCondition = try skinCondition(sourceTrack, targetIDs: specialSkinIDs) else {
+                continue
+            }
+            if sourceCondition.kind == .scalar {
+                guard let scalarID = sourceCondition.scalarID,
+                      specialSkinIDs.contains(scalarID) else { continue }
+                let hasCondition = verifiedAction.directChildren("Track").contains { candidate in
+                    guard trackKey(candidate) == trackKey(sourceTrack),
+                          let info = try? skinCondition(candidate, targetIDs: specialSkinIDs) else { return false }
+                    return info.kind == .scalar && info.scalarID == scalarID
+                }
+                guard hasCondition else {
+                    throw AoVCommonActionsError.roundTripFailed(resourceName)
+                }
+            } else {
+                let key = conditionArrayKey(sourceTrack)
+                let matches = verifiedAction.directChildren("Track").filter {
+                    conditionArrayKey($0) == key
+                }
+                let values = Set(matches.flatMap { candidate in
+                    (try? skinCondition(candidate, targetIDs: []))?.arrayValues ?? []
+                })
+                let required = Set(sourceCondition.arrayValues.filter { specialSkinIDs.contains($0) })
+                guard required.isSubset(of: values) else {
+                    throw AoVCommonActionsError.roundTripFailed(resourceName)
+                }
             }
         }
 
