@@ -416,6 +416,7 @@ final class AoVBytesDecoderTests: XCTestCase {
             return XCTFail("Output wrapper is missing Resources.zip or DanhSachSkin.txt")
         }
 
+        XCTAssertNotNil(outer.first(where: { $0.path == "Resources/1.64.1/LooseBase.bytes" }))
         let mergedResourcesURL = root.appendingPathComponent("output-resources.zip")
         _ = try outer.extract(resourcesEntry, to: mergedResourcesURL)
         var skinData = Data()
@@ -426,8 +427,7 @@ final class AoVBytesDecoderTests: XCTestCase {
 
         let resources = try Archive(url: mergedResourcesURL, accessMode: .read)
         guard let commonEntry = resources.first(where: { $0.path == commonPath }),
-              resources.first(where: { $0.path == "Ages/Prefab_Characters/Prefab_Hero/Actor593/NewResource.bytes" }) != nil,
-              resources.first(where: { $0.path == "LooseBase.bytes" }) != nil else {
+              resources.first(where: { $0.path == "Ages/Prefab_Characters/Prefab_Hero/Actor593/NewResource.bytes" }) != nil else {
             return XCTFail("Output Resources.zip is missing merged/added resources")
         }
         var packageData = Data()
