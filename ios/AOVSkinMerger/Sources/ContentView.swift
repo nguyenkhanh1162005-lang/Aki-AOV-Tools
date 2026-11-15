@@ -10,6 +10,8 @@ struct ContentView: View {
     @State private var analysis: ArchiveAnalysis?
     @State private var aesReport: AESScanReport?
     @State private var isDecoding = false
+    @State private var isMerging = false
+    @State private var mergeReport: AoVModMergeReport?
     @State private var alertText = ""
     @State private var showAlert = false
     @State private var updateMessage = "Chưa kiểm tra cập nhật"
@@ -46,8 +48,18 @@ struct ContentView: View {
                         }
                         .buttonStyle(.bordered)
                         .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding)
-                        Text("Chỉ giải mã đọc thử header AES 22 4A 67 00. AES+Zstandard và các định dạng khác sẽ được báo chưa hỗ trợ.")
+                        Text("Quét tài nguyên và giải mã trực tiếp trên iPhone. Không upload ZIP.")
                             .font(.caption2).foregroundColor(.secondary)
+                        Button(action: runModMerge) {
+                            HStack {
+                                if isMerging { ProgressView() }
+                                Label(isMerging ? "Đang ghép MOD…" : "Ghép MOD và xuất ZIP",
+                                      systemImage: "arrow.triangle.merge")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(selectedURLs.count < 2 || isAnalyzing || isDecoding || isMerging)
                     }
                     .panel()
 
@@ -82,6 +94,7 @@ struct ContentView: View {
 
                     if let analysis { analysisView(analysis) }
                     if let aesReport { aesReportView(aesReport) }
+                    if let mergeReport { mergeResultView(mergeReport) }
 
                     VStack(alignment: .leading, spacing: 9) {
                         Label("Tiến độ phát triển", systemImage: "hammer.fill").font(.headline)
@@ -129,7 +142,7 @@ struct ContentView: View {
                     Text("Bản iOS thử nghiệm 0.4.0").font(.caption).foregroundColor(.secondary)
                 }
             }
-            Text("Kiểm tra payload ZIP và giải mã thử một nhánh AES AoV trực tiếp trên iPhone. Chưa phải bộ ghép skin hoàn chỉnh.")
+            Text("AKI AOV SKIN xử lý file ngay trên iPhone. Bộ ghép sẽ dừng khi gặp xung đột chưa có adapter đã xác minh.")
                 .font(.subheadline).foregroundColor(.secondary)
         }.panel()
     }
@@ -261,6 +274,8 @@ struct ContentView: View {
                     selectedURLs.append(destination)
                 }
                 analysis = nil
+                aesReport = nil
+                mergeReport = nil
             } catch {
                 alertText = error.localizedDescription
                 showAlert = true
@@ -279,6 +294,32 @@ struct ContentView: View {
         return folder
     }
 
+    private func mergeResultView(_ report: AoVModMergeReport) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("ZIP đã ghép và kiểm tra cấu trúc", systemImage: "checkmark.seal.fill")
+                .font(.headline)
+                .foregroundColor(.green)
+            Text(report.outputURL.lastPathComponent)
+                .font(.subheadline.weight(.semibold))
+                .textSelection(.enabled)
+            metric("Gói nguồn", "\(report.sourceCount)")
+            metric("Gói nền được chọn", report.baseSource)
+            metric("Tài nguyên mới", "\(report.addedResources)")
+            metric("Tài nguyên thay thế", "\(report.replacedResources)")
+            metric("CommonActions đã ghép", "\(report.commonActionsFiles.count)")
+            metric("AssetRef duy nhất giữ nguyên", "\(report.preservedAssetReferenceSets.count)")
+            ShareLink(item: report.outputURL) {
+                Label("Chia sẻ / lưu ZIP kết quả", systemImage: "square.and.arrow.up")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            Text("ZIP đã qua kiểm CRC và kiểm tra cấu trúc. Chưa thử trong Liên Quân; đây không phải xác nhận tương thích game. Nếu một loại xung đột chưa có adapter, app sẽ dừng và không xuất ZIP.")
+                .font(.footnote)
+                .foregroundColor(.orange)
+        }
+        .panel()
+    }
+
     private func runAnalysis() {
         guard !selectedURLs.isEmpty else { return }
         isAnalyzing = true
@@ -294,6 +335,25 @@ struct ContentView: View {
                 showAlert = true
             }
             isAnalyzing = false
+        }
+    }
+
+    private func runModMerge() {
+        guard selectedURLs.count >= 2 else { return }
+        isMerging = true
+        mergeReport = nil
+        let urls = selectedURLs
+        Task {
+            do {
+                let report = try await Task.detached(priority: .userInitiated) {
+                    try AoVModArchiveMerger.merge(urls)
+                }.value
+                mergeReport = report
+            } catch {
+                alertText = error.localizedDescription
+                showAlert = true
+            }
+            isMerging = false
         }
     }
 
