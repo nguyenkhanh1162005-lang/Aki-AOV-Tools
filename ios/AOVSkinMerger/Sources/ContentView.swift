@@ -5,6 +5,7 @@ import UIKit
 struct ContentView: View {
     @Environment(\.openURL) private var openURL
     @State private var isImporting = false
+    @State private var isCopyingFiles = false
     @State private var isAnalyzing = false
     @State private var selectedURLs: [URL] = []
     @State private var analysis: ArchiveAnalysis?
@@ -27,9 +28,17 @@ struct ContentView: View {
                         Text("Chọn nhiều ZIP. File được giữ trên iPhone, không tải lên máy chủ.")
                             .font(.footnote).foregroundColor(.secondary)
                         Button { isImporting = true } label: {
-                            Label("Chọn file ZIP", systemImage: "plus.circle.fill")
-                                .frame(maxWidth: .infinity)
-                        }.buttonStyle(.borderedProminent)
+                            HStack {
+                                if isCopyingFiles { ProgressView() }
+                                Label(
+                                    isCopyingFiles ? "Đang nhập ZIP vào iPhone…" : "Chọn file ZIP",
+                                    systemImage: isCopyingFiles ? "arrow.down.doc" : "plus.circle.fill"
+                                )
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isCopyingFiles || isAnalyzing || isDecoding || isMerging)
                         Button(action: runAnalysis) {
                             HStack {
                                 if isAnalyzing { ProgressView().tint(.white) }
@@ -48,7 +57,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(.bordered)
                         .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding)
-                        Text("Quét tài nguyên và giải mã trực tiếp trên iPhone. Không upload ZIP.")
+                        Text("Chọn ZIP trong ứng dụng Tệp. App sẽ sao chép file vào bộ nhớ iPhone trước, rồi mới quét hoặc ghép. Hãy đợi tên file xuất hiện trong danh sách.")
                             .font(.caption2).foregroundColor(.secondary)
                         Button(action: runModMerge) {
                             HStack {
@@ -273,21 +282,49 @@ struct ContentView: View {
     private func importFiles(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
-            do {
-                let folder = try sourceFolder()
-                for source in urls {
-                    let accessing = source.startAccessingSecurityScopedResource()
-                    defer { if accessing { source.stopAccessingSecurityScopedResource() } }
-                    let destination = folder.appendingPathComponent(UUID().uuidString + "-" + source.lastPathComponent)
-                    try FileManager.default.copyItem(at: source, to: destination)
-                    selectedURLs.append(destination)
-                }
-                analysis = nil
-                aesReport = nil
-                mergeReport = nil
-            } catch {
-                alertText = error.localizedDescription
+            guard !urls.isEmpty else { return }
+            let existingCount = selectedURLs.count
+            let existingBytes = selectedURLs.reduce(UInt64(0)) { partial, url in
+                let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                let sum = partial.addingReportingOverflow(UInt64(max(size, 0)))
+                return sum.overflow ? AoVSourceFileImporter.maximumTotalBytes : sum.partialValue
+            }
+            guard existingCount + urls.count <= AoVSourceFileImporter.maximumFiles else {
+                alertText = "App nhận tối đa 10 ZIP. Hãy xóa bớt file trong danh sách rồi chọn lại."
                 showAlert = true
+                return
+            }
+
+            isCopyingFiles = true
+            Task {
+                do {
+                    let folder = try sourceFolder()
+                    let report = try await Task.detached(priority: .userInitiated) {
+                        try AoVSourceFileImporter.copy(
+                            urls,
+                            into: folder,
+                            existingFileCount: existingCount,
+                            existingBytes: existingBytes
+                        )
+                    }.value
+                    selectedURLs.append(contentsOf: report.importedURLs)
+                    analysis = nil
+                    aesReport = nil
+                    mergeReport = nil
+
+                    if !report.errors.isEmpty {
+                        alertText = "Đã nhập \(report.importedURLs.count)/\(urls.count) file. File lỗi:\n" +
+                            report.errors.joined(separator: "\n")
+                        showAlert = true
+                    } else if report.importedURLs.isEmpty {
+                        alertText = "Chưa có ZIP nào được thêm vào danh sách."
+                        showAlert = true
+                    }
+                } catch {
+                    alertText = error.localizedDescription
+                    showAlert = true
+                }
+                isCopyingFiles = false
             }
         case .failure(let error):
             alertText = error.localizedDescription
