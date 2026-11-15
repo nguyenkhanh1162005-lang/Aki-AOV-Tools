@@ -107,7 +107,10 @@ struct ContentView: View {
                         statusRow("Giải mã AES / AES+Zstandard / Zstandard AoV", true)
                         statusRow("AssetRef: nhận diện và giữ path duy nhất", true)
                         statusRow("CommonActions: direct list + skinId conditions", true)
-                        statusRow("MSES / IFix / Wwise / AssetBundle metadata", false)
+                        statusRow("MSES / IFix: adapter theo schema đã nhận diện", true)
+                        statusRow("Wwise BNK: append-only nếu ID không xung đột", true)
+                        statusRow("AssetBundle Packer / Verification metadata", false)
+                        statusRow("AssetRef subset merge khi cùng path khác payload", false)
                         statusRow("Xuất ZIP với kiểm CRC khi không còn blocker", true)
                     }.panel()
 
@@ -316,6 +319,7 @@ struct ContentView: View {
             metric("Bảng MSES đã ghép", "\(report.mergedMSESTables.count)")
             metric("IFix patch đã ghép", "\(report.mergedIFixPatches.count)")
             metric("AssetRef duy nhất giữ nguyên", "\(report.preservedAssetReferenceSets.count)")
+            metric("Wwise BNK thêm nguyên trạng (append-only)", "\(report.preservedWwiseBanks.count)")
             ShareLink(item: report.outputURL) {
                 Label("Chia sẻ / lưu ZIP kết quả", systemImage: "square.and.arrow.up")
                     .frame(maxWidth: .infinity)
