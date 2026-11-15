@@ -1,7 +1,7 @@
 import Foundation
 import CommonCrypto
 
-enum AoVBytesDecodeError: LocalizedError {
+enum AoVBytesDecodeError: LocalizedError, Equatable {
     case notAES
     case aesZstdUnsupported
     case unsupportedAESFlag(UInt8)
