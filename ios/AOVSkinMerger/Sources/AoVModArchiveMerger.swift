@@ -64,6 +64,7 @@ struct AoVModMergeReport: Sendable {
     let mergedMSESTables: [String]
     let mergedIFixPatches: [String]
     let preservedAssetReferenceSets: [String]
+    let preservedWwiseBanks: [String]
     let structurallyValidated: Bool
     let gameCompatibilityTested: Bool
 }
@@ -161,6 +162,7 @@ enum AoVModArchiveMerger {
         var mergedMSESTables: [String] = []
         var mergedIFixPatches: [String] = []
         var assetRefUnique: [String] = []
+        var preservedWwiseBanks: [String] = []
 
         for path in allPaths {
             let providers = ordered.compactMap { source -> (AoVModSource, AoVResourceReference)? in
@@ -181,6 +183,16 @@ enum AoVModArchiveMerger {
             if distinct.isEmpty {
                 if baseProvider.0.id != base.id {
                     let lowerPath = path.lowercased()
+                    if lowerPath.hasSuffix(".bnk") {
+                        added[path] = baseProvider.1
+                        preservedWwiseBanks.append(path)
+                        continue
+                    }
+                    if lowerPath.hasSuffix(".wem") {
+                        throw AoVModArchiveMergeError.wwiseNotSupported(
+                            "\(path): WEM rời chưa có adapter ghép cặp external-media đã xác minh."
+                        )
+                    }
                     if lowerPath == "thanos/heroskin_1.bytes" || lowerPath == "thanos/heroskin_2.bytes" {
                         throw AoVModArchiveMergeError.unsupportedConflict(
                             path,
@@ -195,6 +207,16 @@ enum AoVModArchiveMerger {
             }
 
             let lowerPath = path.lowercased()
+            if lowerPath.hasSuffix(".bnk") {
+                throw AoVModArchiveMergeError.wwiseNotSupported(
+                    "\(path): cùng đường dẫn BNK có payload khác nhau; không ghi đè bank."
+                )
+            }
+            if lowerPath.hasSuffix(".wem") {
+                throw AoVModArchiveMergeError.wwiseNotSupported(
+                    "\(path): WEM rời chưa có adapter ghép cặp external-media đã xác minh."
+                )
+            }
             if lowerPath == "thanos/heroskin_1.bytes" || lowerPath == "thanos/heroskin_2.bytes" {
                 guard baseProvider.0.id == base.id else {
                     throw AoVModArchiveMergeError.unsupportedConflict(
@@ -269,9 +291,6 @@ enum AoVModArchiveMerger {
                     "Packer/Verification catalog có payload khác; parser cập nhật dependency/checksum chưa được port sang iOS."
                 )
             }
-            if path.lowercased().hasSuffix(".bnk") || path.lowercased().hasSuffix(".wem") {
-                throw AoVModArchiveMergeError.wwiseNotSupported(path)
-            }
             if path.lowercased().hasSuffix(".assetbundle") {
                 throw AoVModArchiveMergeError.assetBundleMetadataRequired(path)
             }
@@ -325,6 +344,44 @@ enum AoVModArchiveMerger {
             )
         }
 
+        if !preservedWwiseBanks.isEmpty {
+            do {
+                let baseBanks = try base.resources.keys
+                    .filter { $0.lowercased().hasSuffix(".bnk") }
+                    .sorted()
+                    .map { path in
+                        AoVWwiseBankInput(
+                            path: path,
+                            data: try readData(
+                                base.resources[path]!,
+                                maxBytes: UInt64(AoVWwiseBNK.maximumBankBytes)
+                            )
+                        )
+                    }
+                let overlayBanks = try preservedWwiseBanks.sorted().map { path in
+                    guard let reference = added[path] else {
+                        throw AoVWwiseBNKError.invalidPath
+                    }
+                    return AoVWwiseBankInput(
+                        path: path,
+                        data: try readData(
+                            reference,
+                            maxBytes: UInt64(AoVWwiseBNK.maximumBankBytes)
+                        )
+                    )
+                }
+                let report = try AoVWwiseBNK.validateAppendOnly(
+                    baseBanks: baseBanks,
+                    overlayBanks: overlayBanks
+                )
+                guard report.verified else {
+                    throw AoVWwiseBNKError.malformed("kiểm tra append-only chưa xác nhận.")
+                }
+            } catch {
+                throw AoVModArchiveMergeError.wwiseNotSupported(error.localizedDescription)
+            }
+        }
+
         let innerOutputURL = tempRoot.appendingPathComponent("Resources-merged.zip")
         try writeMergedResources(
             base: base,
@@ -365,6 +422,7 @@ enum AoVModArchiveMerger {
             mergedMSESTables: mergedMSESTables,
             mergedIFixPatches: mergedIFixPatches,
             preservedAssetReferenceSets: assetRefUnique,
+            preservedWwiseBanks: preservedWwiseBanks.sorted(),
             structurallyValidated: true,
             gameCompatibilityTested: false
         )
