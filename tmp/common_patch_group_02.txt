@@ -1,0 +1,92 @@
+@@ -80,11 +242,12 @@
+     *,
+     special_ids: set[str] | None = None,
+ ) -> tuple[bytes, dict]:
+-    """Merge only explicitly actor-gated CommonActions tracks.
++    """Merge actor-gated skin lists and verified scalar/array skin conditions.
+ 
+-    This parser supports direct-child SkinOrAvatarList gates only. Condition-index
+-    based CheckSkinIdTick logic used by some MOD packs is a separate format and
+-    must not be treated as equivalent to these explicit skin-list gates.
++    Supported condition forms are direct CheckSkinIdTick/CheckSkinIdVirtualTick
++    events with targetId plus scalar skinId, or a typed skinIdArray whose values
++    can be unioned under an otherwise identical condition. Unknown layouts fail
++    closed; nested condition-index structures are never rewritten.
+     """
+     target_ids = {str(value) for value in (SPECIAL_IDS if special_ids is None else special_ids)}
+     if not target_ids or any(not value.isdigit() for value in target_ids):
+@@ -126,70 +289,11 @@
+     appended = []
+     already_present = []
+     merged_into_existing = []
++    condition_appended = []
++    condition_merged = []
+ 
+-    for source_track in overlay_tracks:
+-        source_skin_nodes = list(source_track.iter("SkinOrAvatarList"))
+-        if not source_skin_nodes:
+-            continue
+-        if not _is_special_track(source_track, target_ids):
+-            continue
+-        # The supported track schema keeps SkinOrAvatarList as direct children.
+-        # Refuse an unknown nested layout instead of moving nodes to a different
+-        # event location during the merge.
+-        direct_skin_nodes = source_track.findall("SkinOrAvatarList")
+-        if len(direct_skin_nodes) != len(source_skin_nodes):
+-            raise CommonActionsMergeError(
+-                f"{resource_name}: track {_normalized_track_name(source_track)} "
+-                "có SkinOrAvatarList lồng ở vị trí chưa được hỗ trợ."
+-            )
+-        # Only import IDs explicitly assigned to this overlay. Some packs can
+-        # contain shared/common track metadata for other actors as well.
+-        filtered_track = copy.deepcopy(source_track)
+-        for node in list(filtered_track.findall("SkinOrAvatarList")):
+-            if node.attrib.get("id") not in target_ids:
+-                filtered_track.remove(node)
+-        if not filtered_track.findall("SkinOrAvatarList"):
+-            continue
+-        name = _normalized_track_name(filtered_track)
+-        key = _track_key(filtered_track)
+-        candidates = index.get(key, [])
+-        if candidates:
+-            target = candidates[0]
+-            was_special = _is_special_track(target, target_ids)
+-            existing_nodes = {
+-                node.attrib.get("id"): node
+-                for node in target.findall("SkinOrAvatarList")
+-            }
+-            changed = False
+-            for source_node in filtered_track.findall("SkinOrAvatarList"):
+-                skin_id = source_node.attrib.get("id")
+-                current = existing_nodes.get(skin_id)
+-                cloned = copy.deepcopy(source_node)
+-                if current is None:
+-                    target.append(cloned)
+-                    existing_nodes[skin_id] = cloned
+-                    changed = True
+-                elif current.attrib != cloned.attrib:
+-                    position = list(target).index(current)
+-                    target.remove(current)
+-                    target.insert(position, cloned)
+-                    existing_nodes[skin_id] = cloned
+-                    changed = True
+-
+-            for attr in ("useRefParam", "refParamName"):
+-                if attr not in target.attrib and attr in source_track.attrib:
+-                    target.attrib[attr] = source_track.attrib[attr]
+-                    changed = True
+-            if changed:
+-                if was_special:
+-                    merged_into_existing.append(name)
+-                else:
+-                    replaced.append(name)
+-            else:
+-                already_present.append(name)
+-            continue
+-
+-        addition = filtered_track
++    def append_track(track: ET.Element, key: tuple[str, str, str], label: str) -> None:
++        addition = copy.deepcopy(track)
+         original_name = addition.attrib.get("trackName", "")
+         addition.attrib["trackName"] = _unique_track_name(original_name, used_names, next_index)
+         addition.attrib.setdefault(
