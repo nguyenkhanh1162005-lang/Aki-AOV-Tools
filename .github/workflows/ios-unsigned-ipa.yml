@@ -1,12 +1,6 @@
 name: Build iOS unsigned IPA
 
 on:
-  push:
-    branches:
-      - feat/ios-offline-app-prototype
-    paths:
-      - 'ios/AOVSkinMerger/**'
-      - '.github/workflows/ios-unsigned-ipa.yml'
   pull_request:
     branches:
       - feat/multi-actor-aov-archive-merge
@@ -19,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: aki-aov-skin-ios-${{ github.event.pull_request.head.ref || github.ref }}
+  group: aki-aov-skin-ios-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -100,7 +94,7 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AKI-AOV-SKIN-0.4.1-IPA
+          name: AKI-AOV-SKIN-0.4.2-IPA
           path: AKI AOV SKIN.ipa
           if-no-files-found: error
           retention-days: 14

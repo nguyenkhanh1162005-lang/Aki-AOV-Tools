@@ -157,7 +157,7 @@ struct ContentView: View {
                 Image(systemName: "archivebox.fill").font(.system(size: 28)).foregroundColor(.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("AKI AOV SKIN").font(.title2.bold())
-                    Text("Bản iOS thử nghiệm 0.4.1").font(.caption).foregroundColor(.secondary)
+                    Text("Bản iOS thử nghiệm 0.4.2").font(.caption).foregroundColor(.secondary)
                 }
             }
             Text("AKI AOV SKIN xử lý file ngay trên iPhone. Bộ ghép sẽ dừng khi gặp xung đột chưa có adapter đã xác minh.")

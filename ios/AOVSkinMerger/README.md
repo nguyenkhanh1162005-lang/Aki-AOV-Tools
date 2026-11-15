@@ -1,4 +1,4 @@
-# AKI AOV SKIN for iOS — prototype 0.4.1
+# AKI AOV SKIN for iOS — prototype 0.4.2
 
 This is an **unsigned iOS device-build prototype**. It is not a universal or game-certified AoV skin merger.
 
@@ -20,6 +20,7 @@ This is an **unsigned iOS device-build prototype**. It is not a universal or gam
 - Up to 20,000 entries per ZIP.
 - Up to 512 MiB per ZIP entry and 1 GiB declared expanded bytes per ZIP.
 - The Wwise append-only inspector reads BNK files up to 128 MiB each.
+- ZIP import runs on a background task; the app retains security-scoped access until the coordinated copy into Documents completes.
 - Unsupported or conflicting resources fail closed instead of choosing a winner or overwriting the base file.
 
 ## Not yet implemented or verified
