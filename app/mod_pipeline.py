@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import os
 import re
 import stat
 import tempfile
 import zlib
+from contextlib import contextmanager
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -36,10 +36,30 @@ MAX_VERSION_MARKER_BYTES = 4096
 MAX_VERSION_MARKER_CHARS = 200
 MAX_INPUT_FILES = 10
 MAX_TOTAL_INPUT_BYTES = 500 * 1024 * 1024
+MAX_ASSETREF_PREFLIGHT_BYTES = 64 * 1024 * 1024
+MAX_WWISE_PREFLIGHT_BYTES = 128 * 1024 * 1024
+MAX_WWISE_BANK_PREFLIGHT_BYTES = 32 * 1024 * 1024
 
 
 class ModPipelineError(ValueError):
     """Raised when an archive set cannot be merged by a verified adapter."""
+
+
+@contextmanager
+def _open_spooled_nested_zip(archive: zipfile.ZipFile, info: zipfile.ZipInfo):
+    """Open a nested ZIP using a disk-backed spool instead of a full RAM copy."""
+    with tempfile.SpooledTemporaryFile(
+        max_size=16 * 1024 * 1024, mode="w+b"
+    ) as nested_stream:
+        with archive.open(info, "r") as source_stream:
+            while True:
+                block = source_stream.read(1024 * 1024)
+                if not block:
+                    break
+                nested_stream.write(block)
+        nested_stream.seek(0)
+        with zipfile.ZipFile(nested_stream, "r") as nested:
+            yield nested
 
 
 AOV_MARKERS = {
@@ -197,21 +217,27 @@ def _assess_asset_reference_sources(archive_paths: list[str]) -> dict[str, Any]:
     ]
     source_counts = [0 for _ in archive_paths]
     identical_duplicates = 0
+    assetref_payload_bytes = 0
 
     def add_assetref(
         source_index: int,
         archive: zipfile.ZipFile,
         info: zipfile.ZipInfo,
     ) -> None:
-        nonlocal identical_duplicates
+        nonlocal identical_duplicates, assetref_payload_bytes
         canonical = _asset_reference_canonical_path(info.filename)
         if canonical is None or not is_asset_reference_set_path(canonical):
             return
-        if info.file_size > 256 * 1024 * 1024:
+        if info.file_size > MAX_ASSETREF_PREFLIGHT_BYTES:
             raise AssetReferenceSetError(
-                f"{Path(archive_paths[source_index]).name}:{info.filename}: AssetRef vượt 256 MiB."
+                f"{Path(archive_paths[source_index]).name}:{info.filename}: AssetRef vượt ngân sách preflight 64 MiB."
+            )
+        if assetref_payload_bytes + info.file_size > MAX_ASSETREF_PREFLIGHT_BYTES:
+            raise AssetReferenceSetError(
+                "Tổng payload AssetRef vượt ngân sách preflight 64 MiB; dừng để bảo vệ RAM."
             )
         payload = archive.read(info)
+        assetref_payload_bytes += len(payload)
         digest = hashlib.sha256(payload).hexdigest()
         existing = inventories[source_index].get(canonical)
         if existing is not None:
@@ -247,8 +273,7 @@ def _assess_asset_reference_sources(archive_paths: list[str]) -> dict[str, Any]:
                         add_assetref(source_index, outer, info)
 
                 if nested_candidates:
-                    nested_bytes = outer.read(nested_candidates[0])
-                    with zipfile.ZipFile(io.BytesIO(nested_bytes), "r") as inner:
+                    with _open_spooled_nested_zip(outer, nested_candidates[0]) as inner:
                         for info in inner.infolist():
                             if info.is_dir():
                                 continue
@@ -354,15 +379,21 @@ def _assess_wwise_bnk_sources(
     source_banks: list[list[tuple[str, bytes]]] = [[] for _ in archive_paths]
     source_wem_counts = [0 for _ in archive_paths]
     total_banks = 0
+    wwise_payload_bytes = 0
 
     def add_bank(source_index: int, archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> None:
-        nonlocal total_banks
-        if info.file_size > MAX_PROFILE_ENTRY:
+        nonlocal total_banks, wwise_payload_bytes
+        if info.file_size > MAX_WWISE_BANK_PREFLIGHT_BYTES:
             raise WwiseBNKError(
-                f"{Path(archive_paths[source_index]).name}:{info.filename}: BNK vượt quá 512 MiB."
+                f"{Path(archive_paths[source_index]).name}:{info.filename}: BNK vượt ngân sách preflight 32 MiB."
+            )
+        if wwise_payload_bytes + info.file_size > MAX_WWISE_PREFLIGHT_BYTES:
+            raise WwiseBNKError(
+                "Tổng payload Wwise BNK vượt ngân sách preflight 128 MiB; dừng để bảo vệ RAM."
             )
         relative = _wwise_scope_path(info.filename)
         payload = archive.read(info)
+        wwise_payload_bytes += len(payload)
         existing = next(
             (item for item in source_banks[source_index] if item[0] == relative),
             None,
@@ -404,8 +435,7 @@ def _assess_wwise_bnk_sources(
                         add_bank(source_index, outer, info)
 
                 if nested_candidates:
-                    nested_bytes = outer.read(nested_candidates[0])
-                    with zipfile.ZipFile(io.BytesIO(nested_bytes), "r") as inner:
+                    with _open_spooled_nested_zip(outer, nested_candidates[0]) as inner:
                         for info in inner.infolist():
                             if info.is_dir():
                                 continue
