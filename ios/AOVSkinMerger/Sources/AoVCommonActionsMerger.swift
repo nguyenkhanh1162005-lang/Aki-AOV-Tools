@@ -665,6 +665,7 @@ enum AoVCommonActionsMerger {
             verified: true
         ))
     }
+}
 
 struct AoVActorSkinInventory: Sendable {
     let skinIDs: Set<String>
@@ -1018,6 +1019,4 @@ extension AoVCommonActionsMerger {
         try destination.addEntry(with: path, fileURL: scratch, compressionMethod: .deflate,
                                  bufferSize: 64 * 1024)
     }
-}
-
 }
