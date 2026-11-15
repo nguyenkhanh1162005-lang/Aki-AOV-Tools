@@ -127,6 +127,11 @@ enum AoVModArchiveMerger {
               base.outerSkinEntry != nil else {
             throw AoVModArchiveMergeError.noBaseWrapper
         }
+        for required in [commonActionsPath, packerPath, verificationPath] {
+            guard base.resources[required] != nil else {
+                throw AoVModArchiveMergeError.baseMissingResource(required)
+            }
+        }
 
         guard let baseVersion = base.version, !baseVersion.isEmpty else {
             throw AoVModArchiveMergeError.baseMissingResource("version.txt")
