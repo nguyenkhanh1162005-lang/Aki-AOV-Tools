@@ -10,6 +10,7 @@ import io
 import json
 import re
 import stat
+import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
