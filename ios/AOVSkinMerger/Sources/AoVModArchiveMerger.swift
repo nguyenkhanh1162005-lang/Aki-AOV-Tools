@@ -265,13 +265,15 @@ enum AoVModArchiveMerger {
         try verifyArchive(stagedURL, label: "ZIP ngoài")
         try FileManager.default.moveItem(at: stagedURL, to: finalURL)
 
+        var actorSummary: [String: [String]] = [:]
+        for (index, source) in ordered.enumerated() {
+            actorSummary["(index + 1):(source.name)"] = source.actorEvidence.allActorIDs.sorted()
+        }
         return AoVModMergeReport(
             outputURL: finalURL,
             baseSource: base.name,
             sourceCount: ordered.count,
-            actorIDsBySource: Dictionary(uniqueKeysWithValues: ordered.map {
-                ($0.name, $0.actorEvidence.allActorIDs.sorted())
-            }),
+            actorIDsBySource: actorSummary,
             addedResources: added.count,
             replacedResources: replacements.count,
             commonActionsFiles: commonActionsFiles,
@@ -547,22 +549,24 @@ enum AoVModArchiveMerger {
             }
         }
 
-        let output = try Archive(url: outputURL, accessMode: .create)
-        var emitted = Set<String>()
-        for entry in base.resourceArchive where entry.type == .file {
-            let relative = try normalizeResourcePath(entry.path)
-            if let payload = replacements[relative] {
-                try addData(payload, to: output, path: entry.path, tempRoot: tempRoot)
-            } else {
-                try copyEntry(entry, from: base.resourceArchive, to: output,
-                              path: entry.path, tempRoot: tempRoot)
+        do {
+                let output = try Archive(url: outputURL, accessMode: .create)
+            var emitted = Set<String>()
+            for entry in base.resourceArchive where entry.type == .file {
+                let relative = try normalizeResourcePath(entry.path)
+                if let payload = replacements[relative] {
+                    try addData(payload, to: output, path: entry.path, tempRoot: tempRoot)
+                } else {
+                    try copyEntry(entry, from: base.resourceArchive, to: output,
+                                  path: entry.path, tempRoot: tempRoot)
+                }
+                emitted.insert(relative)
             }
-            emitted.insert(relative)
-        }
-        for (relative, reference) in added where !emitted.contains(relative) {
-            let outputPath = prefix + relative
-            try copyEntry(reference.entry, from: reference.archive, to: output,
-                          path: outputPath, tempRoot: tempRoot)
+            for (relative, reference) in added where !emitted.contains(relative) {
+                let outputPath = prefix + relative
+                try copyEntry(reference.entry, from: reference.archive, to: output,
+                              path: outputPath, tempRoot: tempRoot)
+            }
         }
         try verifyArchive(outputURL, label: "Resources.zip")
     }
