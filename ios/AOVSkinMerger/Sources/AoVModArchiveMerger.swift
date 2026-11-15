@@ -38,7 +38,7 @@ enum AoVModArchiveMergeError: LocalizedError {
         case .assetBundleMetadataRequired(let path):
             return "\(path): AssetBundle mới cần ghép Packer/Verification metadata, adapter iOS chưa hoàn tất."
         case .wwiseNotSupported(let path):
-            return "\(path): Wwise BNK/WEM cần parser tham chiếu HIRC/Media; app chưa cho phép ghép phần này."
+            return "\(path): không qua kiểm tra Wwise append-only. BNK chỉ được thêm nguyên trạng khi ID không xung đột; remap HIRC và WEM rời chưa hỗ trợ."
         case .assetReferenceConflict(let path):
             return "\(path): AssetReferenceSet cùng đường dẫn nhưng payload khác. Chưa có parser subset để hợp nhất an toàn."
         case .commonActionsFailure(let reason):

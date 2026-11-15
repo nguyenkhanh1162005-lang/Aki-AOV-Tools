@@ -1,39 +1,37 @@
-# AKI AOV SKIN for iOS — prototype 0.4.0
+# AKI AOV SKIN for iOS — prototype 0.4.1
 
-This is an **unsigned iOS device build prototype**, not a finished AoV skin merger.
+This is an **unsigned iOS device-build prototype**. It is not a universal or game-certified AoV skin merger.
 
 ## Implemented on-device
 
-- Imports multiple ZIP archives from the iOS Files picker and keeps originals in the app sandbox.
-- Reads ZIP entries in bounded chunks using ZIPFoundation.
-- Reads every payload during inventory, calculates SHA-256 incrementally and validates entry CRC.
-- Distinguishes repeated paths with identical payloads from same-path payload conflicts.
-- Scans both outer MOD ZIPs and one-level nested \`Resources.zip\` files for AoV \`.bytes\`.
-- Ports the verified AoV AES-CBC/PKCS7 path for header \`22 4A 67 00\`, with the filename-derived key, zero IV and exact decoded-size check.
-- Reports decoded payload SHA-256 without modifying the source ZIP.
-- Checks the latest public GitHub Release for update information.
+- Import multiple MOD ZIP archives from the iOS Files picker. Source files remain in the app sandbox and are not uploaded.
+- Inventory ZIP entries, validate CRC, calculate SHA-256, check nested \`Resources.zip\`, validate paths, and match game version markers.
+- Decode and encode the currently supported AoV AES-CBC, AES+Zstandard, and standalone Zstandard wrappers; preserve wrapper mode and require round-trip verification.
+- Detect Actor IDs and merge supported MSES v7 rows, IFix HeroSkin patches, and supported CommonActions tracks/skin conditions with schema and round-trip checks.
+- Preserve unique-path AssetReferenceSet resources byte-for-byte. This does not merge conflicting baseSubset/skinSubset graphs.
+- Add new Wwise BNK files byte-for-byte only when the read-only append-only checker validates Wwise version, bank IDs, DIDX media IDs/payload hashes, HIRC object IDs/types/payload hashes, and overlapping platform/locale namespaces.
+- Keep the original BNK payload unchanged. No HIRC object or reference remapping is performed.
+- Build an output ZIP and read it back for CRC validation before exposing the iOS share sheet.
+- Check the latest public GitHub Release for update information.
 
 ## Safety limits
 
-- Up to 500 MiB total input ZIP size.
+- Up to 10 input ZIP files and 500 MiB total compressed input.
 - Up to 20,000 entries per ZIP.
-- Up to 256 MiB per ZIP entry and 1 GiB declared expanded bytes per ZIP.
-- AES inspection reads \`.bytes\` entries of at most 32 MiB at a time.
-- Unsafe paths, symlinks, duplicate paths within one ZIP and failed CRC/payload reads are rejected.
+- Up to 512 MiB per ZIP entry and 1 GiB declared expanded bytes per ZIP.
+- The Wwise append-only inspector reads BNK files up to 128 MiB each.
+- Unsupported or conflicting resources fail closed instead of choosing a winner or overwriting the base file.
 
-## Explicit limitations
+## Not yet implemented or verified
 
-- AoV AES-CBC, AES+Zstandard (\`22 4A 67 EF\`) and standalone AoV Zstandard wrappers are decoded/encoded with the bundled AoV dictionary and round-trip checks.
-- MSES v7, IFix and supported CommonActions tracks are parsed and merged with schema/round-trip checks; unknown forms fail closed.
-- Wwise BNK files may be added byte-for-byte only when the read-only append-only inspector validates Wwise version, bank ID, DIDX media IDs/payload hashes, HIRC object IDs/types/payload hashes and overlapping platform/locale namespaces. The BNK itself is never rewritten; HIRC references are not remapped.
-- Standalone WEM, external-media references, unknown Wwise chunks and same-path BNK payload conflicts remain blocked.
-- AssetReferenceSet baseSubset/skinSubset graphs, Unity AssetBundle Packer/Verification metadata and VTK package catalogs are not semantically merged by this build.
-- It does not combine game resources and does not output a game-ready ZIP.
-- Repeated paths are classified by their content hashes, but no automatic winner is selected for conflicting contents.
-- No in-game test or game compatibility claim is made.
-- Online update checking opens a GitHub release page. iOS apps cannot silently replace their own installed IPA.
+- Semantic merge of AssetReferenceSet \`baseSubset\`/\`skinSubset\` graphs when the same AssetRef path has different payloads.
+- Unity AssetBundle \`ResourcePackerInfoSetAll\` and \`ResourceVerificationInfoSetAll\` catalog/dependency/checksum merge. New catalog-dependent AssetBundles/Databin resources remain blocked.
+- Wwise HIRC reference-graph parsing/remapping, standalone WEM pairing, external media, unknown Wwise chunks, and same-path BNK replacement.
+- Unknown MSES/IFix schemas and unsupported CommonActions condition trees.
+- Full VTK package-catalog merge.
+- Physical-iPhone in-game compatibility testing. A structurally valid ZIP does not prove Liên Quân will load the content or preserve every animation, sound, recall, kill notice, and UI element.
 
-## Build and test
+## Build and signing
 
 Requires macOS, Xcode, Homebrew, and XcodeGen:
 
@@ -52,11 +50,10 @@ xcodebuild -project AOVSkinMerger.xcodeproj \\
   CODE_SIGNING_ALLOWED=NO build
 \`\`\`
 
-CI packages the unsigned device app into an \`.ipa\` artifact. **Unsigned IPA cannot be installed directly**: it must be signed with the user's own Apple development identity and provisioning profile, or re-signed with a sideloading tool such as AltStore/Sideloadly. No Apple signing credentials are stored in this repository.
+CI packages an unsigned device IPA. It must be signed with the user's own Apple development identity and provisioning profile, or re-signed with AltStore/Sideloadly, before installation. The app cannot silently replace its own installed IPA.
 
+## App identity
 
-## App branding 0.4.0
-
-- iOS home-screen display name: `AKI AOV SKIN`.
-- App icon is generated from the image supplied by the user at build time.
-- The exported artifact is named `AKI AOV SKIN.ipa`.
+- Home-screen name: \`AKI AOV SKIN\`.
+- App icon: generated from the supplied artwork stored in \`IconSource\`.
+- IPA artifact: \`AKI AOV SKIN.ipa\`.

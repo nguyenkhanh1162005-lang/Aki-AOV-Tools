@@ -181,4 +181,49 @@ final class AoVWwiseBNKTests: XCTestCase {
         )
         XCTAssertTrue(try AoVWwiseBNK.validateAppendOnly(baseBanks: [base], overlayBanks: [overlay]).verified)
     }
+
+    func testChangedMediaPayloadForSameIDIsRejected() {
+        let base = AoVWwiseBankInput(
+            path: "Sound/iOS/English/base.bnk",
+            data: bank(bankID: 10, media: [(44, Data([1, 2, 3]))])
+        )
+        let overlay = AoVWwiseBankInput(
+            path: "Sound/iOS/English/skin.bnk",
+            data: bank(bankID: 20, media: [(44, Data([9, 8, 7]))])
+        )
+        XCTAssertThrowsError(try AoVWwiseBNK.validateAppendOnly(baseBanks: [base], overlayBanks: [overlay]))
+    }
+
+    func testDuplicateBankPathIsRejected() {
+        let samePath = "Sound/iOS/English/shared.bnk"
+        let base = AoVWwiseBankInput(path: samePath, data: bank(bankID: 10))
+        let overlay = AoVWwiseBankInput(path: samePath, data: bank(bankID: 20))
+        XCTAssertThrowsError(try AoVWwiseBNK.validateAppendOnly(baseBanks: [base], overlayBanks: [overlay]))
+    }
+
+    func testIdenticalHIRCObjectCanBeShared() throws {
+        let sharedObject = Object(type: 2, id: 100, payload: [1, 2, 3])
+        let base = AoVWwiseBankInput(
+            path: "Sound/iOS/English/base.bnk",
+            data: bank(bankID: 10, objects: [sharedObject])
+        )
+        let overlay = AoVWwiseBankInput(
+            path: "Sound/iOS/English/skin.bnk",
+            data: bank(bankID: 20, objects: [sharedObject])
+        )
+        XCTAssertTrue(try AoVWwiseBNK.validateAppendOnly(baseBanks: [base], overlayBanks: [overlay]).verified)
+    }
+
+    func testMutuallyExclusivePlatformScopesMayReuseIDs() throws {
+        let base = AoVWwiseBankInput(
+            path: "Sound/iOS/English/base.bnk",
+            data: bank(bankID: 10, objects: [Object(type: 2, id: 100, payload: [1])])
+        )
+        let overlay = AoVWwiseBankInput(
+            path: "Sound/Android/English/skin.bnk",
+            data: bank(bankID: 10, objects: [Object(type: 2, id: 100, payload: [9])])
+        )
+        XCTAssertTrue(try AoVWwiseBNK.validateAppendOnly(baseBanks: [base], overlayBanks: [overlay]).verified)
+    }
+
 }
