@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 from starlette.datastructures import UploadFile
 
-from app.main import roundtrip_check_assetbundle
+from app.main import _run_guarded_heavy_job, roundtrip_check_assetbundle
 from app.assetbundle_inspector import verify_assetbundle_roundtrip
 
 
@@ -29,7 +29,7 @@ class AssetBundleRoundtripEndpointTests(unittest.IsolatedAsyncioTestCase):
             result = await roundtrip_check_assetbundle(upload)
 
         self.assertEqual(result, expected)
-        run.assert_awaited_once_with(verify_assetbundle_roundtrip, payload)
+        run.assert_awaited_once_with(_run_guarded_heavy_job, verify_assetbundle_roundtrip, payload)
         self.assertTrue(upload.file.closed)
 
     async def test_endpoint_rejects_upload_over_roundtrip_limit(self):
