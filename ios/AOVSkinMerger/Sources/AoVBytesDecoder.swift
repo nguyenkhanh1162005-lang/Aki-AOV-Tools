@@ -48,6 +48,8 @@ struct AoVDecodedResource: Sendable {
     let wrapperMode: String
 }
 
+private final class AoVBytesDecoderBundleToken {}
+
 enum AoVBytesDecoder {
     private static let aesHeader: [UInt8] = [0x22, 0x4A, 0x67]
     private static let zstdMagic: [UInt8] = [0x28, 0xB5, 0x2F, 0xFD]
@@ -136,6 +138,7 @@ enum AoVBytesDecoder {
             throw AoVBytesDecodeError.resourceTooLarge
         }
         let bundleURL = Bundle.main.url(forResource: "AoVZstdDictionary", withExtension: "base64")
+            ?? Bundle(for: AoVBytesDecoderBundleToken.self).url(forResource: "AoVZstdDictionary", withExtension: "base64")
         guard let bundleURL else { throw AoVBytesDecodeError.dictionaryMissing }
 
         let base64 = try String(contentsOf: bundleURL, encoding: .utf8)
