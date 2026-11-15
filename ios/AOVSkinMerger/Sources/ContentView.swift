@@ -87,7 +87,7 @@ struct ContentView: View {
                         Label("Tiến độ phát triển", systemImage: "hammer.fill").font(.headline)
                         statusRow("Nhập nhiều ZIP", true)
                         statusRow("Quét inventory và đường dẫn trùng", true)
-                        statusRow("Giải mã tài nguyên AoV", false)
+                        statusRow("Giải mã AoV AES thường (22 4A 67 00)", true)
                         statusRow("Ghép AssetRef / CommonActions / Wwise", false)
                         statusRow("Xuất ZIP và kiểm tra CRC", false)
                     }.panel()
