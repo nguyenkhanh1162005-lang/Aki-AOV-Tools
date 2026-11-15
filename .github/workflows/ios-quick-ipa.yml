@@ -6,6 +6,7 @@ on:
       - feat/ios-offline-app-prototype
     paths:
       - '.github/workflows/ios-quick-ipa.yml'
+      - 'ios/AOVSkinMerger/**'
   pull_request:
     branches:
       - feat/multi-actor-aov-archive-merge
@@ -94,7 +95,7 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AOVSkinMerger-0.2.0-unsigned-IPA
+          name: AKI-AOV-SKIN-0.4.0-IPA
           path: AKI AOV SKIN.ipa
           if-no-files-found: error
           retention-days: 14
