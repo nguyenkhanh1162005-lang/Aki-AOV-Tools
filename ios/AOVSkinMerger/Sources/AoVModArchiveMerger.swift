@@ -18,6 +18,7 @@ enum AoVModArchiveMergeError: LocalizedError {
     case assetReferenceConflict(String)
     case commonActionsFailure(String)
     case msesFailure(String)
+    case ifixFailure(String)
     case outputValidation(String)
 
     var errorDescription: String? {
@@ -44,6 +45,8 @@ enum AoVModArchiveMergeError: LocalizedError {
             return "CommonActions không ghép được an toàn: \(reason)"
         case .msesFailure(let reason):
             return "MSES không ghép được an toàn: \(reason)"
+        case .ifixFailure(let reason):
+            return "IFix không ghép được an toàn: \(reason)"
         case .outputValidation(let reason):
             return "ZIP đầu ra không vượt qua kiểm tra: \(reason)"
         }
@@ -59,6 +62,7 @@ struct AoVModMergeReport: Sendable {
     let replacedResources: Int
     let commonActionsFiles: [String]
     let mergedMSESTables: [String]
+    let mergedIFixPatches: [String]
     let preservedAssetReferenceSets: [String]
     let structurallyValidated: Bool
     let gameCompatibilityTested: Bool
@@ -155,6 +159,7 @@ enum AoVModArchiveMerger {
         var replacements: [String: Data] = [:]
         var commonActionsFiles: [String] = []
         var mergedMSESTables: [String] = []
+        var mergedIFixPatches: [String] = []
         var assetRefUnique: [String] = []
 
         for path in allPaths {
@@ -177,7 +182,36 @@ enum AoVModArchiveMerger {
                 if baseProvider.0.name != base.name {
                     try classifyNewResource(path, sourceName: baseProvider.0.name)
                     added[path] = baseProvider.1
-                    if isAssetReferencePath(path) { assetRefUnique.append(path) }
+                    let lowerPath = path.lowercased()
+            if lowerPath == "thanos/heroskin_1.bytes" || lowerPath == "thanos/heroskin_2.bytes" {
+                guard baseProvider.0.id == base.id else {
+                    throw AoVModArchiveMergeError.unsupportedConflict(
+                        path,
+                        "IFix chỉ có ở overlay, chưa có patch nền để remap index."
+                    )
+                }
+                do {
+                    var current = try readData(baseProvider.1)
+                    for (_, reference, _) in distinct {
+                        let overlay = try readData(reference)
+                        let (merged, report) = try AoVIFixMerger.mergeResource(
+                            current,
+                            overlay,
+                            resourcePath: path
+                        )
+                        guard report.verified else { throw AoVIFixError.roundTripFailure }
+                        current = merged
+                    }
+                    replacements[path] = current
+                    mergedIFixPatches.append(path)
+                    continue
+                } catch {
+                    throw AoVModArchiveMergeError.ifixFailure(
+                        "\(path): \(error.localizedDescription)"
+                    )
+                }
+            }
+            if isAssetReferencePath(path) { assetRefUnique.append(path) }
                 }
                 continue
             }
@@ -321,6 +355,7 @@ enum AoVModArchiveMerger {
             replacedResources: replacements.count,
             commonActionsFiles: commonActionsFiles,
             mergedMSESTables: mergedMSESTables,
+            mergedIFixPatches: mergedIFixPatches,
             preservedAssetReferenceSets: assetRefUnique,
             structurallyValidated: true,
             gameCompatibilityTested: false
