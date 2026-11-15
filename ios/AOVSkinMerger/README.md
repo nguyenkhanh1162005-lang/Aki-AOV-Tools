@@ -23,8 +23,11 @@ This is an **unsigned iOS device build prototype**, not a finished AoV skin merg
 
 ## Explicit limitations
 
-- AES+Zstandard (\`22 4A 67 EF\`) and standalone AoV Zstandard wrappers are not decoded by this iOS build. The app reports them as unsupported.
-- This build does not parse/rewrite AssetReferenceSet baseSubset/skinSubset graphs, MSES, IFix, CommonActions condition trees, Unity AssetBundle Packer/Verification metadata, Wwise HIRC graphs or VTK package catalogs.
+- AoV AES-CBC, AES+Zstandard (\`22 4A 67 EF\`) and standalone AoV Zstandard wrappers are decoded/encoded with the bundled AoV dictionary and round-trip checks.
+- MSES v7, IFix and supported CommonActions tracks are parsed and merged with schema/round-trip checks; unknown forms fail closed.
+- Wwise BNK files may be added byte-for-byte only when the read-only append-only inspector validates Wwise version, bank ID, DIDX media IDs/payload hashes, HIRC object IDs/types/payload hashes and overlapping platform/locale namespaces. The BNK itself is never rewritten; HIRC references are not remapped.
+- Standalone WEM, external-media references, unknown Wwise chunks and same-path BNK payload conflicts remain blocked.
+- AssetReferenceSet baseSubset/skinSubset graphs, Unity AssetBundle Packer/Verification metadata and VTK package catalogs are not semantically merged by this build.
 - It does not combine game resources and does not output a game-ready ZIP.
 - Repeated paths are classified by their content hashes, but no automatic winner is selected for conflicting contents.
 - No in-game test or game compatibility claim is made.
