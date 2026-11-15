@@ -21,6 +21,7 @@ from .ifix_merger import IFixMergeError, parse_ifix_patch
 MAX_ARCHIVE_ENTRIES = 20000
 MAX_ARCHIVE_UNCOMPRESSED = 512 * 1024 * 1024
 MAX_ENTRY_UNCOMPRESSED = 64 * 1024 * 1024
+MAX_NESTED_CONTAINER_BYTES = 512 * 1024 * 1024
 MAX_SCAN_ENTRY_BYTES = 16 * 1024 * 1024
 MAX_DECODED_RESOURCE = 64 * 1024 * 1024
 MAX_TOTAL_DECODED_BYTES = 128 * 1024 * 1024
@@ -371,7 +372,7 @@ def _scan_notice_assetbundle(data: bytes, path: str) -> dict[str, Any]:
     if not payload.startswith(signatures):
         return {"scanned": False, "findings": [], "reason": "decoded_payload_is_not_unity"}
     if len(payload) > MAX_NOTICE_ASSETBUNDLE_BYTES:
-        return {"scanned": False, "findings": [], "reason": "assetbundle_over_64_mib"}
+        return {"scanned": False, "findings": [], "reason": "assetbundle_over_16_mib"}
 
     try:
         from .assetbundle_inspector import _load_unitypy_aov
@@ -592,11 +593,49 @@ def decode_archive_resources(
                 raise AOVBytesArchiveError(f"ZIP chứa mục liên kết hoặc mã hóa không hỗ trợ: {path}")
             if info.is_dir():
                 continue
-            if info.file_size > MAX_ENTRY_UNCOMPRESSED:
-                raise AOVBytesArchiveError(f"ZIP entry vượt giới hạn 64 MiB: {path}")
+            is_nested_zip = path.lower().endswith(".zip")
+            entry_limit = (
+                MAX_NESTED_CONTAINER_BYTES if is_nested_zip
+                else MAX_ENTRY_UNCOMPRESSED
+            )
+            if info.file_size > entry_limit:
+                raise AOVBytesArchiveError(
+                    f"ZIP entry vượt giới hạn {entry_limit // (1024 * 1024)} MiB: {path}"
+                )
             total_uncompressed += info.file_size
             if total_uncompressed > MAX_ARCHIVE_UNCOMPRESSED:
                 raise AOVBytesArchiveError("Tổng dữ liệu giải nén vượt giới hạn 512 MiB.")
+
+            # A nested Resources.zip can be large. Stream it to a disk-backed
+            # spool and recurse without ever creating a full in-memory copy.
+            if is_nested_zip:
+                if depth >= MAX_NESTED_ZIP_DEPTH:
+                    report["nested_packages_not_expanded"].append({
+                        "source": prefix,
+                        "path": path,
+                        "reason": "Đã đạt giới hạn độ sâu ZIP lồng.",
+                    })
+                    report["ignored_files"] += 1
+                    continue
+                try:
+                    with tempfile.SpooledTemporaryFile(
+                        max_size=16 * 1024 * 1024, mode="w+b"
+                    ) as nested_stream:
+                        with archive.open(info, "r") as source_stream:
+                            while True:
+                                block = source_stream.read(1024 * 1024)
+                                if not block:
+                                    break
+                                nested_stream.write(block)
+                        nested_stream.seek(0)
+                        with zipfile.ZipFile(nested_stream, "r") as nested:
+                            process_archive(nested, f"{prefix}/{path}", depth + 1)
+                except zipfile.BadZipFile as exc:
+                    raise AOVBytesArchiveError(
+                        f"Package ZIP lồng có header nhưng dữ liệu không hợp lệ: {path}"
+                    ) from exc
+                continue
+
             if scan_only and info.file_size > MAX_SCAN_ENTRY_BYTES:
                 report["oversized_entries_skipped"] += 1
                 report["ignored_files"] += 1
