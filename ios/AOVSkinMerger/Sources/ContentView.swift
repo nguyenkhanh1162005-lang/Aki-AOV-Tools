@@ -42,7 +42,7 @@ struct ContentView: View {
                         Button(action: runAESScan) {
                             HStack {
                                 if isDecoding { ProgressView() }
-                                Label(isDecoding ? "Đang quét AES…" : "Quét giải mã AoV AES thường",
+                                Label(isDecoding ? "Đang quét AoV .bytes…" : "Quét giải mã AoV .bytes (AES/Zstd)",
                                       systemImage: "lock.open")
                             }.frame(maxWidth: .infinity)
                         }
@@ -81,6 +81,8 @@ struct ContentView: View {
                                     Button(role: .destructive) {
                                         selectedURLs.remove(at: index)
                                         analysis = nil
+                                        aesReport = nil
+                                        mergeReport = nil
                                     } label: { Image(systemName: "xmark.circle.fill") }
                                     .buttonStyle(.plain)
                                 }
@@ -88,6 +90,8 @@ struct ContentView: View {
                             Button("Xóa danh sách", role: .destructive) {
                                 selectedURLs.removeAll()
                                 analysis = nil
+                                aesReport = nil
+                                mergeReport = nil
                             }.font(.footnote)
                         }.panel()
                     }
@@ -98,11 +102,13 @@ struct ContentView: View {
 
                     VStack(alignment: .leading, spacing: 9) {
                         Label("Tiến độ phát triển", systemImage: "hammer.fill").font(.headline)
-                        statusRow("Nhập nhiều ZIP", true)
-                        statusRow("Quét inventory và đường dẫn trùng", true)
-                        statusRow("Giải mã AoV AES và AES+Zstandard", true)
-                        statusRow("Ghép AssetRef / CommonActions / Wwise", false)
-                        statusRow("Xuất ZIP và kiểm tra CRC", false)
+                        statusRow("Nhập nhiều ZIP và tự nhận gói nền", true)
+                        statusRow("Quét inventory, CRC và SHA-256", true)
+                        statusRow("Giải mã AES / AES+Zstandard / Zstandard AoV", true)
+                        statusRow("AssetRef: nhận diện và giữ path duy nhất", true)
+                        statusRow("CommonActions: direct list + skinId conditions", true)
+                        statusRow("MSES / IFix / Wwise / AssetBundle metadata", false)
+                        statusRow("Xuất ZIP với kiểm CRC khi không còn blocker", true)
                     }.panel()
 
                     VStack(alignment: .leading, spacing: 10) {
