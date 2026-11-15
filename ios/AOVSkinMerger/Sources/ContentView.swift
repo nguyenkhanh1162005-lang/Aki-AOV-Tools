@@ -87,7 +87,7 @@ struct ContentView: View {
                         Label("Tiến độ phát triển", systemImage: "hammer.fill").font(.headline)
                         statusRow("Nhập nhiều ZIP", true)
                         statusRow("Quét inventory và đường dẫn trùng", true)
-                        statusRow("Giải mã AoV AES thường (22 4A 67 00)", true)
+                        statusRow("Giải mã AoV AES và AES+Zstandard", true)
                         statusRow("Ghép AssetRef / CommonActions / Wwise", false)
                         statusRow("Xuất ZIP và kiểm tra CRC", false)
                     }.panel()
@@ -126,7 +126,7 @@ struct ContentView: View {
                 Image(systemName: "archivebox.fill").font(.system(size: 28)).foregroundColor(.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("AKI AOV SKIN").font(.title2.bold())
-                    Text("Bản iOS thử nghiệm 0.3.0").font(.caption).foregroundColor(.secondary)
+                    Text("Bản iOS thử nghiệm 0.4.0").font(.caption).foregroundColor(.secondary)
                 }
             }
             Text("Kiểm tra payload ZIP và giải mã thử một nhánh AES AoV trực tiếp trên iPhone. Chưa phải bộ ghép skin hoàn chỉnh.")
@@ -178,7 +178,7 @@ struct ContentView: View {
 
     private func aesReportView(_ report: AESScanReport) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Kết quả giải mã AoV AES", systemImage: "lock.open.fill").font(.headline)
+            Label("Kết quả giải mã AoV AES / Zstandard", systemImage: "lock.open.fill").font(.headline)
             metric("AES thường giải mã được", "\(report.aesDecodedCount)")
             metric("AES+Zstandard giải mã được", "\(report.aesZstdDecodedCount)")
             metric("File .bytes khác / chưa nhận diện", "\(report.otherBytesFiles)")
