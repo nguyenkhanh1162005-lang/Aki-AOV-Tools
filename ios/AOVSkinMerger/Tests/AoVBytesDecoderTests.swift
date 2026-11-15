@@ -135,6 +135,116 @@ final class AoVBytesDecoderTests: XCTestCase {
         XCTAssertEqual(report.assetReferenceSets.first?.referencePathCandidates, 1)
     }
 
+    func testMergesDirectSkinOrAvatarListAndPreservesBaseTrackXML() throws {
+        let path = "commonresource/Back.xml"
+        let baseXML = Data("""
+        <?xml version="1.0" encoding="utf-8"?>
+        <Project><TemplateObjectList/><RefParamList/><Action length="1.000" loop="false">
+          <Track trackName="TriggerParticleTick0" eventType="TriggerParticleTick" enabled="true">
+            <Event eventName="TriggerParticleTick" time="0.000" isDuration="false"/>
+          </Track>
+        </Action></Project>
+        """.utf8)
+        let overlayXML = Data("""
+        <?xml version="1.0" encoding="utf-8"?>
+        <Project><TemplateObjectList/><RefParamList/><Action length="1.000" loop="false">
+          <Track trackName="0_TriggerParticleTick0" eventType="TriggerParticleTick" enabled="true">
+            <Event eventName="TriggerParticleTick" time="0.000" isDuration="false"/>
+            <SkinOrAvatarList id="59500"/>
+          </Track>
+        </Action></Project>
+        """.utf8)
+        let base = try AoVBytesDecoder.encodeResource(baseXML, resourceName: path, wrapperMode: "zstd")
+        let overlay = try AoVBytesDecoder.encodeResource(overlayXML, resourceName: path, wrapperMode: "zstd")
+
+        let (merged, report) = try AoVCommonActionsMerger.mergeActionXML(
+            baseBytes: base,
+            overlayBytes: overlay,
+            resourceName: path,
+            specialSkinIDs: ["59500"]
+        )
+        let output = try AoVBytesDecoder.decodeResource(merged, resourceName: path)
+        let text = String(data: output.data, encoding: .utf8) ?? ""
+        XCTAssertTrue(text.contains("SkinOrAvatarList"))
+        XCTAssertTrue(text.contains("59500"))
+        XCTAssertEqual(report.wrapperMode, "zstd")
+        XCTAssertTrue(report.verified)
+        XCTAssertEqual(report.replacedTracks, ["TriggerParticleTick0"])
+    }
+
+    func testAppendsVerifiedScalarCheckSkinIdTickTrack() throws {
+        let path = "commonresource/Back.xml"
+        let baseXML = Data("""
+        <Project><Action><Track trackName="Existing" eventType="TriggerParticleTick"/></Action></Project>
+        """.utf8)
+        let overlayXML = Data("""
+        <Project><Action>
+          <Track trackName="0_CheckSkin" eventType="CheckSkinIdTick">
+            <Event eventName="CheckSkinIdTick">
+              <TemplateObject name="targetId" objectName="self" id="0"/>
+              <int name="skinId" value="59300"/>
+            </Event>
+          </Track>
+        </Action></Project>
+        """.utf8)
+        let base = try AoVBytesDecoder.encodeResource(baseXML, resourceName: path, wrapperMode: "aes")
+        let overlay = try AoVBytesDecoder.encodeResource(overlayXML, resourceName: path, wrapperMode: "aes")
+        let (merged, report) = try AoVCommonActionsMerger.mergeActionXML(
+            baseBytes: base, overlayBytes: overlay, resourceName: path, specialSkinIDs: ["59300"]
+        )
+        let output = try AoVBytesDecoder.decodeResource(merged, resourceName: path)
+        let text = String(data: output.data, encoding: .utf8) ?? ""
+        XCTAssertTrue(text.contains("name=\"skinId\" value=\"59300\""))
+        XCTAssertEqual(report.conditionAppendedTracks, ["CheckSkin"])
+        XCTAssertTrue(report.verified)
+    }
+
+    func testArrayCheckSkinIdTickKeepsOnlyActorOwnedSkinIDs() throws {
+        let path = "commonresource/Back.xml"
+        let baseXML = Data("<Project><Action/></Project>".utf8)
+        let overlayXML = Data("""
+        <Project><Action>
+          <Track trackName="0_CheckArray" eventType="CheckSkinIdVirtualTick">
+            <Event eventName="CheckSkinIdVirtualTick">
+              <TemplateObject name="targetId" objectName="target" id="1"/>
+              <Array name="skinIdArray" type="int">
+                <int value="59300"/><int value="59500"/>
+              </Array>
+            </Event>
+          </Track>
+        </Action></Project>
+        """.utf8)
+        let base = try AoVBytesDecoder.encodeResource(baseXML, resourceName: path, wrapperMode: "aes+zstd")
+        let overlay = try AoVBytesDecoder.encodeResource(overlayXML, resourceName: path, wrapperMode: "aes+zstd")
+        let (merged, report) = try AoVCommonActionsMerger.mergeActionXML(
+            baseBytes: base, overlayBytes: overlay, resourceName: path, specialSkinIDs: ["59300"]
+        )
+        let output = try AoVBytesDecoder.decodeResource(merged, resourceName: path)
+        let text = String(data: output.data, encoding: .utf8) ?? ""
+        XCTAssertTrue(text.contains("value=\"59300\""))
+        XCTAssertFalse(text.contains("value=\"59500\""))
+        XCTAssertEqual(report.conditionAppendedTracks, ["CheckArray"])
+        XCTAssertTrue(report.verified)
+    }
+
+    func testRejectsNestedCommonActionsSkinListLayout() throws {
+        let path = "commonresource/Back.xml"
+        let base = try AoVBytesDecoder.encodeResource(
+            Data("<Project><Action/></Project>".utf8),
+            resourceName: path,
+            wrapperMode: "zstd"
+        )
+        let overlayXML = Data("""
+        <Project><Action><Track trackName="0_Nested" eventType="TriggerParticleTick">
+          <Event><SkinOrAvatarList id="59300"/></Event>
+        </Track></Action></Project>
+        """.utf8)
+        let overlay = try AoVBytesDecoder.encodeResource(overlayXML, resourceName: path, wrapperMode: "zstd")
+        XCTAssertThrowsError(try AoVCommonActionsMerger.mergeActionXML(
+            baseBytes: base, overlayBytes: overlay, resourceName: path, specialSkinIDs: ["59300"]
+        ))
+    }
+
     private func makeArchive(root: URL, name: String, path: String, payload: Data) throws -> URL {
         let source = root.appendingPathComponent(UUID().uuidString + ".bin")
         try payload.write(to: source)
