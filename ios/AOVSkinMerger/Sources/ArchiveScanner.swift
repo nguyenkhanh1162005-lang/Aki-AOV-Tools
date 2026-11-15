@@ -43,15 +43,17 @@ struct DecodedAESResource: Codable, Identifiable, Sendable {
     let path: String
     let decodedBytes: UInt64
     let sha256: String
+    let wrapperMode: String
     var id: String { "\(archiveName)|\(path)" }
 }
 
 struct AESScanReport: Codable, Sendable {
     let decoded: [DecodedAESResource]
-    let unsupportedZstd: Int
     let otherBytesFiles: Int
     let tooLargeToInspect: Int
     let invalidAES: [String]
+    var aesDecodedCount: Int { decoded.filter { $0.wrapperMode == "aes" }.count }
+    var aesZstdDecodedCount: Int { decoded.filter { $0.wrapperMode == "aes+zstd" }.count }
 }
 
 enum ArchiveScanError: LocalizedError {
@@ -149,7 +151,6 @@ enum ArchiveScanner {
 
     static func inspectAESResources(_ urls: [URL]) throws -> AESScanReport {
         var decoded: [DecodedAESResource] = []
-        var unsupportedZstd = 0
         var otherBytes = 0
         var tooLarge = 0
         var invalidAES: [String] = []
@@ -161,7 +162,6 @@ enum ArchiveScanner {
                 sourceName: url.lastPathComponent,
                 pathPrefix: "",
                 decoded: &decoded,
-                unsupportedZstd: &unsupportedZstd,
                 otherBytes: &otherBytes,
                 tooLarge: &tooLarge,
                 invalidAES: &invalidAES
@@ -186,7 +186,6 @@ enum ArchiveScanner {
                         sourceName: url.lastPathComponent,
                         pathPrefix: "\(entry.path)!/",
                         decoded: &decoded,
-                        unsupportedZstd: &unsupportedZstd,
                         otherBytes: &otherBytes,
                         tooLarge: &tooLarge,
                         invalidAES: &invalidAES
@@ -199,7 +198,6 @@ enum ArchiveScanner {
 
         return AESScanReport(
             decoded: decoded,
-            unsupportedZstd: unsupportedZstd,
             otherBytesFiles: otherBytes,
             tooLargeToInspect: tooLarge,
             invalidAES: invalidAES
@@ -211,7 +209,6 @@ enum ArchiveScanner {
         sourceName: String,
         pathPrefix: String,
         decoded: inout [DecodedAESResource],
-        unsupportedZstd: inout Int,
         otherBytes: inout Int,
         tooLarge: inout Int,
         invalidAES: inout [String]
@@ -238,18 +235,18 @@ enum ArchiveScanner {
             }
 
             do {
-                let payload = try AoVBytesDecoder.decodeAESOnly(resourceData, resourceName: entry.path)
+                let decodedResource = try AoVBytesDecoder.decodeResource(resourceData, resourceName: entry.path)
+                let payload = decodedResource.data
                 let digest = SHA256.hash(data: payload)
                 decoded.append(
                     DecodedAESResource(
                         archiveName: sourceName,
                         path: displayPath,
                         decodedBytes: UInt64(payload.count),
-                        sha256: digest.map { String(format: "%02x", $0) }.joined()
+                        sha256: digest.map { String(format: "%02x", $0) }.joined(),
+                        wrapperMode: decodedResource.wrapperMode
                     )
                 )
-            } catch AoVBytesDecodeError.aesZstdUnsupported {
-                unsupportedZstd += 1
             } catch {
                 if invalidAES.count < 30 {
                     invalidAES.append("\(sourceName): \(displayPath) — \(error.localizedDescription)")
