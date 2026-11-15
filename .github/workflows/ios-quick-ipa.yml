@@ -28,6 +28,20 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Generate 1024px app icon from supplied artwork
+        shell: bash
+        run: |
+          set -euo pipefail
+          ICON_DIR="ios/AOVSkinMerger/Sources/Assets.xcassets/AppIcon.appiconset"
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          source = Path("ios/AOVSkinMerger/IconSource/app-icon.jpg.base64").read_text().strip()
+          Path("$RUNNER_TEMP/aki-aov-skin-icon.jpg").write_bytes(base64.b64decode(source, validate=True))
+          PY
+          sips -s format png -z 1024 1024 "$RUNNER_TEMP/aki-aov-skin-icon.jpg" --out "$ICON_DIR/AppIcon.png"
+          test -s "$ICON_DIR/AppIcon.png"
+
       - name: Generate Xcode project
         working-directory: ios/AOVSkinMerger
         run: xcodegen generate
@@ -71,14 +85,14 @@ jobs:
           ditto "$APP_PATH" "$PACKAGE_DIR/Payload/AOVSkinMerger.app"
           (
             cd "$PACKAGE_DIR"
-            /usr/bin/zip -qry "$GITHUB_WORKSPACE/AOVSkinMerger-unsigned.ipa" Payload
+            /usr/bin/zip -qry "$GITHUB_WORKSPACE/AKI AOV SKIN.ipa" Payload
           )
-          shasum -a 256 "$GITHUB_WORKSPACE/AOVSkinMerger-unsigned.ipa"
+          shasum -a 256 "$GITHUB_WORKSPACE/AKI AOV SKIN.ipa"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: AOVSkinMerger-0.2.0-unsigned-IPA
-          path: AOVSkinMerger-unsigned.ipa
+          path: AKI AOV SKIN.ipa
           if-no-files-found: error
           retention-days: 14
