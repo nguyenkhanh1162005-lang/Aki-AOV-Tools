@@ -666,6 +666,13 @@ enum AoVCommonActionsMerger {
         ))
     }
 
+struct AoVActorSkinInventory: Sendable {
+    let skinIDs: Set<String>
+    let candidateFiles: Int
+    let inspectedTracks: Int
+    let conditionTracks: Int
+}
+
 struct AoVCommonActionsPackageReport: Sendable {
     let baseEntries: Int
     let overlayEntries: Int
@@ -692,6 +699,92 @@ extension AoVCommonActionsMerger {
         "commonresource/HasteE3.xml",
         "commonresource/QuickBack.xml"
     ]
+
+    static func inspectActorSkinIDs(
+        packageData: Data,
+        actorIDs: Set<String>,
+        resourceName: String = "Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes"
+    ) throws -> AoVActorSkinInventory {
+        guard !actorIDs.isEmpty else { return AoVActorSkinInventory(skinIDs: [], candidateFiles: 0, inspectedTracks: 0, conditionTracks: 0) }
+        let wrapper = try unwrapPackage(packageData, resourceName: resourceName)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-CommonActions-Inspect-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let packageURL = directory.appendingPathComponent("CommonActions.zip")
+        try wrapper.data.write(to: packageURL, options: .atomic)
+        let archive = try Archive(url: packageURL, accessMode: .read)
+
+        var skinIDs = Set<String>()
+        var candidateFiles = 0
+        var inspectedTracks = 0
+        var conditionTracks = 0
+
+        for entry in archive where entry.type == .file {
+            let normalizedPath = entry.path.replacingOccurrences(of: "\\", with: "/").lowercased()
+            guard packageXMLCandidates.contains(normalizedPath) else { continue }
+            guard entry.uncompressedSize <= maximumCandidateXMLBytes else {
+                throw AoVCommonActionsError.invalidXML("\(entry.path): XML vượt giới hạn 16 MiB")
+            }
+            var bytes = Data()
+            _ = try archive.extract(entry, bufferSize: 64 * 1024, consumer: { bytes.append($0) })
+            let decoded = try AoVBytesDecoder.decodeResource(bytes, resourceName: entry.path)
+            let root = try AoVXMLTreeBuilder.parse(decoded.data, resourceName: entry.path)
+            guard let action = root.directChildren("Action").first else {
+                throw AoVCommonActionsError.missingAction(entry.path)
+            }
+            candidateFiles += 1
+
+            for track in action.directChildren("Track") {
+                inspectedTracks += 1
+                let direct = track.directChildren("SkinOrAvatarList")
+                let all = track.descendants("SkinOrAvatarList")
+                if all.count != direct.count {
+                    let directObjectIDs = Set(direct.map { ObjectIdentifier($0) })
+                    let nestedIDs = all.filter { !directObjectIDs.contains(ObjectIdentifier($0)) }
+                    if nestedIDs.contains(where: {
+                        guard let id = $0.attributes["id"], id.count >= 3 else { return false }
+                        return actorIDs.contains(String(id.prefix(3)))
+                    }) {
+                        throw AoVCommonActionsError.unsupportedNestedSkinList(
+                            normalizedTrackName(track.attributes["trackName"] ?? "")
+                        )
+                    }
+                }
+                for node in direct {
+                    guard let id = node.attributes["id"], id.allSatisfy(\.isNumber), id.count >= 3 else {
+                        continue
+                    }
+                    if actorIDs.contains(String(id.prefix(3))) {
+                        skinIDs.insert(id)
+                    }
+                }
+
+                if direct.isEmpty,
+                   conditionEvents.contains(track.attributes["eventType"] ?? "") {
+                    conditionTracks += 1
+                    let info = try skinCondition(track, targetIDs: actorIDs)
+                    guard let info else { continue }
+                    if info.kind == .scalar, let id = info.scalarID, id.count >= 3,
+                       actorIDs.contains(String(id.prefix(3))) {
+                        skinIDs.insert(id)
+                    } else if info.kind == .array {
+                        for id in info.arrayValues where
+                            id.count >= 3 && actorIDs.contains(String(id.prefix(3))) {
+                            skinIDs.insert(id)
+                        }
+                    }
+                }
+            }
+        }
+
+        return AoVActorSkinInventory(
+            skinIDs: skinIDs,
+            candidateFiles: candidateFiles,
+            inspectedTracks: inspectedTracks,
+            conditionTracks: conditionTracks
+        )
+    }
 
     private static let maximumPackageBytes = 512 * 1024 * 1024
     private static let maximumPackageEntries = 20_000
