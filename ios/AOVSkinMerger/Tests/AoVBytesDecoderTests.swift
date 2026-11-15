@@ -308,6 +308,140 @@ final class AoVBytesDecoderTests: XCTestCase {
         ))
     }
 
+    func testOfflineModArchiveMergerBuildsValidatedOuterZIP() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-ModMerge-E2E-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let commonPath = "Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes"
+        let backPath = "commonresource/Back.xml"
+        let baseXML = Data("""
+        <Project><Action><Track trackName="TriggerParticleTick0" eventType="TriggerParticleTick">
+          <Event eventName="TriggerParticleTick" time="0.000"/>
+        </Track></Action></Project>
+        """.utf8)
+        let overlayXML = Data("""
+        <Project><Action><Track trackName="0_TriggerParticleTick0" eventType="TriggerParticleTick">
+          <Event eventName="TriggerParticleTick" time="0.000"/>
+          <SkinOrAvatarList id="59300"/>
+        </Track></Action></Project>
+        """.utf8)
+        let baseBack = try AoVBytesDecoder.encodeResource(baseXML, resourceName: backPath, wrapperMode: "zstd")
+        let overlayBack = try AoVBytesDecoder.encodeResource(overlayXML, resourceName: backPath, wrapperMode: "zstd")
+        let baseCommon = try makeArchive(
+            root: root,
+            name: "base-common.zip",
+            path: backPath,
+            payload: baseBack
+        )
+        let overlayCommon = try makeArchive(
+            root: root,
+            name: "overlay-common.zip",
+            path: backPath,
+            payload: overlayBack
+        )
+
+        let packerPath = "assetbundle/resourcepackerinfosetall.assetbundle"
+        let verificationPath = "assetbundle/resourceverificationinfosetall.assetbundle"
+        let resSkinPath = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
+        let baseResourcesURL = try makeArchive(
+            root: root,
+            name: "base-resources.zip",
+            files: [
+                "version.txt": Data("1.64.1.12".utf8),
+                commonPath: Data(contentsOf: baseCommon),
+                packerPath: Data("packer-placeholder".utf8),
+                verificationPath: Data("verification-placeholder".utf8),
+                resSkinPath: Data("base-res-skin".utf8)
+            ]
+        )
+        let overlayResourcesURL = try makeArchive(
+            root: root,
+            name: "overlay-resources.zip",
+            files: [
+                "version.txt": Data("1.64.1.12".utf8),
+                commonPath: Data(contentsOf: overlayCommon),
+                "Actor_593_Actions.pkg.bytes": Data("actor593".utf8),
+                "Databin/Client/Actor/593_NewResource.bytes": Data("unique-overlay-resource".utf8)
+            ]
+        )
+
+        let baseOuter = try makeArchive(
+            root: root,
+            name: "base.zip",
+            files: [
+                "Resources.zip": Data(contentsOf: baseResourcesURL),
+                "DanhSachSkin.txt": Data("Base Skin\n".utf8)
+            ]
+        )
+        let overlayOuter = try makeArchive(
+            root: root,
+            name: "overlay.zip",
+            files: [
+                "Resources.zip": Data(contentsOf: overlayResourcesURL),
+                "DanhSachSkin.txt": Data("Creator Skin\n".utf8)
+            ]
+        )
+
+        let report = try AoVModArchiveMerger.merge([baseOuter, overlayOuter])
+        XCTAssertTrue(report.structurallyValidated)
+        XCTAssertFalse(report.gameCompatibilityTested)
+        XCTAssertEqual(report.baseSource, "base.zip")
+        XCTAssertEqual(report.commonActionsFiles, [commonPath])
+        XCTAssertEqual(report.addedResources, 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: report.outputURL.path))
+
+        let outer = try Archive(url: report.outputURL, accessMode: .read)
+        guard let resourcesEntry = outer.first(where: {
+            ($0.path as NSString).lastPathComponent == "Resources.zip"
+        }), let skinEntry = outer.first(where: {
+            ($0.path as NSString).lastPathComponent == "DanhSachSkin.txt"
+        }) else {
+            return XCTFail("Output wrapper is missing Resources.zip or DanhSachSkin.txt")
+        }
+
+        let mergedResourcesURL = root.appendingPathComponent("output-resources.zip")
+        _ = try outer.extract(resourcesEntry, to: mergedResourcesURL)
+        var skinData = Data()
+        _ = try outer.extract(skinEntry, consumer: { skinData.append($0) })
+        let skinText = String(data: skinData, encoding: .utf8) ?? ""
+        XCTAssertTrue(skinText.contains("Base Skin"))
+        XCTAssertTrue(skinText.contains("Creator Skin"))
+
+        let resources = try Archive(url: mergedResourcesURL, accessMode: .read)
+        guard let commonEntry = resources.first(where: { $0.path == commonPath }),
+              resources.first(where: { $0.path == "Databin/Client/Actor/593_NewResource.bytes" }) != nil else {
+            return XCTFail("Output Resources.zip is missing merged/added resources")
+        }
+        var packageData = Data()
+        _ = try resources.extract(commonEntry, consumer: { packageData.append($0) })
+        let packageURL = root.appendingPathComponent("output-common.pkg.zip")
+        try packageData.write(to: packageURL)
+        let common = try Archive(url: packageURL, accessMode: .read)
+        guard let backEntry = common.first(where: { $0.path == backPath }) else {
+            return XCTFail("Merged CommonActions Back.xml is missing")
+        }
+        var wrappedXML = Data()
+        _ = try common.extract(backEntry, consumer: { wrappedXML.append($0) })
+        let decodedXML = try AoVBytesDecoder.decodeResource(wrappedXML, resourceName: backPath)
+        let xmlText = String(data: decodedXML.data, encoding: .utf8) ?? ""
+        XCTAssertTrue(xmlText.contains("SkinOrAvatarList"))
+        XCTAssertTrue(xmlText.contains("59300"))
+    }
+
+    private func makeArchive(root: URL, name: String, files: [String: Data]) throws -> URL {
+        let archiveURL = root.appendingPathComponent(name)
+        let archive = try Archive(url: archiveURL, accessMode: .create)
+        for (path, data) in files {
+            let fileURL = root.appendingPathComponent(UUID().uuidString + ".tmp")
+            try data.write(to: fileURL)
+            defer { try? FileManager.default.removeItem(at: fileURL) }
+            try archive.addEntry(with: path, fileURL: fileURL, compressionMethod: .deflate)
+        }
+        return archiveURL
+    }
+
     private func makeArchive(root: URL, name: String, path: String, payload: Data) throws -> URL {
         let source = root.appendingPathComponent(UUID().uuidString + ".bin")
         try payload.write(to: source)
