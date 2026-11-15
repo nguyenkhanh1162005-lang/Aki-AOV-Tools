@@ -181,6 +181,7 @@ struct ContentView: View {
             Label("Kết quả giải mã AoV AES / Zstandard", systemImage: "lock.open.fill").font(.headline)
             metric("AES thường giải mã được", "\(report.aesDecodedCount)")
             metric("AES+Zstandard giải mã được", "\(report.aesZstdDecodedCount)")
+            metric("Zstandard độc lập giải mã được", "\(report.zstdDecodedCount)")
             metric("File .bytes khác / chưa nhận diện", "\(report.otherBytesFiles)")
             metric("Quá lớn để quét an toàn", "\(report.tooLargeToInspect)")
             if !report.decoded.isEmpty {
