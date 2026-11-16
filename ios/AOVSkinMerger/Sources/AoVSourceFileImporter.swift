@@ -6,6 +6,22 @@ struct AoVSourceImportReport: Sendable {
     let totalBytes: UInt64
 }
 
+/// Opens file-provider security scopes immediately when the picker returns its URLs.
+/// Pass this lease to the background copy operation so access remains active until it ends.
+final class AoVSecurityScopedAccess: @unchecked Sendable {
+    private let activeURLs: [URL]
+
+    init(urls: [URL]) {
+        activeURLs = urls.filter { $0.startAccessingSecurityScopedResource() }
+    }
+
+    deinit {
+        for url in activeURLs {
+            url.stopAccessingSecurityScopedResource()
+        }
+    }
+}
+
 enum AoVSourceFileImporterError: LocalizedError {
     case noFiles
     case tooManyFiles(limit: Int)
@@ -43,8 +59,11 @@ enum AoVSourceFileImporter {
         _ sourceURLs: [URL],
         into destinationFolder: URL,
         existingFileCount: Int = 0,
-        existingBytes: UInt64 = 0
+        existingBytes: UInt64 = 0,
+        securityScopeLease: AoVSecurityScopedAccess? = nil
     ) throws -> AoVSourceImportReport {
+        defer { withExtendedLifetime(securityScopeLease) {} }
+
         guard !sourceURLs.isEmpty else {
             throw AoVSourceFileImporterError.noFiles
         }
@@ -95,14 +114,7 @@ enum AoVSourceFileImporter {
             throw AoVSourceFileImporterError.invalidFileType(source.lastPathComponent)
         }
 
-        // Keep the security-scoped URL available until the coordinated copy ends.
-        let accessing = source.startAccessingSecurityScopedResource()
-        defer {
-            if accessing {
-                source.stopAccessingSecurityScopedResource()
-            }
-        }
-
+        // The caller owns the security-scope lease opened in the picker callback.
         let coordinator = NSFileCoordinator(filePresenter: nil)
         var coordinationError: NSError?
         var copyError: Error?
