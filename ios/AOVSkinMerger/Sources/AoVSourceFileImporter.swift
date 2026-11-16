@@ -25,7 +25,6 @@ final class AoVSecurityScopedAccess: @unchecked Sendable {
 enum AoVSourceFileImporterError: LocalizedError {
     case noFiles
     case tooManyFiles(limit: Int)
-    case totalTooLarge
     case invalidFileType(String)
     case emptyFile(String)
     case notRegularFile(String)
@@ -37,8 +36,6 @@ enum AoVSourceFileImporterError: LocalizedError {
             return "Không có file ZIP nào được chọn."
         case .tooManyFiles(let limit):
             return "App nhận tối đa \(limit) ZIP trong một lần ghép. Hãy xóa bớt file rồi chọn lại."
-        case .totalTooLarge:
-            return "Tổng dung lượng ZIP vượt giới hạn 500 MiB của bản iOS thử nghiệm."
         case .invalidFileType(let name):
             return "\(name): chỉ nhận file có đuôi .zip."
         case .emptyFile(let name):
@@ -53,7 +50,6 @@ enum AoVSourceFileImporterError: LocalizedError {
 
 enum AoVSourceFileImporter {
     static let maximumFiles = 10
-    static let maximumTotalBytes: UInt64 = 500 * 1024 * 1024
 
     static func copy(
         _ sourceURLs: [URL],
@@ -71,10 +67,6 @@ enum AoVSourceFileImporter {
               existingFileCount + sourceURLs.count <= maximumFiles else {
             throw AoVSourceFileImporterError.tooManyFiles(limit: maximumFiles)
         }
-        guard existingBytes <= maximumTotalBytes else {
-            throw AoVSourceFileImporterError.totalTooLarge
-        }
-
         try FileManager.default.createDirectory(
             at: destinationFolder,
             withIntermediateDirectories: true
@@ -138,10 +130,9 @@ enum AoVSourceFileImporter {
                     throw AoVSourceFileImporterError.emptyFile(source.lastPathComponent)
                 }
 
-                let nextTotal = currentTotalBytes.addingReportingOverflow(sourceSize)
-                guard !nextTotal.overflow, nextTotal.partialValue <= maximumTotalBytes else {
-                    throw AoVSourceFileImporterError.totalTooLarge
-                }
+                // No aggregate-size cap. Saturate only the byte counter on integer overflow.
+                let sum = currentTotalBytes.addingReportingOverflow(sourceSize)
+                let nextTotal = sum.overflow ? UInt64.max : sum.partialValue
 
                 let stagingURL = folder.appendingPathComponent(
                     ".\(UUID().uuidString).partial",
