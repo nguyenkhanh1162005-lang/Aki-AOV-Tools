@@ -22,6 +22,7 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
+                if selectedTab == "Tính năng" {
                 VStack(alignment: .leading, spacing: 18) {
                     header
                     quickStatus
@@ -141,6 +142,13 @@ struct ContentView: View {
                     }.panel()
                 }
                 .padding(16)
+                } else if selectedTab == "Trang chủ" {
+                    homeDashboard
+                } else if selectedTab == "Lịch sử" {
+                    historyDashboard
+                } else {
+                    infoDashboard
+                }
             }
             .background {
                 ZStack {
@@ -194,6 +202,99 @@ struct ContentView: View {
         }
     }
 
+
+
+    private var homeDashboard: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                header
+                quickStatus
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("WORKSPACE").font(.system(size: 10, weight: .black, design: .rounded)).tracking(2).foregroundStyle(.white.opacity(0.55))
+                    Text("Chào mừng đến AKI").font(.system(size: 28, weight: .black, design: .rounded)).foregroundStyle(.white)
+                    Text("Quản lý và hợp nhất các gói MOD ngay trên iPhone.").font(.subheadline).foregroundStyle(.white.opacity(0.65))
+                    Button { selectedTab = "Tính năng" } label: {
+                        Label("Mở bộ công cụ", systemImage: "arrow.right.circle.fill").frame(maxWidth: .infinity)
+                    }.buttonStyle(AKIPrimaryButtonStyle())
+                }.panel()
+                HStack(spacing: 10) {
+                    dashboardTile("Nhập ZIP", detail: "Chọn nhiều gói", icon: "doc.zipper")
+                    dashboardTile("Quét dữ liệu", detail: "AES / Zstd", icon: "lock.open")
+                }
+                HStack(spacing: 10) {
+                    dashboardTile("Ghép MOD", detail: "Tạo gói kết quả", icon: "arrow.triangle.merge")
+                    dashboardTile("Xử lý cục bộ", detail: "Không tải máy chủ", icon: "iphone")
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Lối tắt", systemImage: "bolt.fill").font(.headline)
+                    Button { isImporting = true } label: {
+                        Label("Chọn file ZIP", systemImage: "plus.circle.fill").frame(maxWidth: .infinity)
+                    }.buttonStyle(AKIPrimaryButtonStyle())
+                    Button { selectedTab = "Tính năng" } label: {
+                        Label("Xem công cụ và trạng thái xử lý", systemImage: "square.grid.2x2").frame(maxWidth: .infinity)
+                    }.buttonStyle(AKISecondaryButtonStyle())
+                }.panel()
+            }.padding(16)
+        }
+    }
+
+    private func dashboardTile(_ title: String, detail: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Image(systemName: icon).font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
+            Text(title).font(.system(size: 14, weight: .bold, design: .rounded)).foregroundStyle(.white)
+            Text(detail).font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.58))
+        }
+        .frame(maxWidth: .infinity, minHeight: 94, alignment: .leading)
+        .padding(13)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.16), lineWidth: 1))
+    }
+
+    private var historyDashboard: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("LỊCH SỬ").font(.system(size: 10, weight: .black, design: .rounded)).tracking(2).foregroundStyle(.white.opacity(0.55))
+                Text("Hoạt động gần đây").font(.system(size: 27, weight: .black, design: .rounded)).foregroundStyle(.white)
+                VStack(spacing: 12) {
+                    Image(systemName: "clock.arrow.circlepath").font(.system(size: 34, weight: .light)).foregroundStyle(.white.opacity(0.65))
+                    Text("Chưa có lịch sử").font(.headline).foregroundStyle(.white)
+                    Text("Các lần ghép chưa được lưu thành nhật ký trong phiên bản này.").font(.footnote).multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.62))
+                }.frame(maxWidth: .infinity).padding(.vertical, 42).panel()
+            }.padding(16)
+        }
+    }
+
+    private var infoDashboard: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("THÔNG TIN").font(.system(size: 10, weight: .black, design: .rounded)).tracking(2).foregroundStyle(.white.opacity(0.55))
+                Text("AKI AOV SKIN").font(.system(size: 27, weight: .black, design: .rounded)).foregroundStyle(.white)
+                VStack(alignment: .leading, spacing: 12) {
+                    infoRow("Phiên bản", "0.5.0")
+                    infoRow("Nền tảng", "iOS 26.5+")
+                    infoRow("Xử lý file", "Trực tiếp trên iPhone")
+                    infoRow("Máy chủ", "Không tải ZIP lên")
+                    infoRow("Trạng thái", "Đang phát triển")
+                }.panel()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Lưu ý tương thích").font(.headline).foregroundStyle(.white)
+                    Text("ZIP xuất ra đã qua kiểm tra cấu trúc và CRC. Chưa có xác nhận chạy thành công trong Liên Quân. Một số loại metadata và xung đột tài nguyên vẫn chưa được hỗ trợ.").font(.footnote).foregroundStyle(.white.opacity(0.68))
+                }.panel()
+                Button(action: checkUpdates) {
+                    Label("Kiểm tra cập nhật", systemImage: "arrow.clockwise").frame(maxWidth: .infinity)
+                }.buttonStyle(AKISecondaryButtonStyle())
+                Text(updateMessage).font(.caption).foregroundStyle(.white.opacity(0.6))
+            }.padding(16)
+        }
+    }
+
+    private func infoRow(_ title: String, _ value: String) -> some View {
+        HStack {
+            Text(title).foregroundStyle(.white.opacity(0.62))
+            Spacer()
+            Text(value).fontWeight(.semibold).foregroundStyle(.white)
+        }.font(.subheadline)
+    }
 
     private var quickStatus: some View {
         HStack(spacing: 10) {
