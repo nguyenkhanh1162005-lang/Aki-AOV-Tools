@@ -60,13 +60,19 @@ jobs:
           -project AOVSkinMerger.xcodeproj
           -scheme AOVSkinMerger
 
-      - name: Run iOS unit tests on iPhone 17 Pro simulator
+      - name: Install iOS Simulator runtime
+        run: |
+          xcodebuild -downloadPlatform iOS
+          xcrun simctl list runtimes
+          xcrun simctl list devices available
+
+      - name: Run iOS unit tests on iPhone simulator
         working-directory: ios/AOVSkinMerger
         run: >-
           xcodebuild test
           -project AOVSkinMerger.xcodeproj
           -scheme AOVSkinMerger
-          -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+          -destination 'platform=iOS Simulator,name=iPhone 17'
           -derivedDataPath "$RUNNER_TEMP/AOVTestDerivedData"
           CODE_SIGNING_ALLOWED=NO
 
