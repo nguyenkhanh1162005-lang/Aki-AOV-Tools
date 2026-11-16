@@ -69,22 +69,22 @@ final class AoVSourceFileImporterTests: XCTestCase {
         XCTAssertTrue(report.errors[0].contains("chỉ nhận file"))
     }
 
-    func testEnforcesCombinedSizeLimitWithoutCopyingOversizedSelection() throws {
+    func testDoesNotRejectZipWhenExistingImportedBytesAreLarge() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let source = root.appendingPathComponent("small.zip")
+        let source = root.appendingPathComponent("large-total.zip")
         let appFolder = root.appendingPathComponent("Documents/SourceArchives", isDirectory: true)
         try Data([0x50, 0x4B, 0x03, 0x04]).write(to: source)
 
         let report = try AoVSourceFileImporter.copy(
             [source],
             into: appFolder,
-            existingBytes: AoVSourceFileImporter.maximumTotalBytes - 2
+            existingBytes: UInt64.max - 1
         )
 
-        XCTAssertTrue(report.importedURLs.isEmpty)
-        XCTAssertEqual(report.errors.count, 1)
-        XCTAssertTrue(report.errors[0].contains("500 MiB"))
-    }
-}
+        XCTAssertEqual(report.importedURLs.count, 1)
+        XCTAssertTrue(report.errors.isEmpty)
+        XCTAssertEqual(report.totalBytes, UInt64.max)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: report.importedURLs[0].path))
+    }}
