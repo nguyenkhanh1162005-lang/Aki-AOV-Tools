@@ -60,14 +60,24 @@ jobs:
           -project AOVSkinMerger.xcodeproj
           -scheme AOVSkinMerger
 
-      - name: Compile iOS unit tests (generic Simulator target)
+      - name: Run iOS unit tests on an available iPhone simulator
         working-directory: ios/AOVSkinMerger
-        run: >-
-          xcodebuild build-for-testing
-          -project AOVSkinMerger.xcodeproj
-          -scheme AOVSkinMerger
-          -destination 'generic/platform=iOS Simulator'
-          -derivedDataPath "$RUNNER_TEMP/AOVTestDerivedData"
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEVICE_ID="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {print $2; exit}')"
+          if [ -z "$DEVICE_ID" ]; then
+            echo "No available iPhone simulator was found."
+            xcrun simctl list devices available
+            exit 1
+          fi
+          xcodebuild test \
+            -project AOVSkinMerger.xcodeproj \
+            -scheme AOVSkinMerger \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -destination-timeout 90 \
+            -derivedDataPath "$RUNNER_TEMP/AOVTestDerivedData" \
+            CODE_SIGNING_ALLOWED=NO
 
       - name: Build unsigned iOS device app
         working-directory: ios/AOVSkinMerger
@@ -100,7 +110,7 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AKI-AOV-SKIN-0.4.5-iOS-26.5-IPA
+          name: AKI-AOV-SKIN-0.4.6-iOS-26.5-IPA
           path: AKI AOV SKIN.ipa
           if-no-files-found: error
           retention-days: 14
