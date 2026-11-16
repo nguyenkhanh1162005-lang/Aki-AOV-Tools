@@ -29,7 +29,7 @@ enum AoVModArchiveMergeError: LocalizedError {
         case .invalidArchive(let name): return "\(name): ZIP không hợp lệ hoặc bị lỗi CRC."
         case .unsafeArchivePath(let path): return "Đường dẫn không an toàn trong ZIP: \(path)"
         case .duplicateResourcePath(let path): return "Có nhiều entry chuẩn hóa về cùng đường dẫn: \(path)"
-        case .noBaseWrapper: return "Không tìm thấy gói nền có cả Resources.zip và DanhSachSkin.txt."
+        case .noBaseWrapper: return "Không tìm thấy ZIP nền có cấu trúc tài nguyên đọc được."
         case .baseMissingResource(let path): return "Gói nền thiếu tài nguyên bắt buộc: \(path)"
         case .versionMismatch(let source, let candidate, let base):
             return "\(source): version.txt \(candidate) khác bản nền \(base). Không trộn khác build."
@@ -127,28 +127,16 @@ enum AoVModArchiveMerger {
             sources.append(try makeSource(url, tempRoot: tempRoot))
         }
 
-        let wrappers = sources.filter(\.isWrapper)
-        guard !wrappers.isEmpty else { throw AoVModArchiveMergeError.noBaseWrapper }
-        let base = wrappers.max { lhs, rhs in
-            isLessComplete(lhs, rhs)
-        }!
-        guard base.outerResourcesEntry != nil,
-              base.outerSkinEntry != nil else {
+        // A base can be either a wrapper (Resources.zip) or a ZIP whose resource
+        // files are stored directly. DanhSachSkin.txt and version.txt are optional.
+        // Prefer the most complete readable archive, regardless of wrapper shape.
+        guard let base = sources.max(by: { isLessComplete($0, $1) }) else {
             throw AoVModArchiveMergeError.noBaseWrapper
         }
-        for required in [commonActionsPath, packerPath, verificationPath] {
-            guard base.resources[required] != nil else {
-                throw AoVModArchiveMergeError.baseMissingResource(required)
-            }
-        }
-
-        guard let baseVersion = base.version, !baseVersion.isEmpty else {
-            throw AoVModArchiveMergeError.baseMissingResource("version.txt")
-        }
-        for source in sources {
-            guard let version = source.version, !version.isEmpty else {
-                throw AoVModArchiveMergeError.baseMissingResource("\(source.name)/version.txt")
-            }
+        let baseVersion = base.version?.trimmingCharacters(in: .whitespacesAndNewlines)
+        for source in sources where source.id != base.id {
+            guard let version = source.version?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  let baseVersion, !version.isEmpty, !baseVersion.isEmpty else { continue }
             guard version == baseVersion else {
                 throw AoVModArchiveMergeError.versionMismatch(source.name, version, baseVersion)
             }
@@ -382,14 +370,28 @@ enum AoVModArchiveMerger {
             }
         }
 
-        let innerOutputURL = tempRoot.appendingPathComponent("Resources-merged.zip")
-        try writeMergedResources(
-            base: base,
-            replacements: replacements,
-            added: added,
-            outputURL: innerOutputURL,
-            tempRoot: tempRoot
-        )
+        let stagedURL = tempRoot.appendingPathComponent("AKI-AOV-output.zip")
+        if base.outerResourcesEntry != nil {
+            let innerOutputURL = tempRoot.appendingPathComponent("Resources-merged.zip")
+            try writeMergedResources(
+                base: base,
+                replacements: replacements,
+                added: added,
+                outputURL: innerOutputURL,
+                tempRoot: tempRoot
+            )
+            try writeOuterArchive(base: base, innerURL: innerOutputURL, outputURL: stagedURL,
+                                  sources: ordered, replacements: replacements, tempRoot: tempRoot)
+        } else {
+            // Plain ZIP: keep the original outer layout; do not invent wrapper files.
+            try writeMergedResources(
+                base: base,
+                replacements: replacements,
+                added: added,
+                outputURL: stagedURL,
+                tempRoot: tempRoot
+            )
+        }
 
         let exportDirectory = try FileManager.default.url(
             for: .documentDirectory,
@@ -401,10 +403,7 @@ enum AoVModArchiveMerger {
         let finalURL = exportDirectory.appendingPathComponent(
             "AKI_AOV_SKIN_\(UUID().uuidString.prefix(8)).zip"
         )
-        let stagedURL = tempRoot.appendingPathComponent("AKI-AOV-output.zip")
-        try writeOuterArchive(base: base, innerURL: innerOutputURL, outputURL: stagedURL,
-                              sources: ordered, replacements: replacements, tempRoot: tempRoot)
-        try verifyArchive(stagedURL, label: "ZIP ngoài")
+        try verifyArchive(stagedURL, label: base.outerResourcesEntry == nil ? "ZIP thường" : "ZIP ngoài")
         try FileManager.default.moveItem(at: stagedURL, to: finalURL)
 
         var actorSummary: [String: [String]] = [:]
@@ -522,7 +521,7 @@ enum AoVModArchiveMerger {
             innerResourcesURL: innerURL,
             outerResourcesEntry: resourcesEntries.first,
             outerSkinEntry: skinEntries.first,
-            isWrapper: resourcesEntries.count == 1 && skinEntries.count == 1,
+            isWrapper: resourcesEntries.count == 1,
             resources: resources,
             actorEvidence: actorEvidence,
             skinText: skinText,
@@ -731,8 +730,7 @@ enum AoVModArchiveMerger {
         replacements: [String: Data],
         tempRoot: URL
     ) throws {
-        guard let resourcesEntry = base.outerResourcesEntry,
-              let skinEntry = base.outerSkinEntry else {
+        guard let resourcesEntry = base.outerResourcesEntry else {
             throw AoVModArchiveMergeError.noBaseWrapper
         }
         let skinLines = mergeSkinLines(sources.map(\.skinText))
@@ -742,7 +740,7 @@ enum AoVModArchiveMerger {
             if entry.path == resourcesEntry.path {
                 try output.addEntry(with: entry.path, fileURL: innerURL,
                                     compressionMethod: .deflate, bufferSize: 64 * 1024)
-            } else if entry.path == skinEntry.path {
+            } else if let skinEntry = base.outerSkinEntry, entry.path == skinEntry.path {
                 try addData(skinData, to: output, path: entry.path, tempRoot: tempRoot)
             } else if entry.path.replacingOccurrences(of: "\\", with: "/").hasPrefix("Resources/"),
                       let relative = try? normalizeResourcePath(entry.path),
