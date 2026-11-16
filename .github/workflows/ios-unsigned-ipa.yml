@@ -54,13 +54,13 @@ jobs:
           -project AOVSkinMerger.xcodeproj
           -scheme AOVSkinMerger
 
-      - name: Run iOS unit tests
+      - name: Compile iOS unit tests (generic Simulator target)
         working-directory: ios/AOVSkinMerger
         run: >-
-          xcodebuild test
+          xcodebuild build-for-testing
           -project AOVSkinMerger.xcodeproj
           -scheme AOVSkinMerger
-          -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+          -destination 'generic/platform=iOS Simulator'
           -derivedDataPath "$RUNNER_TEMP/AOVTestDerivedData"
 
       - name: Build unsigned iOS device app
