@@ -33,6 +33,7 @@ targets:
         IPHONEOS_DEPLOYMENT_TARGET: "16.0"
         TARGETED_DEVICE_FAMILY: "1"
     info:
+      path: Info.plist
       properties:
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
