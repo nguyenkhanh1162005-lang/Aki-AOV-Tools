@@ -8,6 +8,8 @@ struct ContentView: View {
     @State private var isCopyingFiles = false
     @State private var isAnalyzing = false
     @State private var selectedURLs: [URL] = []
+    @State private var selectedBaseURL: URL?
+    @State private var showBasePicker = false
     @State private var analysis: ArchiveAnalysis?
     @State private var aesReport: AESScanReport?
     @State private var isDecoding = false
@@ -107,7 +109,8 @@ struct ContentView: View {
                                         }
                                         Spacer()
                                         Button(role: .destructive) {
-                                            selectedURLs.remove(at: index)
+                                            let removedURL = selectedURLs.remove(at: index)
+                                            if selectedBaseURL == removedURL { selectedBaseURL = nil }
                                             analysis = nil
                                             aesReport = nil
                                             mergeReport = nil
@@ -117,6 +120,7 @@ struct ContentView: View {
                                 }
                                 Button("Xóa danh sách", role: .destructive) {
                                     selectedURLs.removeAll()
+                                    selectedBaseURL = nil
                                     analysis = nil
                                     aesReport = nil
                                     mergeReport = nil
@@ -197,6 +201,14 @@ struct ContentView: View {
             .alert("Thông báo", isPresented: $showAlert) {
                 Button("Đóng", role: .cancel) { showAlert = false }
             } message: { Text(alertText) }
+            .confirmationDialog("Chọn ZIP làm gói nền", isPresented: $showBasePicker, titleVisibility: .visible) {
+                ForEach(Array(selectedURLs.enumerated()), id: \.offset) { _, url in
+                    Button(url.lastPathComponent) { selectedBaseURL = url }
+                }
+                Button("Hủy", role: .cancel) { }
+            } message: {
+                Text("Gói được chọn sẽ làm nền; các ZIP còn lại được ghép vào gói này.")
+            }
         }
     }
 
@@ -246,11 +258,15 @@ struct ContentView: View {
                     homeSelectionCard(
                         title: "Chọn Gói Nền",
                         subtitle: "Tùy chọn gói nền yêu thích",
-                        status: selectedURLs.isEmpty ? "Chưa chọn gói nền" : "Đã có dữ liệu để quét",
+                        status: selectedBaseURL?.lastPathComponent ?? "Chưa chọn gói nền",
                         icon: "square.stack.3d.up.fill",
-                        actionTitle: selectedURLs.isEmpty ? "Chọn Gói" : "Quét Gói"
+                        actionTitle: "Chọn Gói"
                     ) {
-                        if selectedURLs.isEmpty { isImporting = true } else { runAnalysis() }
+                        if selectedURLs.isEmpty {
+                            isImporting = true
+                        } else {
+                            showBasePicker = true
+                        }
                     }
 
                     HStack(spacing: 7) {
@@ -838,14 +854,23 @@ struct ContentView: View {
     }
 
     private func runModMerge() {
-        guard selectedURLs.count >= 2 else { return }
+        guard selectedURLs.count >= 2 else {
+            alertText = "Cần chọn ít nhất hai ZIP để ghép."
+            showAlert = true
+            return
+        }
+        guard let baseURL = selectedBaseURL else {
+            alertText = "Hãy chọn một ZIP làm gói nền trước khi ghép. Các ZIP còn lại sẽ được dùng làm gói skin."
+            showAlert = true
+            return
+        }
         isMerging = true
         mergeReport = nil
         let urls = selectedURLs
         Task {
             do {
                 let report = try await Task.detached(priority: .userInitiated) {
-                    try AoVModArchiveMerger.merge(urls)
+                    try AoVModArchiveMerger.merge(urls, baseURL: baseURL)
                 }.value
                 mergeReport = report
             } catch {
