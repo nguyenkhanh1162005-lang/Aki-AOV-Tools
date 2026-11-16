@@ -65,10 +65,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          DEVICE_ID="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {print $2; exit}')"
+          DESTINATIONS="$(xcodebuild -showdestinations -project AOVSkinMerger.xcodeproj -scheme AOVSkinMerger 2>&1)"
+          DEVICE_ID="$(printf '%s\\n' "$DESTINATIONS" | python3 -c 'import re,sys; m=re.search(r"\\{ platform:iOS Simulator, arch:arm64, id:([^,]+), OS:26\\.5, name:iPhone[^}]*\\}", sys.stdin.read()); print(m.group(1) if m else "")')"
           if [ -z "$DEVICE_ID" ]; then
-            echo "No available iPhone simulator was found."
-            xcrun simctl list devices available
+            echo "No iOS 26.5 iPhone simulator destination was found."
+            printf '%s\\n' "$DESTINATIONS"
             exit 1
           fi
           xcodebuild test \
