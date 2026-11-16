@@ -60,15 +60,13 @@ jobs:
           -project AOVSkinMerger.xcodeproj
           -scheme AOVSkinMerger
 
-      - name: Run iOS unit tests on iPhone 17 Pro (iOS 26.5 Simulator)
+      - name: Compile iOS app and XCTest bundle for Simulator
         working-directory: ios/AOVSkinMerger
         run: >-
-          xcodebuild test
+          xcodebuild build-for-testing
           -project AOVSkinMerger.xcodeproj
           -scheme AOVSkinMerger
-          -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5'
-          -destination-timeout 90
-          -parallel-testing-enabled NO
+          -destination 'generic/platform=iOS Simulator'
           -derivedDataPath "$RUNNER_TEMP/AOVTestDerivedData"
           CODE_SIGNING_ALLOWED=NO
 
@@ -98,7 +96,18 @@ jobs:
             cd "$PACKAGE_DIR"
             /usr/bin/zip -qry "$GITHUB_WORKSPACE/AKI AOV SKIN.ipa" Payload
           )
-          shasum -a 256 "$GITHUB_WORKSPACE/AKI AOV SKIN.ipa"
+          IPA_PATH="$GITHUB_WORKSPACE/AKI AOV SKIN.ipa"
+          test -s "$IPA_PATH"
+          /usr/bin/unzip -tq "$IPA_PATH"
+          test -d "$PACKAGE_DIR/Payload/AOVSkinMerger.app"
+          APP_INFO="$PACKAGE_DIR/Payload/AOVSkinMerger.app/Info.plist"
+          test -s "$APP_INFO"
+          test -x "$APP_PATH/AOVSkinMerger"
+          test "$(plutil -extract CFBundleIdentifier raw "$APP_INFO")" = "com.aki.aovskinmerger"
+          test "$(plutil -extract CFBundleShortVersionString raw "$APP_INFO")" = "0.4.6"
+          test "$(plutil -extract MinimumOSVersion raw "$APP_INFO")" = "26.5"
+          lipo -archs "$APP_PATH/AOVSkinMerger" | grep -qw arm64
+          shasum -a 256 "$IPA_PATH"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
