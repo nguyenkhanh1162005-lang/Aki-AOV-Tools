@@ -21,178 +21,176 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                if selectedTab == "Tính năng" {
-                VStack(alignment: .leading, spacing: 18) {
-                    header
-                    quickStatus
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label("Nguồn MOD", systemImage: "doc.zipper").font(.headline)
-                        Text("Chọn nhiều ZIP. File được giữ trên iPhone, không tải lên máy chủ.")
-                            .font(.footnote).foregroundColor(.secondary)
-                        Button { isImporting = true } label: {
-                            HStack {
-                                if isCopyingFiles { ProgressView() }
-                                Label(
-                                    isCopyingFiles ? "Đang nhập ZIP vào iPhone…" : "Chọn file ZIP",
-                                    systemImage: isCopyingFiles ? "arrow.down.doc" : "plus.circle.fill"
-                                )
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(AKIPrimaryButtonStyle())
-                        .disabled(isCopyingFiles || isAnalyzing || isDecoding || isMerging)
-                        Button(action: runAnalysis) {
-                            HStack {
-                                if isAnalyzing { ProgressView().tint(.white) }
-                                Label(isAnalyzing ? "Đang kiểm tra…" : "Kiểm tra cấu trúc và nội dung ZIP",
-                                      systemImage: "doc.text.magnifyingglass")
-                            }.frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(AKISecondaryButtonStyle())
-                        .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding || isCopyingFiles || isMerging)
-                        Button(action: runAESScan) {
-                            HStack {
-                                if isDecoding { ProgressView() }
-                                Label(isDecoding ? "Đang quét AoV .bytes…" : "Quét giải mã AoV .bytes (AES/Zstd)",
-                                      systemImage: "lock.open")
-                            }.frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(AKISecondaryButtonStyle())
-                        .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding || isCopyingFiles || isMerging)
-                        Text("Có thể chọn ZIP tại đây, hoặc mở ZIP từ Tệp bằng Chia sẻ → Mở bằng AKI AOV SKIN. Thư mục của app cũng xuất hiện ở Trên iPhone của tôi → AKI AOV SKIN; ZIP đã nhập nằm trong SourceArchives.")
-                            .font(.caption2).foregroundColor(.secondary)
-                        Button(action: runModMerge) {
-                            HStack {
-                                if isMerging { ProgressView() }
-                                Label(isMerging ? "Đang ghép MOD…" : "Ghép MOD và xuất ZIP",
-                                      systemImage: "arrow.triangle.merge")
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(AKIPrimaryButtonStyle())
-                        .disabled(selectedURLs.count < 2 || isAnalyzing || isDecoding || isMerging || isCopyingFiles)
-                    }
-                    .panel()
-
-                    if !selectedURLs.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text("File đã chọn").font(.headline)
-                                Spacer()
-                                Text("\(selectedURLs.count) ZIP").font(.caption).foregroundColor(.secondary)
-                            }
-                            ForEach(Array(selectedURLs.enumerated()), id: \.offset) { index, url in
-                                HStack {
-                                    Image(systemName: "doc.zipper").foregroundColor(.accentColor)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(url.lastPathComponent).font(.subheadline).lineLimit(1)
-                                        Text(fileSize(url)).font(.caption).foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    Button(role: .destructive) {
-                                        selectedURLs.remove(at: index)
-                                        analysis = nil
-                                        aesReport = nil
-                                        mergeReport = nil
-                                    } label: { Image(systemName: "xmark.circle.fill") }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            Button("Xóa danh sách", role: .destructive) {
-                                selectedURLs.removeAll()
-                                analysis = nil
-                                aesReport = nil
-                                mergeReport = nil
-                            }.font(.footnote)
-                        }.panel()
-                    }
-
-                    if let analysis { analysisView(analysis) }
-                    if let aesReport { aesReportView(aesReport) }
-                    if let mergeReport { mergeResultView(mergeReport) }
-
-                    VStack(alignment: .leading, spacing: 9) {
-                        Label("Tiến độ phát triển", systemImage: "hammer.fill").font(.headline)
-                        statusRow("Nhập nhiều ZIP và tự nhận gói nền", true)
-                        statusRow("Quét inventory, CRC và SHA-256", true)
-                        statusRow("Giải mã AES / AES+Zstandard / Zstandard AoV", true)
-                        statusRow("AssetRef: nhận diện và giữ path duy nhất", true)
-                        statusRow("CommonActions: direct list + skinId conditions", true)
-                        statusRow("MSES / IFix: adapter theo schema đã nhận diện", true)
-                        statusRow("Wwise BNK: append-only nếu ID không xung đột", true)
-                        statusRow("AssetBundle Packer / Verification metadata", false)
-                        statusRow("AssetRef subset merge khi cùng path khác payload", false)
-                        statusRow("Xuất ZIP với kiểm CRC khi không còn blocker", true)
-                    }.panel()
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("Cập nhật online", systemImage: "arrow.clockwise.circle").font(.headline)
-                        Text(updateMessage).font(.footnote).foregroundColor(.secondary)
-                        Button(action: checkUpdates) {
-                            Label("Kiểm tra bản mới trên GitHub", systemImage: "arrow.triangle.2.circlepath")
-                                .frame(maxWidth: .infinity)
-                        }.buttonStyle(AKISecondaryButtonStyle())
-                        if let releaseURL {
-                            Button("Mở trang phát hành") { openURL(releaseURL) }
-                                .font(.footnote.weight(.semibold))
-                        }
-                        Text("Ứng dụng không tự thay thế IPA đã cài. Bản cập nhật cần được cài lại theo cơ chế iOS.")
-                            .font(.caption2).foregroundColor(.secondary)
-                    }.panel()
-                }
-                .padding(16)
-                } else if selectedTab == "Trang chủ" {
-                    homeDashboard
-                } else if selectedTab == "Lịch sử" {
-                    historyDashboard
-                } else {
-                    infoDashboard
-                }
-            }
-            .background {
+            ZStack {
                 ZStack {
                     LinearGradient(
-                        colors: [Color(red: 0.025, green: 0.025, blue: 0.055),
-                                 Color(red: 0.055, green: 0.045, blue: 0.105),
-                                 Color(red: 0.018, green: 0.02, blue: 0.04)],
+                        colors: [Color(red: 0.015, green: 0.012, blue: 0.045),
+                                 Color(red: 0.075, green: 0.045, blue: 0.15),
+                                 Color(red: 0.012, green: 0.012, blue: 0.035)],
                         startPoint: .topLeading, endPoint: .bottomTrailing
                     )
-                    Circle().fill(Color.white.opacity(0.07)).frame(width: 260).blur(radius: 90)
-                        .offset(x: 150, y: -330)
-                    Circle().fill(Color.purple.opacity(0.16)).frame(width: 220).blur(radius: 85)
-                        .offset(x: -150, y: 80)
-                }.ignoresSafeArea()
+                    Circle().fill(Color.purple.opacity(0.18)).frame(width: 260).blur(radius: 100)
+                        .offset(x: 150, y: -300)
+                    Circle().fill(Color(red: 0.45, green: 0.30, blue: 1).opacity(0.12))
+                        .frame(width: 230).blur(radius: 85).offset(x: -160, y: 130)
+                }
+                .ignoresSafeArea()
+
+                Group {
+                    if selectedTab == "Tính năng" {
+                        ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        header
+                        quickStatus
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Nguồn MOD", systemImage: "doc.zipper").font(.headline)
+                            Text("Chọn nhiều ZIP. File được giữ trên iPhone, không tải lên máy chủ.")
+                                .font(.footnote).foregroundColor(.secondary)
+                            Button { isImporting = true } label: {
+                                HStack {
+                                    if isCopyingFiles { ProgressView() }
+                                    Label(
+                                        isCopyingFiles ? "Đang nhập ZIP vào iPhone…" : "Chọn file ZIP",
+                                        systemImage: isCopyingFiles ? "arrow.down.doc" : "plus.circle.fill"
+                                    )
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(AKIPrimaryButtonStyle())
+                            .disabled(isCopyingFiles || isAnalyzing || isDecoding || isMerging)
+                            Button(action: runAnalysis) {
+                                HStack {
+                                    if isAnalyzing { ProgressView().tint(.white) }
+                                    Label(isAnalyzing ? "Đang kiểm tra…" : "Kiểm tra cấu trúc và nội dung ZIP",
+                                          systemImage: "doc.text.magnifyingglass")
+                                }.frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(AKISecondaryButtonStyle())
+                            .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding || isCopyingFiles || isMerging)
+                            Button(action: runAESScan) {
+                                HStack {
+                                    if isDecoding { ProgressView() }
+                                    Label(isDecoding ? "Đang quét AoV .bytes…" : "Quét giải mã AoV .bytes (AES/Zstd)",
+                                          systemImage: "lock.open")
+                                }.frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(AKISecondaryButtonStyle())
+                            .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding || isCopyingFiles || isMerging)
+                            Text("Có thể chọn ZIP tại đây, hoặc mở ZIP từ Tệp bằng Chia sẻ → Mở bằng AKI AOV SKIN. Thư mục của app cũng xuất hiện ở Trên iPhone của tôi → AKI AOV SKIN; ZIP đã nhập nằm trong SourceArchives.")
+                                .font(.caption2).foregroundColor(.secondary)
+                            Button(action: runModMerge) {
+                                HStack {
+                                    if isMerging { ProgressView() }
+                                    Label(isMerging ? "Đang ghép MOD…" : "Ghép MOD và xuất ZIP",
+                                          systemImage: "arrow.triangle.merge")
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(AKIPrimaryButtonStyle())
+                            .disabled(selectedURLs.count < 2 || isAnalyzing || isDecoding || isMerging || isCopyingFiles)
+                        }
+                        .panel()
+    
+                        if !selectedURLs.isEmpty {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    Text("File đã chọn").font(.headline)
+                                    Spacer()
+                                    Text("\(selectedURLs.count) ZIP").font(.caption).foregroundColor(.secondary)
+                                }
+                                ForEach(Array(selectedURLs.enumerated()), id: \.offset) { index, url in
+                                    HStack {
+                                        Image(systemName: "doc.zipper").foregroundColor(.accentColor)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(url.lastPathComponent).font(.subheadline).lineLimit(1)
+                                            Text(fileSize(url)).font(.caption).foregroundColor(.secondary)
+                                        }
+                                        Spacer()
+                                        Button(role: .destructive) {
+                                            selectedURLs.remove(at: index)
+                                            analysis = nil
+                                            aesReport = nil
+                                            mergeReport = nil
+                                        } label: { Image(systemName: "xmark.circle.fill") }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                Button("Xóa danh sách", role: .destructive) {
+                                    selectedURLs.removeAll()
+                                    analysis = nil
+                                    aesReport = nil
+                                    mergeReport = nil
+                                }.font(.footnote)
+                            }.panel()
+                        }
+    
+                        if let analysis { analysisView(analysis) }
+                        if let aesReport { aesReportView(aesReport) }
+                        if let mergeReport { mergeResultView(mergeReport) }
+    
+                        VStack(alignment: .leading, spacing: 9) {
+                            Label("Tiến độ phát triển", systemImage: "hammer.fill").font(.headline)
+                            statusRow("Nhập nhiều ZIP và tự nhận gói nền", true)
+                            statusRow("Quét inventory, CRC và SHA-256", true)
+                            statusRow("Giải mã AES / AES+Zstandard / Zstandard AoV", true)
+                            statusRow("AssetRef: nhận diện và giữ path duy nhất", true)
+                            statusRow("CommonActions: direct list + skinId conditions", true)
+                            statusRow("MSES / IFix: adapter theo schema đã nhận diện", true)
+                            statusRow("Wwise BNK: append-only nếu ID không xung đột", true)
+                            statusRow("AssetBundle Packer / Verification metadata", false)
+                            statusRow("AssetRef subset merge khi cùng path khác payload", false)
+                            statusRow("Xuất ZIP với kiểm CRC khi không còn blocker", true)
+                        }.panel()
+    
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("Cập nhật online", systemImage: "arrow.clockwise.circle").font(.headline)
+                            Text(updateMessage).font(.footnote).foregroundColor(.secondary)
+                            Button(action: checkUpdates) {
+                                Label("Kiểm tra bản mới trên GitHub", systemImage: "arrow.triangle.2.circlepath")
+                                    .frame(maxWidth: .infinity)
+                            }.buttonStyle(AKISecondaryButtonStyle())
+                            if let releaseURL {
+                                Button("Mở trang phát hành") { openURL(releaseURL) }
+                                    .font(.footnote.weight(.semibold))
+                            }
+                            Text("Ứng dụng không tự thay thế IPA đã cài. Bản cập nhật cần được cài lại theo cơ chế iOS.")
+                                .font(.caption2).foregroundColor(.secondary)
+                        }.panel()
+                    }
+                    .padding(16)
+                        }
+                    } else if selectedTab == "Trang chủ" {
+                        homeDashboard
+                    } else if selectedTab == "Lịch sử" {
+                        historyDashboard
+                    } else {
+                        infoDashboard
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { bottomNavigation }
+            .toolbar(.hidden, for: .navigationBar)
             .tint(.white)
             .preferredColorScheme(.dark)
-            .navigationTitle("AKI AOV SKIN")
-            .navigationBarTitleDisplayMode(.inline)
-            // Some file providers expose ZIPs as generic data instead of public.zip-archive.
-            // Accept generic files here; the importer validates the .zip extension before copying.
             .fullScreenCover(isPresented: $isImporting) {
                 ZIPDocumentPicker(
                     onPick: { urls in
                         isImporting = false
                         importFiles(.success(urls))
                     },
-                    onCancel: {
-                        isImporting = false
-                    }
+                    onCancel: { isImporting = false }
                 )
                 .ignoresSafeArea()
             }
             .onOpenURL { url in
-                // Accept ZIP files opened from the iOS Files app ("Open in AKI AOV SKIN").
                 importFiles(.success([url]))
             }
             .task {
-                // Create the shared Documents subfolder on first launch so it is visible in Files.
                 do {
                     _ = try sourceFolder()
                 } catch {
-                    alertText = "Không thể tạo thư mục lưu ZIP: \(error.localizedDescription)"
+                    alertText = "Không thể tạo thư mục lưu ZIP: \\(error.localizedDescription)"
                     showAlert = true
                 }
             }
@@ -203,39 +201,182 @@ struct ContentView: View {
     }
 
 
-
     private var homeDashboard: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header
-                quickStatus
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("WORKSPACE").font(.system(size: 10, weight: .black, design: .rounded)).tracking(2).foregroundStyle(.white.opacity(0.55))
-                    Text("Chào mừng đến AKI").font(.system(size: 28, weight: .black, design: .rounded)).foregroundStyle(.white)
-                    Text("Quản lý và hợp nhất các gói MOD ngay trên iPhone.").font(.subheadline).foregroundStyle(.white.opacity(0.65))
-                    Button { selectedTab = "Tính năng" } label: {
-                        Label("Mở bộ công cụ", systemImage: "arrow.right.circle.fill").frame(maxWidth: .infinity)
-                    }.buttonStyle(AKIPrimaryButtonStyle())
-                }.panel()
-                HStack(spacing: 10) {
-                    dashboardTile("Nhập ZIP", detail: "Chọn nhiều gói", icon: "doc.zipper")
-                    dashboardTile("Quét dữ liệu", detail: "AES / Zstd", icon: "lock.open")
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 13) {
+                Image("AkiHero")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 3)
+                    .background(Color.black.opacity(0.30), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(LinearGradient(colors: [.white.opacity(0.48), .purple.opacity(0.45), .white.opacity(0.12)],
+                                               startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+                    .shadow(color: .purple.opacity(0.22), radius: 18, y: 8)
+
+                homeSelectionCard(
+                    title: "Chọn File ZIP",
+                    subtitle: "Hỗ trợ gói nền hoặc skin AOV",
+                    status: selectedURLs.isEmpty ? "Chưa chọn file" : "\\(selectedURLs.count) ZIP đã chọn",
+                    icon: "folder.fill",
+                    actionTitle: "Chọn File"
+                ) { isImporting = true }
+
+                homeSelectionCard(
+                    title: "Chọn Gói Nền",
+                    subtitle: "Tự nhận diện gói nền từ danh sách ZIP",
+                    status: selectedURLs.isEmpty ? "Chưa chọn gói nền" : "Đã có dữ liệu để quét",
+                    icon: "square.3.layers.3d",
+                    actionTitle: selectedURLs.isEmpty ? "Chọn Gói" : "Quét Gói"
+                ) {
+                    if selectedURLs.isEmpty { isImporting = true } else { runAnalysis() }
                 }
-                HStack(spacing: 10) {
-                    dashboardTile("Ghép MOD", detail: "Tạo gói kết quả", icon: "arrow.triangle.merge")
-                    dashboardTile("Xử lý cục bộ", detail: "Không tải máy chủ", icon: "iphone")
+
+                HStack(spacing: 8) {
+                    benefitTile("Xử Lý Nhanh", detail: "Trên iPhone", icon: "bolt.fill")
+                    benefitTile("An Toàn", detail: "Kiểm tra CRC", icon: "checkmark.shield.fill")
+                    benefitTile("Mượt Mà", detail: "Giữ file nguồn", icon: "diamond.fill")
+                    benefitTile("Cập Nhật", detail: "Kiểm tra bản mới", icon: "arrow.clockwise")
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Lối tắt", systemImage: "bolt.fill").font(.headline)
-                    Button { isImporting = true } label: {
-                        Label("Chọn file ZIP", systemImage: "plus.circle.fill").frame(maxWidth: .infinity)
-                    }.buttonStyle(AKIPrimaryButtonStyle())
-                    Button { selectedTab = "Tính năng" } label: {
-                        Label("Xem công cụ và trạng thái xử lý", systemImage: "square.grid.2x2").frame(maxWidth: .infinity)
-                    }.buttonStyle(AKISecondaryButtonStyle())
-                }.panel()
-            }.padding(16)
+
+                Button {
+                    if selectedURLs.count >= 2 {
+                        runModMerge()
+                    } else if selectedURLs.isEmpty {
+                        isImporting = true
+                    } else {
+                        selectedTab = "Tính năng"
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "wrench.and.screwdriver.fill")
+                            .font(.system(size: 26, weight: .black))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(isMerging ? "ĐANG GHÉP SKIN" : "BẮT ĐẦU GHÉP SKIN")
+                                .font(.system(size: 17, weight: .black, design: .rounded))
+                            Text(selectedURLs.count >= 2 ? "Tạo file ZIP kết quả" : "Chọn ít nhất 2 gói ZIP để tiếp tục")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        Spacer(minLength: 2)
+                        Image(systemName: "chevron.right.2")
+                            .font(.system(size: 19, weight: .black))
+                    }
+                    .foregroundStyle(Color(red: 0.07, green: 0.045, blue: 0.13))
+                    .padding(.horizontal, 20)
+                    .frame(maxWidth: .infinity, minHeight: 78)
+                    .background(LinearGradient(colors: [.white, Color(red: 0.78, green: 0.72, blue: 1)],
+                                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                                in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(.white.opacity(0.9), lineWidth: 1.4))
+                    .shadow(color: .purple.opacity(0.38), radius: 18, y: 8)
+                }
+                .buttonStyle(.plain)
+                .disabled(isMerging)
+
+                HStack(spacing: 12) {
+                    Image(systemName: "megaphone.fill")
+                        .font(.system(size: 23, weight: .bold))
+                        .foregroundStyle(Color(red: 0.82, green: 0.75, blue: 1))
+                        .frame(width: 42)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Thông Báo").font(.system(size: 14, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                        Text("Chào mừng bạn đến với AKI AOV SKIN!")
+                            .font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.72))
+                    }
+                    Spacer(minLength: 2)
+                    Button { selectedTab = "Thông tin" } label: {
+                        HStack(spacing: 4) {
+                            Text("Xem Thêm")
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 9)
+                        .background(.white.opacity(0.10), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(14)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(.white.opacity(0.22), lineWidth: 1))
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 18)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func homeSelectionCard(title: String, subtitle: String, status: String,
+                                   icon: String, actionTitle: String,
+                                   action: @escaping () -> Void) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: icon)
+                .font(.system(size: 30, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Color(red: 0.78, green: 0.70, blue: 1))
+                .frame(width: 48)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.system(size: 17, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                Text(subtitle).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(2)
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.seal.fill")
+                    Text(status)
+                }
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color(red: 0.78, green: 0.60, blue: 1))
+                .lineLimit(1)
+            }
+            Spacer(minLength: 2)
+            Button(action: action) {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.up.doc.fill")
+                    Text(actionTitle).lineLimit(1)
+                    Image(systemName: "chevron.right.2")
+                }
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .frame(width: 116, height: 48)
+                .background(LinearGradient(colors: [Color(red: 0.48, green: 0.40, blue: 0.90), Color(red: 0.22, green: 0.16, blue: 0.45)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing),
+                            in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(.white.opacity(0.65), lineWidth: 1))
+                .shadow(color: .purple.opacity(0.30), radius: 9, y: 4)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(13)
+        .background(LinearGradient(colors: [Color.white.opacity(0.10), Color.purple.opacity(0.08), Color.black.opacity(0.34)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    in: RoundedRectangle(cornerRadius: 21, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 21, style: .continuous)
+            .stroke(LinearGradient(colors: [.white.opacity(0.40), .purple.opacity(0.42), .white.opacity(0.12)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+        .shadow(color: .black.opacity(0.26), radius: 13, y: 6)
+    }
+
+    private func benefitTile(_ title: String, detail: String, icon: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 20, weight: .bold))
+                .foregroundStyle(Color(red: 0.90, green: 0.86, blue: 1))
+                .shadow(color: .purple.opacity(0.75), radius: 8)
+            Text(title).font(.system(size: 9, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.75)
+            Text(detail).font(.system(size: 8, weight: .medium))
+                .foregroundStyle(.white.opacity(0.65)).lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, minHeight: 82)
+        .padding(.horizontal, 3)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
+            .stroke(.white.opacity(0.20), lineWidth: 1))
     }
 
     private func dashboardTile(_ title: String, detail: String, icon: String) -> some View {
@@ -324,40 +465,45 @@ struct ContentView: View {
     }
 
     private var bottomNavigation: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             navItem("Trang chủ", icon: "house.fill")
-            navItem("Tính năng", icon: "square.grid.2x2.fill")
+            navItem("Tính năng", icon: "square.grid.2x2")
             navItem("Lịch sử", icon: "clock.arrow.circlepath")
-            navItem("Thông tin", icon: "info.circle.fill")
+            navItem("Thông tin", icon: "crown.fill")
         }
-        .padding(.top, 10)
-        .padding(.bottom, 5)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.16)).frame(height: 1) }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 7)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous)
+            .stroke(LinearGradient(colors: [.white.opacity(0.30), .purple.opacity(0.38), .white.opacity(0.12)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+        .shadow(color: .black.opacity(0.28), radius: 14, y: 5)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 3)
+        .background(Color.black.opacity(0.12).ignoresSafeArea(edges: .bottom))
     }
 
     private func navItem(_ title: String, icon: String) -> some View {
         Button {
             selectedTab = title
-            switch title {
-            case "Thông tin":
-                alertText = "AKI AOV SKIN 0.5.0\\nXử lý ZIP trực tiếp trên iPhone."
-                showAlert = true
-            case "Lịch sử":
-                alertText = "Hiện phiên bản này chưa lưu lịch sử ghép."
-                showAlert = true
-            case "Tính năng":
-                alertText = "Chọn ZIP, kiểm tra cấu trúc, quét AoV .bytes và ghép MOD."
-                showAlert = true
-            default: break
-            }
         } label: {
             VStack(spacing: 5) {
-                Image(systemName: icon).font(.system(size: 17, weight: .semibold))
+                Image(systemName: icon).font(.system(size: 18, weight: .semibold))
                 Text(title).font(.system(size: 9, weight: .bold, design: .rounded))
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                Capsule().fill(selectedTab == title ? Color(red: 0.74, green: 0.62, blue: 1) : .clear)
+                    .frame(width: 28, height: 3)
             }
             .foregroundStyle(selectedTab == title ? Color.white : Color.white.opacity(0.48))
             .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .background {
+                if selectedTab == title {
+                    RoundedRectangle(cornerRadius: 19, style: .continuous)
+                        .fill(LinearGradient(colors: [Color.white.opacity(0.16), Color.purple.opacity(0.16)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
