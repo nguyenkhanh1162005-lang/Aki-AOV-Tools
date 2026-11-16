@@ -172,7 +172,7 @@ struct ContentView: View {
                 Image(systemName: "archivebox.fill").font(.system(size: 28)).foregroundColor(.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("AKI AOV SKIN").font(.title2.bold())
-                    Text("Bản iOS 0.4.7 · yêu cầu iOS 26.5+").font(.caption).foregroundColor(.secondary)
+                    Text("Bản iOS 0.4.8 · yêu cầu iOS 26.5+").font(.caption).foregroundColor(.secondary)
                 }
             }
             Text("AKI AOV SKIN xử lý file ngay trên iPhone. Bộ ghép sẽ dừng khi gặp xung đột chưa có adapter đã xác minh.")
@@ -302,7 +302,7 @@ struct ContentView: View {
             let existingBytes = selectedURLs.reduce(UInt64(0)) { partial, url in
                 let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
                 let sum = partial.addingReportingOverflow(UInt64(max(size, 0)))
-                return sum.overflow ? AoVSourceFileImporter.maximumTotalBytes : sum.partialValue
+                return sum.overflow ? UInt64.max : sum.partialValue
             }
             guard existingCount + urls.count <= AoVSourceFileImporter.maximumFiles else {
                 alertText = "App nhận tối đa 10 ZIP. Hãy xóa bớt file trong danh sách rồi chọn lại."
