@@ -190,7 +190,7 @@ struct ContentView: View {
                 do {
                     _ = try sourceFolder()
                 } catch {
-                    alertText = "Không thể tạo thư mục lưu ZIP: \\(error.localizedDescription)"
+                    alertText = "Không thể tạo thư mục lưu ZIP: \(error.localizedDescription)"
                     showAlert = true
                 }
             }
@@ -219,7 +219,7 @@ struct ContentView: View {
                 homeSelectionCard(
                     title: "Chọn File ZIP",
                     subtitle: "Hỗ trợ gói nền hoặc skin AOV",
-                    status: selectedURLs.isEmpty ? "Chưa chọn file" : "\\(selectedURLs.count) ZIP đã chọn",
+                    status: selectedURLs.isEmpty ? "Chưa chọn file" : "\(selectedURLs.count) ZIP đã chọn",
                     icon: "folder.fill",
                     actionTitle: "Chọn File"
                 ) { isImporting = true }
@@ -228,7 +228,7 @@ struct ContentView: View {
                     title: "Chọn Gói Nền",
                     subtitle: "Tự nhận diện gói nền từ danh sách ZIP",
                     status: selectedURLs.isEmpty ? "Chưa chọn gói nền" : "Đã có dữ liệu để quét",
-                    icon: "square.3.layers.3d",
+                    icon: "square.stack.3d.up",
                     actionTitle: selectedURLs.isEmpty ? "Chọn Gói" : "Quét Gói"
                 ) {
                     if selectedURLs.isEmpty { isImporting = true } else { runAnalysis() }
