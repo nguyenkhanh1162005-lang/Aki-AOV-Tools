@@ -10,6 +10,7 @@ enum AoVModArchiveMergeError: LocalizedError {
     case unsafeArchivePath(String)
     case duplicateResourcePath(String)
     case noBaseWrapper
+    case baseNotSelected
     case baseMissingResource(String)
     case versionMismatch(String, String, String)
     case unsupportedConflict(String, String)
@@ -30,6 +31,7 @@ enum AoVModArchiveMergeError: LocalizedError {
         case .unsafeArchivePath(let path): return "Đường dẫn không an toàn trong ZIP: \(path)"
         case .duplicateResourcePath(let path): return "Có nhiều entry chuẩn hóa về cùng đường dẫn: \(path)"
         case .noBaseWrapper: return "Không tìm thấy ZIP nền có cấu trúc tài nguyên đọc được."
+        case .baseNotSelected: return "ZIP được chọn làm gói nền không nằm trong danh sách ZIP đã nhập."
         case .baseMissingResource(let path): return "Gói nền thiếu tài nguyên bắt buộc: \(path)"
         case .versionMismatch(let source, let candidate, let base):
             return "\(source): version.txt \(candidate) khác bản nền \(base). Không trộn khác build."
@@ -79,6 +81,7 @@ private struct AoVResourceReference {
 private struct AoVModSource {
     let id: UUID
     let name: String
+    let sourceURL: URL
     let outerArchive: Archive
     let resourceArchive: Archive
     let innerResourcesURL: URL?
@@ -103,7 +106,7 @@ enum AoVModArchiveMerger {
     private static let verificationPath = "assetbundle/resourceverificationinfosetall.assetbundle"
     private static let resSkinPath = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
 
-    static func merge(_ archiveURLs: [URL]) throws -> AoVModMergeReport {
+    static func merge(_ archiveURLs: [URL], baseURL: URL? = nil) throws -> AoVModMergeReport {
         guard archiveURLs.count >= 2 else { throw AoVModArchiveMergeError.tooFewInputs }
         guard archiveURLs.count <= maximumInputs else { throw AoVModArchiveMergeError.tooManyInputs }
 
@@ -127,10 +130,19 @@ enum AoVModArchiveMerger {
             sources.append(try makeSource(url, tempRoot: tempRoot))
         }
 
-        // A base can be either a wrapper (Resources.zip) or a ZIP whose resource
-        // files are stored directly. DanhSachSkin.txt and version.txt are optional.
-        // Prefer the most complete readable archive, regardless of wrapper shape.
-        guard let base = sources.max(by: { isLessComplete($0, $1) }) else {
+        // Prefer the explicitly selected base. The completeness heuristic remains
+        // as a compatibility fallback for non-UI callers, but the iOS app now asks
+        // the user to select the base ZIP so an overlay cannot silently win.
+        let base: AoVModSource
+        if let baseURL {
+            let requested = baseURL.standardizedFileURL
+            guard let selected = sources.first(where: { $0.sourceURL.standardizedFileURL == requested }) else {
+                throw AoVModArchiveMergeError.baseNotSelected
+            }
+            base = selected
+        } else if let inferred = sources.max(by: { isLessComplete($0, $1) }) {
+            base = inferred
+        } else {
             throw AoVModArchiveMergeError.noBaseWrapper
         }
         let baseVersion = base.version?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -516,6 +528,7 @@ enum AoVModArchiveMerger {
         return AoVModSource(
             id: UUID(),
             name: url.lastPathComponent,
+            sourceURL: url.standardizedFileURL,
             outerArchive: outer,
             resourceArchive: resourceArchive,
             innerResourcesURL: innerURL,
