@@ -60,25 +60,16 @@ jobs:
           -project AOVSkinMerger.xcodeproj
           -scheme AOVSkinMerger
 
-      - name: Run iOS unit tests on an available iPhone simulator
+      - name: Run iOS unit tests on iPhone 17 Pro (iOS 26.5 Simulator)
         working-directory: ios/AOVSkinMerger
-        shell: bash
-        run: |
-          set -euo pipefail
-          DESTINATIONS="$(xcodebuild -showdestinations -project AOVSkinMerger.xcodeproj -scheme AOVSkinMerger 2>&1)"
-          DEVICE_ID="$(printf '%s\n' "$DESTINATIONS" | python3 -c 'import re,sys; m=re.search(r"\{ platform:iOS Simulator, arch:arm64, id:([^,]+), OS:26\.5, name:iPhone[^}]*\}", sys.stdin.read()); print(m.group(1) if m else "")')"
-          if [ -z "$DEVICE_ID" ]; then
-            echo "No iOS 26.5 iPhone simulator destination was found."
-            printf '%s\n' "$DESTINATIONS"
-            exit 1
-          fi
-          xcodebuild test \
-            -project AOVSkinMerger.xcodeproj \
-            -scheme AOVSkinMerger \
-            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
-            -destination-timeout 90 \
-            -derivedDataPath "$RUNNER_TEMP/AOVTestDerivedData" \
-            CODE_SIGNING_ALLOWED=NO
+        run: >-
+          xcodebuild test
+          -project AOVSkinMerger.xcodeproj
+          -scheme AOVSkinMerger
+          -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5'
+          -destination-timeout 90
+          -derivedDataPath "$RUNNER_TEMP/AOVTestDerivedData"
+          CODE_SIGNING_ALLOWED=NO
 
       - name: Build unsigned iOS device app
         working-directory: ios/AOVSkinMerger
