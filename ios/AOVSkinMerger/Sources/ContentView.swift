@@ -170,7 +170,7 @@ struct ContentView: View {
                 Image(systemName: "archivebox.fill").font(.system(size: 28)).foregroundColor(.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("AKI AOV SKIN").font(.title2.bold())
-                    Text("Bản iOS 0.4.5 · yêu cầu iOS 26.5+").font(.caption).foregroundColor(.secondary)
+                    Text("Bản iOS 0.4.6 · yêu cầu iOS 26.5+").font(.caption).foregroundColor(.secondary)
                 }
             }
             Text("AKI AOV SKIN xử lý file ngay trên iPhone. Bộ ghép sẽ dừng khi gặp xung đột chưa có adapter đã xác minh.")
@@ -308,6 +308,8 @@ struct ContentView: View {
                 return
             }
 
+            // Open provider access inside the picker callback, before its grant can expire.
+            let securityScopeLease = AoVSecurityScopedAccess(urls: urls)
             isCopyingFiles = true
             Task {
                 do {
@@ -317,7 +319,8 @@ struct ContentView: View {
                             urls,
                             into: folder,
                             existingFileCount: existingCount,
-                            existingBytes: existingBytes
+                            existingBytes: existingBytes,
+                            securityScopeLease: securityScopeLease
                         )
                     }.value
                     selectedURLs.append(contentsOf: report.importedURLs)
