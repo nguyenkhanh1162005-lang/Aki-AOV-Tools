@@ -17,12 +17,14 @@ struct ContentView: View {
     @State private var showAlert = false
     @State private var updateMessage = "Chưa kiểm tra cập nhật"
     @State private var releaseURL: URL?
+    @State private var selectedTab = "Trang chủ"
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 18) {
                     header
+                    quickStatus
                     VStack(alignment: .leading, spacing: 12) {
                         Label("Nguồn MOD", systemImage: "doc.zipper").font(.headline)
                         Text("Chọn nhiều ZIP. File được giữ trên iPhone, không tải lên máy chủ.")
@@ -154,6 +156,7 @@ struct ContentView: View {
                         .offset(x: -150, y: 80)
                 }.ignoresSafeArea()
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) { bottomNavigation }
             .tint(.white)
             .preferredColorScheme(.dark)
             .navigationTitle("AKI AOV SKIN")
@@ -191,6 +194,74 @@ struct ContentView: View {
         }
     }
 
+
+    private var quickStatus: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "cpu.fill")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("SKIN MERGER STUDIO")
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .tracking(1.4).foregroundStyle(.white.opacity(0.65))
+                Text("Sẵn sàng xử lý trên thiết bị")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            Spacer()
+            Circle().fill(Color.green).frame(width: 7, height: 7)
+            Text("LOCAL")
+                .font(.system(size: 9, weight: .black, design: .rounded))
+                .tracking(1).foregroundStyle(.white.opacity(0.72))
+        }
+        .padding(13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).stroke(.white.opacity(0.16), lineWidth: 1))
+    }
+
+    private var bottomNavigation: some View {
+        HStack(spacing: 0) {
+            navItem("Trang chủ", icon: "house.fill")
+            navItem("Tính năng", icon: "square.grid.2x2.fill")
+            navItem("Lịch sử", icon: "clock.arrow.circlepath")
+            navItem("Thông tin", icon: "info.circle.fill")
+        }
+        .padding(.top, 10)
+        .padding(.bottom, 5)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.16)).frame(height: 1) }
+    }
+
+    private func navItem(_ title: String, icon: String) -> some View {
+        Button {
+            selectedTab = title
+            switch title {
+            case "Thông tin":
+                alertText = "AKI AOV SKIN 0.5.0\\nXử lý ZIP trực tiếp trên iPhone."
+                showAlert = true
+            case "Lịch sử":
+                alertText = "Hiện phiên bản này chưa lưu lịch sử ghép."
+                showAlert = true
+            case "Tính năng":
+                alertText = "Chọn ZIP, kiểm tra cấu trúc, quét AoV .bytes và ghép MOD."
+                showAlert = true
+            default: break
+            }
+        } label: {
+            VStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 17, weight: .semibold))
+                Text(title).font(.system(size: 9, weight: .bold, design: .rounded))
+            }
+            .foregroundStyle(selectedTab == title ? Color.white : Color.white.opacity(0.48))
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private var header: some View {
         ZStack(alignment: .topTrailing) {
             RoundedRectangle(cornerRadius: 25, style: .continuous)
@@ -217,9 +288,23 @@ struct ContentView: View {
                         .font(.system(size: 20, weight: .medium))
                         .foregroundStyle(.white.opacity(0.8))
                 }
-                Text("AKI AOV SKIN")
-                    .font(.system(size: 30, weight: .black, design: .rounded))
-                    .tracking(-0.8).foregroundStyle(.white)
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(.white.opacity(0.10)).frame(width: 58, height: 58)
+                        Image(systemName: "bolt.shield.fill")
+                            .font(.system(size: 29, weight: .black)).foregroundStyle(.white)
+                            .shadow(color: .purple.opacity(0.65), radius: 10)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("AKI AOV SKIN")
+                            .font(.system(size: 27, weight: .black, design: .rounded))
+                            .tracking(-0.8).foregroundStyle(.white)
+                        Text("ULTIMATE MOD WORKSPACE")
+                            .font(.system(size: 8, weight: .heavy, design: .rounded))
+                            .tracking(1.5).foregroundStyle(.white.opacity(0.58))
+                    }
+                }
                 Text("GỘP SKIN · TRẢI NGHIỆM ĐỈNH CAO")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .tracking(1.2).foregroundStyle(Color.white.opacity(0.72))
