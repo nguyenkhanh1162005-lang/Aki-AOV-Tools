@@ -49,6 +49,19 @@ jobs:
           sips -s format png -z 1024 1024 "$ICON_OUTPUT" --out "$ICON_DIR/AppIcon.png"
           test -s "$ICON_DIR/AppIcon.png"
 
+          # Install the user-supplied AKI hero artwork into the asset catalog.
+          HERO_DIR="ios/AOVSkinMerger/Sources/Assets.xcassets/AkiHero.imageset"
+          mkdir -p "$HERO_DIR"
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          source = Path("ios/AOVSkinMerger/Artwork/AkiHero.jpg.base64").read_text().strip()
+          output = Path("ios/AOVSkinMerger/Sources/Assets.xcassets/AkiHero.imageset/AkiHero.jpg")
+          output.write_bytes(base64.b64decode(source, validate=True))
+          PY
+          test -s "$HERO_DIR/AkiHero.jpg"
+          file "$HERO_DIR/AkiHero.jpg"
+
       - name: Generate Xcode project
         working-directory: ios/AOVSkinMerger
         run: xcodegen generate
