@@ -145,8 +145,18 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             // Some file providers expose ZIPs as generic data instead of public.zip-archive.
             // Accept generic files here; the importer validates the .zip extension before copying.
-            .fileImporter(isPresented: $isImporting, allowedContentTypes: [.zip, .data],
-                          allowsMultipleSelection: true, onCompletion: importFiles)
+            .sheet(isPresented: $isImporting) {
+                ZIPDocumentPicker(
+                    onPick: { urls in
+                        isImporting = false
+                        importFiles(.success(urls))
+                    },
+                    onCancel: {
+                        isImporting = false
+                    }
+                )
+                .ignoresSafeArea()
+            }
             .onOpenURL { url in
                 // Accept ZIP files opened from the iOS Files app ("Open in AKI AOV SKIN").
                 importFiles(.success([url]))
@@ -172,7 +182,7 @@ struct ContentView: View {
                 Image(systemName: "archivebox.fill").font(.system(size: 28)).foregroundColor(.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("AKI AOV SKIN").font(.title2.bold())
-                    Text("Bản iOS 0.4.8 · yêu cầu iOS 26.5+").font(.caption).foregroundColor(.secondary)
+                    Text("Bản iOS 0.4.9 · yêu cầu iOS 26.5+").font(.caption).foregroundColor(.secondary)
                 }
             }
             Text("AKI AOV SKIN xử lý file ngay trên iPhone. Bộ ghép sẽ dừng khi gặp xung đột chưa có adapter đã xác minh.")
@@ -456,6 +466,47 @@ struct ContentView: View {
             } catch {
                 updateMessage = error.localizedDescription
             }
+        }
+    }
+}
+
+private struct ZIPDocumentPicker: UIViewControllerRepresentable {
+    let onPick: ([URL]) -> Void
+    let onCancel: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick, onCancel: onCancel)
+    }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let zipType = UTType(filenameExtension: "zip") ?? .zip
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: [zipType, .data],
+            asCopy: false
+        )
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = true
+        picker.shouldShowFileExtensions = true
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        private let onPick: ([URL]) -> Void
+        private let onCancel: () -> Void
+
+        init(onPick: @escaping ([URL]) -> Void, onCancel: @escaping () -> Void) {
+            self.onPick = onPick
+            self.onCancel = onCancel
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            onPick(urls)
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onCancel()
         }
     }
 }
