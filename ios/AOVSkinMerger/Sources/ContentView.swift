@@ -145,7 +145,7 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             // Some file providers expose ZIPs as generic data instead of public.zip-archive.
             // Accept generic files here; the importer validates the .zip extension before copying.
-            .sheet(isPresented: $isImporting) {
+            .fullScreenCover(isPresented: $isImporting) {
                 ZIPDocumentPicker(
                     onPick: { urls in
                         isImporting = false
@@ -482,7 +482,7 @@ private struct ZIPDocumentPicker: UIViewControllerRepresentable {
         let zipType = UTType(filenameExtension: "zip") ?? .zip
         let picker = UIDocumentPickerViewController(
             forOpeningContentTypes: [zipType, .data],
-            asCopy: false
+            asCopy: true
         )
         picker.delegate = context.coordinator
         picker.allowsMultipleSelection = true
