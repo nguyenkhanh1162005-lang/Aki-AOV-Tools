@@ -149,7 +149,16 @@ struct ContentView: View {
                 // Accept ZIP files opened from the iOS Files app ("Open in AKI AOV SKIN").
                 importFiles(.success([url]))
             }
-            .alert("Không thể xử lý", isPresented: $showAlert) {
+            .task {
+                // Create the shared Documents subfolder on first launch so it is visible in Files.
+                do {
+                    _ = try sourceFolder()
+                } catch {
+                    alertText = "Không thể tạo thư mục lưu ZIP: \(error.localizedDescription)"
+                    showAlert = true
+                }
+            }
+            .alert("Thông báo", isPresented: $showAlert) {
                 Button("Đóng", role: .cancel) { showAlert = false }
             } message: { Text(alertText) }
         }
@@ -161,7 +170,7 @@ struct ContentView: View {
                 Image(systemName: "archivebox.fill").font(.system(size: 28)).foregroundColor(.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("AKI AOV SKIN").font(.title2.bold())
-                    Text("Bản iOS thử nghiệm 0.4.2").font(.caption).foregroundColor(.secondary)
+                    Text("Bản iOS thử nghiệm 0.4.4").font(.caption).foregroundColor(.secondary)
                 }
             }
             Text("AKI AOV SKIN xử lý file ngay trên iPhone. Bộ ghép sẽ dừng khi gặp xung đột chưa có adapter đã xác minh.")
@@ -322,6 +331,9 @@ struct ContentView: View {
                         showAlert = true
                     } else if report.importedURLs.isEmpty {
                         alertText = "Chưa có ZIP nào được thêm vào danh sách."
+                        showAlert = true
+                    } else {
+                        alertText = "Đã nhập thành công \(report.importedURLs.count) ZIP. Bản sao nằm trong Tệp → Trên iPhone → AKI AOV SKIN → SourceArchives."
                         showAlert = true
                     }
                 } catch {
