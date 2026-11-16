@@ -37,7 +37,7 @@ struct ContentView: View {
                             }
                             .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(AKIPrimaryButtonStyle())
                         .disabled(isCopyingFiles || isAnalyzing || isDecoding || isMerging)
                         Button(action: runAnalysis) {
                             HStack {
@@ -46,7 +46,7 @@ struct ContentView: View {
                                       systemImage: "doc.text.magnifyingglass")
                             }.frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(AKISecondaryButtonStyle())
                         .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding || isCopyingFiles || isMerging)
                         Button(action: runAESScan) {
                             HStack {
@@ -55,7 +55,7 @@ struct ContentView: View {
                                       systemImage: "lock.open")
                             }.frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(AKISecondaryButtonStyle())
                         .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding || isCopyingFiles || isMerging)
                         Text("Có thể chọn ZIP tại đây, hoặc mở ZIP từ Tệp bằng Chia sẻ → Mở bằng AKI AOV SKIN. Thư mục của app cũng xuất hiện ở Trên iPhone của tôi → AKI AOV SKIN; ZIP đã nhập nằm trong SourceArchives.")
                             .font(.caption2).foregroundColor(.secondary)
@@ -67,7 +67,7 @@ struct ContentView: View {
                             }
                             .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(AKIPrimaryButtonStyle())
                         .disabled(selectedURLs.count < 2 || isAnalyzing || isDecoding || isMerging || isCopyingFiles)
                     }
                     .panel()
@@ -129,7 +129,7 @@ struct ContentView: View {
                         Button(action: checkUpdates) {
                             Label("Kiểm tra bản mới trên GitHub", systemImage: "arrow.triangle.2.circlepath")
                                 .frame(maxWidth: .infinity)
-                        }.buttonStyle(.bordered)
+                        }.buttonStyle(AKISecondaryButtonStyle())
                         if let releaseURL {
                             Button("Mở trang phát hành") { openURL(releaseURL) }
                                 .font(.footnote.weight(.semibold))
@@ -140,7 +140,22 @@ struct ContentView: View {
                 }
                 .padding(16)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background {
+                ZStack {
+                    LinearGradient(
+                        colors: [Color(red: 0.025, green: 0.025, blue: 0.055),
+                                 Color(red: 0.055, green: 0.045, blue: 0.105),
+                                 Color(red: 0.018, green: 0.02, blue: 0.04)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                    Circle().fill(Color.white.opacity(0.07)).frame(width: 260).blur(radius: 90)
+                        .offset(x: 150, y: -330)
+                    Circle().fill(Color.purple.opacity(0.16)).frame(width: 220).blur(radius: 85)
+                        .offset(x: -150, y: 80)
+                }.ignoresSafeArea()
+            }
+            .tint(.white)
+            .preferredColorScheme(.dark)
             .navigationTitle("AKI AOV SKIN")
             .navigationBarTitleDisplayMode(.inline)
             // Some file providers expose ZIPs as generic data instead of public.zip-archive.
@@ -177,17 +192,51 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Image(systemName: "archivebox.fill").font(.system(size: 28)).foregroundColor(.accentColor)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("AKI AOV SKIN").font(.title2.bold())
-                    Text("Bản iOS 0.5.0 · yêu cầu iOS 26.5+").font(.caption).foregroundColor(.secondary)
+        ZStack(alignment: .topTrailing) {
+            RoundedRectangle(cornerRadius: 25, style: .continuous)
+                .fill(LinearGradient(
+                    colors: [Color(red: 0.13, green: 0.12, blue: 0.22),
+                             Color(red: 0.055, green: 0.055, blue: 0.105),
+                             Color(red: 0.12, green: 0.09, blue: 0.20)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ))
+            Circle().stroke(Color.white.opacity(0.13), lineWidth: 1)
+                .frame(width: 190, height: 190).offset(x: 68, y: -70)
+            Circle().stroke(Color.purple.opacity(0.22), lineWidth: 1)
+                .frame(width: 240, height: 240).offset(x: 88, y: -92)
+            VStack(alignment: .leading, spacing: 13) {
+                HStack {
+                    Image(systemName: "crown.fill")
+                        .font(.system(size: 13, weight: .black))
+                        .foregroundStyle(Color.white)
+                    Text("AKI / GAMING WORKBENCH")
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .tracking(2.1).foregroundStyle(.white.opacity(0.75))
+                    Spacer()
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.8))
                 }
+                Text("AKI AOV SKIN")
+                    .font(.system(size: 30, weight: .black, design: .rounded))
+                    .tracking(-0.8).foregroundStyle(.white)
+                Text("GỘP SKIN · TRẢI NGHIỆM ĐỈNH CAO")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .tracking(1.2).foregroundStyle(Color.white.opacity(0.72))
+                Text("Bản iOS 0.5.0 · yêu cầu iOS 26.5+")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(.white.opacity(0.58))
+                Text("Xử lý file ngay trên iPhone. Bộ ghép sẽ dừng khi gặp xung đột chưa có adapter đã xác minh.")
+                    .font(.footnote).foregroundStyle(.white.opacity(0.78))
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Text("AKI AOV SKIN xử lý file ngay trên iPhone. Bộ ghép sẽ dừng khi gặp xung đột chưa có adapter đã xác minh.")
-                .font(.subheadline).foregroundColor(.secondary)
-        }.panel()
+            .padding(19)
+        }
+        .frame(maxWidth: .infinity, minHeight: 205, alignment: .leading)
+        .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous)
+            .stroke(LinearGradient(colors: [.white.opacity(0.55), .purple.opacity(0.32), .white.opacity(0.12)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+        .shadow(color: .purple.opacity(0.18), radius: 24, y: 12)
     }
 
     private func analysisView(_ report: ArchiveAnalysis) -> some View {
@@ -392,7 +441,7 @@ struct ContentView: View {
                 Label("Chia sẻ / lưu ZIP kết quả", systemImage: "square.and.arrow.up")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(AKIPrimaryButtonStyle())
             Text("ZIP đã qua kiểm CRC và kiểm tra cấu trúc. Chưa thử trong Liên Quân; đây không phải xác nhận tương thích game. Nếu một loại xung đột chưa có adapter, app sẽ dừng và không xuất ZIP.")
                 .font(.footnote)
                 .foregroundColor(.orange)
@@ -511,11 +560,59 @@ private struct ZIPDocumentPicker: UIViewControllerRepresentable {
     }
 }
 
+private struct AKIPrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(.subheadline, design: .rounded).weight(.heavy))
+            .foregroundStyle(Color(red: 0.055, green: 0.045, blue: 0.09))
+            .padding(.vertical, 13)
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity)
+            .background(
+                LinearGradient(colors: [Color.white, Color(red: 0.83, green: 0.81, blue: 1.0)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+            )
+            .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(Color.white.opacity(0.8), lineWidth: 1))
+            .shadow(color: .purple.opacity(configuration.isPressed ? 0.08 : 0.25),
+                    radius: configuration.isPressed ? 5 : 14, y: 5)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .opacity(configuration.isPressed ? 0.88 : 1)
+    }
+}
+
+private struct AKISecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+            .foregroundStyle(.white.opacity(0.94))
+            .padding(.vertical, 12)
+            .padding(.horizontal, 13)
+            .frame(maxWidth: .infinity)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(Color.white.opacity(0.19), lineWidth: 1))
+            .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .opacity(configuration.isPressed ? 0.82 : 1)
+    }
+}
+
 private extension View {
     func panel() -> some View {
         self.padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .secondarySystemGroupedBackground),
-                        in: RoundedRectangle(cornerRadius: 18))
+            .background(
+                LinearGradient(colors: [
+                    Color(red: 0.105, green: 0.095, blue: 0.16).opacity(0.96),
+                    Color(red: 0.045, green: 0.045, blue: 0.085).opacity(0.98)
+                ], startPoint: .topLeading, endPoint: .bottomTrailing),
+                in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+            )
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(LinearGradient(colors: [.white.opacity(0.25), .purple.opacity(0.20), .white.opacity(0.08)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+            .shadow(color: .black.opacity(0.24), radius: 16, y: 8)
     }
 }
