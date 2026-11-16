@@ -21,7 +21,14 @@ final class AoVSourceFileImporterTests: XCTestCase {
         let payload = Data([0x50, 0x4B, 0x03, 0x04, 1, 2, 3, 4])
         try payload.write(to: source)
 
-        let report = try AoVSourceFileImporter.copy([source], into: appFolder)
+        // Match the app flow: acquire the file-provider lease before dispatching the copy.
+        let securityScopeLease = AoVSecurityScopedAccess(urls: [source])
+        let report = try AoVSourceFileImporter.copy(
+            [source],
+            into: appFolder,
+            securityScopeLease: securityScopeLease
+        )
+        withExtendedLifetime(securityScopeLease) {}
 
         XCTAssertEqual(report.importedURLs.count, 1)
         XCTAssertTrue(report.errors.isEmpty)
