@@ -87,4 +87,5 @@ final class AoVSourceFileImporterTests: XCTestCase {
         XCTAssertTrue(report.errors.isEmpty)
         XCTAssertEqual(report.totalBytes, UInt64.max)
         XCTAssertTrue(FileManager.default.fileExists(atPath: report.importedURLs[0].path))
-    }}
+    }
+}
