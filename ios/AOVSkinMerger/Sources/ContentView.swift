@@ -202,113 +202,151 @@ struct ContentView: View {
 
 
     private var homeDashboard: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 13) {
-                Image("AkiHero")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 3)
-                    .background(Color.black.opacity(0.30), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(LinearGradient(colors: [.white.opacity(0.48), .purple.opacity(0.45), .white.opacity(0.12)],
-                                               startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
-                    .shadow(color: .purple.opacity(0.22), radius: 18, y: 8)
-
-                homeSelectionCard(
-                    title: "Chọn File ZIP",
-                    subtitle: "Hỗ trợ gói nền hoặc skin AOV",
-                    status: selectedURLs.isEmpty ? "Chưa chọn file" : "\(selectedURLs.count) ZIP đã chọn",
-                    icon: "folder.fill",
-                    actionTitle: "Chọn File"
-                ) { isImporting = true }
-
-                homeSelectionCard(
-                    title: "Chọn Gói Nền",
-                    subtitle: "Tự nhận diện gói nền từ danh sách ZIP",
-                    status: selectedURLs.isEmpty ? "Chưa chọn gói nền" : "Đã có dữ liệu để quét",
-                    icon: "square.stack.3d.up",
-                    actionTitle: selectedURLs.isEmpty ? "Chọn Gói" : "Quét Gói"
-                ) {
-                    if selectedURLs.isEmpty { isImporting = true } else { runAnalysis() }
-                }
-
-                HStack(spacing: 8) {
-                    benefitTile("Xử Lý Nhanh", detail: "Trên iPhone", icon: "bolt.fill")
-                    benefitTile("An Toàn", detail: "Kiểm tra CRC", icon: "checkmark.shield.fill")
-                    benefitTile("Mượt Mà", detail: "Giữ file nguồn", icon: "diamond.fill")
-                    benefitTile("Cập Nhật", detail: "Kiểm tra bản mới", icon: "arrow.clockwise")
-                }
-
-                Button {
-                    if selectedURLs.count >= 2 {
-                        runModMerge()
-                    } else if selectedURLs.isEmpty {
-                        isImporting = true
-                    } else {
-                        selectedTab = "Tính năng"
-                    }
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "wrench.and.screwdriver.fill")
-                            .font(.system(size: 26, weight: .black))
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(isMerging ? "ĐANG GHÉP SKIN" : "BẮT ĐẦU GHÉP SKIN")
-                                .font(.system(size: 17, weight: .black, design: .rounded))
-                            Text(selectedURLs.count >= 2 ? "Tạo file ZIP kết quả" : "Chọn ít nhất 2 gói ZIP để tiếp tục")
-                                .font(.system(size: 11, weight: .semibold))
+        GeometryReader { geometry in
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 12) {
+                    // The supplied hero artwork is used as both the full-screen atmosphere
+                    // and the top brand panel; controls remain real SwiftUI controls.
+                    ZStack(alignment: .bottomLeading) {
+                        Image("AkiHero")
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: geometry.size.width, height: min(geometry.size.height * 0.30, 250))
+                            .clipped()
+                        LinearGradient(
+                            colors: [.clear, Color.black.opacity(0.16), Color.black.opacity(0.70)],
+                            startPoint: .center, endPoint: .bottom
+                        )
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("AKI AOV SKIN")
+                                .font(.system(size: 25, weight: .black, design: .rounded))
+                                .tracking(1.2)
+                            Text("Gộp Skin · Trải Nghiệm Đỉnh Cao")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.88))
                         }
-                        Spacer(minLength: 2)
-                        Image(systemName: "chevron.right.2")
-                            .font(.system(size: 19, weight: .black))
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 15)
                     }
-                    .foregroundStyle(Color(red: 0.07, green: 0.045, blue: 0.13))
-                    .padding(.horizontal, 20)
-                    .frame(maxWidth: .infinity, minHeight: 78)
-                    .background(LinearGradient(colors: [.white, Color(red: 0.78, green: 0.72, blue: 1)],
-                                               startPoint: .topLeading, endPoint: .bottomTrailing),
-                                in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(.white.opacity(0.9), lineWidth: 1.4))
-                    .shadow(color: .purple.opacity(0.38), radius: 18, y: 8)
-                }
-                .buttonStyle(.plain)
-                .disabled(isMerging)
+                    .frame(height: min(geometry.size.height * 0.30, 250))
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(LinearGradient(colors: [.white.opacity(0.65), .purple.opacity(0.65), .white.opacity(0.12)],
+                                               startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2))
+                    .shadow(color: .purple.opacity(0.42), radius: 22, y: 8)
 
-                HStack(spacing: 12) {
-                    Image(systemName: "megaphone.fill")
-                        .font(.system(size: 23, weight: .bold))
-                        .foregroundStyle(Color(red: 0.82, green: 0.75, blue: 1))
-                        .frame(width: 42)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Thông Báo").font(.system(size: 14, weight: .bold, design: .rounded)).foregroundStyle(.white)
-                        Text("Chào mừng bạn đến với AKI AOV SKIN!")
-                            .font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.72))
+                    homeSelectionCard(
+                        title: "Chọn File ZIP",
+                        subtitle: "Hỗ trợ gói nền hoặc skin AOV",
+                        status: selectedURLs.isEmpty ? "Chưa chọn file" : "\(selectedURLs.count) ZIP đã chọn",
+                        icon: "folder.fill",
+                        actionTitle: "Chọn File"
+                    ) { isImporting = true }
+
+                    homeSelectionCard(
+                        title: "Chọn Gói Nền",
+                        subtitle: "Tùy chọn gói nền yêu thích",
+                        status: selectedURLs.isEmpty ? "Chưa chọn gói nền" : "Đã có dữ liệu để quét",
+                        icon: "square.stack.3d.up.fill",
+                        actionTitle: selectedURLs.isEmpty ? "Chọn Gói" : "Quét Gói"
+                    ) {
+                        if selectedURLs.isEmpty { isImporting = true } else { runAnalysis() }
                     }
-                    Spacer(minLength: 2)
-                    Button { selectedTab = "Thông tin" } label: {
-                        HStack(spacing: 4) {
-                            Text("Xem Thêm")
-                            Image(systemName: "chevron.right")
+
+                    HStack(spacing: 7) {
+                        benefitTile("Xử Lý Nhanh", detail: "Trên iPhone", icon: "bolt.fill")
+                        benefitTile("An Toàn", detail: "Kiểm tra CRC", icon: "checkmark.shield.fill")
+                        benefitTile("Mượt Mà", detail: "Giữ file nguồn", icon: "diamond.fill")
+                        benefitTile("Cập Nhật", detail: "Kiểm tra bản mới", icon: "arrow.clockwise")
+                    }
+
+                    Button {
+                        if selectedURLs.count >= 2 {
+                            runModMerge()
+                        } else if selectedURLs.isEmpty {
+                            isImporting = true
+                        } else {
+                            selectedTab = "Tính năng"
                         }
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12).padding(.vertical, 9)
-                        .background(.white.opacity(0.10), in: Capsule())
+                    } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "wrench.and.screwdriver.fill")
+                                .font(.system(size: 30, weight: .black))
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(isMerging ? "ĐANG GHÉP SKIN" : "BẮT ĐẦU GHÉP SKIN")
+                                    .font(.system(size: 18, weight: .black, design: .rounded))
+                                Text(selectedURLs.count >= 2 ? "Tạo file ZIP hoàn chỉnh" : "Chọn file ZIP để bắt đầu")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.right.2")
+                                .font(.system(size: 22, weight: .black))
+                        }
+                        .foregroundStyle(Color(red: 0.055, green: 0.035, blue: 0.12))
+                        .padding(.horizontal, 20)
+                        .frame(maxWidth: .infinity, minHeight: 92)
+                        .background(
+                            LinearGradient(colors: [.white, Color(red: 0.78, green: 0.70, blue: 1)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing),
+                            in: RoundedRectangle(cornerRadius: 23, style: .continuous)
+                        )
+                        .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous)
+                            .stroke(.white.opacity(0.98), lineWidth: 1.8))
+                        .shadow(color: .purple.opacity(0.65), radius: 22, y: 8)
                     }
                     .buttonStyle(.plain)
+                    .disabled(isMerging)
+
+                    HStack(spacing: 12) {
+                        Image(systemName: "megaphone.fill")
+                            .font(.system(size: 25, weight: .bold))
+                            .foregroundStyle(Color(red: 0.85, green: 0.77, blue: 1))
+                            .frame(width: 42)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Thông Báo")
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                            Text("Chào mừng bạn đến với AKI AOV SKIN!")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.78))
+                        }
+                        Spacer(minLength: 2)
+                        Button { selectedTab = "Thông tin" } label: {
+                            Label("Xem Thêm", systemImage: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12).padding(.vertical, 10)
+                                .background(.white.opacity(0.13), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(15)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 21, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 21, style: .continuous)
+                        .stroke(.white.opacity(0.32), lineWidth: 1))
                 }
-                .padding(14)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(.white.opacity(0.22), lineWidth: 1))
+                .padding(.horizontal, 13)
+                .padding(.top, 6)
+                .padding(.bottom, 22)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 8)
-            .padding(.bottom, 18)
+            .background {
+                ZStack {
+                    Image("AkiHero")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                        .blur(radius: 22)
+                        .overlay(Color(red: 0.025, green: 0.018, blue: 0.065).opacity(0.78))
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.38), Color.purple.opacity(0.20), Color.black.opacity(0.76)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                }
+                .ignoresSafeArea()
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func homeSelectionCard(title: String, subtitle: String, status: String,
