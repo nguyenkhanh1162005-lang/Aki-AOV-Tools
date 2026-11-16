@@ -151,7 +151,7 @@ enum AoVSourceFileImporter {
                         throw AoVSourceFileImporterError.copiedSizeMismatch(source.lastPathComponent)
                     }
                     try FileManager.default.moveItem(at: stagingURL, to: finalURL)
-                    copiedResult = (finalURL, nextTotal.partialValue)
+                    copiedResult = (finalURL, nextTotal)
                 } catch {
                     try? FileManager.default.removeItem(at: stagingURL)
                     throw error
