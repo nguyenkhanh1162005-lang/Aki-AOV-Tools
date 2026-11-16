@@ -68,6 +68,7 @@ jobs:
           -scheme AOVSkinMerger
           -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5'
           -destination-timeout 90
+          -parallel-testing-enabled NO
           -derivedDataPath "$RUNNER_TEMP/AOVTestDerivedData"
           CODE_SIGNING_ALLOWED=NO
 
