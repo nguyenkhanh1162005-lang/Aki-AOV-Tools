@@ -57,7 +57,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(.bordered)
                         .disabled(selectedURLs.isEmpty || isAnalyzing || isDecoding || isCopyingFiles || isMerging)
-                        Text("Chọn ZIP trong ứng dụng Tệp. App sẽ sao chép file vào bộ nhớ iPhone trước, rồi mới quét hoặc ghép. Hãy đợi tên file xuất hiện trong danh sách.")
+                        Text("Có thể chọn ZIP tại đây, hoặc mở ZIP từ Tệp bằng Chia sẻ → Mở bằng AKI AOV SKIN. Thư mục của app cũng xuất hiện ở Trên iPhone của tôi → AKI AOV SKIN; ZIP đã nhập nằm trong SourceArchives.")
                             .font(.caption2).foregroundColor(.secondary)
                         Button(action: runModMerge) {
                             HStack {
@@ -145,6 +145,10 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .fileImporter(isPresented: $isImporting, allowedContentTypes: [.zip],
                           allowsMultipleSelection: true, onCompletion: importFiles)
+            .onOpenURL { url in
+                // Accept ZIP files opened from the iOS Files app ("Open in AKI AOV SKIN").
+                importFiles(.success([url]))
+            }
             .alert("Không thể xử lý", isPresented: $showAlert) {
                 Button("Đóng", role: .cancel) { showAlert = false }
             } message: { Text(alertText) }

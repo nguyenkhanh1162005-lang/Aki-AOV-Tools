@@ -1,4 +1,4 @@
-# AKI AOV SKIN for iOS — prototype 0.4.2
+# AKI AOV SKIN for iOS — prototype 0.4.3
 
 This is an **unsigned iOS device-build prototype**. It is not a universal or game-certified AoV skin merger.
 
