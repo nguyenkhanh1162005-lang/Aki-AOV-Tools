@@ -400,10 +400,12 @@ enum AoVModRemakeAnalyzer {
     ) -> [AoVRemakeCatalogRecordSnapshot] {
         inventory.unityFSBundles
             .filter { ($0.path as NSString).lastPathComponent.lowercased() == kind.fileName }
-            .flatMap { bundle in
-                bundle.catalogNodeSamples.flatMap { sample in
-                    guard let serialized = sample.serializedFile else { return [] }
-                    return serialized.assetBundleRecords.map { record in
+            .flatMap { bundle -> [AoVRemakeCatalogRecordSnapshot] in
+                bundle.catalogNodeSamples.flatMap { sample -> [AoVRemakeCatalogRecordSnapshot] in
+                    guard let serialized = sample.serializedFile else {
+                        return [AoVRemakeCatalogRecordSnapshot]()
+                    }
+                    return serialized.assetBundleRecords.map { record -> AoVRemakeCatalogRecordSnapshot in
                         let pointerAudit = auditPointers(record, in: serialized)
                         return AoVRemakeCatalogRecordSnapshot(
                             sourceArchive: inventory.fileName,
