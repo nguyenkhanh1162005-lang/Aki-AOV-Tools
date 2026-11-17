@@ -167,7 +167,7 @@ enum AoVModArchiveMerger {
         var pipelineEvents: [AoVModMergePipelineEvent] = [
             AoVModMergePipelineEvent(
                 stage: .preflight,
-                detail: "Đã kiểm tra (archiveURLs.count) ZIP; tổng dung lượng đầu vào nằm trong giới hạn 500 MiB."
+                detail: "Đã kiểm tra \(archiveURLs.count) ZIP; tổng dung lượng đầu vào nằm trong giới hạn 500 MiB."
             )
         ]
 
@@ -183,7 +183,7 @@ enum AoVModArchiveMerger {
         pipelineEvents.append(
             AoVModMergePipelineEvent(
                 stage: .sourceInventory,
-                detail: "Đã mở (sources.count) gói, kiểm tra cấu trúc và lập inventory tài nguyên."
+                detail: "Đã mở \(sources.count) gói, kiểm tra cấu trúc và lập inventory tài nguyên."
             )
         )
 
@@ -429,7 +429,7 @@ enum AoVModArchiveMerger {
         pipelineEvents.append(
             AoVModMergePipelineEvent(
                 stage: .conflictResolution,
-                detail: "Đã phân tích (allPaths.count) đường dẫn; thêm (added.count) tài nguyên mới và tạo (replacements.count) payload thay thế. Xung đột không có adapter vẫn bị từ chối."
+                detail: "Đã phân tích \(allPaths.count) đường dẫn; thêm \(added.count) tài nguyên mới và tạo \(replacements.count) payload thay thế. Xung đột không có adapter vẫn bị từ chối."
             )
         )
 
@@ -476,7 +476,7 @@ enum AoVModArchiveMerger {
             "MSES: \(mergedMSESTables.count)",
             "IFix: \(mergedIFixPatches.count)",
             "AssetRef giữ nguyên: \(assetRefUnique.count)",
-            "Wwise BNK append-only: \(preservedWwiseBanks.count)"
+            "Wwise BNK append-only: \\(preservedWwiseBanks.count)"
         ].joined(separator: " · ")
         pipelineEvents.append(
             AoVModMergePipelineEvent(
