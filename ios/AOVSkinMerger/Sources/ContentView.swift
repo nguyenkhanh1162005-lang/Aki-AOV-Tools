@@ -312,8 +312,15 @@ struct ContentView: View {
             metric("Verification Catalog RES", report.baseHasVerificationCatalog ? "Có" : "Thiếu")
 
             Divider().overlay(.white.opacity(0.12))
-            catalogComparisonView("Packer Catalog", report.packerCatalogComparison)
-            catalogComparisonView("Verification Catalog", report.verificationCatalogComparison)
+            catalogComparisonView("Packer AssetBundle wrappers", report.packerCatalogComparison)
+            catalogComparisonView("Verification AssetBundle wrappers", report.verificationCatalogComparison)
+
+            Text("Runtime catalog thật").font(.subheadline.weight(.bold))
+            runtimeCatalogSectionView(report.runtimeCatalogComparison.packerResources)
+            runtimeCatalogSectionView(report.runtimeCatalogComparison.packerParentChildLinks)
+            runtimeCatalogSectionView(report.runtimeCatalogComparison.verificationZIP)
+            runtimeCatalogSectionView(report.runtimeCatalogComparison.verificationDatabin)
+
             catalogMergePlanView(report.catalogMergePlanFindings)
 
             if !report.legacyVersions.isEmpty {
@@ -350,6 +357,81 @@ struct ContentView: View {
                 .font(.footnote.weight(.semibold)).foregroundColor(.orange)
         }
         .panel()
+    }
+
+    private func runtimeCatalogSectionView(_ report: AoVRuntimeCatalogSectionReport) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(report.title).font(.caption.weight(.bold))
+            if !report.currentCatalogVersions.isEmpty {
+                Text("RES: " + report.currentCatalogVersions.joined(separator: ", "))
+                    .font(.caption2).foregroundColor(.secondary)
+            } else {
+                Text("RES: chưa đọc được catalog runtime")
+                    .font(.caption2).foregroundColor(.orange)
+            }
+            if !report.legacyCatalogVersions.isEmpty {
+                Text("MOD: " + report.legacyCatalogVersions.joined(separator: " · "))
+                    .font(.caption2).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            metric("Số mục RES / MOD", "\(report.currentEntryCount) / \(report.legacyEntryCount)")
+            metric("Nội dung trùng", "\(report.identicalEntryCount)")
+            metric("Cùng path, khác dữ liệu", "\(report.changedEntryCount)")
+            metric("Chỉ có trong MOD", "\(report.legacyOnlyEntryCount)")
+            metric("Chỉ có trong RES", "\(report.currentOnlyEntryCount)")
+            metric("Đường dẫn trùng / xung đột", "\(report.duplicateCurrentPathCount + report.duplicateLegacyPathCount + report.conflictingLegacyPathCount)")
+            metric("Tham chiếu không hợp lệ", "\(report.invalidReferenceCount)")
+
+            ForEach(Array(report.findings.prefix(6))) { finding in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(runtimeCatalogDifferenceText(finding.difference))
+                            .font(.caption2.weight(.bold))
+                            .foregroundColor(runtimeCatalogDifferenceColor(finding.difference))
+                        Spacer(minLength: 3)
+                    }
+                    Text(finding.path)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.92))
+                        .textSelection(.enabled)
+                    if let currentDetail = finding.currentDetail {
+                        Text("RES: " + currentDetail)
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                    ForEach(Array(finding.legacyDetails.enumerated()), id: \.offset) { _, detail in
+                        Text("MOD: " + detail)
+                            .font(.caption2).foregroundColor(.orange.opacity(0.9))
+                    }
+                }
+                .padding(.top, 4)
+            }
+            if report.findings.count > 6 {
+                Text("Còn \(report.findings.count - 6) khác biệt hiển thị trong báo cáo dữ liệu.")
+                    .font(.caption2).foregroundColor(.secondary)
+            }
+        }
+        .padding(11)
+        .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
+
+    private func runtimeCatalogDifferenceText(_ difference: AoVRuntimeCatalogDifference) -> String {
+        switch difference {
+        case .identical: return "TRÙNG"
+        case .changed: return "ĐỔI DỮ LIỆU"
+        case .legacyOnly: return "CHỈ CÓ MOD"
+        case .currentOnly: return "CHỈ CÓ RES"
+        case .duplicateCurrent: return "RES TRÙNG PATH"
+        case .conflictingLegacy: return "MOD XUNG ĐỘT"
+        }
+    }
+
+    private func runtimeCatalogDifferenceColor(_ difference: AoVRuntimeCatalogDifference) -> Color {
+        switch difference {
+        case .identical: return .green
+        case .changed, .legacyOnly, .conflictingLegacy, .duplicateCurrent: return .orange
+        case .currentOnly: return .secondary
+        }
     }
 
     private func catalogComparisonView(
