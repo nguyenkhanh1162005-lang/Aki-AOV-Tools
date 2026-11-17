@@ -269,7 +269,7 @@ enum AoVSerializedFileParser {
             }
         } else {
             guard initialFileSize <= UInt64(data.count),
-                  initialMetadataSize > 0,
+                  initialMetadataSize >= 1,
                   initialMetadataSize <= initialFileSize else {
                 throw AoVSerializedFileError.invalidHeader("legacy file/metadata size không hợp lệ.")
             }
@@ -294,7 +294,9 @@ enum AoVSerializedFileParser {
         }
 
         let metadataStart = reader.offset
-        let metadataEndValue = UInt64(metadataStart).addingReportingOverflow(metadataSize)
+        // Legacy v5-v8 metadata size includes the endian marker already consumed above.
+        let metadataPayloadSize = formatVersion < 9 ? metadataSize - 1 : metadataSize
+        let metadataEndValue = UInt64(metadataStart).addingReportingOverflow(metadataPayloadSize)
         guard !metadataEndValue.overflow, metadataEndValue.partialValue <= fileSize else {
             throw AoVSerializedFileError.invalidHeader("metadata size vượt phạm vi file.")
         }
@@ -502,7 +504,8 @@ enum AoVSerializedFileParser {
                 payload,
                 pathID: object.pathID,
                 serializedVersion: formatVersion,
-                unityVersion: unityVersion
+                unityVersion: unityVersion,
+                littleEndian: reader.littleEndian
             )
         }
 
@@ -523,9 +526,10 @@ enum AoVSerializedFileParser {
         _ data: Data,
         pathID: Int64,
         serializedVersion: UInt32,
-        unityVersion: String
+        unityVersion: String,
+        littleEndian: Bool
     ) throws -> AoVSerializedAssetBundleRecord {
-        var reader = AoVSerializedReader(data: data, littleEndian: true)
+        var reader = AoVSerializedReader(data: data, littleEndian: littleEndian)
         let name = try reader.readAlignedString("AssetBundle m_Name")
         let preloadCount = try reader.readCount("AssetBundle m_PreloadTable count", maximum: 1_000_000)
         var preloadReferences: [AoVSerializedAssetPointer] = []
