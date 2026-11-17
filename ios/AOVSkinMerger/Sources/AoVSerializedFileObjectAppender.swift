@@ -199,15 +199,13 @@ enum AoVSerializedFileObjectAppender {
         var dataRegion = source.subdata(
             in: Int(summary.dataOffset)..<Int(summary.fileSize)
         )
-        dataRegion.align16()
+        alignData(&dataRegion, to: 16)
 
-        var appendedOffsets: [Int64: UInt64] = [:]
         for object in objects {
-            dataRegion.align16()
+            alignData(&dataRegion, to: 16)
             guard let relativeOffset = UInt64(exactly: dataRegion.count) else {
                 throw AoVSerializedFileObjectAppenderError.resourceLimit
             }
-            appendedOffsets[object.pathID] = relativeOffset
             dataRegion.append(object.payload)
 
             metadata.appendInt64(object.pathID)
@@ -272,8 +270,6 @@ enum AoVSerializedFileObjectAppender {
             }
         }
 
-        _ = objectRecordsStart
-        _ = appendedOffsets
         return AoVSerializedFileObjectAppendReport(
             data: output,
             appendedPathIDs: objects.map(\.pathID),
@@ -288,5 +284,13 @@ enum AoVSerializedFileObjectAppender {
     private static func aligned16(_ value: Int) -> Int {
         let remainder = value % 16
         return remainder == 0 ? value : value + (16 - remainder)
+    }
+
+    private static func alignData(_ data: inout Data, to boundary: Int) {
+        guard boundary > 0 else { return }
+        let remainder = data.count % boundary
+        if remainder != 0 {
+            data.append(Data(repeating: 0, count: boundary - remainder))
+        }
     }
 }
