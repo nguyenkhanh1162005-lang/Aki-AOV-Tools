@@ -294,7 +294,12 @@ enum AoVSerializedFileParser {
         in data: Data,
         summary: AoVSerializedFileSummary? = nil
     ) throws -> AoVUnityTypeTreeValue {
-        let inspected = try summary ?? inspect(data)
+        let inspected: AoVSerializedFileSummary
+        if let summary {
+            inspected = summary
+        } else {
+            inspected = try inspect(data)
+        }
         guard inspected.fileSize == UInt64(data.count) else {
             throw AoVSerializedFileError.invalidHeader("SerializedFile size differs from the supplied byte buffer.")
         }
@@ -952,10 +957,13 @@ enum AoVSerializedFileParser {
         var nodes: [AoVUnityTypeTreeNode] = []
         nodes.reserveCapacity(64)
         while !remainingChildren.isEmpty {
-            while remainingChildren.last == 0 {
+            while let last = remainingChildren.last, last == 0 {
                 remainingChildren.removeLast()
             }
             guard !remainingChildren.isEmpty else { break }
+            guard remainingChildren.count <= AoVUnityTypeTreeReader.maximumDepth + 1 else {
+                throw AoVSerializedFileError.resourceLimit("\(label) legacy TypeTree depth exceeds the supported limit.")
+            }
             guard nodes.count < maximumTypeTreeNodes else {
                 throw AoVSerializedFileError.resourceLimit("\(label) legacy type tree có quá nhiều node.")
             }
