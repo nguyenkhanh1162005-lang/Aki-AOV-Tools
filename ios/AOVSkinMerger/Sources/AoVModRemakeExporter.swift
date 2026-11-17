@@ -11,7 +11,7 @@ struct AoVModRemakeResourcePayload: Sendable {
 
 struct AoVModRemakeAssetBundleMergeResult: Sendable {
     let resourcePath: String
-    let payload: Data
+    let resourcePayload: AoVModRemakeResourcePayload
     let importedObjectCount: Int
     let importedPathIDs: [Int64]
     let roundTripVerified: Bool
@@ -123,6 +123,7 @@ enum AoVModRemakeExporter {
     /// metadata is independently verified and passed to exportVerifiedRES.
     static func mergeAssetBundleResource(
         resourcePath: String,
+        runtimePath: String? = nil,
         baseAssetBundle: Data,
         serializedFileNodePath: String,
         legacyInputs: [AoVAssetBundleLegacyObjectImportInput],
@@ -146,10 +147,37 @@ enum AoVModRemakeExporter {
         }
         return AoVModRemakeAssetBundleMergeResult(
             resourcePath: resourcePath,
-            payload: report.data,
+            resourcePayload: AoVModRemakeResourcePayload(
+                archivePath: resourcePath,
+                ifsPath: runtimePath ?? resourcePath,
+                data: report.data
+            ),
             importedObjectCount: report.importedObjectCount,
             importedPathIDs: report.importedPathIDs,
             roundTripVerified: true
+        )
+    }
+
+    /// Convenience entry point that feeds object-merged AssetBundles into the
+    /// verified RES exporter. Checksum values are still mandatory and are never
+    /// derived or guessed by this method.
+    static func exportVerifiedRESIncludingAssetBundleMerges(
+        baseRESURL: URL,
+        legacyMODURLs: [URL],
+        resourcePayloads: [AoVModRemakeResourcePayload],
+        assetBundleMergeResults: [AoVModRemakeAssetBundleMergeResult],
+        verifiedFinalPackerEntries: [String: AoVRuntimeResourcePackInfo],
+        verifiedFinalDatabinChecksumValues: [String: Int64],
+        verifiedFinalZIPChecksumValues: [String: Int64]
+    ) throws -> AoVModRemakeExportReport {
+        let mergedPayloads = resourcePayloads + assetBundleMergeResults.map(\.resourcePayload)
+        return try exportVerifiedRES(
+            baseRESURL: baseRESURL,
+            legacyMODURLs: legacyMODURLs,
+            resourcePayloads: mergedPayloads,
+            verifiedFinalPackerEntries: verifiedFinalPackerEntries,
+            verifiedFinalDatabinChecksumValues: verifiedFinalDatabinChecksumValues,
+            verifiedFinalZIPChecksumValues: verifiedFinalZIPChecksumValues
         )
     }
 
