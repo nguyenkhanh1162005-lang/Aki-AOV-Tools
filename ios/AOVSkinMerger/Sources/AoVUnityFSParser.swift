@@ -31,6 +31,20 @@ struct AoVUnityFSBundleInfo: Codable, Sendable {
     let totalUncompressedBytes: UInt64
     let totalCompressedBlockBytes: UInt64
     let availableBlockDataBytes: UInt64
+    let blockDataOffset: UInt64
+}
+
+struct AoVUnityFSExtractedNode: Sendable {
+    let path: String
+    let data: Data
+}
+
+struct AoVUnityFSCatalogNodeSample: Codable, Hashable, Sendable, Identifiable {
+    let path: String
+    let size: UInt64
+    let prefixHex: String
+    let stringHints: [String]
+    var id: String { path }
 }
 
 struct AoVUnityFSScanResult: Codable, Sendable, Identifiable {
@@ -47,10 +61,18 @@ struct AoVUnityFSScanResult: Codable, Sendable, Identifiable {
     let totalUncompressedBytes: UInt64
     let totalCompressedBlockBytes: UInt64
     let nodePathSamples: [String]
+    let catalogExtractionStatus: String?
+    let catalogNodeSamples: [AoVUnityFSCatalogNodeSample]
 
     var id: String { "\(archiveName)|\(path)" }
 
-    init(archiveName: String, path: String, info: AoVUnityFSBundleInfo) {
+    init(
+        archiveName: String,
+        path: String,
+        info: AoVUnityFSBundleInfo,
+        catalogExtractionStatus: String? = nil,
+        catalogNodeSamples: [AoVUnityFSCatalogNodeSample] = []
+    ) {
         self.archiveName = archiveName
         self.path = path
         formatVersion = info.formatVersion
@@ -64,6 +86,8 @@ struct AoVUnityFSScanResult: Codable, Sendable, Identifiable {
         totalUncompressedBytes = info.totalUncompressedBytes
         totalCompressedBlockBytes = info.totalCompressedBlockBytes
         nodePathSamples = Array(info.nodes.prefix(5).map(\.path))
+        self.catalogExtractionStatus = catalogExtractionStatus
+        self.catalogNodeSamples = catalogNodeSamples
     }
 }
 
@@ -75,6 +99,7 @@ enum AoVUnityFSError: LocalizedError {
     case unsupportedEncryption(UInt32)
     case ambiguousLegacyFlag
     case unsupportedInfoCompression(UInt32)
+    case unsupportedBlockCompression(UInt32)
     case invalidCompression(UInt32)
     case decompressionFailed(String)
     case invalidBlockTable(String)
@@ -97,6 +122,8 @@ enum AoVUnityFSError: LocalizedError {
             return "UnityFS không có phiên bản Unity rõ ràng và dùng cờ 0x200; chưa thể phân biệt padding với mã hóa."
         case .unsupportedInfoCompression(let method):
             return "Bảng metadata UnityFS dùng kiểu nén \(method), chưa có bộ giải nén an toàn."
+        case .unsupportedBlockCompression(let method):
+            return "Dữ liệu block UnityFS dùng kiểu nén \(method), hiện chỉ hỗ trợ none/LZ4/LZ4HC."
         case .invalidCompression(let method):
             return "UnityFS có mã nén không hợp lệ: \(method)."
         case .decompressionFailed(let reason):
@@ -432,8 +459,156 @@ enum AoVUnityFSParser {
             nodes: nodes,
             totalUncompressedBytes: totalUncompressed,
             totalCompressedBlockBytes: totalCompressed,
-            availableBlockDataBytes: availableBlockData
+            availableBlockDataBytes: availableBlockData,
+            blockDataOffset: UInt64(dataStart)
         )
+    }
+
+
+    /// Extract UnityFS directory nodes for read-only inspection. This never rebuilds
+    /// or modifies a bundle and enforces a caller-supplied expanded-size ceiling.
+    static func extractNodes(
+        _ data: Data,
+        matching paths: Set<String>? = nil,
+        maximumExpandedBytes: UInt64 = 256 * 1024 * 1024,
+        maximumNodeCount: Int = 512
+    ) throws -> [AoVUnityFSExtractedNode] {
+        let info = try inspect(data)
+        guard maximumExpandedBytes > 0,
+              maximumExpandedBytes <= UInt64(maximumBundleBytes) else {
+            throw AoVUnityFSError.resourceLimit("giới hạn giải nén phải nằm trong khoảng 1 byte–512 MiB.")
+        }
+        guard info.totalUncompressedBytes <= maximumExpandedBytes else {
+            throw AoVUnityFSError.resourceLimit(
+                "dữ liệu sau giải nén là \(info.totalUncompressedBytes) byte, vượt giới hạn \(maximumExpandedBytes) byte."
+            )
+        }
+        guard maximumNodeCount > 0, info.nodes.count <= maximumNodeCount else {
+            throw AoVUnityFSError.resourceLimit(
+                "bundle có \(info.nodes.count) node, vượt giới hạn trích xuất \(maximumNodeCount)."
+            )
+        }
+        guard let startOffset = Int(exactly: info.blockDataOffset),
+              startOffset <= data.count else {
+            throw AoVUnityFSError.invalidBlockTable("offset dữ liệu block không biểu diễn được.")
+        }
+
+        let expectedExpandedSize = Int(info.totalUncompressedBytes)
+        var expanded = Data()
+        expanded.reserveCapacity(expectedExpandedSize)
+        var cursor = startOffset
+
+        for block in info.blocks {
+            let compressedCount = Int(block.compressedSize)
+            let expectedBlockSize = Int(block.uncompressedSize)
+            guard cursor >= 0, cursor <= data.count,
+                  compressedCount <= data.count - cursor else {
+                throw AoVUnityFSError.truncated("dữ liệu block \(block.index)")
+            }
+
+            let compressed = data.subdata(in: cursor..<(cursor + compressedCount))
+            let method = UInt32(block.flags & 0x3F)
+            let decoded: Data
+            switch method {
+            case 0:
+                guard compressed.count == expectedBlockSize else {
+                    throw AoVUnityFSError.decompressionFailed(
+                        "block \(block.index) không nén có \(compressed.count) byte, cần \(expectedBlockSize)."
+                    )
+                }
+                decoded = compressed
+            case 2, 3:
+                do {
+                    decoded = try AoVLZ4Block.decompress(
+                        compressed,
+                        expectedSize: expectedBlockSize,
+                        maximumSize: Int(maximumExpandedBytes)
+                    )
+                } catch {
+                    throw AoVUnityFSError.decompressionFailed(
+                        "block \(block.index): \(error.localizedDescription)"
+                    )
+                }
+            case 1, 4:
+                throw AoVUnityFSError.unsupportedBlockCompression(method)
+            default:
+                throw AoVUnityFSError.invalidCompression(method)
+            }
+
+            let nextCount = expanded.count.addingReportingOverflow(decoded.count)
+            guard !nextCount.overflow,
+                  UInt64(nextCount.partialValue) <= maximumExpandedBytes else {
+                throw AoVUnityFSError.resourceLimit("dữ liệu block giải nén vượt giới hạn.")
+            }
+            expanded.append(decoded)
+            cursor += compressedCount
+        }
+
+        guard expanded.count == expectedExpandedSize else {
+            throw AoVUnityFSError.invalidBlockTable(
+                "tổng block giải nén là \(expanded.count) byte, directory khai báo \(expectedExpandedSize) byte."
+            )
+        }
+
+        var extracted: [AoVUnityFSExtractedNode] = []
+        var extractedBytes: UInt64 = 0
+        for node in info.nodes {
+            if let paths, !paths.contains(node.path) { continue }
+            guard let offset = Int(exactly: node.offset),
+                  let size = Int(exactly: node.size),
+                  offset <= expanded.count,
+                  size <= expanded.count - offset else {
+                throw AoVUnityFSError.invalidDirectory("node \(node.path) không nằm trong dữ liệu đã giải nén.")
+            }
+            let nextBytes = extractedBytes.addingReportingOverflow(UInt64(size))
+            guard !nextBytes.overflow, nextBytes.partialValue <= maximumExpandedBytes else {
+                throw AoVUnityFSError.resourceLimit("tổng node được trích xuất vượt giới hạn.")
+            }
+            extractedBytes = nextBytes.partialValue
+            extracted.append(
+                AoVUnityFSExtractedNode(
+                    path: node.path,
+                    data: expanded.subdata(in: offset..<(offset + size))
+                )
+            )
+        }
+        return extracted
+    }
+
+    /// Printable strings are diagnostic hints only, not parsed catalog fields.
+    static func asciiStringHints(
+        _ data: Data,
+        maximumBytes: Int = 256 * 1024,
+        maximumCount: Int = 6
+    ) -> [String] {
+        guard maximumBytes > 0, maximumCount > 0 else { return [] }
+        let limit = min(data.count, maximumBytes)
+        var hints: [String] = []
+        var seen = Set<String>()
+        var start: Int?
+
+        func appendHint(_ lower: Int, _ upper: Int) {
+            guard upper - lower >= 6,
+                  let value = String(data: data.subdata(in: lower..<upper), encoding: .ascii),
+                  seen.insert(value).inserted,
+                  hints.count < maximumCount else { return }
+            hints.append(value)
+        }
+
+        for index in 0..<limit {
+            let byte = data[index]
+            if (0x20...0x7E).contains(byte) {
+                if start == nil { start = index }
+            } else if let lower = start {
+                appendHint(lower, index)
+                start = nil
+                if hints.count >= maximumCount { break }
+            }
+        }
+        if hints.count < maximumCount, let lower = start {
+            appendHint(lower, limit)
+        }
+        return hints
     }
 
     private static func decompressBlockInfo(
