@@ -4,6 +4,7 @@ enum AoVUnityFSContentRewriteError: LocalizedError {
     case nodeNotFound(String)
     case ambiguousTarget(String)
     case expandedArchiveTooLarge
+    case encryptedBundleNotWritable
 
     var errorDescription: String? {
         switch self {
@@ -13,6 +14,8 @@ enum AoVUnityFSContentRewriteError: LocalizedError {
             return "Có nhiều UnityFS node trùng đường dẫn: \(path)"
         case .expandedArchiveTooLarge:
             return "UnityFS giải nén vượt giới hạn 512 MiB."
+        case .encryptedBundleNotWritable:
+            return "UnityFS đang dùng lớp mã hóa AOV; writer hiện tại chưa tái mã hóa nên không được phép ghi lại bundle này."
         }
     }
 }
@@ -31,6 +34,15 @@ struct AoVUnityFSContentRewriteReport: Sendable {
 }
 
 enum AoVUnityFSContentRewriter {
+    static func validateWritableTemplate(_ info: AoVUnityFSBundleInfo) throws {
+        guard !info.usesAoVEncryption else {
+            throw AoVUnityFSContentRewriteError.encryptedBundleNotWritable
+        }
+        guard info.totalUncompressedBytes <= UInt64(512 * 1024 * 1024) else {
+            throw AoVUnityFSContentRewriteError.expandedArchiveTooLarge
+        }
+    }
+
     /// Replaces exactly one UnityFS node, preserving all other node payloads,
     /// names and flags. The rebuilt archive uses uncompressed blocks and is
     /// round-trip validated before being returned.
@@ -40,9 +52,7 @@ enum AoVUnityFSContentRewriter {
         with replacement: Data
     ) throws -> AoVUnityFSContentRewriteReport {
         let info = try AoVUnityFSParser.inspect(source)
-        guard info.totalUncompressedBytes <= UInt64(512 * 1024 * 1024) else {
-            throw AoVUnityFSContentRewriteError.expandedArchiveTooLarge
-        }
+        try validateWritableTemplate(info)
         let extracted = try AoVUnityFSParser.extractNodes(
             source,
             maximumExpandedBytes: UInt64(512 * 1024 * 1024),
@@ -115,6 +125,7 @@ enum AoVUnityFSContentRewriter {
         with replacement: AoVRuntimeResourceCatalog
     ) throws -> AoVUnityFSContentRewriteReport {
         let info = try AoVUnityFSParser.inspect(source)
+        try validateWritableTemplate(info)
         let extracted = try AoVUnityFSParser.extractNodes(
             source,
             maximumExpandedBytes: UInt64(512 * 1024 * 1024),
