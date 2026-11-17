@@ -265,7 +265,7 @@ enum AoVAssetBundleCatalogMerger {
             guard destination.serializedObjectPathIDs.contains(pointer.pathID) else {
                 throw AoVAssetBundleCatalogMergeError.unresolvedLocalPointer(field)
             }
-            return (pointer, false)
+            return (pointer, false, false)
         }
 
         guard pointer.pathID != 0,
