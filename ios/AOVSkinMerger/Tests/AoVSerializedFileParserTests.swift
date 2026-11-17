@@ -603,7 +603,7 @@ final class AoVSerializedFileParserTests: XCTestCase {
             appendSerialized(Int32(index), to: &data, littleEndian: littleEndian)
             appendSerialized(node.metaFlags, to: &data, littleEndian: littleEndian)
             if formatVersion >= 19 {
-                appendSerialized(UInt64(0), to: &data, littleEndian: littleEndian)
+                appendSerialized(Int64(0), to: &data, littleEndian: littleEndian)
             }
         }
         data.append(strings)
