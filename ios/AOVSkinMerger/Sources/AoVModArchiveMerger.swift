@@ -55,6 +55,50 @@ enum AoVModArchiveMergeError: LocalizedError {
     }
 }
 
+enum AoVModMergePipelineStage: String, CaseIterable, Sendable {
+    case preflight
+    case sourceInventory
+    case baseSelection
+    case versionCompatibility
+    case conflictResolution
+    case adapterValidation
+    case archivePackaging
+    case integrityValidation
+
+    var title: String {
+        switch self {
+        case .preflight: return "Kiểm tra đầu vào"
+        case .sourceInventory: return "Đọc và kiểm kê ZIP"
+        case .baseSelection: return "Xác định gói nền"
+        case .versionCompatibility: return "Đối chiếu phiên bản"
+        case .conflictResolution: return "Phân tích xung đột"
+        case .adapterValidation: return "Chạy adapter tài nguyên"
+        case .archivePackaging: return "Đóng gói kết quả"
+        case .integrityValidation: return "Kiểm tra toàn vẹn"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .preflight: return "checkmark.shield.fill"
+        case .sourceInventory: return "doc.zipper"
+        case .baseSelection: return "square.stack.3d.up.fill"
+        case .versionCompatibility: return "arrow.left.arrow.right"
+        case .conflictResolution: return "point.3.connected.trianglepath.dotted"
+        case .adapterValidation: return "wrench.and.screwdriver.fill"
+        case .archivePackaging: return "shippingbox.fill"
+        case .integrityValidation: return "checkmark.seal.fill"
+        }
+    }
+}
+
+struct AoVModMergePipelineEvent: Sendable, Identifiable {
+    let stage: AoVModMergePipelineStage
+    let detail: String
+
+    var id: String { stage.rawValue }
+}
+
 struct AoVModMergeReport: Sendable {
     let outputURL: URL
     let baseSource: String
@@ -69,6 +113,7 @@ struct AoVModMergeReport: Sendable {
     let preservedWwiseBanks: [String]
     let structurallyValidated: Bool
     let gameCompatibilityTested: Bool
+    let pipelineEvents: [AoVModMergePipelineEvent]
 }
 
 private struct AoVResourceReference {
@@ -119,6 +164,12 @@ enum AoVModArchiveMerger {
             return sum.partialValue
         }
         _ = totalInput
+        var pipelineEvents: [AoVModMergePipelineEvent] = [
+            AoVModMergePipelineEvent(
+                stage: .preflight,
+                detail: "Đã kiểm tra (archiveURLs.count) ZIP; tổng dung lượng đầu vào nằm trong giới hạn 500 MiB."
+            )
+        ]
 
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-AOV-Merge-\(UUID().uuidString)", isDirectory: true)
@@ -129,6 +180,12 @@ enum AoVModArchiveMerger {
         for url in archiveURLs {
             sources.append(try makeSource(url, tempRoot: tempRoot))
         }
+        pipelineEvents.append(
+            AoVModMergePipelineEvent(
+                stage: .sourceInventory,
+                detail: "Đã mở (sources.count) gói, kiểm tra cấu trúc và lập inventory tài nguyên."
+            )
+        )
 
         // Prefer the explicitly selected base. The completeness heuristic remains
         // as a compatibility fallback for non-UI callers, but the iOS app now asks
@@ -145,6 +202,13 @@ enum AoVModArchiveMerger {
         } else {
             throw AoVModArchiveMergeError.noBaseWrapper
         }
+        let baseSelectionMode = baseURL == nil ? "tự chọn theo độ đầy đủ" : "người dùng chỉ định"
+        pipelineEvents.append(
+            AoVModMergePipelineEvent(
+                stage: .baseSelection,
+                detail: "Gói nền: (base.name) ((baseSelectionMode)); các gói còn lại là nguồn overlay."
+            )
+        )
         let baseVersion = base.version?.trimmingCharacters(in: .whitespacesAndNewlines)
         for source in sources where source.id != base.id {
             guard let version = source.version?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -153,6 +217,24 @@ enum AoVModArchiveMerger {
                 throw AoVModArchiveMergeError.versionMismatch(source.name, version, baseVersion)
             }
         }
+
+        let missingVersionSources = sources
+            .filter { source in
+                guard let value = source.version?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                    return true
+                }
+                return value.isEmpty
+            }
+            .map(\.name)
+        let versionDetail: String
+        if missingVersionSources.isEmpty {
+            versionDetail = "Đã đối chiếu version.txt của toàn bộ gói: (baseVersion ?? "không rõ")."
+        } else {
+            versionDetail = "Không có xung đột ở các version.txt đã đọc; thiếu version.txt ở: (missingVersionSources.joined(separator: ", ")). Không thể xác nhận các gói thiếu marker cùng build."
+        }
+        pipelineEvents.append(
+            AoVModMergePipelineEvent(stage: .versionCompatibility, detail: versionDetail)
+        )
 
         let ordered = [base] + sources.filter { $0.id != base.id }
         let allPaths = Set(ordered.flatMap { Array($0.resources.keys) }).sorted()
@@ -344,6 +426,13 @@ enum AoVModArchiveMerger {
             )
         }
 
+        pipelineEvents.append(
+            AoVModMergePipelineEvent(
+                stage: .conflictResolution,
+                detail: "Đã phân tích (allPaths.count) đường dẫn; thêm (added.count) tài nguyên mới và tạo (replacements.count) payload thay thế. Xung đột không có adapter vẫn bị từ chối."
+            )
+        )
+
         if !preservedWwiseBanks.isEmpty {
             do {
                 let baseBanks = try base.resources.keys
@@ -382,6 +471,20 @@ enum AoVModArchiveMerger {
             }
         }
 
+        let adapterSummary = [
+            "CommonActions: (commonActionsFiles.count)",
+            "MSES: (mergedMSESTables.count)",
+            "IFix: (mergedIFixPatches.count)",
+            "AssetRef giữ nguyên: (assetRefUnique.count)",
+            "Wwise BNK append-only: (preservedWwiseBanks.count)"
+        ].joined(separator: " · ")
+        pipelineEvents.append(
+            AoVModMergePipelineEvent(
+                stage: .adapterValidation,
+                detail: "(adapterSummary). Adapter nào được dùng đều phải vượt kiểm tra riêng; Wwise chỉ được thêm nguyên trạng khi kiểm tra append-only đạt."
+            )
+        )
+
         let stagedURL = tempRoot.appendingPathComponent("AKI-AOV-output.zip")
         if base.outerResourcesEntry != nil {
             let innerOutputURL = tempRoot.appendingPathComponent("Resources-merged.zip")
@@ -415,7 +518,21 @@ enum AoVModArchiveMerger {
         let finalURL = exportDirectory.appendingPathComponent(
             "AKI_AOV_SKIN_\(UUID().uuidString.prefix(8)).zip"
         )
+        pipelineEvents.append(
+            AoVModMergePipelineEvent(
+                stage: .archivePackaging,
+                detail: base.outerResourcesEntry == nil
+                    ? "Đã tạo ZIP kết quả theo cấu trúc gói nền."
+                    : "Đã đóng lại Resources.zip và wrapper ngoài theo cấu trúc gói nền."
+            )
+        )
         try verifyArchive(stagedURL, label: base.outerResourcesEntry == nil ? "ZIP thường" : "ZIP ngoài")
+        pipelineEvents.append(
+            AoVModMergePipelineEvent(
+                stage: .integrityValidation,
+                detail: "ZIP đầu ra đã mở lại được và toàn bộ entry đã qua kiểm CRC."
+            )
+        )
         try FileManager.default.moveItem(at: stagedURL, to: finalURL)
 
         var actorSummary: [String: [String]] = [:]
@@ -435,7 +552,8 @@ enum AoVModArchiveMerger {
             preservedAssetReferenceSets: assetRefUnique,
             preservedWwiseBanks: preservedWwiseBanks.sorted(),
             structurallyValidated: true,
-            gameCompatibilityTested: false
+            gameCompatibilityTested: false,
+            pipelineEvents: pipelineEvents
         )
     }
 
