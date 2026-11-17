@@ -39,12 +39,15 @@ struct AoVUnityFSExtractedNode: Sendable {
     let data: Data
 }
 
-struct AoVUnityFSCatalogNodeSample: Codable, Hashable, Sendable, Identifiable {
+struct AoVUnityFSCatalogNodeSample: Codable, Sendable, Identifiable {
     let path: String
     let size: UInt64
     let prefixHex: String
     let stringHints: [String]
     let serializedFileSummary: String?
+    /// Full bounded SerializedFile metadata, retained for catalog comparison.
+    /// This is descriptive data only; it is never written back into a UnityFS bundle.
+    let serializedFile: AoVSerializedFileSummary?
     var id: String { path }
 }
 
