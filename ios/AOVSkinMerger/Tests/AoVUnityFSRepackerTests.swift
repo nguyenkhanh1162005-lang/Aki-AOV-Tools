@@ -36,6 +36,31 @@ final class AoVUnityFSRepackerTests: XCTestCase {
         }
     }
 
+    func testRepackRoundTripsArenaOfValorCustomBlockAndDirectoryLayout() throws {
+        let nodes = [
+            AoVUnityFSRepackNode(path: "CAB-catalog", data: Data("aov-catalog".utf8), flags: 4),
+            AoVUnityFSRepackNode(path: "CAB-assets", data: Data("aov-assets".utf8), flags: 8)
+        ]
+        let report = try AoVUnityFSRepacker.repack(
+            nodes,
+            formatVersion: 7,
+            playerVersion: "5.0.0",
+            engineVersion: "2022.3.1f1",
+            blockInfoLayout: .arenaOfValor
+        )
+
+        XCTAssertTrue(report.roundTripVerified)
+        XCTAssertEqual(report.blockInfoLayout, .arenaOfValor)
+        let info = try AoVUnityFSParser.inspect(report.data)
+        XCTAssertEqual(info.blockInfoLayout, .arenaOfValor)
+        XCTAssertEqual(info.nodes.map(\.path), nodes.map(\.path))
+        XCTAssertEqual(info.nodes.map(\.size), nodes.map { UInt64($0.data.count) })
+
+        let extracted = try AoVUnityFSParser.extractNodes(report.data)
+        XCTAssertEqual(extracted.map(\.path), nodes.map(\.path))
+        XCTAssertEqual(extracted.map(\.data), nodes.map(\.data))
+    }
+
     func testRepackRoundTripsUnity2019AlignedFormatSixHeader() throws {
         let node = AoVUnityFSRepackNode(path: "CAB-catalog", data: Data(repeating: 0xA5, count: 33))
         let report = try AoVUnityFSRepacker.repack(
