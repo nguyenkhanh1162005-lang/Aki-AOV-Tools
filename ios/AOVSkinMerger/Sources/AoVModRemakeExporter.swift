@@ -291,13 +291,22 @@ enum AoVModRemakeExporter {
         }
 
         let stagedOutputURL = tempRoot.appendingPathComponent("RES-remade.zip")
-        if let innerURL, let resourceEntry = nestedResourceEntries.first {
+        if innerURL != nil, let resourceEntry = nestedResourceEntries.first {
+            var outerAliases: [String: Data] = [:]
+            for (path, data) in finalPayloads {
+                let projectedPath = try normalizeArchivePath("Resources/" + path)
+                if let existing = outerAliases[projectedPath], existing != data {
+                    throw AoVModRemakeExporterError.duplicateArchivePath(projectedPath)
+                }
+                outerAliases[projectedPath] = data
+            }
             try writeOuterArchive(
                 baseArchive: outerArchive,
                 baseEntries: outerEntries,
                 nestedResourceEntry: resourceEntry,
                 innerArchiveURL: stagedInnerURL,
                 replacements: finalPayloads,
+                outerAliases: outerAliases,
                 outputURL: stagedOutputURL,
                 tempRoot: tempRoot
             )
@@ -383,10 +392,6 @@ enum AoVModRemakeExporter {
         }
         if parts.first == "Resources", parts.count >= 3 {
             return parts.dropFirst(2).joined(separator: "/")
-        }
-        if path.lowercased().hasSuffix(".assetbundle"),
-           !path.lowercased().hasPrefix("assetbundle/") {
-            return "assetbundle/" + path
         }
         return path
     }
@@ -499,6 +504,7 @@ enum AoVModRemakeExporter {
         nestedResourceEntry: Entry,
         innerArchiveURL: URL,
         replacements: [String: Data],
+        outerAliases: [String: Data],
         outputURL: URL,
         tempRoot: URL
     ) throws {
@@ -515,7 +521,7 @@ enum AoVModRemakeExporter {
             }
             let path = try normalizeArchivePath(entry.path)
             if entry.path.replacingOccurrences(of: "\\", with: "/").hasPrefix("Resources/"),
-               let payload = replacements[path] {
+               let payload = outerAliases[path] ?? replacements[path] {
                 try addData(
                     payload,
                     to: output,
