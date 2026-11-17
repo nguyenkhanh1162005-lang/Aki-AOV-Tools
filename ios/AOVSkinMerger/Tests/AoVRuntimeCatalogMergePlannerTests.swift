@@ -124,8 +124,8 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
         let plan = AoVRuntimeCatalogMergePlanner.planVerification(
             current: current,
             legacy: [("legacy.zip", legacy)],
-            finalDatabinPayloads: [databinPath: payload],
-            finalZIPChecksumValues: ["New/Legacy.pkg.bytes": 789]
+            verifiedFinalDatabinChecksumValues: [databinPath: 987654321],
+            verifiedFinalZIPChecksumValues: ["New/Legacy.pkg.bytes": 789]
         )
 
         XCTAssertTrue(plan.safeToWrite)
@@ -134,7 +134,7 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
         XCTAssertEqual(plan.updatedDatabinPaths, [databinPath])
         XCTAssertEqual(
             plan.candidateCatalog?.allDatabinVerificationInfo.first?.crcXor,
-            AoVRuntimeCatalogChecksum.verificationDatabinCRC32(payload)
+            987654321
         )
     }
 
