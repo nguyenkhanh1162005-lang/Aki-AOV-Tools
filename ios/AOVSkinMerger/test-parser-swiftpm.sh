@@ -9,6 +9,10 @@ TEST_DIR="$PACKAGE_DIR/Tests/AOVSkinMergerTests"
 mkdir -p "$SOURCE_DIR" "$TEST_DIR"
 cp "$SCRIPT_DIR/Sources/AoVSerializedFileParser.swift" \
    "$SOURCE_DIR/AoVSerializedFileParser.swift"
+cp "$SCRIPT_DIR/Sources/AoVSerializedFileObjectAppender.swift" \
+   "$SOURCE_DIR/AoVSerializedFileObjectAppender.swift"
+cp "$SCRIPT_DIR/Sources/AoVSerializedFileObjectImportPlanner.swift" \
+   "$SOURCE_DIR/AoVSerializedFileObjectImportPlanner.swift"
 cp "$SCRIPT_DIR/Sources/AoVRuntimeResourceCatalogParser.swift" \
    "$SOURCE_DIR/AoVRuntimeResourceCatalogParser.swift"
 cp "$SCRIPT_DIR/Sources/AoVSerializedAssetBundleWriter.swift" \
@@ -40,6 +44,8 @@ cp "$SCRIPT_DIR/Sources/AoVSerializedRuntimeCatalogWriter.swift" \
    "$SOURCE_DIR/AoVSerializedRuntimeCatalogWriter.swift"
 cp "$SCRIPT_DIR/Tests/AoVUnityTypeTreeParserTests.swift" \
    "$TEST_DIR/AoVUnityTypeTreeParserTests.swift"
+cp "$SCRIPT_DIR/Tests/AoVSerializedFileObjectImportPlannerTests.swift" \
+   "$TEST_DIR/AoVSerializedFileObjectImportPlannerTests.swift"
 cp "$SCRIPT_DIR/Tests/AoVSerializedFileObjectImportPlannerTests.swift" \
    "$TEST_DIR/AoVSerializedFileObjectImportPlannerTests.swift"
 cp "$SCRIPT_DIR/Tests/AoVRuntimeCatalogMergePlannerTests.swift" \
