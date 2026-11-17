@@ -16,8 +16,8 @@ cp "$SCRIPT_DIR/Sources/AoVSerializedAssetBundleWriter.swift" \
 cp "$SCRIPT_DIR/Sources/AoVAssetBundleCatalogMerger.swift" \
    "$SOURCE_DIR/AoVAssetBundleCatalogMerger.swift"
 test -s "$SOURCE_DIR/AoVSerializedAssetBundleWriter.swift"
-cp "$SCRIPT_DIR/Tests/AoVSerializedFileParserTests.swift" \
-   "$TEST_DIR/AoVSerializedFileParserTests.swift"
+cp "$SCRIPT_DIR/ParserPackageTests/AoVSerializedFileParserPortableTests.swift" \
+   "$TEST_DIR/AoVSerializedFileParserPortableTests.swift"
 cp "$SCRIPT_DIR/Tests/AoVRuntimeResourceCatalogParserTests.swift" \
    "$TEST_DIR/AoVRuntimeResourceCatalogParserTests.swift"
 cp "$SCRIPT_DIR/Tests/AoVAssetBundleCatalogMergerTests.swift" \
