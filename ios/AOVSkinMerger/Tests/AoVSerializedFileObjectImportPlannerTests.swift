@@ -516,7 +516,7 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
         let sourceSummary = try AoVSerializedFileParser.inspect(source)
         let closure = try AoVUnityFSAssetBundleMergeExecutor.requiredLocalObjectClosure(
             legacyRecord: legacyRecord,
-            currentRecord: currentRecord,
+            selectedContainerKeys: ["assets/new-skin.prefab"],
             sourceData: source,
             sourceSummary: sourceSummary
         )
