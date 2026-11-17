@@ -177,7 +177,9 @@ final class AoVSerializedFileParserTests: XCTestCase {
             preloadSize: 1,
             asset: first.asset
         )
-        replacement = copyRecord(replacement, containerEntries: [invalidEntry] + replacement.containerEntries.dropFirst())
+        var invalidEntries = replacement.containerEntries
+        invalidEntries[0] = invalidEntry
+        replacement = copyRecord(replacement, containerEntries: invalidEntries)
 
         XCTAssertThrowsError(
             try AoVSerializedAssetBundleWriter.rewrite(
