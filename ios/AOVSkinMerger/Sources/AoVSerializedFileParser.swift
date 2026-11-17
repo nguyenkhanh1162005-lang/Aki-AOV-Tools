@@ -22,13 +22,35 @@ struct AoVSerializedAssetBundleEntry: Codable, Hashable, Sendable, Identifiable 
     var id: String { key }
 }
 
+struct AoVSerializedAssetInfo: Codable, Hashable, Sendable {
+    let preloadIndex: Int32
+    let preloadSize: Int32
+    let asset: AoVSerializedAssetPointer
+}
+
+struct AoVSerializedClassCompatibilityEntry: Codable, Hashable, Sendable, Identifiable {
+    let classID: Int32
+    let info: AoVSerializedAssetInfo
+    var id: String { "\(classID):\(info.asset.fileID):\(info.asset.pathID)" }
+}
+
+struct AoVSerializedScriptCompatibility: Codable, Hashable, Sendable, Identifiable {
+    let first: Int32
+    let second: Int32
+    var id: String { "\(first):\(second)" }
+}
+
 struct AoVSerializedAssetBundleRecord: Codable, Sendable, Identifiable {
     let pathID: Int64
     let name: String
     let preloadReferences: [AoVSerializedAssetPointer]
     let containerEntries: [AoVSerializedAssetBundleEntry]
     let mainAsset: AoVSerializedAssetPointer
+    let mainAssetPreloadIndex: Int32
+    let mainAssetPreloadSize: Int32
+    let scriptCompatibilityEntries: [AoVSerializedScriptCompatibility]
     let classCompatibilityIDs: [Int32]
+    let classCompatibilityEntries: [AoVSerializedClassCompatibilityEntry]
     let runtimeCompatibility: UInt32?
     let assetBundleName: String
     let dependencies: [String]
@@ -580,12 +602,21 @@ enum AoVSerializedFileParser {
         let major = versionParts[0]
         let minor = versionParts[1]
 
+        var scriptCompatibilityEntries: [AoVSerializedScriptCompatibility] = []
         if major == 5 && minor == 4 {
             let scriptCompatibilityCount = try reader.readCount(
                 "m_ScriptCompatibility count",
                 maximum: 100_000
             )
-            try reader.skip(scriptCompatibilityCount * 8, "m_ScriptCompatibility entries")
+            scriptCompatibilityEntries.reserveCapacity(scriptCompatibilityCount)
+            for index in 0..<scriptCompatibilityCount {
+                scriptCompatibilityEntries.append(
+                    AoVSerializedScriptCompatibility(
+                        first: try reader.readInt32("m_ScriptCompatibility[\(index)] first"),
+                        second: try reader.readInt32("m_ScriptCompatibility[\(index)] second")
+                    )
+                )
+            }
         }
 
         let classCompatibilityCount = try reader.readCount(
@@ -593,15 +624,28 @@ enum AoVSerializedFileParser {
             maximum: 100_000
         )
         var classCompatibilityIDs: [Int32] = []
+        var classCompatibilityEntries: [AoVSerializedClassCompatibilityEntry] = []
         classCompatibilityIDs.reserveCapacity(classCompatibilityCount)
+        classCompatibilityEntries.reserveCapacity(classCompatibilityCount)
         for index in 0..<classCompatibilityCount {
-            classCompatibilityIDs.append(try reader.readInt32("m_ClassCompatibility[\(index)] class ID"))
-            _ = try reader.readInt32("m_ClassCompatibility[\(index)] preload index")
-            _ = try reader.readInt32("m_ClassCompatibility[\(index)] preload size")
-            _ = try readAssetPointer(
+            let classID = try reader.readInt32("m_ClassCompatibility[\(index)] class ID")
+            let preloadIndex = try reader.readInt32("m_ClassCompatibility[\(index)] preload index")
+            let preloadSize = try reader.readInt32("m_ClassCompatibility[\(index)] preload size")
+            let asset = try readAssetPointer(
                 &reader,
                 serializedVersion: serializedVersion,
                 field: "m_ClassCompatibility[\(index)] asset"
+            )
+            classCompatibilityIDs.append(classID)
+            classCompatibilityEntries.append(
+                AoVSerializedClassCompatibilityEntry(
+                    classID: classID,
+                    info: AoVSerializedAssetInfo(
+                        preloadIndex: preloadIndex,
+                        preloadSize: preloadSize,
+                        asset: asset
+                    )
+                )
             )
         }
 
@@ -623,15 +667,17 @@ enum AoVSerializedFileParser {
             isStreamedSceneAssetBundle = try reader.readBoolean("m_IsStreamedSceneAssetBundle")
         }
 
-        _ = mainPreloadIndex
-        _ = mainPreloadSize
         return AoVSerializedAssetBundleRecord(
             pathID: pathID,
             name: name,
             preloadReferences: preloadReferences,
             containerEntries: containerEntries,
             mainAsset: mainAsset,
+            mainAssetPreloadIndex: mainPreloadIndex,
+            mainAssetPreloadSize: mainPreloadSize,
+            scriptCompatibilityEntries: scriptCompatibilityEntries,
             classCompatibilityIDs: classCompatibilityIDs,
+            classCompatibilityEntries: classCompatibilityEntries,
             runtimeCompatibility: runtimeCompatibility,
             assetBundleName: assetBundleName,
             dependencies: dependencies,
