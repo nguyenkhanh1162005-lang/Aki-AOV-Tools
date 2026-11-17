@@ -189,12 +189,14 @@ enum AoVUnityTypeTreeWriter {
         case "UInt64", "unsigned long long", "FileSize":
             writer.appendUInt64(try unsigned64(value, field: node.name))
         case "float":
-            guard case .floating(let number) = value,
-                  number.isFinite,
-                  let exact = Float(exactly: number) else {
+            guard case .floating(let number) = value, number.isFinite else {
                 throw AoVUnityTypeTreeError.invalidValue("\(node.name) phải là Float hữu hạn.")
             }
-            writer.appendUInt32(exact.bitPattern)
+            let converted = Float(number)
+            guard converted.isFinite else {
+                throw AoVUnityTypeTreeError.invalidValue("\(node.name) vượt giới hạn Float.")
+            }
+            writer.appendUInt32(converted.bitPattern)
         case "double":
             guard case .floating(let number) = value, number.isFinite else {
                 throw AoVUnityTypeTreeError.invalidValue("\(node.name) phải là Double hữu hạn.")
@@ -229,10 +231,12 @@ enum AoVUnityTypeTreeWriter {
                 shouldAlign = true
             }
             guard case .map(let entries) = value,
-                  entries.count <= AoVUnityTypeTreeReader.maximumArrayElements,
-                  let keyIndex = (index + 4) as Int?,
-                  keyIndex < end else {
+                  entries.count <= AoVUnityTypeTreeReader.maximumArrayElements else {
                 throw AoVUnityTypeTreeError.invalidValue("\(node.name) phải là map hợp lệ.")
+            }
+            let keyIndex = index + 4
+            guard keyIndex < end else {
+                throw AoVUnityTypeTreeError.invalidTree("map \(node.name) thiếu key node.")
             }
             let valueIndex = subtreeEnds[keyIndex]
             guard valueIndex < end else {
