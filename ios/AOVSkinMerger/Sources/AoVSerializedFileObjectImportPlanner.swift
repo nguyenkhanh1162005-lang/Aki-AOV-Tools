@@ -108,6 +108,7 @@ enum AoVSerializedFileObjectImportPlanner {
         source: Data,
         destination: Data,
         seedPathIDs: Set<Int64>,
+        preservedLocalPathIDMap: [Int64: Int64] = [:],
         externalFileIDMap: [Int32: Int32] = [:],
         externalPathIDMaps: [Int32: [Int64: Int64]] = [:],
         availableExternalTargetPathIDs: [Int32: Set<Int64>] = [:]
@@ -132,9 +133,21 @@ enum AoVSerializedFileObjectImportPlanner {
         let sourceObjectsByID = Dictionary(uniqueKeysWithValues: sourceSummary.serializedObjects.map {
             ($0.pathID, $0)
         })
+        let destinationSummary = try AoVSerializedFileParser.inspect(destination)
+        let destinationIDs = Set(destinationSummary.serializedObjects.map { $0.pathID })
+        for (sourcePathID, destinationPathID) in preservedLocalPathIDMap {
+            guard sourceObjectsByID[sourcePathID] != nil,
+                  destinationIDs.contains(destinationPathID) else {
+                throw AoVSerializedFileObjectImportPlanError.invalidPreservedPathIDMapping(
+                    sourcePathID,
+                    destinationPathID
+                )
+            }
+        }
         var pending = Array(seedPathIDs)
         var closure = Set<Int64>()
         while let pathID = pending.popLast() {
+            if preservedLocalPathIDMap[pathID] != nil { continue }
             guard let object = sourceObjectsByID[pathID] else {
                 throw AoVSerializedFileObjectImportPlanError.selectedObjectMissing(pathID)
             }
@@ -155,7 +168,8 @@ enum AoVSerializedFileObjectImportPlanner {
                 nodes: typeInfo.typeTreeNodes,
                 value: value
             )
-            for targetPathID in localTargets where !closure.contains(targetPathID) {
+            for targetPathID in localTargets
+                where !closure.contains(targetPathID) && preservedLocalPathIDMap[targetPathID] == nil {
                 guard sourceObjectsByID[targetPathID] != nil else {
                     throw AoVSerializedFileObjectImportPlanError.pointerAuditFailed(
                         pathID,
@@ -169,6 +183,7 @@ enum AoVSerializedFileObjectImportPlanner {
             source: source,
             destination: destination,
             selectedPathIDs: closure,
+            preservedLocalPathIDMap: preservedLocalPathIDMap,
             externalFileIDMap: externalFileIDMap,
             externalPathIDMaps: externalPathIDMaps,
             availableExternalTargetPathIDs: availableExternalTargetPathIDs
