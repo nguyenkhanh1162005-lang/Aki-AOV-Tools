@@ -178,6 +178,66 @@ struct AoVRemakeCatalogKindReport: Codable, Sendable {
     let findings: [AoVRemakeCatalogRecordFinding]
 }
 
+enum AoVRemakeCatalogPlanStatus: String, Codable, Equatable, Sendable {
+    case candidate
+    case requiresExternalTargetAudit
+    case noChanges
+    case missingCurrentBundle
+    case ambiguousCurrentBundle
+    case blocked
+}
+
+struct AoVRemakeCatalogPlanFinding: Codable, Sendable, Identifiable {
+    let kind: AoVRemakeCatalogKind
+    let bundleName: String
+    let currentCatalogPath: String?
+    let currentNodePath: String?
+    let currentObjectPathID: Int64?
+    let sourceArchives: [String]
+    let status: AoVRemakeCatalogPlanStatus
+    let addedContainerKeys: [String]
+    let alreadyPresentContainerKeys: [String]
+    let addedPreloadReferenceCount: Int
+    let addedDependencies: [String]
+    let remappedExternalPointerCount: Int
+    let externalTargetAuditSamples: [String]
+    let reasons: [String]
+
+    var id: String {
+        "\(kind.rawValue)|\(bundleName)|\(currentCatalogPath ?? "missing")|\(sourceArchives.joined(separator: ","))"
+    }
+}
+
+private struct AoVRemakeCatalogRecordContext: Sendable, Identifiable {
+    let sourceArchive: String
+    let catalogPath: String
+    let nodePath: String
+    let serializedFile: AoVSerializedFileSummary
+    let record: AoVSerializedAssetBundleRecord
+
+    var bundleName: String {
+        let value = record.assetBundleName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? record.name : value
+    }
+
+    var matchingName: String { bundleName.lowercased() }
+    var id: String { "\(sourceArchive)|\(catalogPath)|\(nodePath)|\(record.pathID)" }
+}
+
+private struct AoVRemakeCatalogPlanAccumulator {
+    let target: AoVRemakeCatalogRecordContext
+    var sourceArchives = Set<String>()
+    var addedKeys = Set<String>()
+    var alreadyPresentKeys = Set<String>()
+    var addedPreloadReferences = 0
+    var addedDependencies = Set<String>()
+    var remappedExternalPointers = 0
+    var externalAuditSamples = Set<String>()
+    var reasons = Set<String>()
+    var failed = false
+    var hasChanges = false
+}
+
 struct AoVModRemakeReport: Codable, Sendable {
     let base: ArchiveInventory
     let legacy: [ArchiveInventory]
@@ -193,6 +253,7 @@ struct AoVModRemakeReport: Codable, Sendable {
     let legacyHasVerificationCatalog: [String]
     let packerCatalogComparison: AoVRemakeCatalogKindReport
     let verificationCatalogComparison: AoVRemakeCatalogKindReport
+    let catalogMergePlanFindings: [AoVRemakeCatalogPlanFinding]
     let warnings: [String]
 
     var totalLegacyFiles: Int { legacy.reduce(0) { $0 + $1.fileCount } }
@@ -200,6 +261,17 @@ struct AoVModRemakeReport: Codable, Sendable {
     var identicalCount: Int { identicalPaths.count }
     var changedCount: Int { changedPaths.count }
     var legacyOnlyCount: Int { legacyOnlyPaths.count }
+    var catalogPlanCandidateCount: Int {
+        catalogMergePlanFindings.filter { $0.status == .candidate || $0.status == .requiresExternalTargetAudit }.count
+    }
+    var catalogPlanBlockedCount: Int {
+        catalogMergePlanFindings.filter {
+            $0.status == .blocked || $0.status == .missingCurrentBundle || $0.status == .ambiguousCurrentBundle
+        }.count
+    }
+    var catalogPlanExternalAuditCount: Int {
+        catalogMergePlanFindings.filter { $0.status == .requiresExternalTargetAudit }.count
+    }
 
     /// Analysis is deliberately separate from the existing skin merger.
     /// No output is advertised until catalog remapping and UnityFS rebuilding exist.
@@ -355,6 +427,34 @@ enum AoVModRemakeAnalyzer {
             legacy: legacyInventories.flatMap { catalogRecords(in: $0, kind: .verification) },
             kind: .verification
         )
+        let currentPackerContexts = catalogRecordContexts(in: baseInventory, kind: .packer)
+        let currentVerificationContexts = catalogRecordContexts(in: baseInventory, kind: .verification)
+        let legacyPackerContexts = legacyInventories.flatMap { catalogRecordContexts(in: $0, kind: .packer) }
+        let legacyVerificationContexts = legacyInventories.flatMap { catalogRecordContexts(in: $0, kind: .verification) }
+
+        let availableCurrentBundleNames = Set(currentPackerContexts.flatMap { context in
+            [context.bundleName, context.record.name, context.record.assetBundleName]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+        })
+        let packerPlanFindings = buildCatalogMergePlans(
+            current: currentPackerContexts,
+            legacy: legacyPackerContexts,
+            kind: .packer,
+            availableCurrentBundleNames: availableCurrentBundleNames
+        )
+        let verificationPlanFindings = buildCatalogMergePlans(
+            current: currentVerificationContexts,
+            legacy: legacyVerificationContexts,
+            kind: .verification,
+            availableCurrentBundleNames: availableCurrentBundleNames
+        )
+        let catalogMergePlanFindings = (packerPlanFindings + verificationPlanFindings)
+            .sorted {
+                if $0.kind != $1.kind { return $0.kind.rawValue < $1.kind.rawValue }
+                if $0.bundleName != $1.bundleName { return $0.bundleName < $1.bundleName }
+                return $0.sourceArchives.joined() < $1.sourceArchives.joined()
+            }
         if packerCatalogComparison.currentRecordCount == 0 ||
             verificationCatalogComparison.currentRecordCount == 0 {
             warnings.append("Một hoặc cả hai catalog chưa có AssetBundle record class 142 đọc được; cần kiểm tra lại RES đầu vào hoặc layout SerializedFile.")
@@ -371,6 +471,12 @@ enum AoVModRemakeAnalyzer {
             verificationCatalogComparison.invalidCurrentExternalPointerCount
         if unresolvedLocalPointers > 0 || invalidExternalPointers > 0 {
             warnings.append("Có pointer chưa phân giải được: local object không tìm thấy = \(unresolvedLocalPointers), external fileID không hợp lệ = \(invalidExternalPointers). Không được tự động remap các record này.")
+        }
+        if !catalogMergePlanFindings.isEmpty {
+            warnings.append("Đã lập kế hoạch ghép thử cho \(catalogMergePlanFindings.filter { $0.status == .candidate || $0.status == .requiresExternalTargetAudit }.count) AssetBundle; \(catalogMergePlanFindings.filter { $0.status == .blocked || $0.status == .missingCurrentBundle || $0.status == .ambiguousCurrentBundle }.count) trường hợp bị chặn hoặc chưa khớp.")
+        }
+        if catalogMergePlanFindings.contains(where: { $0.status == .requiresExternalTargetAudit }) {
+            warnings.append("Một số kế hoạch dùng external PPtr đã remap theo GUID/path, nhưng vẫn cần xác minh pathID trong CAB đích trước khi được phép ghi.")
         }
         warnings.append("Catalog đã được phân tích sâu ở mức AssetBundle class 142, container key, preload range, pointer và dependency. Các pointer chỉ là ứng viên ánh xạ, chưa được ghi ngược vào file.")
         warnings.append("Bản phân tích này không tạo ZIP remake. Cần xác minh remap pointer, checksum và UnityFS rebuild trên bộ RES/MOD thật trước khi xuất.")
@@ -390,8 +496,135 @@ enum AoVModRemakeAnalyzer {
             legacyHasVerificationCatalog: legacyVerification,
             packerCatalogComparison: packerCatalogComparison,
             verificationCatalogComparison: verificationCatalogComparison,
+            catalogMergePlanFindings: catalogMergePlanFindings,
             warnings: warnings
         )
+    }
+
+    private static func catalogRecordContexts(
+        in inventory: ArchiveInventory,
+        kind: AoVRemakeCatalogKind
+    ) -> [AoVRemakeCatalogRecordContext] {
+        inventory.unityFSBundles
+            .filter { ($0.path as NSString).lastPathComponent.lowercased() == kind.fileName }
+            .flatMap { bundle in
+                bundle.catalogNodeSamples.flatMap { sample in
+                    guard let serialized = sample.serializedFile else { return [] }
+                    return serialized.assetBundleRecords.map { record in
+                        AoVRemakeCatalogRecordContext(
+                            sourceArchive: inventory.fileName,
+                            catalogPath: bundle.path,
+                            nodePath: sample.path,
+                            serializedFile: serialized,
+                            record: record
+                        )
+                    }
+                }
+            }
+    }
+
+    private static func buildCatalogMergePlans(
+        current: [AoVRemakeCatalogRecordContext],
+        legacy: [AoVRemakeCatalogRecordContext],
+        kind: AoVRemakeCatalogKind,
+        availableCurrentBundleNames: Set<String>
+    ) -> [AoVRemakeCatalogPlanFinding] {
+        let currentByName = Dictionary(grouping: current, by: \.matchingName)
+        var accumulators: [String: AoVRemakeCatalogPlanAccumulator] = [:]
+        var unmatchedFindings: [AoVRemakeCatalogPlanFinding] = []
+        var workingRecords: [String: AoVSerializedAssetBundleRecord] = [:]
+
+        let orderedLegacy = legacy.sorted {
+            if $0.matchingName != $1.matchingName { return $0.matchingName < $1.matchingName }
+            if $0.sourceArchive != $1.sourceArchive { return $0.sourceArchive < $1.sourceArchive }
+            return $0.nodePath < $1.nodePath
+        }
+
+        for oldContext in orderedLegacy {
+            let candidates = currentByName[oldContext.matchingName] ?? []
+            guard candidates.count == 1, let target = candidates.first else {
+                let status: AoVRemakeCatalogPlanStatus = candidates.isEmpty
+                    ? .missingCurrentBundle : .ambiguousCurrentBundle
+                unmatchedFindings.append(
+                    AoVRemakeCatalogPlanFinding(
+                        kind: kind,
+                        bundleName: oldContext.bundleName,
+                        currentCatalogPath: nil,
+                        currentNodePath: nil,
+                        currentObjectPathID: nil,
+                        sourceArchives: [oldContext.sourceArchive],
+                        status: status,
+                        addedContainerKeys: [],
+                        alreadyPresentContainerKeys: [],
+                        addedPreloadReferenceCount: 0,
+                        addedDependencies: [],
+                        remappedExternalPointerCount: 0,
+                        externalTargetAuditSamples: [],
+                        reasons: [candidates.isEmpty
+                            ? "Không có AssetBundle cùng tên trong RES mới."
+                            : "Có nhiều AssetBundle cùng tên trong RES mới, không thể chọn duy nhất."]
+                    )
+                )
+                continue
+            }
+
+            var accumulator = accumulators[target.id] ?? AoVRemakeCatalogPlanAccumulator(target: target)
+            accumulator.sourceArchives.insert(oldContext.sourceArchive)
+            let currentRecord = workingRecords[target.id] ?? target.record
+            do {
+                let plan = try AoVAssetBundleCatalogMerger.plan(
+                    current: currentRecord,
+                    legacy: oldContext.record,
+                    currentSerializedFile: target.serializedFile,
+                    legacySerializedFile: oldContext.serializedFile,
+                    availableCurrentBundleNames: availableCurrentBundleNames
+                )
+                workingRecords[target.id] = plan.mergedRecord
+                accumulator.addedKeys.formUnion(plan.addedContainerKeys)
+                accumulator.alreadyPresentKeys.formUnion(plan.alreadyPresentContainerKeys)
+                accumulator.addedPreloadReferences += plan.addedPreloadReferenceCount
+                accumulator.addedDependencies.formUnion(plan.addedDependencies)
+                accumulator.remappedExternalPointers += plan.remappedExternalPointerCount
+                accumulator.externalAuditSamples.formUnion(plan.externalTargetAuditSamples)
+                if !plan.addedContainerKeys.isEmpty || !plan.addedDependencies.isEmpty {
+                    accumulator.hasChanges = true
+                }
+            } catch {
+                accumulator.failed = true
+                accumulator.reasons.insert("\(oldContext.sourceArchive): \(error.localizedDescription)")
+            }
+            accumulators[target.id] = accumulator
+        }
+
+        let plannedFindings = accumulators.values.map { accumulator -> AoVRemakeCatalogPlanFinding in
+            let status: AoVRemakeCatalogPlanStatus
+            if accumulator.failed {
+                status = .blocked
+            } else if accumulator.remappedExternalPointers > 0 {
+                status = .requiresExternalTargetAudit
+            } else if !accumulator.hasChanges {
+                status = .noChanges
+            } else {
+                status = .candidate
+            }
+            return AoVRemakeCatalogPlanFinding(
+                kind: kind,
+                bundleName: accumulator.target.bundleName,
+                currentCatalogPath: accumulator.target.catalogPath,
+                currentNodePath: accumulator.target.nodePath,
+                currentObjectPathID: accumulator.target.record.pathID,
+                sourceArchives: accumulator.sourceArchives.sorted(),
+                status: status,
+                addedContainerKeys: accumulator.addedKeys.sorted(),
+                alreadyPresentContainerKeys: accumulator.alreadyPresentKeys.sorted(),
+                addedPreloadReferenceCount: accumulator.addedPreloadReferences,
+                addedDependencies: accumulator.addedDependencies.sorted(),
+                remappedExternalPointerCount: accumulator.remappedExternalPointers,
+                externalTargetAuditSamples: accumulator.externalAuditSamples.sorted(),
+                reasons: accumulator.reasons.sorted()
+            )
+        }
+        return unmatchedFindings + plannedFindings
     }
 
     private static func catalogRecords(
