@@ -92,6 +92,12 @@ struct AoVSerializedFileSummary: Codable, Sendable {
     let littleEndian: Bool
     let fileSizeFieldOffset: Int
     let dataOffsetFieldOffset: Int
+    let metadataSizeFieldOffset: Int
+    let metadataStartOffset: Int
+    let metadataEndOffset: Int
+    let objectCountFieldOffset: Int
+    let objectTableStartOffset: Int
+    let objectTableEndOffset: Int
     let typeCount: Int
     let serializedTypes: [AoVSerializedFileTypeInfo]
     let objectCount: Int
@@ -348,6 +354,7 @@ enum AoVSerializedFileParser {
         let metadataSize: UInt64
         let fileSize: UInt64
         let dataOffset: UInt64
+        let metadataSizeFieldOffset: Int
         let fileSizeFieldOffset: Int
         let dataOffsetFieldOffset: Int
 
@@ -365,6 +372,7 @@ enum AoVSerializedFileParser {
                 // payload endianness only after reading the widened header fields.
                 let payloadLittleEndian = reader.littleEndian
                 reader.littleEndian = false
+                metadataSizeFieldOffset = reader.offset
                 metadataSize = UInt64(try reader.readUInt32("extended metadata size"))
                 fileSizeFieldOffset = reader.offset
                 let extendedFileSize = try reader.readInt64("extended file size")
@@ -379,6 +387,7 @@ enum AoVSerializedFileParser {
                 dataOffset = UInt64(extendedDataOffset)
             } else {
                 metadataSize = initialMetadataSize
+                metadataSizeFieldOffset = 0
                 fileSize = initialFileSize
                 dataOffset = initialDataOffset
                 // The legacy 16-byte SerializedFile header is always big-endian.
@@ -393,6 +402,7 @@ enum AoVSerializedFileParser {
             }
             fileSize = initialFileSize
             metadataSize = initialMetadataSize
+            metadataSizeFieldOffset = 0
             dataOffset = initialDataOffset
             fileSizeFieldOffset = -1
             dataOffsetFieldOffset = -1
@@ -510,7 +520,9 @@ enum AoVSerializedFileParser {
             bigIDEnabled = try reader.readInt32("big ID enabled") != 0
         }
 
+        let objectCountFieldOffset = reader.offset
         let objectCount = try reader.readCount("object count", maximum: maximumObjects)
+        let objectTableStartOffset = reader.offset
         var serializedObjects: [AoVSerializedFileObject] = []
         var assetBundleObjects: [AoVSerializedFileObject] = []
         serializedObjects.reserveCapacity(objectCount)
@@ -585,6 +597,7 @@ enum AoVSerializedFileParser {
                 assetBundleObjects.append(object)
             }
         }
+        let objectTableEndOffset = reader.offset
 
         if formatVersion >= 11 {
             let scriptCount = try reader.readCount("script count", maximum: 1_000_000)
@@ -705,6 +718,12 @@ enum AoVSerializedFileParser {
             littleEndian: reader.littleEndian,
             fileSizeFieldOffset: fileSizeFieldOffset,
             dataOffsetFieldOffset: dataOffsetFieldOffset,
+            metadataSizeFieldOffset: metadataSizeFieldOffset,
+            metadataStartOffset: metadataStart,
+            metadataEndOffset: metadataEnd,
+            objectCountFieldOffset: objectCountFieldOffset,
+            objectTableStartOffset: objectTableStartOffset,
+            objectTableEndOffset: objectTableEndOffset,
             typeCount: typeCount,
             serializedTypes: serializedTypes,
             objectCount: objectCount,
