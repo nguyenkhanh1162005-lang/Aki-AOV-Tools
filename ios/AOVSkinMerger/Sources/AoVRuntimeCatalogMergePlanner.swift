@@ -49,6 +49,11 @@ struct AoVRuntimeVerificationMergePlan: Sendable {
 /// checksum values are preserved only when equal; this planner never guesses
 /// the unknown 64-bit ZIP checksum algorithm. Databin values can be recalculated
 /// from the final output bytes using the verified CRC-32 routine.
+private struct AoVRuntimeMergeSourceValue<Value: Hashable> {
+    let source: String
+    let value: Value
+}
+
 enum AoVRuntimeCatalogMergePlanner {
     static func planPacker(
         current: AoVRuntimeResourcePackerCatalog,
@@ -56,7 +61,7 @@ enum AoVRuntimeCatalogMergePlanner {
     ) -> AoVRuntimePackerMergePlan {
         var issues: [AoVRuntimeCatalogMergeIssue] = []
         let currentByPath = Dictionary(grouping: current.allResourcePackInfo, by: \.pathInIFS)
-        var currentDuplicatePaths = currentByPath
+        let currentDuplicatePaths = currentByPath
             .filter { $0.key.isEmpty || $0.value.count > 1 }
             .keys.sorted()
         if !currentDuplicatePaths.isEmpty {
@@ -71,7 +76,7 @@ enum AoVRuntimeCatalogMergePlanner {
 
         let legacyRows = legacy.flatMap { source in
             source.catalog.allResourcePackInfo.map {
-                AoVRuntimeCatalogSourceValue(source: source.source, value: $0)
+                AoVRuntimeMergeSourceValue(source: source.source, value: $0)
             }
         }
         let legacyByPath = Dictionary(grouping: legacyRows, by: { $0.value.pathInIFS })
@@ -250,12 +255,12 @@ enum AoVRuntimeCatalogMergePlanner {
 
         let legacyZIPRows = legacy.flatMap { source in
             source.catalog.allZipVerificationInfo.map {
-                AoVRuntimeCatalogSourceValue(source: source.source, value: $0)
+                AoVRuntimeMergeSourceValue(source: source.source, value: $0)
             }
         }
         let legacyDatabinRows = legacy.flatMap { source in
             source.catalog.allDatabinVerificationInfo.map {
-                AoVRuntimeCatalogSourceValue(source: source.source, value: $0)
+                AoVRuntimeMergeSourceValue(source: source.source, value: $0)
             }
         }
         let legacyZIP = Dictionary(grouping: legacyZIPRows, by: { $0.value.pathInIFS })
