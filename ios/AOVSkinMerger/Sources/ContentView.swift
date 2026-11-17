@@ -370,6 +370,10 @@ struct ContentView: View {
             metric("Preload range sai trong RES mới", "\(report.invalidCurrentPreloadRangeCount)")
             metric("Main asset pointer thay đổi", "\(report.changedMainAssetPointerCount)")
             metric("Class compatibility thay đổi", "\(report.changedClassCompatibilityCount)")
+            metric("Pointer nội bộ MOD không tìm thấy", "\(report.unresolvedLegacyLocalPointerCount)")
+            metric("Pointer nội bộ RES không tìm thấy", "\(report.unresolvedCurrentLocalPointerCount)")
+            metric("External fileID sai trong MOD", "\(report.invalidLegacyExternalPointerCount)")
+            metric("External fileID sai trong RES", "\(report.invalidCurrentExternalPointerCount)")
             metric("Dependency mới ở RES", "\(report.dependenciesAddedInCurrentCount)")
             metric("Dependency cũ không còn", "\(report.dependenciesRemovedInCurrentCount)")
 
@@ -409,6 +413,14 @@ struct ContentView: View {
                     if !finding.dependenciesAddedInCurrent.isEmpty {
                         Text("Dependency mới: " + finding.dependenciesAddedInCurrent.joined(separator: ", "))
                             .font(.caption2).foregroundColor(.secondary)
+                    }
+                    if !finding.legacyPointerAuditSamples.isEmpty || !finding.currentPointerAuditSamples.isEmpty {
+                        ForEach(Array(finding.legacyPointerAuditSamples.prefix(3).enumerated()), id: \.offset) { _, sample in
+                            Text("MOD pointer: " + sample).font(.caption2).foregroundColor(.orange)
+                        }
+                        ForEach(Array(finding.currentPointerAuditSamples.prefix(3).enumerated()), id: \.offset) { _, sample in
+                            Text("RES pointer: " + sample).font(.caption2).foregroundColor(.orange)
+                        }
                     }
                 }
                 .padding(.vertical, 4)
