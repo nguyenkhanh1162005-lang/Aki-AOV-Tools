@@ -65,6 +65,18 @@ final class AoVSerializedFileParserTests: XCTestCase {
         XCTAssertEqual(summary.assetBundleRecords.first?.mainAsset.pathID, 7003)
     }
 
+    func testParsesUnity54ScriptCompatibilityEntries() throws {
+        let data = makeSerializedFile(unityVersion: "5.4.0f3")
+        let summary = try AoVSerializedFileParser.inspect(data)
+        let record = try XCTUnwrap(summary.assetBundleRecords.first)
+
+        XCTAssertEqual(record.scriptCompatibilityEntries.count, 1)
+        XCTAssertEqual(record.scriptCompatibilityEntries.first?.first, 111)
+        XCTAssertEqual(record.scriptCompatibilityEntries.first?.second, 222)
+        XCTAssertEqual(record.classCompatibilityEntries.first?.info.asset.pathID, 7004)
+        XCTAssertEqual(record.assetBundleName, "resource-packer")
+    }
+
     func testRejectsTruncatedAssetBundleObject() {
         let data = makeSerializedFile(objectPayload: Data([0x01, 0x02]))
         XCTAssertThrowsError(try AoVSerializedFileParser.inspect(data))
@@ -105,11 +117,15 @@ final class AoVSerializedFileParserTests: XCTestCase {
         objectTypeIndex: Int32 = 0,
         targetPlatform: Int32 = 13,
         objectPayload: Data? = nil,
-        littleEndian: Bool = true
+        littleEndian: Bool = true,
+        unityVersion: String = "2020.3.34f1"
     ) -> Data {
-        let payload = objectPayload ?? makeAssetBundleObject(littleEndian: littleEndian)
+        let payload = objectPayload ?? makeAssetBundleObject(
+            littleEndian: littleEndian,
+            unityVersion: unityVersion
+        )
         var metadata = Data()
-        metadata.append(Data("2020.3.34f1\0".utf8))
+        metadata.append(Data((unityVersion + "\0").utf8))
         appendSerialized(targetPlatform, to: &metadata, littleEndian: littleEndian)
         metadata.append(0)
         appendSerialized(Int32(1), to: &metadata, littleEndian: littleEndian)
@@ -162,7 +178,10 @@ final class AoVSerializedFileParserTests: XCTestCase {
         return file
     }
 
-    private func makeAssetBundleObject(littleEndian: Bool) -> Data {
+    private func makeAssetBundleObject(
+        littleEndian: Bool,
+        unityVersion: String
+    ) -> Data {
         var object = Data()
         appendAlignedString("catalog", to: &object, littleEndian: littleEndian)
         appendSerialized(Int32(1), to: &object, littleEndian: littleEndian) // preload count
@@ -178,6 +197,11 @@ final class AoVSerializedFileParserTests: XCTestCase {
         appendSerialized(Int32(1), to: &object, littleEndian: littleEndian) // main preload size
         appendSerialized(Int32(0), to: &object, littleEndian: littleEndian)
         appendSerialized(Int64(7003), to: &object, littleEndian: littleEndian)
+        if unityVersion.hasPrefix("5.4.") {
+            appendSerialized(Int32(1), to: &object, littleEndian: littleEndian)
+            appendSerialized(Int32(111), to: &object, littleEndian: littleEndian)
+            appendSerialized(Int32(222), to: &object, littleEndian: littleEndian)
+        }
         appendSerialized(Int32(1), to: &object, littleEndian: littleEndian) // class compatibility count
         appendSerialized(Int32(28), to: &object, littleEndian: littleEndian)
         appendSerialized(Int32(0), to: &object, littleEndian: littleEndian)
