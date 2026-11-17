@@ -38,11 +38,166 @@ struct AoVUnityFSAssetBundleMergeExecutionReport: Sendable {
     let roundTripVerified: Bool
 }
 
+struct AoVAssetBundleLegacyRecordInput: Sendable {
+    let source: String
+    let record: AoVSerializedAssetBundleRecord
+    let serializedFile: AoVSerializedFileSummary
+}
+
+struct AoVUnityFSAssetBundleBatchMergeExecutionReport: Sendable {
+    let data: Data
+    let nodePath: String
+    let rewrittenObjectPathIDs: [Int64]
+    let plans: [AoVAssetBundleCatalogMergePlan]
+    let rewrite: AoVUnityFSContentRewriteReport
+    let roundTripVerified: Bool
+}
+
 /// Executes the class-142 merge plan against the actual SerializedFile node in
 /// a UnityFS archive. It is deliberately a single-bundle primitive: callers
 /// must still coordinate runtime Packer/Verification metadata and ZIP output.
 enum AoVUnityFSAssetBundleMergeExecutor {
     private static let maximumExpandedBytes: UInt64 = 512 * 1024 * 1024
+
+    /// Applies multiple legacy class-142 records to one SerializedFile and
+    /// rebuilds its enclosing UnityFS bundle only once. Any failed plan or
+    /// unresolved pointer aborts the entire in-memory operation.
+    static func mergeBatch(
+        in source: Data,
+        serializedFileNodePath: String,
+        legacyRecords: [AoVAssetBundleLegacyRecordInput],
+        availableCurrentBundleNames: Set<String>,
+        verifiedExternalTargetFiles: [String: Data] = [:]
+    ) throws -> AoVUnityFSAssetBundleBatchMergeExecutionReport {
+        guard !legacyRecords.isEmpty else {
+            throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                "Không có legacy AssetBundle record để ghép."
+            )
+        }
+
+        let info = try AoVUnityFSParser.inspect(source)
+        try AoVUnityFSContentRewriter.validateWritableTemplate(info)
+        guard info.totalUncompressedBytes <= maximumExpandedBytes else {
+            throw AoVUnityFSAssetBundleMergeExecutorError.expandedArchiveTooLarge
+        }
+        let nodes = try AoVUnityFSParser.extractNodes(
+            source,
+            maximumExpandedBytes: maximumExpandedBytes,
+            maximumNodeCount: max(info.nodes.count, 1)
+        )
+        let nodeMatches = nodes.filter { $0.path == serializedFileNodePath }
+        guard nodeMatches.count == 1, let originalNode = nodeMatches.first else {
+            if nodeMatches.count > 1 {
+                throw AoVUnityFSAssetBundleMergeExecutorError.ambiguousNode(serializedFileNodePath)
+            }
+            throw AoVUnityFSAssetBundleMergeExecutorError.nodeNotFound(serializedFileNodePath)
+        }
+
+        let auditedExternalTargets = try AoVAssetBundleCatalogMerger.auditExternalTargetPathIDs(
+            serializedFilesByExternalTargetKey: verifiedExternalTargetFiles
+        )
+        var serializedOutput = originalNode.data
+        var plans: [AoVAssetBundleCatalogMergePlan] = []
+        var rewrittenPathIDs = Set<Int64>()
+
+        for input in legacyRecords {
+            let currentSummary = try AoVSerializedFileParser.inspect(serializedOutput)
+            let objectMatches = currentSummary.serializedObjects.filter {
+                $0.pathID == input.record.pathID
+            }
+            guard objectMatches.count == 1, let object = objectMatches.first else {
+                if objectMatches.count > 1 {
+                    throw AoVUnityFSAssetBundleMergeExecutorError.ambiguousObject(input.record.pathID)
+                }
+                throw AoVUnityFSAssetBundleMergeExecutorError.objectNotFound(input.record.pathID)
+            }
+            guard object.classID == 142,
+                  let currentRecord = currentSummary.assetBundleRecords.first(where: {
+                      $0.pathID == input.record.pathID
+                  }) else {
+                throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                    "Object pathID \(input.record.pathID) không phải AssetBundle class 142 có record đọc được."
+                )
+            }
+
+            let plan = try AoVAssetBundleCatalogMerger.plan(
+                current: currentRecord,
+                legacy: input.record,
+                currentSerializedFile: currentSummary,
+                legacySerializedFile: input.serializedFile,
+                availableCurrentBundleNames: availableCurrentBundleNames,
+                verifiedExternalTargetPathIDs: auditedExternalTargets
+            )
+            guard !plan.externalTargetAuditRequired else {
+                throw AoVUnityFSAssetBundleMergeExecutorError.externalTargetAuditRequired(
+                    plan.externalTargetAuditSamples
+                )
+            }
+            plans.append(plan)
+            guard plan.mergedRecord != currentRecord else { continue }
+
+            let rewritten = try AoVSerializedFileRewriter.replaceAssetBundleRecord(
+                in: serializedOutput,
+                pathID: input.record.pathID,
+                with: plan.mergedRecord
+            )
+            guard rewritten.roundTripVerified else {
+                throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                    "SerializedFile pathID \(input.record.pathID) không qua round-trip."
+                )
+            }
+            serializedOutput = rewritten.data
+            rewrittenPathIDs.insert(input.record.pathID)
+        }
+
+        guard !rewrittenPathIDs.isEmpty else {
+            throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                "Không có thay đổi catalog nào cần ghi."
+            )
+        }
+
+        let rewrittenSerializedSummary = try AoVSerializedFileParser.inspect(serializedOutput)
+        for plan in plans {
+            let finalRecord = rewrittenSerializedSummary.assetBundleRecords.first(where: {
+                $0.pathID == plan.mergedRecord.pathID
+            })
+            guard finalRecord == plan.mergedRecord else {
+                throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                    "AssetBundle pathID \(plan.mergedRecord.pathID) không khớp batch merge plan."
+                )
+            }
+        }
+
+        let rewrite = try AoVUnityFSContentRewriter.replaceNode(
+            in: source,
+            nodePath: serializedFileNodePath,
+            with: serializedOutput
+        )
+        let verifiedBundle = try AoVUnityFSParser.inspect(rewrite.data)
+        let verifiedNodes = try AoVUnityFSParser.extractNodes(
+            rewrite.data,
+            maximumExpandedBytes: maximumExpandedBytes,
+            maximumNodeCount: max(verifiedBundle.nodes.count, 1)
+        )
+        let verifiedMatches = verifiedNodes.filter { $0.path == serializedFileNodePath }
+        guard verifiedMatches.count == 1,
+              let verifiedNode = verifiedMatches.first,
+              verifiedNode.data == serializedOutput,
+              rewrite.roundTripVerified else {
+            throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                "SerializedFile node không giữ nguyên dữ liệu sau khi UnityFS repack."
+            )
+        }
+
+        return AoVUnityFSAssetBundleBatchMergeExecutionReport(
+            data: rewrite.data,
+            nodePath: serializedFileNodePath,
+            rewrittenObjectPathIDs: rewrittenPathIDs.sorted(),
+            plans: plans,
+            rewrite: rewrite,
+            roundTripVerified: true
+        )
+    }
 
     static func merge(
         in source: Data,
