@@ -202,6 +202,9 @@ enum AoVSerializedFileObjectAppender {
         let beforeObjectTable = source.subdata(
             in: summary.metadataStartOffset..<summary.objectTableStartOffset
         )
+        let existingObjectTable = source.subdata(
+            in: summary.objectTableStartOffset..<summary.objectTableEndOffset
+        )
         let afterObjectTable = source.subdata(
             in: summary.objectTableEndOffset..<summary.metadataEndOffset
         )
@@ -218,6 +221,9 @@ enum AoVSerializedFileObjectAppender {
             value: objectCountValue
         )
 
+        // Preserve the original object table byte-for-byte, including its
+        // initial pathID alignment padding, before appending new records.
+        metadata.data.append(existingObjectTable)
         // Object records use 4-byte alignment for pathID in SerializedFile v22+.
         metadata.align(4)
         var dataRegion = source.subdata(
