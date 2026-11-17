@@ -58,9 +58,18 @@ final class AoVSerializedFileRewriterTests: XCTestCase {
         XCTAssertEqual(output.assetBundleRecords.first, replacement)
     }
 
-    func testRejectsMissingObjectReplacement() throws {
+    func testRejectsMissingAssetBundleObjectReplacement() throws {
         let original = makeSerializedFile()
-        XCTAssertThrowsError(try AoVSerializedFileRewriter.rewrite(original, replacingObjects: [999: Data([1])]))
+        let record = try XCTUnwrap(AoVSerializedFileParser.inspect(original).assetBundleRecords.first)
+        let replacement = replacing(record, name: "missing-target", dependencies: ["common"])
+
+        XCTAssertThrowsError(
+            try AoVSerializedFileRewriter.replaceAssetBundleRecord(
+                in: original,
+                pathID: 999,
+                with: replacement
+            )
+        )
     }
 
     private func replacing(
