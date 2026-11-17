@@ -1,0 +1,213 @@
+import Foundation
+import XCTest
+@testable import AOVSkinMerger
+
+final class AoVUnityFSAssetBundleMergeExecutorTests: XCTestCase {
+    func testDetectsChangedObjectPayloadBehindAnUnchangedContainerPointer() throws {
+        let nodes = objectNodes()
+        let currentPayload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: .object(["m_TestPathID": .signed(100)]),
+            littleEndian: true
+        )
+        let legacyPayload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: .object(["m_TestPathID": .signed(200)]),
+            littleEndian: true
+        )
+        let currentData = makeSerializedFile(payload: currentPayload, nodes: nodes)
+        let legacyData = makeSerializedFile(payload: legacyPayload, nodes: nodes)
+        let currentSummary = try AoVSerializedFileParser.inspect(currentData)
+        let legacySummary = try AoVSerializedFileParser.inspect(legacyData)
+        let pointer = AoVSerializedAssetPointer(fileID: 0, pathID: 1001)
+        let entry = makeEntry(pointer)
+        let currentRecord = makeBundleRecord(entry: entry)
+        let legacyRecord = makeBundleRecord(entry: entry)
+
+        let changed = try AoVUnityFSAssetBundleMergeExecutor.changedContainerKeys(
+            legacyRecord: legacyRecord,
+            currentRecord: currentRecord,
+            sourceData: legacyData,
+            destinationData: currentData,
+            sourceSummary: legacySummary,
+            destinationSummary: currentSummary
+        )
+
+        XCTAssertEqual(changed, ["assets/hero.prefab"])
+    }
+
+    func testDoesNotReplaceContainerWhenSamePointerAndObjectBytesMatch() throws {
+        let nodes = objectNodes()
+        let payload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: .object(["m_TestPathID": .signed(100)]),
+            littleEndian: true
+        )
+        let data = makeSerializedFile(payload: payload, nodes: nodes)
+        let summary = try AoVSerializedFileParser.inspect(data)
+        let entry = makeEntry(AoVSerializedAssetPointer(fileID: 0, pathID: 1001))
+        let record = makeBundleRecord(entry: entry)
+
+        let changed = try AoVUnityFSAssetBundleMergeExecutor.changedContainerKeys(
+            legacyRecord: record,
+            currentRecord: record,
+            sourceData: data,
+            destinationData: data,
+            sourceSummary: summary,
+            destinationSummary: summary
+        )
+
+        XCTAssertTrue(changed.isEmpty)
+    }
+
+    private func objectNodes() -> [AoVUnityTypeTreeNode] {
+        [
+            AoVUnityTypeTreeNode(type: "Texture2D", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_TestPathID", level: 1, byteSize: 8, metaFlags: 0)
+        ]
+    }
+
+    private func makeEntry(_ pointer: AoVSerializedAssetPointer) -> AoVSerializedAssetBundleEntry {
+        AoVSerializedAssetBundleEntry(
+            key: "assets/hero.prefab",
+            preloadIndex: 0,
+            preloadSize: 0,
+            asset: pointer
+        )
+    }
+
+    private func makeBundleRecord(
+        entry: AoVSerializedAssetBundleEntry
+    ) -> AoVSerializedAssetBundleRecord {
+        AoVSerializedAssetBundleRecord(
+            pathID: 5001,
+            name: "actor/change-detection",
+            preloadReferences: [],
+            containerEntries: [entry],
+            mainAsset: AoVSerializedAssetPointer(fileID: 0, pathID: 0),
+            mainAssetPreloadIndex: 0,
+            mainAssetPreloadSize: 0,
+            scriptCompatibilityEntries: [],
+            classCompatibilityIDs: [],
+            classCompatibilityEntries: [],
+            runtimeCompatibility: 0,
+            assetBundleName: "actor/change-detection",
+            dependencies: [],
+            isStreamedSceneAssetBundle: false,
+            trailingBytes: 0,
+            trailingData: Data()
+        )
+    }
+
+    private func makeSerializedFile(payload: Data, nodes: [AoVUnityTypeTreeNode]) -> Data {
+        var metadata = Data()
+        metadata.append(Data("2022.3.5f1\\0".utf8))
+        appendInt32(13, to: &metadata)
+        metadata.append(1)
+        appendInt32(1, to: &metadata)
+        appendInt32(28, to: &metadata)
+        metadata.append(0)
+        appendInt16(-1, to: &metadata)
+        metadata.append(Data(repeating: 0, count: 16))
+        appendTypeTree(nodes, to: &metadata)
+        appendInt32(0, to: &metadata)
+        appendInt32(1, to: &metadata)
+        align4(&metadata)
+        appendInt64(1001, to: &metadata)
+        appendInt64(0, to: &metadata)
+        appendUInt32(UInt32(payload.count), to: &metadata)
+        appendInt32(0, to: &metadata)
+        appendInt32(0, to: &metadata)
+        appendInt32(0, to: &metadata)
+        appendInt32(0, to: &metadata)
+        metadata.append(0)
+
+        let dataOffset = ((48 + metadata.count + 15) / 16) * 16
+        let fileSize = dataOffset + payload.count
+        var file = Data()
+        appendBE(UInt32(metadata.count), to: &file)
+        appendBE(UInt32(fileSize), to: &file)
+        appendBE(UInt32(22), to: &file)
+        appendBE(UInt32(dataOffset), to: &file)
+        file.append(0)
+        file.append(contentsOf: [0, 0, 0])
+        appendBE(UInt32(metadata.count), to: &file)
+        appendBE(UInt64(fileSize), to: &file)
+        appendBE(UInt64(dataOffset), to: &file)
+        appendBE(UInt64(0), to: &file)
+        file.append(metadata)
+        while file.count < dataOffset { file.append(0) }
+        file.append(payload)
+        return file
+    }
+
+    private func appendTypeTree(_ nodes: [AoVUnityTypeTreeNode], to data: inout Data) {
+        var strings = Data()
+        var offsets: [String: UInt32] = [:]
+        func intern(_ value: String) -> UInt32 {
+            if let offset = offsets[value] { return offset }
+            let offset = UInt32(strings.count)
+            strings.append(Data(value.utf8))
+            strings.append(0)
+            offsets[value] = offset
+            return offset
+        }
+        let pairs = nodes.map { (intern($0.type), intern($0.name)) }
+        appendInt32(Int32(nodes.count), to: &data)
+        appendInt32(Int32(strings.count), to: &data)
+        for (index, node) in nodes.enumerated() {
+            appendInt16(1, to: &data)
+            data.append(node.level)
+            data.append(0)
+            appendUInt32(pairs[index].0, to: &data)
+            appendUInt32(pairs[index].1, to: &data)
+            appendInt32(node.byteSize, to: &data)
+            appendInt32(Int32(index), to: &data)
+            appendUInt32(node.metaFlags, to: &data)
+            appendUInt64(0, to: &data)
+        }
+        data.append(strings)
+    }
+
+    private func appendInt16(_ value: Int16, to data: inout Data) {
+        let bits = UInt16(bitPattern: value)
+        data.append(UInt8(truncatingIfNeeded: bits))
+        data.append(UInt8(truncatingIfNeeded: bits >> 8))
+    }
+
+    private func appendInt32(_ value: Int32, to data: inout Data) {
+        appendUInt32(UInt32(bitPattern: value), to: &data)
+    }
+
+    private func appendUInt32(_ value: UInt32, to data: inout Data) {
+        for shift in stride(from: 0, through: 24, by: 8) {
+            data.append(UInt8(truncatingIfNeeded: value >> shift))
+        }
+    }
+
+    private func appendInt64(_ value: Int64, to data: inout Data) {
+        appendUInt64(UInt64(bitPattern: value), to: &data)
+    }
+
+    private func appendUInt64(_ value: UInt64, to data: inout Data) {
+        for shift in stride(from: 0, through: 56, by: 8) {
+            data.append(UInt8(truncatingIfNeeded: value >> shift))
+        }
+    }
+
+    private func appendBE(_ value: UInt32, to data: inout Data) {
+        for shift in stride(from: 24, through: 0, by: -8) {
+            data.append(UInt8(truncatingIfNeeded: value >> shift))
+        }
+    }
+
+    private func appendBE(_ value: UInt64, to data: inout Data) {
+        for shift in stride(from: 56, through: 0, by: -8) {
+            data.append(UInt8(truncatingIfNeeded: value >> shift))
+        }
+    }
+
+    private func align4(_ data: inout Data) {
+        while data.count % 4 != 0 { data.append(0) }
+    }
+}
