@@ -267,6 +267,68 @@ final class AoVModRemakeExporterTests: XCTestCase {
         }
     }
 
+    func testArchiveBasedExportLoadsCatalogsAndWritesVerifiedZIPPayload() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-RES-Archive-Coordinator-Test-\\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root, includingPropertiesForKeys: nil) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("legacy-source.zip")
+        let packerBytes = try makeUnityFS(with: .packer(makePackerCatalog()))
+        let verificationBytes = try makeUnityFS(with: .verification(makeVerificationCatalog()))
+        let sharedEntries = [
+            ("version.txt", Data("1.64.1.12\\n".utf8)),
+            ("1.64.1/assetbundle/resourcepackerinfosetall.assetbundle", packerBytes),
+            ("1.64.1/assetbundle/resourceverificationinfosetall.assetbundle", verificationBytes)
+        ]
+        try makeArchive(baseURL, entries: sharedEntries, root: root)
+        try makeArchive(legacyURL, entries: sharedEntries, root: root)
+
+        let runtimePath = "Ages/Legacy/Actor_731/CreatorSkin.pkg.bytes"
+        let payloadBytes = Data("verified legacy skin package".utf8)
+        let report = try AoVModRemakeExporter.exportVerifiedRES(
+            baseRESURL: baseURL,
+            legacyMODURLs: [legacyURL],
+            resourcePayloads: [
+                AoVModRemakeResourcePayload(
+                    archivePath: "1.64.1/" + runtimePath,
+                    ifsPath: runtimePath,
+                    data: payloadBytes
+                )
+            ],
+            verifiedFinalPackerEntries: [:],
+            verifiedFinalDatabinChecksumValues: [:],
+            verifiedFinalZIPChecksumValues: [runtimePath: 808080]
+        )
+        defer { try? FileManager.default.removeItem(at: report.outputURL) }
+
+        XCTAssertEqual(report.verificationAddedZIPPaths, [runtimePath])
+        XCTAssertEqual(report.packerAddedPaths, [])
+        XCTAssertEqual(report.addedResources, 1)
+        XCTAssertTrue(report.structurallyValidated)
+
+        let output = try Archive(url: report.outputURL, accessMode: .read)
+        XCTAssertEqual(
+            try readEntry(output, path: "1.64.1/" + runtimePath),
+            payloadBytes
+        )
+        let verificationData = try readEntry(
+            output,
+            path: "1.64.1/assetbundle/resourceverificationinfosetall.assetbundle"
+        )
+        let target = try AoVUnityFSRuntimeCatalogMergeExecutor.locateVerificationCatalog(
+            in: verificationData
+        )
+        guard case .verification(let catalog) = target.catalog else {
+            return XCTFail("Expected a Verification catalog in the exported RES.")
+        }
+        XCTAssertEqual(
+            catalog.allZipVerificationInfo.first(where: { $0.pathInIFS == runtimePath })?.crcXor,
+            808080
+        )
+    }
+
     func testExporterRejectsCatalogVersionMismatchBeforeWriting() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-RES-Catalog-Version-Test-\\(UUID().uuidString)", isDirectory: true)
