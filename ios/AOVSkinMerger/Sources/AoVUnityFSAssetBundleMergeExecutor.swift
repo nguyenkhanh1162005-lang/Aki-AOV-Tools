@@ -124,13 +124,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
 
         for input in legacyRecords {
             let currentSummary = try AoVSerializedFileParser.inspect(serializedOutput)
-            let objectMatches = currentSummary.serializedObjects.filter {
-                $0.pathID == input.record.pathID
-            }
-            guard objectMatches.count == 1, let object = objectMatches.first else {
-                if objectMatches.count > 1 {
-                    throw AoVUnityFSAssetBundleMergeExecutorError.ambiguousObject(input.record.pathID)
-                }
+            guard let object = currentSummary.serializedObjectsByPathID[input.record.pathID] else {
                 throw AoVUnityFSAssetBundleMergeExecutorError.objectNotFound(input.record.pathID)
             }
             guard object.classID == 142,
@@ -567,15 +561,11 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         }
 
         var selected = Set<Int64>()
-        let sourceObjectsByID = Dictionary(
-            grouping: sourceSummary.serializedObjects,
-            by: \.pathID
-        )
+        let sourceObjectsByID = sourceSummary.serializedObjectsByPathID
         let sourceBundleRootIDs = Set(sourceSummary.assetBundleRecords.map(\.pathID))
         while let pathID = pending.popLast() {
             if pathID == legacyRecord.pathID { continue }
-            guard let matches = sourceObjectsByID[pathID], matches.count == 1,
-                  let object = matches.first else {
+            guard let object = sourceObjectsByID[pathID] else {
                 throw AoVUnityFSAssetBundleMergeExecutorError.objectNotFound(pathID)
             }
             guard !sourceBundleRootIDs.contains(pathID), object.classID != 142 else {
@@ -721,11 +711,8 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         if let cached = graphDiffCache.values[pointer.pathID] { return cached }
         guard graphDiffCache.visited.insert(pointer.pathID).inserted else { return false }
 
-        let sourceMatches = sourceSummary.serializedObjects.filter { $0.pathID == pointer.pathID }
-        let destinationMatches = destinationSummary.serializedObjects.filter { $0.pathID == pointer.pathID }
-        guard sourceMatches.count == 1, destinationMatches.count == 1,
-              let sourceObject = sourceMatches.first,
-              let destinationObject = destinationMatches.first,
+        guard let sourceObject = sourceSummary.serializedObjectsByPathID[pointer.pathID],
+              let destinationObject = destinationSummary.serializedObjectsByPathID[pointer.pathID],
               sourceObject.classID == destinationObject.classID,
               sourceObject.byteSize == destinationObject.byteSize,
               let sourceType = sourceSummary.typeInfo(for: sourceObject),
