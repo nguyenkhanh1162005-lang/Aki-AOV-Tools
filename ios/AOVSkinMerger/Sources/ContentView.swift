@@ -59,7 +59,7 @@ struct ContentView: View {
                             Label("Nguồn MOD", systemImage: "doc.zipper").font(.headline)
                             Text("Chọn nhiều ZIP. File được giữ trên iPhone, không tải lên máy chủ.")
                                 .font(.footnote).foregroundColor(.secondary)
-                            Button { isImporting = true } label: {
+                            Button { importPurpose = .merger; isImporting = true } label: {
                                 HStack {
                                     if isCopyingFiles { ProgressView() }
                                     Label(
@@ -385,7 +385,7 @@ struct ContentView: View {
                         status: selectedURLs.isEmpty ? "Chưa chọn file" : "\(selectedURLs.count) ZIP đã chọn",
                         icon: "folder.fill",
                         actionTitle: "Chọn File"
-                    ) { isImporting = true }
+                    ) { importPurpose = .merger; isImporting = true }
 
                     homeSelectionCard(
                         title: "Chọn Gói Nền",
@@ -395,6 +395,7 @@ struct ContentView: View {
                         actionTitle: "Chọn Gói"
                     ) {
                         if selectedURLs.isEmpty {
+                            importPurpose = .merger
                             isImporting = true
                         } else {
                             showBasePicker = true
@@ -412,6 +413,7 @@ struct ContentView: View {
                         if selectedURLs.count >= 2 {
                             runModMerge()
                         } else if selectedURLs.isEmpty {
+                            importPurpose = .merger
                             isImporting = true
                         } else {
                             selectedTab = "Tính năng"
@@ -597,7 +599,7 @@ struct ContentView: View {
                 Text("THÔNG TIN").font(.system(size: 10, weight: .black, design: .rounded)).tracking(2).foregroundStyle(.white.opacity(0.55))
                 Text("AKI AOV SKIN").font(.system(size: 27, weight: .black, design: .rounded)).foregroundStyle(.white)
                 VStack(alignment: .leading, spacing: 12) {
-                    infoRow("Phiên bản", "0.5.0")
+                    infoRow("Phiên bản", "0.5.1")
                     infoRow("Nền tảng", "iOS 26.5+")
                     infoRow("Xử lý file", "Trực tiếp trên iPhone")
                     infoRow("Máy chủ", "Không tải ZIP lên")
@@ -741,7 +743,7 @@ struct ContentView: View {
                 Text("GỘP SKIN · TRẢI NGHIỆM ĐỈNH CAO")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .tracking(1.2).foregroundStyle(Color.white.opacity(0.72))
-                Text("Bản iOS 0.5.0 · yêu cầu iOS 26.5+")
+                Text("Bản iOS 0.5.1 · yêu cầu iOS 26.5+")
                     .font(.caption2.weight(.semibold)).foregroundStyle(.white.opacity(0.58))
                 Text("Xử lý file ngay trên iPhone. Bộ ghép sẽ dừng khi gặp xung đột chưa có adapter đã xác minh.")
                     .font(.footnote).foregroundStyle(.white.opacity(0.78))
