@@ -98,6 +98,12 @@ struct AoVRemakeCatalogRecordSnapshot: Codable, Sendable, Identifiable {
     let invalidPreloadRangeCount: Int
     let invalidPreloadRangeSamples: [String]
     let classCompatibilityIDs: [Int32]
+    let resolvedLocalPointerCount: Int
+    let externalPointerCount: Int
+    let nullPointerCount: Int
+    let unresolvedLocalPointerCount: Int
+    let invalidExternalPointerCount: Int
+    let pointerAuditSamples: [String]
     let mainAssetFileID: Int32
     let mainAssetPathID: Int64
     let dependencies: [String]
@@ -130,6 +136,10 @@ struct AoVRemakeCatalogRecordFinding: Codable, Sendable, Identifiable {
     let invalidCurrentPreloadRangeCount: Int
     let mainAssetPointerChanged: Bool
     let classCompatibilityChanged: Bool
+    let unresolvedLegacyLocalPointerCount: Int
+    let unresolvedCurrentLocalPointerCount: Int
+    let invalidLegacyExternalPointerCount: Int
+    let invalidCurrentExternalPointerCount: Int
     let dependenciesAddedInCurrent: [String]
     let dependenciesRemovedInCurrent: [String]
     let legacyOnlyKeySamples: [String]
@@ -157,6 +167,10 @@ struct AoVRemakeCatalogKindReport: Codable, Sendable {
     let invalidCurrentPreloadRangeCount: Int
     let changedMainAssetPointerCount: Int
     let changedClassCompatibilityCount: Int
+    let unresolvedLegacyLocalPointerCount: Int
+    let unresolvedCurrentLocalPointerCount: Int
+    let invalidLegacyExternalPointerCount: Int
+    let invalidCurrentExternalPointerCount: Int
     let dependenciesAddedInCurrentCount: Int
     let dependenciesRemovedInCurrentCount: Int
     let findings: [AoVRemakeCatalogRecordFinding]
@@ -188,6 +202,15 @@ struct AoVModRemakeReport: Codable, Sendable {
     /// Analysis is deliberately separate from the existing skin merger.
     /// No output is advertised until catalog remapping and UnityFS rebuilding exist.
     var rebuildAvailable: Bool { false }
+}
+
+private struct AoVRemakeCatalogPointerAudit {
+    let resolvedLocal: Int
+    let external: Int
+    let null: Int
+    let unresolvedLocal: Int
+    let invalidExternal: Int
+    let samples: [String]
 }
 
 enum AoVModRemakeAnalyzer {
@@ -366,7 +389,8 @@ enum AoVModRemakeAnalyzer {
                 bundle.catalogNodeSamples.flatMap { sample in
                     guard let serialized = sample.serializedFile else { return [] }
                     return serialized.assetBundleRecords.map { record in
-                        AoVRemakeCatalogRecordSnapshot(
+                        let pointerAudit = auditPointers(record, in: serialized)
+                        return AoVRemakeCatalogRecordSnapshot(
                             sourceArchive: inventory.fileName,
                             catalogPath: bundle.path,
                             nodePath: sample.path,
@@ -392,6 +416,12 @@ enum AoVModRemakeAnalyzer {
                                     end.overflow || end.partialValue > Int64(record.preloadReferences.count)
                             }.prefix(8).map { $0.key }),
                             classCompatibilityIDs: record.classCompatibilityIDs,
+                            resolvedLocalPointerCount: pointerAudit.resolvedLocal,
+                            externalPointerCount: pointerAudit.external,
+                            nullPointerCount: pointerAudit.null,
+                            unresolvedLocalPointerCount: pointerAudit.unresolvedLocal,
+                            invalidExternalPointerCount: pointerAudit.invalidExternal,
+                            pointerAuditSamples: pointerAudit.samples,
                             mainAssetFileID: record.mainAsset.fileID,
                             mainAssetPathID: record.mainAsset.pathID,
                             dependencies: record.dependencies,
@@ -412,6 +442,57 @@ enum AoVModRemakeAnalyzer {
                     }
                 }
             }
+    }
+
+    private static func auditPointers(
+        _ record: AoVSerializedAssetBundleRecord,
+        in serialized: AoVSerializedFileSummary
+    ) -> AoVRemakeCatalogPointerAudit {
+        let pointers: [(String, AoVSerializedAssetPointer)] =
+            record.preloadReferences.enumerated().map { ("preload[\($0.offset)]", $0.element) } +
+            record.containerEntries.map { ("container[\($0.key)]", $0.asset) } +
+            [("mainAsset", record.mainAsset)] +
+            record.classCompatibilityEntries.map { ("classCompat[\($0.classID)]", $0.info.asset) }
+
+        let localIDs = serialized.serializedObjectPathIDs
+        let externalCount = serialized.externalReferences.count
+        var resolvedLocal = 0
+        var external = 0
+        var null = 0
+        var unresolvedLocal = 0
+        var invalidExternal = 0
+        var samples: [String] = []
+
+        for (label, pointer) in pointers {
+            if pointer.pathID == 0 {
+                null += 1
+            } else if pointer.fileID == 0 {
+                if localIDs.contains(pointer.pathID) {
+                    resolvedLocal += 1
+                } else {
+                    unresolvedLocal += 1
+                    if samples.count < 12 {
+                        samples.append("\(label) -> local pathID \(pointer.pathID) không có trong object table")
+                    }
+                }
+            } else if pointer.fileID > 0 && Int(pointer.fileID) <= externalCount {
+                external += 1
+            } else {
+                invalidExternal += 1
+                if samples.count < 12 {
+                    samples.append("\(label) -> fileID \(pointer.fileID) ngoài \(externalCount) external reference")
+                }
+            }
+        }
+
+        return AoVRemakeCatalogPointerAudit(
+            resolvedLocal: resolvedLocal,
+            external: external,
+            null: null,
+            unresolvedLocal: unresolvedLocal,
+            invalidExternal: invalidExternal,
+            samples: samples
+        )
     }
 
     /// Compare logical AssetBundle names and container keys. Pointers are reported
@@ -436,6 +517,10 @@ enum AoVModRemakeAnalyzer {
         var invalidCurrentPreloadRanges = 0
         var changedMainAssetPointers = 0
         var changedClassCompatibility = 0
+        var unresolvedLegacyLocalPointers = 0
+        var unresolvedCurrentLocalPointers = 0
+        var invalidLegacyExternalPointers = 0
+        var invalidCurrentExternalPointers = 0
         var dependenciesAdded = 0
         var dependenciesRemoved = 0
         var findings: [AoVRemakeCatalogRecordFinding] = []
@@ -450,6 +535,8 @@ enum AoVModRemakeAnalyzer {
                 status = .missingFromCurrent
                 missingRecordCount += 1
                 invalidLegacyPreloadRanges += oldRecord.invalidPreloadRangeCount
+                unresolvedLegacyLocalPointers += oldRecord.unresolvedLocalPointerCount
+                invalidLegacyExternalPointers += oldRecord.invalidExternalPointerCount
                 findings.append(
                     AoVRemakeCatalogRecordFinding(
                         sourceArchive: oldRecord.sourceArchive,
@@ -468,6 +555,10 @@ enum AoVModRemakeAnalyzer {
                         invalidCurrentPreloadRangeCount: 0,
                         mainAssetPointerChanged: false,
                         classCompatibilityChanged: false,
+                        unresolvedLegacyLocalPointerCount: oldRecord.unresolvedLocalPointerCount,
+                        unresolvedCurrentLocalPointerCount: 0,
+                        invalidLegacyExternalPointerCount: oldRecord.invalidExternalPointerCount,
+                        invalidCurrentExternalPointerCount: 0,
                         dependenciesAddedInCurrent: [],
                         dependenciesRemovedInCurrent: [],
                         legacyOnlyKeySamples: Array(oldRecord.containerEntries.prefix(8).map(\.key)),
@@ -483,6 +574,10 @@ enum AoVModRemakeAnalyzer {
                 ambiguousRecordCount += 1
                 invalidLegacyPreloadRanges += oldRecord.invalidPreloadRangeCount
                 invalidCurrentPreloadRanges += candidates.reduce(0) { $0 + $1.invalidPreloadRangeCount }
+                unresolvedLegacyLocalPointers += oldRecord.unresolvedLocalPointerCount
+                unresolvedCurrentLocalPointers += candidates.reduce(0) { $0 + $1.unresolvedLocalPointerCount }
+                invalidLegacyExternalPointers += oldRecord.invalidExternalPointerCount
+                invalidCurrentExternalPointers += candidates.reduce(0) { $0 + $1.invalidExternalPointerCount }
                 findings.append(
                     AoVRemakeCatalogRecordFinding(
                         sourceArchive: oldRecord.sourceArchive,
@@ -501,6 +596,10 @@ enum AoVModRemakeAnalyzer {
                         invalidCurrentPreloadRangeCount: candidates.reduce(0) { $0 + $1.invalidPreloadRangeCount },
                         mainAssetPointerChanged: false,
                         classCompatibilityChanged: false,
+                        unresolvedLegacyLocalPointerCount: oldRecord.unresolvedLocalPointerCount,
+                        unresolvedCurrentLocalPointerCount: candidates.reduce(0) { $0 + $1.unresolvedLocalPointerCount },
+                        invalidLegacyExternalPointerCount: oldRecord.invalidExternalPointerCount,
+                        invalidCurrentExternalPointerCount: candidates.reduce(0) { $0 + $1.invalidExternalPointerCount },
                         dependenciesAddedInCurrent: [],
                         dependenciesRemovedInCurrent: [],
                         legacyOnlyKeySamples: [],
@@ -527,6 +626,10 @@ enum AoVModRemakeAnalyzer {
             let recordMainAssetPointerChanged = oldRecord.mainAssetFileID != newRecord.mainAssetFileID ||
                 oldRecord.mainAssetPathID != newRecord.mainAssetPathID
             let recordClassCompatibilityChanged = oldRecord.classCompatibilityIDs != newRecord.classCompatibilityIDs
+            let recordUnresolvedLegacyLocalPointers = oldRecord.unresolvedLocalPointerCount
+            let recordUnresolvedCurrentLocalPointers = newRecord.unresolvedLocalPointerCount
+            let recordInvalidLegacyExternalPointers = oldRecord.invalidExternalPointerCount
+            let recordInvalidCurrentExternalPointers = newRecord.invalidExternalPointerCount
             var legacyOnlySamples: [String] = []
             var currentOnlySamples: [String] = []
             var pointerChangedSamples: [String] = []
@@ -567,6 +670,10 @@ enum AoVModRemakeAnalyzer {
             invalidCurrentPreloadRanges += recordInvalidCurrentRanges
             if recordMainAssetPointerChanged { changedMainAssetPointers += 1 }
             if recordClassCompatibilityChanged { changedClassCompatibility += 1 }
+            unresolvedLegacyLocalPointers += recordUnresolvedLegacyLocalPointers
+            unresolvedCurrentLocalPointers += recordUnresolvedCurrentLocalPointers
+            invalidLegacyExternalPointers += recordInvalidLegacyExternalPointers
+            invalidCurrentExternalPointers += recordInvalidCurrentExternalPointers
             mappedKeys += recordMappedKeys
             legacyOnlyKeys += recordLegacyOnly
             currentOnlyKeys += recordCurrentOnly
@@ -592,6 +699,10 @@ enum AoVModRemakeAnalyzer {
                     invalidCurrentPreloadRangeCount: recordInvalidCurrentRanges,
                     mainAssetPointerChanged: recordMainAssetPointerChanged,
                     classCompatibilityChanged: recordClassCompatibilityChanged,
+                    unresolvedLegacyLocalPointerCount: recordUnresolvedLegacyLocalPointers,
+                    unresolvedCurrentLocalPointerCount: recordUnresolvedCurrentLocalPointers,
+                    invalidLegacyExternalPointerCount: recordInvalidLegacyExternalPointers,
+                    invalidCurrentExternalPointerCount: recordInvalidCurrentExternalPointers,
                     dependenciesAddedInCurrent: Array(added.prefix(12)),
                     dependenciesRemovedInCurrent: Array(removed.prefix(12)),
                     legacyOnlyKeySamples: legacyOnlySamples,
@@ -630,6 +741,10 @@ enum AoVModRemakeAnalyzer {
             invalidCurrentPreloadRangeCount: invalidCurrentPreloadRanges,
             changedMainAssetPointerCount: changedMainAssetPointers,
             changedClassCompatibilityCount: changedClassCompatibility,
+            unresolvedLegacyLocalPointerCount: unresolvedLegacyLocalPointers,
+            unresolvedCurrentLocalPointerCount: unresolvedCurrentLocalPointers,
+            invalidLegacyExternalPointerCount: invalidLegacyExternalPointers,
+            invalidCurrentExternalPointerCount: invalidCurrentExternalPointers,
             dependenciesAddedInCurrentCount: dependenciesAdded,
             dependenciesRemovedInCurrentCount: dependenciesRemoved,
             findings: Array(findings.prefix(maximumCatalogFindings))
