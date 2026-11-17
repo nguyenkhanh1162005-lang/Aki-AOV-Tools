@@ -294,7 +294,7 @@ enum AoVModRemakeExporter {
         if innerURL != nil, let resourceEntry = nestedResourceEntries.first {
             var outerAliases: [String: Data] = [:]
             for (path, data) in finalPayloads {
-                let projectedPath = try normalizeArchivePath("Resources/" + path)
+                let projectedPath = try outerLooseResourcePath(path)
                 if let existing = outerAliases[projectedPath], existing != data {
                     throw AoVModRemakeExporterError.duplicateArchivePath(projectedPath)
                 }
@@ -386,7 +386,7 @@ enum AoVModRemakeExporter {
         let path = raw.replacingOccurrences(of: "\\", with: "/")
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         guard !path.isEmpty, !path.hasPrefix("/"), !path.hasPrefix("~"),
-              !parts.contains(".."), !parts.contains("."),
+              !parts.contains(""), !parts.contains(".."), !parts.contains("."),
               !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw AoVModRemakeExporterError.invalidArchivePath(raw)
         }
@@ -394,6 +394,20 @@ enum AoVModRemakeExporter {
             return parts.dropFirst(2).joined(separator: "/")
         }
         return path
+    }
+
+    private static func outerLooseResourcePath(_ normalizedResourcePath: String) throws -> String {
+        let normalized = try normalizeArchivePath(normalizedResourcePath)
+        let components = normalized.split(separator: "/", omittingEmptySubsequences: false)
+        guard let first = components.first else {
+            throw AoVModRemakeExporterError.invalidArchivePath(normalizedResourcePath)
+        }
+        let versionPattern = #"^\\d+\\.\\d+(?:\\.\\d+)?$"#
+        if first.range(of: versionPattern, options: .regularExpression) != nil,
+           components.count >= 2 {
+            return components.dropFirst().joined(separator: "/")
+        }
+        return normalized
     }
 
     private static func normalizeRuntimePath(_ raw: String) -> String {
