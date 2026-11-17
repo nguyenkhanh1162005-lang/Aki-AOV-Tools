@@ -172,9 +172,7 @@ enum AoVUnityFSContentRewriter {
         with replacement: AoVSerializedAssetBundleRecord
     ) throws -> AoVUnityFSContentRewriteReport {
         let info = try AoVUnityFSParser.inspect(source)
-        guard info.totalUncompressedBytes <= UInt64(512 * 1024 * 1024) else {
-            throw AoVUnityFSContentRewriteError.expandedArchiveTooLarge
-        }
+        try validateWritableTemplate(info)
         let extracted = try AoVUnityFSParser.extractNodes(
             source,
             maximumExpandedBytes: UInt64(512 * 1024 * 1024),
