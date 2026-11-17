@@ -84,14 +84,17 @@ final class AoVUnityFSParserTests: XCTestCase {
         XCTAssertThrowsError(try AoVUnityFSParser.inspect(bundle))
     }
 
-    func testRejectsCompressedMetadataModesNotYetImplemented() {
-        let bundle = makeBundle(flags: 0x41)
-        XCTAssertThrowsError(try AoVUnityFSParser.inspect(bundle)) { error in
-            guard let parserError = error as? AoVUnityFSError,
-                  case .unsupportedInfoCompression(1) = parserError else {
-                return XCTFail("Expected unsupported LZMA metadata, got \(error)")
-            }
-        }
+    func testInspectsAndExtractsUnityFSWithLZMABlockInfo() throws {
+        let encoded = "VW5pdHlGUwAAAAAGNS4wLjAAMjAyMC4zLjM0ZjEAAAAAAAAAAGwAAAAlAAAAPwAAAEFdABAAAAAAZtpnmFVjFk2iV6wNtW3YSNbBKUyv8zen///yJcAAbGVnYWN5LWFvdi1ibG9jay1sem1h"
+        let bundle = try XCTUnwrap(Data(base64Encoded: encoded))
+        let info = try AoVUnityFSParser.inspect(bundle)
+
+        XCTAssertEqual(info.blockInfoCompression, "LZMA")
+        XCTAssertEqual(info.blockInfoLayout, .standard)
+        XCTAssertEqual(info.nodes.map(\.path), ["CAB-lzma"])
+
+        let extracted = try AoVUnityFSParser.extractNodes(bundle)
+        XCTAssertEqual(extracted.first?.data, Data("legacy-aov-block-lzma".utf8))
     }
 
     func testRejectsDeclaredFileSizeMismatch() {
@@ -133,12 +136,37 @@ final class AoVUnityFSParserTests: XCTestCase {
         XCTAssertEqual(extracted.first?.data, payload)
     }
 
-    func testRejectsUnsupportedLZMABlockData() {
-        let bundle = makeBundle(blockCompression: 1)
+    func testExtractsNodeFromLZMACompressedDataBlock() throws {
+        let encoded = "VW5pdHlGUwAAAAAGNS4wLjAAMjAyMC4zLjM0ZjEAAAAAAAAAAJYAAAA/AAAAPwAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAABUAAAAlAAEAAAABAAAAAAAAAAAAAAAAAAAAFQAAAABDQUItbHptYQBdABAAAAA2GUkpepqG5vS+QhEmWilv9ykni/SwzS+V///HpQAA"
+        let bundle = try XCTUnwrap(Data(base64Encoded: encoded))
+
+        let extracted = try AoVUnityFSParser.extractNodes(bundle)
+        XCTAssertEqual(extracted.first?.path, "CAB-lzma")
+        XCTAssertEqual(extracted.first?.data, Data("legacy-aov-block-lzma".utf8))
+    }
+
+    func testRejectsUnsupportedLZHAMBlockData() {
+        let bundle = makeBundle(blockCompression: 4)
         XCTAssertThrowsError(try AoVUnityFSParser.extractNodes(bundle)) { error in
             guard let parserError = error as? AoVUnityFSError,
-                  case .unsupportedBlockCompression(1) = parserError else {
-                return XCTFail("Expected unsupported LZMA block, got \(error)")
+                  case .unsupportedBlockCompression(4) = parserError else {
+                return XCTFail("Expected unsupported LZHAM block, got \(error)")
+            }
+        }
+    }
+
+    func testRejectsLZMADictionaryAboveSafetyLimit() {
+        let properties = Data([93, 0, 0, 0, 0x10]) // 256 MiB dictionary
+        XCTAssertThrowsError(
+            try AoVUnityFSParser.decompressLZMA(
+                properties,
+                expectedSize: 4,
+                maximumOutputSize: 64
+            )
+        ) { error in
+            guard let parserError = error as? AoVUnityFSError,
+                  case .resourceLimit = parserError else {
+                return XCTFail("Expected dictionary resource-limit rejection, got \(error)")
             }
         }
     }
