@@ -297,13 +297,18 @@ enum AoVSerializedFileParser {
             reader.littleEndian = endianFlag == 0
 
             if formatVersion >= 22 {
-                // Unity 2020+ extended header replaces the legacy size/offset fields.
+                // Unity's 48-byte SerializedFile header is big-endian even when
+                // the metadata/data section is little-endian. Switch back to the
+                // payload endianness only after reading the widened header fields.
+                let payloadLittleEndian = reader.littleEndian
+                reader.littleEndian = false
                 metadataSize = UInt64(try reader.readUInt32("extended metadata size"))
                 fileSizeFieldOffset = reader.offset
                 let extendedFileSize = try reader.readInt64("extended file size")
                 dataOffsetFieldOffset = reader.offset
                 let extendedDataOffset = try reader.readInt64("extended data offset")
                 _ = try reader.readInt64("extended unknown header field")
+                reader.littleEndian = payloadLittleEndian
                 guard extendedFileSize >= 0, extendedDataOffset >= 0 else {
                     throw AoVSerializedFileError.invalidHeader("extended size/offset âm.")
                 }
