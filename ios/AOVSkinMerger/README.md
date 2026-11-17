@@ -7,7 +7,7 @@ This is an **unsigned iOS device-build prototype**. It is not a universal or gam
 - Import multiple MOD ZIP archives from the iOS Files picker. Source files remain in the app sandbox and are not uploaded.
 - Inventory ZIP entries, validate CRC, calculate SHA-256, inspect nested `Resources.zip`, validate paths, and compare game version markers.
 - Decode and encode the currently supported AoV AES-CBC, AES+Zstandard, and standalone Zstandard wrappers; preserve wrapper mode and require round-trip verification.
-- Inspect UnityFS AssetBundle headers, engine/format versions, archive flags, block-info metadata, block compression descriptors, and directory node paths. For read-only inspection, decompress block payloads using none/LZ4/LZ4HC and extract directory nodes under a 128 MiB catalog budget. Extracted catalog nodes are also checked for Unity SerializedFile headers, type/object tables, and AssetBundle class ID 142 object ranges. The scanner limits UnityFS input to 64 MiB per bundle and 256 MiB total per archive scan. LZMA/LZHAM block data remains unsupported.
+- Inspect UnityFS AssetBundle headers, engine/format versions, archive flags, block-info metadata, block compression descriptors, and directory node paths. For read-only inspection, decompress block payloads using none/LZ4/LZ4HC and extract directory nodes under a 128 MiB catalog budget. Extracted catalog nodes are checked for Unity SerializedFile type/object tables and class 142 AssetBundle objects; supported Android/iOS layouts expose preload counts, container keys, bundle names and dependency strings. This is inventory only and does not modify catalog bytes.
 - Detect Actor IDs and merge supported MSES v7 rows, IFix HeroSkin patches, and supported CommonActions tracks/skin conditions with schema and round-trip checks.
 - Preserve unique-path AssetReferenceSet resources byte-for-byte. This does not merge conflicting baseSubset/skinSubset graphs.
 - Add new Wwise BNK files byte-for-byte only when the read-only append-only checker validates Wwise version, bank IDs, DIDX media IDs/payload hashes, HIRC object IDs/types/payload hashes, and overlapping platform/locale namespaces.
@@ -28,7 +28,7 @@ This is an **unsigned iOS device-build prototype**. It is not a universal or gam
 ## Not yet implemented or verified
 
 - UnityFS AssetBundle rebuilding, LZMA/LZHAM data-block support, and modification of extracted bundle contents. Current extraction is read-only.
-- Semantic decoding and merge of Unity AssetBundle class 142 fields (`m_PreloadTable`, `m_Container`, `m_Dependencies`, compatibility records), dependency IDs and verification checksums. Current build indexes the SerializedFile and locates class 142 object ranges but does not parse or rewrite those object fields; catalog-dependent AssetBundles/Databin resources remain blocked.
+- Merging Packer/Verification catalog objects, rewriting dependency IDs, container references or verification checksums, and rebuilding UnityFS. The current build parses supported class 142 AssetBundle fields read-only; unsupported target-platform layouts and catalog-dependent merges remain blocked.
 - Semantic merge of AssetReferenceSet `baseSubset`/`skinSubset` graphs when the same AssetRef path has different payloads.
 - Wwise HIRC reference-graph parsing/remapping, standalone WEM pairing, external media, unknown Wwise chunks, and same-path BNK replacement.
 - Unknown MSES/IFix schemas and unsupported CommonActions condition trees.
