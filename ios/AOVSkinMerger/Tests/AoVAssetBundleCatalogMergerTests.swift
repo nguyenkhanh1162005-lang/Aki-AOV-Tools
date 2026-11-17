@@ -158,6 +158,38 @@ final class AoVAssetBundleCatalogMergerTests: XCTestCase {
         }
     }
 
+    func testExistingKeyWithDifferentLegacyPointerIsRetainedFromCurrentRES() throws {
+        let currentPointer = AoVSerializedAssetPointer(fileID: 0, pathID: 100)
+        let legacyPointer = AoVSerializedAssetPointer(fileID: 0, pathID: 200)
+        let currentSummary = makeSummary(localPathIDs: [100])
+        let legacySummary = makeSummary(localPathIDs: [200])
+        let current = record(
+            bundle: "actor/6006",
+            preloads: [currentPointer],
+            entries: [entry("assets/hero.prefab", index: 0, size: 1, pointer: currentPointer)],
+            dependencies: []
+        )
+        let legacy = record(
+            bundle: "actor/6006",
+            preloads: [legacyPointer],
+            entries: [entry("assets/hero.prefab", index: 0, size: 1, pointer: legacyPointer)],
+            dependencies: []
+        )
+
+        let plan = try AoVAssetBundleCatalogMerger.plan(
+            current: current,
+            legacy: legacy,
+            currentSerializedFile: currentSummary,
+            legacySerializedFile: legacySummary,
+            availableCurrentBundleNames: ["actor/6006"]
+        )
+
+        XCTAssertTrue(plan.addedContainerKeys.isEmpty)
+        XCTAssertEqual(plan.alreadyPresentContainerKeys, ["assets/hero.prefab"])
+        XCTAssertEqual(plan.currentVersionRetainedPointerConflictKeys, ["assets/hero.prefab"])
+        XCTAssertEqual(plan.mergedRecord.containerEntries.first?.asset, currentPointer)
+    }
+
     private func makeSummary(
         localPathIDs: [Int64],
         externalReferences: [AoVSerializedFileExternalReference] = []
