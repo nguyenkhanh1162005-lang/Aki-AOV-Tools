@@ -425,12 +425,7 @@ enum AoVUnityFSParser {
         }
         var compressedInfo = data.subdata(in: infoOffset..<(infoOffset + compressedLength))
         if usesAoVEncryption {
-            compressedInfo = try AoVSM4.cryptCBC(
-                compressedInfo,
-                key: Self.aovBlockSM4Key,
-                iv: Self.aovBlockSM4IV,
-                decrypt: true
-            )
+            compressedInfo = try cryptAoVBlockInfo(compressedInfo, decrypt: true)
         }
         let infoCompressionCode = flags & 0x3F
         let infoCompression = try decompressBlockInfo(
@@ -747,6 +742,56 @@ enum AoVUnityFSParser {
             appendHint(lower, limit)
         }
         return hints
+    }
+
+    /// Encrypts the 16-byte little-endian UnityFS AoV header fields and applies
+    /// the same per-word byte reversal expected by the AoV loader.
+    static func encryptAoVHeader(_ plaintext: Data) throws -> Data {
+        guard plaintext.count == 16 else {
+            throw AoVUnityFSError.decryptionFailed("Header AES phải có đúng 16 byte.")
+        }
+        var encrypted = Data(count: 16)
+        let outputCapacity = encrypted.count
+        var outputLength: size_t = 0
+        let status = plaintext.withUnsafeBytes { inputBytes in
+            Self.aovHeaderAESKey.withUnsafeBytes { keyBytes in
+                Self.aovHeaderAESIV.withUnsafeBytes { ivBytes in
+                    encrypted.withUnsafeMutableBytes { outputBytes in
+                        CCCrypt(
+                            CCOperation(kCCEncrypt),
+                            CCAlgorithm(kCCAlgorithmAES),
+                            CCOptions(0),
+                            keyBytes.baseAddress,
+                            Self.aovHeaderAESKey.count,
+                            ivBytes.baseAddress,
+                            inputBytes.baseAddress,
+                            plaintext.count,
+                            outputBytes.baseAddress,
+                            outputCapacity,
+                            &outputLength
+                        )
+                    }
+                }
+            }
+        }
+        guard status == kCCSuccess, outputLength == 16 else {
+            throw AoVUnityFSError.decryptionFailed("AES-CBC header encrypt trả về trạng thái \\(status).")
+        }
+        let bytes = Array(encrypted)
+        var reordered = Data()
+        reordered.append(contentsOf: bytes[0..<8].reversed())
+        reordered.append(contentsOf: bytes[8..<12].reversed())
+        reordered.append(contentsOf: bytes[12..<16].reversed())
+        return reordered
+    }
+
+    static func cryptAoVBlockInfo(_ data: Data, decrypt: Bool) throws -> Data {
+        try AoVSM4.cryptCBC(
+            data,
+            key: Self.aovBlockSM4Key,
+            iv: Self.aovBlockSM4IV,
+            decrypt: decrypt
+        )
     }
 
     private static func decryptAoVHeader(_ encrypted: Data) throws -> Data {
