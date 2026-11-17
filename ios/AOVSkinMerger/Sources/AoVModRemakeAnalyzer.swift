@@ -240,6 +240,11 @@ private struct AoVRemakeCatalogPlanAccumulator {
     var hasChanges = false
 }
 
+struct AoVModRemakeCatalogInputs: Sendable {
+    let packer: [(source: String, catalog: AoVRuntimeResourcePackerCatalog)]
+    let verification: [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)]
+}
+
 struct AoVModRemakeReport: Codable, Sendable {
     let base: ArchiveInventory
     let legacy: [ArchiveInventory]
@@ -581,6 +586,34 @@ enum AoVModRemakeAnalyzer {
             catalogMergePlanFindings: catalogMergePlanFindings,
             warnings: warnings
         )
+    }
+
+    /// Loads actual class-114 runtime catalogs from legacy MOD archives for
+    /// the export stage. It reads each source independently and never uses
+    /// filenames or payload bytes as hard-coded merge fixtures.
+    static func loadRuntimeCatalogInputs(
+        legacyMODURLs: [URL]
+    ) throws -> AoVModRemakeCatalogInputs {
+        guard !legacyMODURLs.isEmpty else { throw AoVModRemakeError.noLegacyMods }
+        guard legacyMODURLs.count <= maximumLegacyMods else { throw AoVModRemakeError.tooManyLegacyMods }
+
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-AOV-CATALOG-SOURCES-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        var packer: [(source: String, catalog: AoVRuntimeResourcePackerCatalog)] = []
+        var verification: [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)] = []
+        for url in legacyMODURLs {
+            let scanURL = try resolveResourceArchive(url, tempRoot: tempRoot)
+            guard let inventory = try ArchiveScanner.analyze([scanURL]).archives.first else {
+                throw AoVModRemakeError.invalidArchive(url.lastPathComponent)
+            }
+            let namedInventory = relabel(inventory, as: url.lastPathComponent)
+            packer.append(contentsOf: runtimePackerCatalogs(in: namedInventory))
+            verification.append(contentsOf: runtimeVerificationCatalogs(in: namedInventory))
+        }
+        return AoVModRemakeCatalogInputs(packer: packer, verification: verification)
     }
 
     private static func runtimePackerCatalogs(
