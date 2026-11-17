@@ -191,15 +191,17 @@ struct ContentView: View {
             .toolbar(.hidden, for: .navigationBar)
             .tint(.white)
             .preferredColorScheme(.dark)
-            .fullScreenCover(isPresented: $isImporting) {
-                ZIPDocumentPicker(
+            .background {
+                ZIPDocumentPickerPresenter(
+                    isPresented: $isImporting,
                     onPick: { urls in
                         isImporting = false
                         importFiles(.success(urls), purpose: importPurpose)
                     },
                     onCancel: { isImporting = false }
                 )
-                .ignoresSafeArea()
+                .frame(width: 1, height: 1)
+                .allowsHitTesting(false)
             }
             .onOpenURL { url in
                 importFiles(.success([url]))
@@ -1394,7 +1396,8 @@ struct ContentView: View {
     }
 }
 
-private struct ZIPDocumentPicker: UIViewControllerRepresentable {
+private struct ZIPDocumentPickerPresenter: UIViewControllerRepresentable {
+    @Binding var isPresented: Bool
     let onPick: ([URL]) -> Void
     let onCancel: () -> Void
 
@@ -1402,41 +1405,100 @@ private struct ZIPDocumentPicker: UIViewControllerRepresentable {
         Coordinator(onPick: onPick, onCancel: onCancel)
     }
 
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let zipType = UTType(filenameExtension: "zip") ?? .zip
-        let picker = UIDocumentPickerViewController(
-            forOpeningContentTypes: [zipType, .data],
-            asCopy: true
-        )
-        picker.delegate = context.coordinator
-        // Keep the Files browser edge-to-edge on iPhone. The surrounding
-        // SwiftUI fullScreenCover alone does not always override the picker's
-        // preferred card presentation on newer iOS releases.
-        picker.modalPresentationStyle = .fullScreen
-        picker.modalTransitionStyle = .coverVertical
-        picker.allowsMultipleSelection = true
-        picker.shouldShowFileExtensions = true
-        return picker
+    func makeUIViewController(context: Context) -> PickerPresenterHostController {
+        let host = PickerPresenterHostController()
+        host.view.backgroundColor = .clear
+        host.view.isUserInteractionEnabled = false
+        host.onDidAppear = { [weak coordinator = context.coordinator, weak host] in
+            guard let host else { return }
+            coordinator?.presentIfNeeded(from: host)
+        }
+        return host
     }
 
-    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+    func updateUIViewController(_ host: PickerPresenterHostController, context: Context) {
+        context.coordinator.onPick = onPick
+        context.coordinator.onCancel = onCancel
+        context.coordinator.isPresented = isPresented
+
+        if isPresented {
+            context.coordinator.presentIfNeeded(from: host)
+        } else {
+            context.coordinator.dismissIfNeeded()
+        }
+    }
 
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        private let onPick: ([URL]) -> Void
-        private let onCancel: () -> Void
+        var onPick: ([URL]) -> Void
+        var onCancel: () -> Void
+        var isPresented = false
+        weak var activePicker: UIDocumentPickerViewController?
 
         init(onPick: @escaping ([URL]) -> Void, onCancel: @escaping () -> Void) {
             self.onPick = onPick
             self.onCancel = onCancel
         }
 
+        func presentIfNeeded(from host: UIViewController) {
+            guard isPresented, activePicker == nil,
+                  let window = host.viewIfLoaded?.window,
+                  let root = window.rootViewController else {
+                return
+            }
+
+            let presenter = topMostController(from: root)
+            guard presenter.presentedViewController == nil else { return }
+
+            let zipType = UTType(filenameExtension: "zip") ?? .zip
+            let picker = UIDocumentPickerViewController(
+                forOpeningContentTypes: [zipType, .data],
+                asCopy: true
+            )
+            picker.delegate = self
+            picker.modalPresentationStyle = .fullScreen
+            picker.modalTransitionStyle = .coverVertical
+            picker.allowsMultipleSelection = true
+            picker.shouldShowFileExtensions = true
+            activePicker = picker
+            presenter.present(picker, animated: true)
+        }
+
+        func dismissIfNeeded() {
+            guard let picker = activePicker else { return }
+            activePicker = nil
+            picker.dismiss(animated: true)
+        }
+
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            onPick(urls)
+            activePicker = nil
+            controller.dismiss(animated: true) { [onPick] in
+                onPick(urls)
+            }
         }
 
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-            onCancel()
+            activePicker = nil
+            controller.dismiss(animated: true) { [onCancel] in
+                onCancel()
+            }
         }
+
+        private func topMostController(from root: UIViewController) -> UIViewController {
+            var current = root
+            while let presented = current.presentedViewController {
+                current = presented
+            }
+            return current
+        }
+    }
+}
+
+private final class PickerPresenterHostController: UIViewController {
+    var onDidAppear: (() -> Void)?
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        onDidAppear?()
     }
 }
 
