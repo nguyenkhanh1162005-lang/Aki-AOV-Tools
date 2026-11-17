@@ -2,6 +2,8 @@ import Foundation
 
 enum AoVRuntimeCatalogMergeBlock: String, Codable, Hashable, Sendable {
     case duplicateCurrentPath
+    case duplicateLegacyPath
+    case duplicateLegacyVerificationPath
     case conflictingLegacyPath
     case changedExistingAssetBundle
     case assetBundlePayloadRequired
@@ -114,6 +116,17 @@ enum AoVRuntimeCatalogMergePlanner {
         for path in legacyByPath.keys.sorted() {
             guard let rows = legacyByPath[path], let candidate = rows.first?.value else { continue }
             let sourceNames = Array(Set(rows.map(\.source))).sorted()
+            let perSourceCounts = Dictionary(grouping: rows, by: \.source).mapValues(\.count)
+            if perSourceCounts.values.contains(where: { $0 > 1 }) {
+                issues.append(
+                    AoVRuntimeCatalogMergeIssue(
+                        path: path,
+                        reason: .duplicateLegacyPath,
+                        sourceArchives: sourceNames
+                    )
+                )
+                continue
+            }
             guard !path.isEmpty else {
                 issues.append(
                     AoVRuntimeCatalogMergeIssue(
@@ -330,6 +343,17 @@ enum AoVRuntimeCatalogMergePlanner {
         var updatedZIP: [String] = []
         for path in legacyZIP.keys.sorted() {
             guard let rows = legacyZIP[path], let candidate = rows.first?.value else { continue }
+            let perSourceCounts = Dictionary(grouping: rows, by: \.source).mapValues(\.count)
+            if perSourceCounts.values.contains(where: { $0 > 1 }) {
+                issues.append(
+                    AoVRuntimeCatalogMergeIssue(
+                        path: path,
+                        reason: .duplicateLegacyVerificationPath,
+                        sourceArchives: Array(Set(rows.map(\.source))).sorted()
+                    )
+                )
+                continue
+            }
             guard !path.isEmpty else {
                 issues.append(
                     AoVRuntimeCatalogMergeIssue(
@@ -402,6 +426,17 @@ enum AoVRuntimeCatalogMergePlanner {
         var unchangedDatabin: [String] = []
         for path in legacyDatabin.keys.sorted() {
             guard let rows = legacyDatabin[path], let candidate = rows.first?.value else { continue }
+            let perSourceCounts = Dictionary(grouping: rows, by: \.source).mapValues(\.count)
+            if perSourceCounts.values.contains(where: { $0 > 1 }) {
+                issues.append(
+                    AoVRuntimeCatalogMergeIssue(
+                        path: path,
+                        reason: .duplicateLegacyVerificationPath,
+                        sourceArchives: Array(Set(rows.map(\.source))).sorted()
+                    )
+                )
+                continue
+            }
             guard !path.isEmpty else {
                 issues.append(
                     AoVRuntimeCatalogMergeIssue(
