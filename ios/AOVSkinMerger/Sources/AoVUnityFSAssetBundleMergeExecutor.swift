@@ -619,7 +619,8 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         var changed = Set<String>()
         for legacyEntry in legacyRecord.containerEntries {
             guard let currentEntry = currentByKey[legacyEntry.key] else {
-                changed.insert(legacyEntry.key)
+                // New keys are handled by the normal add path, not the
+                // explicit replacement set.
                 continue
             }
             let legacyPreloads = try preloadSlice(legacyEntry, in: legacyRecord)
