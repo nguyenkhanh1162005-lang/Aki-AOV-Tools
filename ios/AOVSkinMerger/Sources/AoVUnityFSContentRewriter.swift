@@ -93,6 +93,51 @@ enum AoVUnityFSContentRewriter {
         )
     }
 
+    /// Rewrites a Packer or Verification MonoBehaviour in one SerializedFile
+    /// node, then rebuilds and round-trip validates the enclosing UnityFS file.
+    static func replaceRuntimeCatalog(
+        in source: Data,
+        serializedFileNodePath: String,
+        objectPathID: Int64,
+        with replacement: AoVRuntimeResourceCatalog
+    ) throws -> AoVUnityFSContentRewriteReport {
+        let info = try AoVUnityFSParser.inspect(source)
+        let extracted = try AoVUnityFSParser.extractNodes(
+            source,
+            maximumExpandedBytes: UInt64(512 * 1024 * 1024),
+            maximumNodeCount: max(info.nodes.count, 1)
+        )
+        let matches = extracted.filter { $0.path == serializedFileNodePath }
+        guard matches.count == 1, let node = matches.first else {
+            if matches.count > 1 {
+                throw AoVUnityFSContentRewriteError.ambiguousTarget(serializedFileNodePath)
+            }
+            throw AoVUnityFSContentRewriteError.nodeNotFound(serializedFileNodePath)
+        }
+
+        let serializedReport = try AoVSerializedRuntimeCatalogWriter.rewrite(
+            serializedFile: node.data,
+            objectPathID: objectPathID,
+            with: replacement
+        )
+        let contentReport = try replaceNode(
+            in: source,
+            nodePath: serializedFileNodePath,
+            with: serializedReport.data
+        )
+        return AoVUnityFSContentRewriteReport(
+            data: contentReport.data,
+            targetNodePath: serializedFileNodePath,
+            originalNodeBytes: UInt64(node.data.count),
+            rewrittenNodeBytes: UInt64(serializedReport.data.count),
+            originalBundleBytes: UInt64(source.count),
+            rewrittenBundleBytes: UInt64(contentReport.data.count),
+            repack: contentReport.repack,
+            serializedFileRewrite: nil,
+            roundTripVerified: contentReport.roundTripVerified && serializedReport.roundTripVerified
+        )
+    }
+
     /// Rewrites one AssetBundle class 142 record inside a SerializedFile node,
     /// then rebuilds and verifies the enclosing UnityFS container.
     static func replaceAssetBundleRecord(
