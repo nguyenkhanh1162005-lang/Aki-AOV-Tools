@@ -342,6 +342,7 @@ struct ContentView: View {
                 details: report.runtimeVerificationMergePlan.map {
                     [
                         "ZIP entry mới: \(plan.addedZIPPaths.count)",
+                        "ZIP checksum đã cập nhật: \(plan.updatedZIPPaths.count)",
                         "Databin cần cập nhật CRC: \(plan.updatedDatabinPaths.count)",
                         "Databin mới: \(plan.addedDatabinPaths.count)"
                     ]
