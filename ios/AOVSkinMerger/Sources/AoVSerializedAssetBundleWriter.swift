@@ -332,6 +332,127 @@ enum AoVSerializedAssetBundleWriter {
         return output
     }
 
+    /// Replaces an arbitrary serialized object payload without changing the
+    /// type table or object count. The caller must provide a payload serialized
+    /// against the object's actual TypeTree and must remap all PPtrs first.
+    static func replaceObjectPayload(
+        in data: Data,
+        pathID: Int64,
+        with payload: Data
+    ) throws -> Data {
+        let summary: AoVSerializedFileSummary
+        do {
+            summary = try AoVSerializedFileParser.inspect(data)
+        } catch {
+            throw AoVSerializedAssetBundleWriteError.validationFailed(error.localizedDescription)
+        }
+        guard (9...30).contains(summary.formatVersion),
+              summary.fileSize == UInt64(data.count) else {
+            throw AoVSerializedAssetBundleWriteError.validationFailed(
+                "SerializedFile header hoặc kích thước không hợp lệ."
+            )
+        }
+        guard !payload.isEmpty,
+              payload.count <= maximumObjectBytes,
+              let newSize = UInt32(exactly: payload.count) else {
+            throw AoVSerializedAssetBundleWriteError.objectTooLarge
+        }
+
+        let matches = summary.serializedObjects.filter { $0.pathID == pathID }
+        guard matches.count == 1, let target = matches.first else {
+            if matches.count > 1 {
+                throw AoVSerializedAssetBundleWriteError.duplicateObjectPathID(pathID)
+            }
+            throw AoVSerializedAssetBundleWriteError.invalidObjectPathID(pathID)
+        }
+
+        let alignedStart = aligned16(data.count)
+        guard let absoluteStart = UInt64(exactly: alignedStart),
+              absoluteStart >= summary.dataOffset else {
+            throw AoVSerializedAssetBundleWriteError.unsupportedIntegerWidth
+        }
+        let relativeStart = absoluteStart - summary.dataOffset
+        let newFileSize = alignedStart.addingReportingOverflow(payload.count)
+        guard !newFileSize.overflow,
+              newFileSize.partialValue <= maximumFileBytes,
+              let newFileSize64 = UInt64(exactly: newFileSize.partialValue) else {
+            throw AoVSerializedAssetBundleWriteError.fileTooLarge
+        }
+
+        var output = data
+        if alignedStart > output.count {
+            output.append(Data(repeating: 0, count: alignedStart - output.count))
+        }
+        output.append(payload)
+
+        if summary.formatVersion >= 22 {
+            guard let relative = Int64(exactly: relativeStart),
+                  let fileSize = Int64(exactly: newFileSize64) else {
+                throw AoVSerializedAssetBundleWriteError.unsupportedIntegerWidth
+            }
+            patchInt64(
+                &output,
+                at: target.byteStartFieldOffset,
+                value: relative,
+                littleEndian: summary.littleEndian
+            )
+            patchInt64(
+                &output,
+                at: summary.fileSizeFieldOffset,
+                value: fileSize,
+                littleEndian: false
+            )
+        } else {
+            guard let relative = UInt32(exactly: relativeStart),
+                  let fileSize = UInt32(exactly: newFileSize64) else {
+                throw AoVSerializedAssetBundleWriteError.unsupportedIntegerWidth
+            }
+            patchUInt32(
+                &output,
+                at: target.byteStartFieldOffset,
+                value: relative,
+                littleEndian: summary.littleEndian
+            )
+            patchUInt32(
+                &output,
+                at: summary.fileSizeFieldOffset,
+                value: fileSize,
+                littleEndian: false
+            )
+        }
+        patchUInt32(
+            &output,
+            at: target.byteSizeFieldOffset,
+            value: newSize,
+            littleEndian: summary.littleEndian
+        )
+
+        let verified: AoVSerializedFileSummary
+        do {
+            verified = try AoVSerializedFileParser.inspect(output)
+        } catch {
+            throw AoVSerializedAssetBundleWriteError.validationFailed(error.localizedDescription)
+        }
+        guard verified.fileSize == UInt64(output.count),
+              verified.serializedObjects.count == summary.serializedObjects.count,
+              let updated = verified.serializedObjects.first(where: { $0.pathID == pathID }),
+              updated.classID == target.classID,
+              updated.typeID == target.typeID,
+              updated.byteSize == newSize,
+              updated.byteOffset == absoluteStart,
+              summary.serializedObjects.filter({ $0.pathID != pathID }) ==
+                verified.serializedObjects.filter({ $0.pathID != pathID }),
+              let start = Int(exactly: updated.byteOffset),
+              start >= 0, start <= output.count,
+              payload.count <= output.count - start,
+              output.subdata(in: start..<(start + payload.count)) == payload else {
+            throw AoVSerializedAssetBundleWriteError.validationFailed(
+                "Object table hoặc payload sau khi ghi không khớp dữ liệu yêu cầu."
+            )
+        }
+        return output
+    }
+
     private static func validateRecordShape(
         _ record: AoVSerializedAssetBundleRecord,
         unityVersion: String
