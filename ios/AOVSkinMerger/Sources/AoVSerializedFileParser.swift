@@ -9,6 +9,15 @@ struct AoVSerializedFileObject: Codable, Hashable, Sendable, Identifiable {
     var id: String { "\(classID):\(pathID)" }
 }
 
+struct AoVSerializedFileExternalReference: Codable, Hashable, Sendable, Identifiable {
+    let temporaryName: String
+    let guidHex: String
+    let type: Int32
+    let path: String
+
+    var id: String { "\(path)|\(guidHex)" }
+}
+
 struct AoVSerializedAssetPointer: Codable, Hashable, Sendable {
     let fileID: Int32
     let pathID: Int64
@@ -67,8 +76,14 @@ struct AoVSerializedFileSummary: Codable, Sendable {
     let dataOffset: UInt64
     let typeCount: Int
     let objectCount: Int
+    let serializedObjects: [AoVSerializedFileObject]
     let assetBundleObjects: [AoVSerializedFileObject]
+    let externalReferences: [AoVSerializedFileExternalReference]
     let assetBundleRecords: [AoVSerializedAssetBundleRecord]
+
+    var serializedObjectPathIDs: Set<Int64> {
+        Set(serializedObjects.map(\.pathID))
+    }
 
     var assetBundleObjectCount: Int { assetBundleObjects.count }
 }
@@ -393,7 +408,9 @@ enum AoVSerializedFileParser {
         }
 
         let objectCount = try reader.readCount("object count", maximum: maximumObjects)
+        var serializedObjects: [AoVSerializedFileObject] = []
         var assetBundleObjects: [AoVSerializedFileObject] = []
+        serializedObjects.reserveCapacity(objectCount)
 
         for index in 0..<objectCount {
             let pathID: Int64
@@ -449,16 +466,16 @@ enum AoVSerializedFileParser {
                 throw AoVSerializedFileError.invalidObjectRange(pathID)
             }
 
+            let object = AoVSerializedFileObject(
+                pathID: pathID,
+                classID: classID,
+                typeID: typeID,
+                byteOffset: absoluteOffset.partialValue,
+                byteSize: byteSize
+            )
+            serializedObjects.append(object)
             if classID == assetBundleClassID {
-                assetBundleObjects.append(
-                    AoVSerializedFileObject(
-                        pathID: pathID,
-                        classID: classID,
-                        typeID: typeID,
-                        byteOffset: absoluteOffset.partialValue,
-                        byteSize: byteSize
-                    )
-                )
+                assetBundleObjects.append(object)
             }
         }
 
@@ -476,15 +493,24 @@ enum AoVSerializedFileParser {
         }
 
         let externalCount = try reader.readCount("external count", maximum: 100_000)
+        var externalReferences: [AoVSerializedFileExternalReference] = []
+        externalReferences.reserveCapacity(externalCount)
         for index in 0..<externalCount {
-            if formatVersion >= 6 {
-                _ = try reader.readCString("external \(index) temporary name")
-            }
-            if formatVersion >= 5 {
-                try reader.skip(16, "external \(index) GUID")
-                _ = try reader.readInt32("external \(index) type")
-            }
-            _ = try reader.readCString("external \(index) path")
+            let temporaryName = formatVersion >= 6
+                ? try reader.readCString("external \(index) temporary name")
+                : ""
+            let guidBytes = try reader.readBytes(16, "external \(index) GUID")
+            let guidHex = guidBytes.map { String(format: "%02x", $0) }.joined()
+            let externalType = try reader.readInt32("external \(index) type")
+            let externalPath = try reader.readCString("external \(index) path")
+            externalReferences.append(
+                AoVSerializedFileExternalReference(
+                    temporaryName: temporaryName,
+                    guidHex: guidHex,
+                    type: externalType,
+                    path: externalPath
+                )
+            )
         }
 
         if formatVersion >= 20 {
@@ -539,7 +565,9 @@ enum AoVSerializedFileParser {
             dataOffset: dataOffset,
             typeCount: typeCount,
             objectCount: objectCount,
+            serializedObjects: serializedObjects,
             assetBundleObjects: assetBundleObjects,
+            externalReferences: externalReferences,
             assetBundleRecords: assetBundleRecords
         )
     }
