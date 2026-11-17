@@ -151,7 +151,7 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
         ) { error in
             guard let rewriteError = error as? AoVUnityFSContentRewriteError,
                   case .expandedArchiveTooLarge = rewriteError else {
-                return XCTFail("Expected expanded-size guard, got \\(error)")
+                return XCTFail("Expected expanded-size guard, got \(error)")
             }
         }
     }
