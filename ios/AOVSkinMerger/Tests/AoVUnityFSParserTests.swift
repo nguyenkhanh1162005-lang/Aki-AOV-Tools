@@ -102,24 +102,80 @@ final class AoVUnityFSParserTests: XCTestCase {
         XCTAssertThrowsError(try AoVUnityFSParser.inspect(bundle))
     }
 
+
+    func testExtractsNodeFromUncompressedBlock() throws {
+        let payload = Data([0x11, 0x22, 0x33, 0x44])
+        let extracted = try AoVUnityFSParser.extractNodes(makeBundle(blockPayload: payload))
+
+        XCTAssertEqual(extracted.count, 1)
+        XCTAssertEqual(extracted.first?.path, "CAB-test")
+        XCTAssertEqual(extracted.first?.data, payload)
+    }
+
+    func testExtractsNodeFromLZ4CompressedBlock() throws {
+        let payload = Data("hello".utf8)
+        let bundle = makeBundle(blockCompression: 2, blockPayload: payload)
+        let extracted = try AoVUnityFSParser.extractNodes(bundle)
+
+        XCTAssertEqual(extracted.first?.data, payload)
+    }
+
+    func testExtractsNodeWhenBlockInfoIsAtEnd() throws {
+        let payload = Data([0xAA, 0xBB, 0xCC, 0xDD])
+        let bundle = makeBundle(
+            formatVersion: 7,
+            engineVersion: "2021.3.2f1",
+            flags: 0xC0,
+            blockPayload: payload
+        )
+        let extracted = try AoVUnityFSParser.extractNodes(bundle)
+
+        XCTAssertEqual(extracted.first?.data, payload)
+    }
+
+    func testRejectsUnsupportedLZMABlockData() {
+        let bundle = makeBundle(blockCompression: 1)
+        XCTAssertThrowsError(try AoVUnityFSParser.extractNodes(bundle)) { error in
+            guard let parserError = error as? AoVUnityFSError,
+                  case .unsupportedBlockCompression(1) = parserError else {
+                return XCTFail("Expected unsupported LZMA block, got \(error)")
+            }
+        }
+    }
+
+    func testExtractionEnforcesExpandedSizeLimit() {
+        let bundle = makeBundle(blockPayload: Data([1, 2, 3, 4]))
+        XCTAssertThrowsError(
+            try AoVUnityFSParser.extractNodes(bundle, maximumExpandedBytes: 3)
+        )
+    }
+
     private func makeBundle(
         formatVersion: UInt32 = 6,
         engineVersion: String = "2020.3.34f1",
         flags: UInt32 = 0x40,
-        nodeSize: UInt64 = 4
+        nodeSize: UInt64? = nil,
+        blockCompression: UInt16 = 0,
+        blockPayload: Data = Data([0x11, 0x22, 0x33, 0x44])
     ) -> Data {
+        let storedDataBlock: Data
+        if blockCompression == 2 || blockCompression == 3 {
+            storedDataBlock = makeLZ4LiteralBlock(blockPayload)
+        } else {
+            storedDataBlock = blockPayload
+        }
+
         var blockInfo = Data(repeating: 0, count: 16)
         appendBE(UInt32(1), to: &blockInfo) // block count
-        appendBE(UInt32(4), to: &blockInfo) // uncompressed block bytes
-        appendBE(UInt32(4), to: &blockInfo) // compressed block bytes
-        appendBE(UInt16(0), to: &blockInfo) // no block compression
+        appendBE(UInt32(blockPayload.count), to: &blockInfo)
+        appendBE(UInt32(storedDataBlock.count), to: &blockInfo)
+        appendBE(blockCompression, to: &blockInfo)
         appendBE(UInt32(1), to: &blockInfo) // node count
         appendBE(UInt64(0), to: &blockInfo)
-        appendBE(nodeSize, to: &blockInfo)
+        appendBE(nodeSize ?? UInt64(blockPayload.count), to: &blockInfo)
         appendBE(UInt32(0), to: &blockInfo)
         blockInfo.append(Data("CAB-test\0".utf8))
 
-        let dataBlock = Data([0x11, 0x22, 0x33, 0x44])
         let infoCompression = flags & 0x3F
         var storedBlockInfo = blockInfo
         if infoCompression == 2 || infoCompression == 3 {
@@ -155,12 +211,12 @@ final class AoVUnityFSParserTests: XCTestCase {
 
         if flags & 0x80 != 0 {
             if flags & 0x200 != 0 { align16(&bundle) }
-            bundle.append(dataBlock)
+            bundle.append(storedDataBlock)
             bundle.append(storedBlockInfo)
         } else {
             bundle.append(storedBlockInfo)
             if flags & 0x200 != 0 { align16(&bundle) }
-            bundle.append(dataBlock)
+            bundle.append(storedDataBlock)
         }
 
         let totalSize = UInt64(bundle.count)
@@ -168,6 +224,20 @@ final class AoVUnityFSParserTests: XCTestCase {
         appendBE(totalSize, to: &encodedSize)
         bundle.replaceSubrange(sizeOffset..<(sizeOffset + 8), with: encodedSize)
         return bundle
+    }
+
+    private func makeLZ4LiteralBlock(_ data: Data) -> Data {
+        var result = Data([UInt8(min(data.count, 15) << 4)])
+        if data.count >= 15 {
+            var remaining = data.count - 15
+            while remaining >= 255 {
+                result.append(255)
+                remaining -= 255
+            }
+            result.append(UInt8(remaining))
+        }
+        result.append(data)
+        return result
     }
 
     private func align16(_ data: inout Data) {
