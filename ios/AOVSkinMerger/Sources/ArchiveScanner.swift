@@ -518,8 +518,16 @@ enum ArchiveScanner {
                                         let bundleObjects = serialized.assetBundleObjects
                                             .map { "pathID \($0.pathID) · offset \($0.byteOffset) · \($0.byteSize) byte" }
                                             .joined(separator: "; ")
+                                        let catalogRecords = serialized.assetBundleRecords.map { record in
+                                            let dependencies = record.dependencies.prefix(8).joined(separator: ", ")
+                                            let containerKeys = record.containerEntries.prefix(5).map(\.key).joined(separator: ", ")
+                                            return "name=\(record.name) · bundle=\(record.assetBundleName) · preload=\(record.preloadReferences.count) · container=\(record.containerEntries.count)" +
+                                                (dependencies.isEmpty ? "" : " · deps=[\(dependencies)]") +
+                                                (containerKeys.isEmpty ? "" : " · keys=[\(containerKeys)]")
+                                        }.joined(separator: " || ")
                                         serializedSummary = "SerializedFile v\(serialized.formatVersion) · Unity \(serialized.unityVersion) · platform \(serialized.targetPlatform) · \(serialized.objectCount) object · AssetBundle class 142: \(serialized.assetBundleObjectCount)" +
-                                            (bundleObjects.isEmpty ? "" : " · \(bundleObjects)")
+                                            (bundleObjects.isEmpty ? "" : " · \(bundleObjects)") +
+                                            (catalogRecords.isEmpty ? "" : " · \(catalogRecords)")
                                     } catch {
                                         serializedSummary = "Không nhận diện SerializedFile: \(error.localizedDescription)"
                                     }
