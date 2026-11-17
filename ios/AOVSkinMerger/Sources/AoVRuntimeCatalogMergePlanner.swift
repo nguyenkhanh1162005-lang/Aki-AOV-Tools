@@ -335,8 +335,28 @@ enum AoVRuntimeCatalogMergePlanner {
                 AoVRuntimeMergeSourceValue(source: source.source, value: $0)
             }
         }
-        let legacyZIP = Dictionary(grouping: legacyZIPRows, by: { $0.value.pathInIFS })
-        let legacyDatabin = Dictionary(grouping: legacyDatabinRows, by: { $0.value.pathInIFS })
+        var legacyZIP = Dictionary(grouping: legacyZIPRows, by: { $0.value.pathInIFS })
+        var legacyDatabin = Dictionary(grouping: legacyDatabinRows, by: { $0.value.pathInIFS })
+
+        // Explicit final checksum maps describe payloads already produced and
+        // validated by upstream adapters. They may introduce a new verification
+        // path even when a legacy MOD omitted its catalog row.
+        for (path, checksum) in verifiedFinalZIPChecksumValues where legacyZIP[path] == nil {
+            legacyZIP[path] = [
+                AoVRuntimeMergeSourceValue(
+                    source: "verified-final-payload",
+                    value: AoVRuntimeVerificationEntry(pathInIFS: path, crcXor: checksum)
+                )
+            ]
+        }
+        for (path, checksum) in verifiedFinalDatabinChecksumValues where legacyDatabin[path] == nil {
+            legacyDatabin[path] = [
+                AoVRuntimeMergeSourceValue(
+                    source: "verified-final-payload",
+                    value: AoVRuntimeVerificationEntry(pathInIFS: path, crcXor: checksum)
+                )
+            ]
+        }
 
         var zipEntries = current.allZipVerificationInfo
         var addedZIP: [AoVRuntimeVerificationEntry] = []
@@ -366,7 +386,7 @@ enum AoVRuntimeCatalogMergePlanner {
                 continue
             }
             let values = Set(rows.map(\.value))
-            if values.count > 1 {
+            if values.count > 1 && verifiedFinalZIPChecksumValues[path] == nil {
                 issues.append(
                     AoVRuntimeCatalogMergeIssue(
                         path: path,
