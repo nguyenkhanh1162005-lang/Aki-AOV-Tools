@@ -9,7 +9,7 @@ enum AoVRuntimeCatalogMergeBlock: String, Codable, Hashable, Sendable {
     case duplicateCurrentVerificationPath
     case conflictingLegacyVerification
     case zipChecksumAlgorithmUnknown
-    case databinPayloadRequired
+    case databinChecksumAlgorithmUnknown
     case emptyPath
 }
 
@@ -50,8 +50,8 @@ struct AoVRuntimeVerificationMergePlan: Codable, Sendable {
 /// that already exist with different contents are blocked until their
 /// underlying AssetBundles have been semantically merged. Verification ZIP
 /// checksum values are preserved only when equal; this planner never guesses
-/// the unknown 64-bit ZIP checksum algorithm. Databin values can be recalculated
-/// from the final output bytes using the verified CRC-32 routine.
+/// the unknown ZIP or Databin checksum algorithms. Updated/new entries require
+/// a checksum produced by an independently verified, version-specific adapter.
 private struct AoVRuntimeMergeSourceValue<Value: Hashable> {
     let source: String
     let value: Value
@@ -284,8 +284,8 @@ enum AoVRuntimeCatalogMergePlanner {
     static func planVerification(
         current: AoVRuntimeResourceVerificationCatalog,
         legacy: [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)],
-        finalDatabinPayloads: [String: Data] = [:],
-        finalZIPChecksumValues: [String: Int64] = [:]
+        verifiedFinalDatabinChecksumValues: [String: Int64] = [:],
+        verifiedFinalZIPChecksumValues: [String: Int64] = [:]
     ) -> AoVRuntimeVerificationMergePlan {
         var issues: [AoVRuntimeCatalogMergeIssue] = []
 
@@ -351,7 +351,7 @@ enum AoVRuntimeCatalogMergePlanner {
                 continue
             }
 
-            guard let verifiedChecksum = finalZIPChecksumValues[path] else {
+            guard let verifiedChecksum = verifiedFinalZIPChecksumValues[path] else {
                 if let existingRows = currentZIP[path],
                    existingRows.count == 1,
                    existingRows[0].crcXor == candidate.crcXor {
@@ -412,7 +412,7 @@ enum AoVRuntimeCatalogMergePlanner {
                 continue
             }
             let values = Set(rows.map(\.value))
-            if values.count > 1, finalDatabinPayloads[path] == nil {
+            if values.count > 1, verifiedFinalDatabinChecksumValues[path] == nil {
                 issues.append(
                     AoVRuntimeCatalogMergeIssue(
                         path: path,
@@ -423,42 +423,48 @@ enum AoVRuntimeCatalogMergePlanner {
                 continue
             }
 
-            if let payload = finalDatabinPayloads[path] {
-                let checksum = AoVRuntimeCatalogChecksum.verificationDatabinCRC32(payload)
-                if let index = databinEntries.firstIndex(where: { $0.pathInIFS == path }) {
-                    if databinEntries[index].crcXor != checksum {
-                        databinEntries[index] = AoVRuntimeVerificationEntry(pathInIFS: path, crcXor: checksum)
-                        updatedDatabin.append(path)
-                    } else {
-                        unchangedDatabin.append(path)
-                    }
-                } else {
-                    databinEntries.append(AoVRuntimeVerificationEntry(pathInIFS: path, crcXor: checksum))
-                    addedDatabin.append(path)
-                }
-                continue
-            }
-
-            if let existingRows = currentDatabin[path] {
-                if existingRows.count == 1, existingRows[0].crcXor == candidate.crcXor {
+            guard let verifiedChecksum = verifiedFinalDatabinChecksumValues[path] else {
+                if let existingRows = currentDatabin[path],
+                   existingRows.count == 1,
+                   existingRows[0].crcXor == candidate.crcXor {
                     unchangedDatabin.append(path)
                 } else {
                     issues.append(
                         AoVRuntimeCatalogMergeIssue(
                             path: path,
-                            reason: .databinPayloadRequired,
+                            reason: .databinChecksumAlgorithmUnknown,
                             sourceArchives: Array(Set(rows.map(\.source))).sorted()
                         )
                     )
                 }
-            } else {
-                issues.append(
-                    AoVRuntimeCatalogMergeIssue(
-                        path: path,
-                        reason: .databinPayloadRequired,
-                        sourceArchives: Array(Set(rows.map(\.source))).sorted()
+                continue
+            }
+
+            let verifiedEntry = AoVRuntimeVerificationEntry(
+                pathInIFS: path,
+                crcXor: verifiedChecksum
+            )
+            if let existingRows = currentDatabin[path] {
+                guard existingRows.count == 1,
+                      let index = databinEntries.firstIndex(where: { $0.pathInIFS == path }) else {
+                    issues.append(
+                        AoVRuntimeCatalogMergeIssue(
+                            path: path,
+                            reason: .duplicateCurrentVerificationPath,
+                            sourceArchives: []
+                        )
                     )
-                )
+                    continue
+                }
+                if existingRows[0].crcXor == verifiedChecksum {
+                    unchangedDatabin.append(path)
+                } else {
+                    databinEntries[index] = verifiedEntry
+                    updatedDatabin.append(path)
+                }
+            } else {
+                databinEntries.append(verifiedEntry)
+                addedDatabin.append(path)
             }
         }
 
