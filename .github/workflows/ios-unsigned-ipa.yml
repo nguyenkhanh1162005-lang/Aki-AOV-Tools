@@ -1,7 +1,10 @@
 name: Build iOS unsigned IPA
 
 on:
-  # Release packaging is manual-only while RMK/RES/VTK is under development.
+  # Build a fresh unsigned IPA whenever the iOS prototype branch changes.
+  push:
+    branches:
+      - feat/ios-offline-app-prototype
   workflow_dispatch:
 
 permissions:
