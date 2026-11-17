@@ -107,10 +107,56 @@ final class AoVRuntimeResourceCatalogParserTests: XCTestCase {
         ))
         XCTAssertNil(try AoVRuntimeResourceCatalogParser.inspectMonoBehaviour(
             writer.data,
-            serializedFormatVersion: 21,
-            unityVersion: "2022.3.5f1",
+            serializedFormatVersion: 8,
+            unityVersion: "5.6.0f3",
             littleEndian: true
         ))
+    }
+
+    func testParsesAndRewritesLegacySerializedFileCatalogWith32BitPPtrs() throws {
+        var writer = AoVCatalogTestWriter()
+        writer.appendBytes(Data(repeating: 0, count: 8))
+        writer.appendByte(1)
+        writer.align(4)
+        writer.appendBytes(Data(repeating: 0, count: 8))
+        writer.appendAlignedString("ResourceVerificationInfoSetXML")
+        writer.appendAlignedString("1.60.0.1")
+        writer.appendAlignedString("legacy-revision")
+        writer.appendInt32(1)
+        writer.appendAlignedString("CommonActions.pkg.bytes")
+        writer.appendInt64(123456789)
+        writer.appendInt32(0)
+
+        let original = try XCTUnwrap(
+            AoVRuntimeResourceCatalogParser.inspectMonoBehaviour(
+                writer.data,
+                serializedFormatVersion: 13,
+                unityVersion: "2018.4.0f1",
+                littleEndian: true
+            )
+        )
+        guard case .verification(let catalog) = original else {
+            return XCTFail("Expected legacy Verification catalog.")
+        }
+        XCTAssertEqual(catalog.version, "1.60.0.1")
+        XCTAssertEqual(catalog.allZipVerificationInfo.first?.crcXor, 123456789)
+
+        let rewritten = try AoVRuntimeResourceCatalogParser.rewriteMonoBehaviour(
+            writer.data,
+            with: .verification(catalog),
+            serializedFormatVersion: 13,
+            unityVersion: "2018.4.0f1",
+            littleEndian: true
+        )
+        XCTAssertEqual(
+            try AoVRuntimeResourceCatalogParser.inspectMonoBehaviour(
+                rewritten,
+                serializedFormatVersion: 13,
+                unityVersion: "2018.4.0f1",
+                littleEndian: true
+            ),
+            original
+        )
     }
 
     func testKnownCatalogWithTruncatedPayloadFailsClosed() throws {
