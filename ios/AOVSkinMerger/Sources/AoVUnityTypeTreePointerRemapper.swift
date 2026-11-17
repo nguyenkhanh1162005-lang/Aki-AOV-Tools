@@ -46,6 +46,7 @@ enum AoVUnityTypeTreePointerRemapper {
         value: AoVUnityTypeTreeValue,
         localPathIDMap: [Int64: Int64] = [:],
         availableLocalPathIDs: Set<Int64>,
+        sourceLocalPathIDs: Set<Int64>? = nil,
         externalFileIDMap: [Int32: Int32],
         externalPathIDMaps: [Int32: [Int64: Int64]] = [:],
         availableExternalTargetPathIDs: [Int32: Set<Int64>]
@@ -65,6 +66,7 @@ enum AoVUnityTypeTreePointerRemapper {
             path: nodes[0].name,
             localPathIDMap: localPathIDMap,
             availableLocalPathIDs: availableLocalPathIDs,
+            sourceLocalPathIDs: sourceLocalPathIDs,
             externalFileIDMap: externalFileIDMap,
             externalPathIDMaps: externalPathIDMaps,
             availableExternalTargetPathIDs: availableExternalTargetPathIDs,
@@ -112,6 +114,7 @@ enum AoVUnityTypeTreePointerRemapper {
         path: String,
         localPathIDMap: [Int64: Int64],
         availableLocalPathIDs: Set<Int64>,
+        sourceLocalPathIDs: Set<Int64>?,
         externalFileIDMap: [Int32: Int32],
         externalPathIDMaps: [Int32: [Int64: Int64]],
         availableExternalTargetPathIDs: [Int32: Set<Int64>],
@@ -140,6 +143,9 @@ enum AoVUnityTypeTreePointerRemapper {
 
             if rawFileID == 0 {
                 if rawPathID == 0 { return value }
+                if let sourceLocalPathIDs, !sourceLocalPathIDs.contains(rawPathID) {
+                    throw AoVUnityTypeTreePointerRemapError.unresolvedLocalPointer(path, rawPathID)
+                }
                 let destinationPathID = localPathIDMap[rawPathID] ?? rawPathID
                 guard availableLocalPathIDs.contains(destinationPathID) else {
                     throw AoVUnityTypeTreePointerRemapError.unresolvedLocalPointer(path, destinationPathID)
@@ -209,6 +215,7 @@ enum AoVUnityTypeTreePointerRemapper {
                     value: entry.key, path: "\(path).key[\(entryIndex)]",
                     localPathIDMap: localPathIDMap,
                     availableLocalPathIDs: availableLocalPathIDs,
+                    sourceLocalPathIDs: sourceLocalPathIDs,
                     externalFileIDMap: externalFileIDMap,
                     externalPathIDMaps: externalPathIDMaps,
                     availableExternalTargetPathIDs: availableExternalTargetPathIDs,
@@ -221,6 +228,7 @@ enum AoVUnityTypeTreePointerRemapper {
                     value: entry.value, path: "\(path).value[\(entryIndex)]",
                     localPathIDMap: localPathIDMap,
                     availableLocalPathIDs: availableLocalPathIDs,
+                    sourceLocalPathIDs: sourceLocalPathIDs,
                     externalFileIDMap: externalFileIDMap,
                     externalPathIDMaps: externalPathIDMaps,
                     availableExternalTargetPathIDs: availableExternalTargetPathIDs,
@@ -250,6 +258,7 @@ enum AoVUnityTypeTreePointerRemapper {
                         value: item, path: "\(path)[\(valueIndex)]",
                         localPathIDMap: localPathIDMap,
                         availableLocalPathIDs: availableLocalPathIDs,
+                    sourceLocalPathIDs: sourceLocalPathIDs,
                         externalFileIDMap: externalFileIDMap,
                         externalPathIDMaps: externalPathIDMaps,
                         availableExternalTargetPathIDs: availableExternalTargetPathIDs,
@@ -277,6 +286,7 @@ enum AoVUnityTypeTreePointerRemapper {
                     value: childValue, path: path + "." + child.name,
                     localPathIDMap: localPathIDMap,
                     availableLocalPathIDs: availableLocalPathIDs,
+                    sourceLocalPathIDs: sourceLocalPathIDs,
                     externalFileIDMap: externalFileIDMap,
                     externalPathIDMaps: externalPathIDMaps,
                     availableExternalTargetPathIDs: availableExternalTargetPathIDs,
