@@ -102,6 +102,7 @@ struct AoVSerializedFileSummary: Codable, Sendable {
     let serializedTypes: [AoVSerializedFileTypeInfo]
     let objectCount: Int
     let serializedObjects: [AoVSerializedFileObject]
+    let serializedObjectsByPathID: [Int64: AoVSerializedFileObject]
     let assetBundleObjects: [AoVSerializedFileObject]
     let externalReferences: [AoVSerializedFileExternalReference]
     let assetBundleRecords: [AoVSerializedAssetBundleRecord]
@@ -133,6 +134,7 @@ enum AoVSerializedFileError: LocalizedError {
     case unsupportedTypeTreeVersion(UInt32)
     case invalidTypeIndex(Int32)
     case invalidObjectRange(Int64)
+    case duplicateObjectPathID(Int64)
     case unsupportedTargetPlatform(Int32)
     case invalidAssetBundle(String)
 
@@ -152,6 +154,8 @@ enum AoVSerializedFileError: LocalizedError {
             return "SerializedFile có type index không hợp lệ: \(index)."
         case .invalidObjectRange(let pathID):
             return "Object pathID \(pathID) nằm ngoài vùng dữ liệu SerializedFile."
+        case .duplicateObjectPathID(let pathID):
+            return "SerializedFile có object pathID bị trùng: \(pathID)."
         case .unsupportedTargetPlatform(let platform):
             return "AssetBundle class 142 có target platform \(platform), layout nền chưa được xác minh."
         case .invalidAssetBundle(let reason):
@@ -309,8 +313,7 @@ enum AoVSerializedFileParser {
         guard inspected.fileSize == UInt64(data.count) else {
             throw AoVSerializedFileError.invalidHeader("SerializedFile size differs from the supplied byte buffer.")
         }
-        let matches = inspected.serializedObjects.filter { $0.pathID == pathID }
-        guard matches.count == 1, let object = matches.first else {
+        guard let object = inspected.serializedObjectsByPathID[pathID] else {
             throw AoVSerializedFileError.invalidObjectRange(pathID)
         }
         guard let typeInfo = inspected.typeInfo(for: object),
@@ -524,6 +527,7 @@ enum AoVSerializedFileParser {
         let objectCount = try reader.readCount("object count", maximum: maximumObjects)
         let objectTableStartOffset = reader.offset
         var serializedObjects: [AoVSerializedFileObject] = []
+        var serializedObjectsByPathID: [Int64: AoVSerializedFileObject] = [:]
         var assetBundleObjects: [AoVSerializedFileObject] = []
         serializedObjects.reserveCapacity(objectCount)
 
@@ -592,6 +596,9 @@ enum AoVSerializedFileParser {
                 byteStartFieldOffset: byteStartFieldOffset,
                 byteSizeFieldOffset: byteSizeFieldOffset
             )
+            guard serializedObjectsByPathID.updateValue(object, forKey: pathID) == nil else {
+                throw AoVSerializedFileError.duplicateObjectPathID(pathID)
+            }
             serializedObjects.append(object)
             if classID == assetBundleClassID {
                 assetBundleObjects.append(object)
@@ -728,6 +735,7 @@ enum AoVSerializedFileParser {
             serializedTypes: serializedTypes,
             objectCount: objectCount,
             serializedObjects: serializedObjects,
+            serializedObjectsByPathID: serializedObjectsByPathID,
             assetBundleObjects: assetBundleObjects,
             externalReferences: externalReferences,
             assetBundleRecords: assetBundleRecords,
