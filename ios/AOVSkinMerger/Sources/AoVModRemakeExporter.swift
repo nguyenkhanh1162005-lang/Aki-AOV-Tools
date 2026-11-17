@@ -292,6 +292,11 @@ enum AoVModRemakeExporter {
               case .verification(let currentVerificationCatalog) = verificationTarget.catalog else {
             throw AoVModRemakeExporterError.catalogMergeFailed("Catalog RES không đúng loại.")
         }
+        guard currentPackerCatalog.version == currentVerificationCatalog.version else {
+            throw AoVModRemakeExporterError.catalogVersionMismatch(
+                "Verification RES", currentVerificationCatalog.version, currentPackerCatalog.version
+            )
+        }
         for source in legacyPackerCatalogs where source.catalog.version != currentPackerCatalog.version {
             throw AoVModRemakeExporterError.catalogVersionMismatch(
                 "Packer", source.catalog.version, currentPackerCatalog.version
