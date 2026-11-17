@@ -176,32 +176,32 @@ enum AoVRuntimeResourceCatalogParser {
     private static let maximumMapItemCount = 2_000_000
     private static let maximumVerificationCount = 500_000
 
-    /// Parses only the two observed Arena of Valor catalog MonoBehaviours from
-    /// Unity 2022.3 / SerializedFile v22. Other MonoBehaviours return nil.
-    /// Once a known catalog name is identified, malformed data fails closed.
+    /// Parses the two observed Arena of Valor catalog MonoBehaviours across
+    /// SerializedFile versions 9...30. PPtr width follows the file format version;
+    /// unknown or structurally different catalog payloads still fail closed.
     static func inspectMonoBehaviour(
         _ payload: Data,
         serializedFormatVersion: UInt32,
         unityVersion: String,
         littleEndian: Bool
     ) throws -> AoVRuntimeResourceCatalog? {
-        guard serializedFormatVersion >= 22,
-              unityVersion.hasPrefix("2022.3."),
-              payload.count >= 32,
+        guard (9...30).contains(Int(serializedFormatVersion)),
+              payload.count >= (serializedFormatVersion >= 14 ? 32 : 24),
               payload.count <= maximumMonoBehaviourBytes else {
             return nil
         }
+        let pointerByteCount = serializedFormatVersion >= 14 ? 12 : 8
 
         var reader = AoVRuntimeResourceCatalogReader(data: payload, littleEndian: littleEndian)
         let objectName: String
         do {
             // MonoBehaviour header: m_GameObject PPtr, m_Enabled, padding,
             // m_Script PPtr, then the aligned m_Name string.
-            try reader.skip(12, "m_GameObject PPtr")
+            try reader.skip(pointerByteCount, "m_GameObject PPtr")
             let enabled = try reader.readByte("m_Enabled")
             guard enabled <= 1 else { return nil }
             try reader.align(4, "m_Script alignment")
-            try reader.skip(12, "m_Script PPtr")
+            try reader.skip(pointerByteCount, "m_Script PPtr")
             objectName = try reader.readAlignedString("m_Name", maximumBytes: 4_096)
         } catch {
             // Most class 114 objects are unrelated game MonoBehaviours.
@@ -219,8 +219,8 @@ enum AoVRuntimeResourceCatalogParser {
     }
 
     /// Rebuilds one observed AoV catalog MonoBehaviour while retaining its
-    /// GameObject/script/name header and any version-specific trailing bytes.
-    /// Only the two parsed 2022.3 / SerializedFile v22 catalog layouts are writable.
+    /// GameObject/script/name header and version-specific PPtr width. The catalog
+    /// body is rewritten only when its known field layout parses and round-trips.
     static func rewriteMonoBehaviour(
         _ payload: Data,
         with replacement: AoVRuntimeResourceCatalog,
@@ -264,13 +264,14 @@ enum AoVRuntimeResourceCatalogParser {
         }
 
         var reader = AoVRuntimeResourceCatalogReader(data: payload, littleEndian: littleEndian)
-        try reader.skip(12, "m_GameObject PPtr")
+        let pointerByteCount = serializedFormatVersion >= 14 ? 12 : 8
+        try reader.skip(pointerByteCount, "m_GameObject PPtr")
         let enabled = try reader.readByte("m_Enabled")
         guard enabled <= 1 else {
             throw AoVRuntimeResourceCatalogParseError.invalidPayload("m_Enabled không hợp lệ.")
         }
         try reader.align(4, "m_Script alignment")
-        try reader.skip(12, "m_Script PPtr")
+        try reader.skip(pointerByteCount, "m_Script PPtr")
         let objectName = try reader.readAlignedString("m_Name", maximumBytes: 4_096)
         guard objectName == expectedName else {
             throw AoVRuntimeResourceCatalogParseError.invalidPayload(
