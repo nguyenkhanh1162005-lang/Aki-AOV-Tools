@@ -38,34 +38,92 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
         XCTAssertEqual(byPath["assets/skin.bin"], Data([1, 2, 3]))
     }
 
-    func testWritableTemplateGuardRejectsAOVEncryptedContainer() {
-        let encrypted = AoVUnityFSBundleInfo(
+    func testRepackerEncryptsAndParserRoundTripsLegacyUnityCNHeader() throws {
+        let nodes = [
+            AoVUnityFSRepackNode(
+                path: "CAB-legacy",
+                data: Data("legacy encrypted UnityFS payload".utf8),
+                flags: 7
+            )
+        ]
+        let report = try AoVUnityFSRepacker.repack(
+            nodes,
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2020.3.33f1",
+            blockInfoLayout: .arenaOfValor,
+            aovEncryption: true
+        )
+
+        let info = try AoVUnityFSParser.inspect(report.data)
+        let extracted = try AoVUnityFSParser.extractNodes(report.data)
+
+        XCTAssertTrue(info.usesAoVEncryption)
+        XCTAssertNotEqual(info.flags & 0x200, 0)
+        XCTAssertEqual(info.flags & 0x400, 0)
+        XCTAssertTrue(report.roundTripVerified)
+        XCTAssertEqual(extracted.map(\.path), ["CAB-legacy"])
+        XCTAssertEqual(extracted.first?.data, nodes.first?.data)
+    }
+
+    func testRepackerEncryptsAndParserRoundTripsCurrentUnityAOVHeader() throws {
+        let nodes = [
+            AoVUnityFSRepackNode(
+                path: "CAB-current",
+                data: Data("current encrypted UnityFS payload".utf8),
+                flags: 9
+            )
+        ]
+        let report = try AoVUnityFSRepacker.repack(
+            nodes,
             formatVersion: 8,
             playerVersion: "5.0.0",
             engineVersion: "2022.3.5f1",
-            totalFileSize: 128,
-            flags: 0x440,
-            blockInfoCompression: "none",
             blockInfoLayout: .arenaOfValor,
-            blockInfoAtEnd: false,
-            usesAoVEncryption: true,
-            blockPaddingAtStart: false,
-            blocks: [],
-            nodes: [],
-            totalUncompressedBytes: 0,
-            totalCompressedBlockBytes: 0,
-            availableBlockDataBytes: 0,
-            blockDataOffset: 0
+            aovEncryption: true
         )
 
-        XCTAssertThrowsError(
-            try AoVUnityFSContentRewriter.validateWritableTemplate(encrypted)
-        ) { error in
-            guard let rewriteError = error as? AoVUnityFSContentRewriteError,
-                  case .encryptedBundleNotWritable = rewriteError else {
-                return XCTFail("Expected encrypted UnityFS writer rejection, got (error)")
-            }
-        }
+        let info = try AoVUnityFSParser.inspect(report.data)
+        let extracted = try AoVUnityFSParser.extractNodes(report.data)
+
+        XCTAssertTrue(info.usesAoVEncryption)
+        XCTAssertNotEqual(info.flags & 0x400, 0)
+        XCTAssertEqual(info.flags & 0x200, 0)
+        XCTAssertTrue(report.roundTripVerified)
+        XCTAssertEqual(extracted.map(\.path), ["CAB-current"])
+        XCTAssertEqual(extracted.first?.data, nodes.first?.data)
+    }
+
+    func testRewriterRetainsAOVEncryptionWhileReplacingNode() throws {
+        let originalNodes = [
+            AoVUnityFSRepackNode(path: "CAB-catalog", data: Data("encrypted-old".utf8), flags: 4),
+            AoVUnityFSRepackNode(path: "CAB-assets", data: Data("assets-preserved".utf8), flags: 3)
+        ]
+        let original = try AoVUnityFSRepacker.repack(
+            originalNodes,
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2022.3.5f1",
+            blockInfoLayout: .arenaOfValor,
+            aovEncryption: true
+        ).data
+
+        let replacement = Data("encrypted-new-catalog-with-extra-bytes".utf8)
+        let report = try AoVUnityFSContentRewriter.replaceNode(
+            in: original,
+            nodePath: "CAB-catalog",
+            with: replacement
+        )
+
+        let info = try AoVUnityFSParser.inspect(report.data)
+        let nodes = try AoVUnityFSParser.extractNodes(report.data)
+        XCTAssertTrue(report.roundTripVerified)
+        XCTAssertTrue(info.usesAoVEncryption)
+        XCTAssertNotEqual(info.flags & 0x400, 0)
+        XCTAssertEqual(nodes.map(\.path), ["CAB-catalog", "CAB-assets"])
+        XCTAssertEqual(nodes.map(\.flags), [4, 3])
+        XCTAssertEqual(nodes[0].data, replacement)
+        XCTAssertEqual(nodes[1].data, Data("assets-preserved".utf8))
     }
 
     func testWritableTemplateGuardRejectsExpandedBundleBeyondLimit() {
@@ -93,7 +151,7 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
         ) { error in
             guard let rewriteError = error as? AoVUnityFSContentRewriteError,
                   case .expandedArchiveTooLarge = rewriteError else {
-                return XCTFail("Expected expanded-size guard, got (error)")
+                return XCTFail("Expected expanded-size guard, got \\(error)")
             }
         }
     }
