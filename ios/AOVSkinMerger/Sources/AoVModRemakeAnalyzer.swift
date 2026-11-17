@@ -255,6 +255,7 @@ struct AoVModRemakeReport: Codable, Sendable {
     let legacyHasVerificationCatalog: [String]
     let packerCatalogComparison: AoVRemakeCatalogKindReport
     let verificationCatalogComparison: AoVRemakeCatalogKindReport
+    let runtimeCatalogComparison: AoVRuntimeCatalogComparisonReport
     let catalogMergePlanFindings: [AoVRemakeCatalogPlanFinding]
     let warnings: [String]
 
@@ -429,6 +430,13 @@ enum AoVModRemakeAnalyzer {
             legacy: legacyInventories.flatMap { catalogRecords(in: $0, kind: .verification) },
             kind: .verification
         )
+        // Compare the real runtime catalog MonoBehaviours too. The class-142
+        // AssetBundle wrappers in these files may have empty m_Container arrays;
+        // the actual packer/verification resource lists live in class-114 data.
+        let runtimeCatalogComparison = AoVRuntimeCatalogComparator.compare(
+            current: baseInventory,
+            legacy: legacyInventories
+        )
         let currentPackerContexts = catalogRecordContexts(in: baseInventory, kind: .packer)
         let currentVerificationContexts = catalogRecordContexts(in: baseInventory, kind: .verification)
         let legacyPackerContexts = legacyInventories.flatMap { catalogRecordContexts(in: $0, kind: .packer) }
@@ -474,6 +482,34 @@ enum AoVModRemakeAnalyzer {
         if unresolvedLocalPointers > 0 || invalidExternalPointers > 0 {
             warnings.append("Có pointer chưa phân giải được: local object không tìm thấy = \(unresolvedLocalPointers), external fileID không hợp lệ = \(invalidExternalPointers). Không được tự động remap các record này.")
         }
+        let runtimeSections = [
+            runtimeCatalogComparison.packerResources,
+            runtimeCatalogComparison.packerParentChildLinks,
+            runtimeCatalogComparison.verificationZIP,
+            runtimeCatalogComparison.verificationDatabin
+        ]
+        let missingRuntimeCatalogs = [
+            runtimeCatalogComparison.packerResources.currentCatalogVersions.isEmpty ? "Packer" : nil,
+            runtimeCatalogComparison.verificationZIP.currentCatalogVersions.isEmpty ? "Verification" : nil
+        ].compactMap { $0 }
+        if !missingRuntimeCatalogs.isEmpty {
+            warnings.append("RES nền chưa đọc được runtime catalog: \(missingRuntimeCatalogs.joined(separator: ", ")). Chưa thể lập đối chiếu catalog thực cho các mục này.")
+        }
+        let runtimeLegacyOnly = runtimeSections.reduce(0) { $0 + $1.legacyOnlyEntryCount }
+        let runtimeChanged = runtimeSections.reduce(0) { $0 + $1.changedEntryCount }
+        let runtimeConflicts = runtimeSections.reduce(0) {
+            $0 + $1.duplicateCurrentPathCount + $1.conflictingLegacyPathCount + $1.invalidReferenceCount
+        }
+        if runtimeLegacyOnly > 0 || runtimeChanged > 0 || runtimeConflicts > 0 {
+            warnings.append("Runtime catalog thật: MOD có \(runtimeLegacyOnly) mục chưa có trong RES, \(runtimeChanged) mục cùng đường dẫn nhưng nội dung khác và \(runtimeConflicts) xung đột/đường dẫn tham chiếu lỗi. Các mục này cần được remap và cập nhật checksum trước khi xuất.")
+        }
+        let runtimeVersionSummary = Array(Set(
+            runtimeCatalogComparison.packerResources.legacyCatalogVersions +
+            runtimeCatalogComparison.verificationZIP.legacyCatalogVersions
+        )).sorted()
+        if !runtimeVersionSummary.isEmpty {
+            warnings.append("Các đời runtime catalog đã phát hiện trong MOD nguồn: \(runtimeVersionSummary.joined(separator: "; ")).")
+        }
         if !catalogMergePlanFindings.isEmpty {
             warnings.append("Đã lập kế hoạch ghép thử cho \(catalogMergePlanFindings.filter { $0.status == .candidate || $0.status == .requiresExternalTargetAudit }.count) AssetBundle; \(catalogMergePlanFindings.filter { $0.status == .blocked || $0.status == .missingCurrentBundle || $0.status == .ambiguousCurrentBundle }.count) trường hợp bị chặn hoặc chưa khớp.")
         }
@@ -498,6 +534,7 @@ enum AoVModRemakeAnalyzer {
             legacyHasVerificationCatalog: legacyVerification,
             packerCatalogComparison: packerCatalogComparison,
             verificationCatalogComparison: verificationCatalogComparison,
+            runtimeCatalogComparison: runtimeCatalogComparison,
             catalogMergePlanFindings: catalogMergePlanFindings,
             warnings: warnings
         )
