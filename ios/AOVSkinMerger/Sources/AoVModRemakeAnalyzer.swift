@@ -48,7 +48,7 @@ struct AoVRemakePathFinding: Codable, Identifiable, Sendable {
     var id: String { path }
 }
 
-enum AoVRemakeCatalogKind: String, Codable, Sendable, CaseIterable {
+enum AoVRemakeCatalogKind: String, Codable, Equatable, Hashable, Sendable, CaseIterable {
     case packer
     case verification
 
@@ -67,7 +67,7 @@ enum AoVRemakeCatalogKind: String, Codable, Sendable, CaseIterable {
     }
 }
 
-enum AoVRemakeCatalogRecordStatus: String, Codable, Sendable {
+enum AoVRemakeCatalogRecordStatus: String, Codable, Equatable, Hashable, Sendable {
     case mappedCandidate
     case missingFromCurrent
     case ambiguousCurrentMatch
