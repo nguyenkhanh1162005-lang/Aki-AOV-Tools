@@ -6,6 +6,7 @@ enum AoVUnityFSAssetBundleMergeExecutorError: LocalizedError {
     case ambiguousNode(String)
     case objectNotFound(Int64)
     case ambiguousObject(Int64)
+    case externalTargetAuditRequired([String])
     case verificationFailed(String)
 
     var errorDescription: String? {
@@ -13,15 +14,17 @@ enum AoVUnityFSAssetBundleMergeExecutorError: LocalizedError {
         case .expandedArchiveTooLarge:
             return "UnityFS AssetBundle ghép vượt giới hạn giải nén 512 MiB."
         case .nodeNotFound(let path):
-            return "Không tìm thấy SerializedFile node (path) trong UnityFS."
+            return "Không tìm thấy SerializedFile node \\(path) trong UnityFS."
         case .ambiguousNode(let path):
-            return "UnityFS có nhiều node trùng đường dẫn (path)."
+            return "UnityFS có nhiều node trùng đường dẫn \\(path)."
         case .objectNotFound(let pathID):
-            return "Không tìm thấy AssetBundle object pathID (pathID) trong SerializedFile."
+            return "Không tìm thấy AssetBundle object pathID \\(pathID) trong SerializedFile."
         case .ambiguousObject(let pathID):
-            return "SerializedFile có nhiều AssetBundle object pathID (pathID)."
+            return "SerializedFile có nhiều AssetBundle object pathID \\(pathID)."
+        case .externalTargetAuditRequired(let samples):
+            return "PPtr external đã đổi fileID nhưng chưa audit pathID đích: \\(samples.prefix(4).joined(separator: ", "))."
         case .verificationFailed(let reason):
-            return "UnityFS AssetBundle merge không vượt qua round-trip: (reason)"
+            return "UnityFS AssetBundle merge không vượt qua round-trip: \\(reason)"
         }
     }
 }
@@ -85,6 +88,11 @@ enum AoVUnityFSAssetBundleMergeExecutor {
             legacySerializedFile: legacySerializedFile,
             availableCurrentBundleNames: availableCurrentBundleNames
         )
+        guard !plan.externalTargetAuditRequired else {
+            throw AoVUnityFSAssetBundleMergeExecutorError.externalTargetAuditRequired(
+                plan.externalTargetAuditSamples
+            )
+        }
         let rewrite = try AoVUnityFSContentRewriter.replaceAssetBundleRecord(
             in: source,
             serializedFileNodePath: serializedFileNodePath,
