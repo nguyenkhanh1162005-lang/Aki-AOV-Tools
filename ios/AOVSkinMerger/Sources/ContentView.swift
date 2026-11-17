@@ -141,8 +141,8 @@ struct ContentView: View {
                             statusRow("CommonActions: direct list + skinId conditions", true)
                             statusRow("MSES / IFix: adapter theo schema đã nhận diện", true)
                             statusRow("Wwise BNK: append-only nếu ID không xung đột", true)
-                            statusRow("UnityFS header / block-directory inspection (read-only)", true)
-                            statusRow("AssetBundle Packer / Verification metadata", false)
+                            statusRow("UnityFS header + LZ4/LZ4HC block/node extraction (read-only)", true)
+                            statusRow("Packer / Verification catalog parsing and merge", false)
                             statusRow("AssetRef subset merge khi cùng path khác payload", false)
                             statusRow("Xuất ZIP với kiểm CRC khi không còn blocker", true)
                         }.panel()
@@ -663,6 +663,30 @@ struct ContentView: View {
                                 .foregroundColor(.secondary)
                                 .textSelection(.enabled)
                         }
+                        if let status = bundle.catalogExtractionStatus {
+                            Text("Catalog: \(status)")
+                                .font(.caption2)
+                                .foregroundColor(status.hasPrefix("Đã trích xuất") ? .green : .orange)
+                                .textSelection(.enabled)
+                        }
+                        ForEach(bundle.catalogNodeSamples) { node in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(node.path) · \(formatByteCount(node.size))")
+                                    .font(.caption2.monospaced())
+                                    .textSelection(.enabled)
+                                if !node.prefixHex.isEmpty {
+                                    Text("Prefix: \(node.prefixHex)")
+                                        .font(.caption2.monospaced())
+                                        .foregroundColor(.secondary)
+                                }
+                                ForEach(node.stringHints, id: \.self) { hint in
+                                    Text("Chuỗi đọc được: \(hint)")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                        }
                     }
                     .padding(.vertical, 5)
                     Divider()
@@ -701,7 +725,7 @@ struct ContentView: View {
                     Divider()
                 }
             }
-            Text("UnityFS hiện chỉ được đọc header, block table và directory để kiểm tra cấu trúc. App chưa giải nén AssetBundle, sửa catalog Packer/Verification hoặc chứng minh game sẽ nạp được bundle sau khi ghép.")
+            Text("UnityFS hiện đã đọc header, block table, giải nén block none/LZ4/LZ4HC và trích xuất node read-only cho hai catalog Packer/Verification. App chưa giải mã type tree/field catalog, chưa cập nhật dependency/checksum và chưa chứng minh game sẽ nạp được bundle sau khi ghép.")
                 .font(.footnote)
                 .foregroundColor(.orange)
             Text("Quét đã đọc từng payload và xác minh CRC. Đường dẫn có payload khác nhau chỉ được đánh dấu xung đột, chưa tự chọn bản để ghi đè. Bản này chưa tạo ZIP skin hoàn chỉnh.")
