@@ -54,6 +54,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         verifiedExternalTargetFiles: [String: Data] = [:]
     ) throws -> AoVUnityFSAssetBundleMergeExecutionReport {
         let info = try AoVUnityFSParser.inspect(source)
+        try AoVUnityFSContentRewriter.validateWritableTemplate(info)
         guard info.totalUncompressedBytes <= maximumExpandedBytes else {
             throw AoVUnityFSAssetBundleMergeExecutorError.expandedArchiveTooLarge
         }
