@@ -1,4 +1,5 @@
 import Foundation
+import CommonCrypto
 
 enum AoVUnityFSBlockInfoLayout: String, Codable, Hashable, Sendable {
     case standard
@@ -122,6 +123,7 @@ enum AoVUnityFSError: LocalizedError {
     case unsupportedEncryption(UInt32)
     case ambiguousLegacyFlag
     case ambiguousBlockInfoLayout
+    case decryptionFailed(String)
     case unsupportedInfoCompression(UInt32)
     case unsupportedBlockCompression(UInt32)
     case invalidCompression(UInt32)
@@ -146,6 +148,8 @@ enum AoVUnityFSError: LocalizedError {
             return "UnityFS không có phiên bản Unity rõ ràng và dùng cờ 0x200; chưa thể phân biệt padding với mã hóa."
         case .ambiguousBlockInfoLayout:
             return "Bảng block UnityFS khớp nhiều layout khác nhau; không thể tự chọn kiểu giải mã an toàn."
+        case .decryptionFailed(let reason):
+            return "Không giải mã được lớp bảo vệ AOV: \(reason)"
         case .unsupportedInfoCompression(let method):
             return "Bảng metadata UnityFS dùng kiểu nén \(method), chưa có bộ giải nén an toàn."
         case .unsupportedBlockCompression(let method):
@@ -297,6 +301,22 @@ enum AoVUnityFSParser {
     private static let maximumBlockInfoBytes = 64 * 1024 * 1024
     private static let maximumBlocks = 4_096
     private static let maximumNodes = 100_000
+    // AOV's public UnityPy fork documents these UnityFS header AES and block-info
+    // SM4 parameters. Header encryption is used only when the version-specific
+    // archive flag says so; ordinary UnityFS headers are never sent through AES.
+    private static let aovHeaderAESKey = Data([
+        0xE3, 0x05, 0x62, 0x14, 0xD6, 0x0A, 0x20, 0x25,
+        0x36, 0x96, 0x1B, 0x07, 0x74, 0xDC, 0x24, 0x02
+    ])
+    private static let aovHeaderAESIV = Data([
+        0x1D, 0x6E, 0xEB, 0x4C, 0x86, 0xA9, 0x45, 0x44,
+        0x45, 0x72, 0x12, 0x21, 0x2B, 0x43, 0x25, 0x2F
+    ])
+    private static let aovBlockSM4Key = Data([
+        0x79, 0x7B, 0xCD, 0x5D, 0x7D, 0x7B, 0xB1, 0x11,
+        0x43, 0xD0, 0x0D, 0x71, 0x3C, 0xDA, 0xA8, 0x08
+    ])
+    private static let aovBlockSM4IV = aovBlockSM4Key
 
     static func inspect(_ data: Data) throws -> AoVUnityFSBundleInfo {
         guard data.count >= 32 else {
@@ -316,10 +336,39 @@ enum AoVUnityFSParser {
         }
         let playerVersion = try header.readCString("player version")
         let engineVersion = try header.readCString("engine version")
-        let declaredFileSize = try header.readUInt64BE("total file size")
-        let compressedInfoSize = try header.readUInt32BE("compressed block-info size")
-        let uncompressedInfoSize = try header.readUInt32BE("uncompressed block-info size")
+        let rawHeaderFields = try header.readBytes(16, "UnityFS size header")
         let flags = try header.readUInt32BE("archive flags")
+
+        let parsedEngine = AoVUnityEngineVersion(engineVersion)
+        let engine = parsedEngine.flatMap { $0.major == 0 ? nil : $0 }
+        let usesLegacyFlags = engine?.usesLegacyEncryptionFlag
+        if flags & 0x1000 != 0 {
+            throw AoVUnityFSError.unsupportedEncryption(flags)
+        }
+        let usesAoVEncryption: Bool
+        if let usesLegacyFlags {
+            usesAoVEncryption = flags & (usesLegacyFlags ? 0x200 : 0x400) != 0
+        } else if flags & 0x600 != 0 {
+            throw AoVUnityFSError.ambiguousLegacyFlag
+        } else {
+            usesAoVEncryption = false
+        }
+
+        let declaredFileSize: UInt64
+        let compressedInfoSize: UInt32
+        let uncompressedInfoSize: UInt32
+        if usesAoVEncryption {
+            let decrypted = try decryptAoVHeader(rawHeaderFields)
+            let bytes = Array(decrypted)
+            declaredFileSize = readLittleEndianUInt64(bytes, at: 0)
+            compressedInfoSize = readLittleEndianUInt32(bytes, at: 8)
+            uncompressedInfoSize = readLittleEndianUInt32(bytes, at: 12)
+        } else {
+            var sizeReader = AoVUnityFSReader(data: rawHeaderFields)
+            declaredFileSize = try sizeReader.readUInt64BE("total file size")
+            compressedInfoSize = try sizeReader.readUInt32BE("compressed block-info size")
+            uncompressedInfoSize = try sizeReader.readUInt32BE("uncompressed block-info size")
+        }
 
         guard declaredFileSize == UInt64(data.count) else {
             throw AoVUnityFSError.fileSizeMismatch(expected: declaredFileSize, actual: data.count)
@@ -333,36 +382,11 @@ enum AoVUnityFSParser {
             throw AoVUnityFSError.invalidHeader("thiếu cờ directory info kết hợp (0x40).")
         }
 
-        let parsedEngine = AoVUnityEngineVersion(engineVersion)
-        let engine = parsedEngine.flatMap { $0.major == 0 ? nil : $0 }
         let headerNeedsAlignment = formatVersion >= 7 || (engine?.needsHeaderAlignment ?? false)
         if headerNeedsAlignment {
             try header.align(16)
         }
         let headerEnd = header.offset
-
-        let usesLegacyFlags = engine?.usesLegacyEncryptionFlag
-        if flags & 0x1000 != 0 {
-            throw AoVUnityFSError.unsupportedEncryption(flags)
-        }
-        let usesAoVEncryption: Bool
-        if let usesLegacyFlags {
-            usesAoVEncryption = flags & (usesLegacyFlags ? 0x200 : 0x400) != 0
-        } else if flags & 0x600 != 0 {
-            throw AoVUnityFSError.ambiguousLegacyFlag
-        } else {
-            usesAoVEncryption = false
-        }
-        if usesAoVEncryption {
-            // Header AES + block-info SM4 are recognised separately from generic
-            // UnityFS. Repacking protected AOV archives remains disabled until the
-            // original protected variant can be reproduced and verified.
-            throw AoVUnityFSError.unsupportedEncryption(flags)
-        }
-        if usesLegacyFlags == nil && flags & 0x200 != 0 {
-            throw AoVUnityFSError.ambiguousLegacyFlag
-        }
-
         let blockInfoAtEnd = flags & 0x80 != 0
         let blockPaddingAtStart = (usesLegacyFlags == false) && (flags & 0x200 != 0)
         let compressedLength = Int(compressedInfoSize)
@@ -397,7 +421,15 @@ enum AoVUnityFSParser {
         guard infoOffset >= 0, compressedLength <= data.count - infoOffset else {
             throw AoVUnityFSError.truncated("block-info payload")
         }
-        let compressedInfo = data.subdata(in: infoOffset..<(infoOffset + compressedLength))
+        var compressedInfo = data.subdata(in: infoOffset..<(infoOffset + compressedLength))
+        if usesAoVEncryption {
+            compressedInfo = try AoVSM4.cryptCBC(
+                compressedInfo,
+                key: Self.aovBlockSM4Key,
+                iv: Self.aovBlockSM4IV,
+                decrypt: true
+            )
+        }
         let infoCompressionCode = flags & 0x3F
         let infoCompression = try decompressBlockInfo(
             compressedInfo,
@@ -446,7 +478,7 @@ enum AoVUnityFSParser {
             blockInfoLayout: selectedLayout,
             blockInfoAtEnd: blockInfoAtEnd,
             blockPaddingAtStart: blockPaddingAtStart,
-            usesAoVEncryption: false,
+            usesAoVEncryption: usesAoVEncryption,
             blocks: selectedTable.blocks,
             nodes: selectedTable.nodes,
             totalUncompressedBytes: selectedTable.totalUncompressedBytes,
@@ -706,6 +738,60 @@ enum AoVUnityFSParser {
             appendHint(lower, limit)
         }
         return hints
+    }
+
+    private static func decryptAoVHeader(_ encrypted: Data) throws -> Data {
+        guard encrypted.count == 16 else {
+            throw AoVUnityFSError.decryptionFailed("Header AES phải có đúng 16 byte.")
+        }
+        let bytes = Array(encrypted)
+        var reordered = Data()
+        reordered.append(contentsOf: bytes[0..<8].reversed())
+        reordered.append(contentsOf: bytes[8..<12].reversed())
+        reordered.append(contentsOf: bytes[12..<16].reversed())
+
+        var output = Data(count: 16)
+        var outputLength: size_t = 0
+        let status = reordered.withUnsafeBytes { inputBytes in
+            Self.aovHeaderAESKey.withUnsafeBytes { keyBytes in
+                Self.aovHeaderAESIV.withUnsafeBytes { ivBytes in
+                    output.withUnsafeMutableBytes { outputBytes in
+                        CCCrypt(
+                            CCOperation(kCCDecrypt),
+                            CCAlgorithm(kCCAlgorithmAES),
+                            CCOptions(0),
+                            keyBytes.baseAddress,
+                            Self.aovHeaderAESKey.count,
+                            ivBytes.baseAddress,
+                            inputBytes.baseAddress,
+                            reordered.count,
+                            outputBytes.baseAddress,
+                            output.count,
+                            &outputLength
+                        )
+                    }
+                }
+            }
+        }
+        guard status == kCCSuccess, outputLength == 16 else {
+            throw AoVUnityFSError.decryptionFailed("AES-CBC header trả về trạng thái \(status).")
+        }
+        return output
+    }
+
+    private static func readLittleEndianUInt32(_ bytes: [UInt8], at offset: Int) -> UInt32 {
+        UInt32(bytes[offset]) |
+            (UInt32(bytes[offset + 1]) << 8) |
+            (UInt32(bytes[offset + 2]) << 16) |
+            (UInt32(bytes[offset + 3]) << 24)
+    }
+
+    private static func readLittleEndianUInt64(_ bytes: [UInt8], at offset: Int) -> UInt64 {
+        var value: UInt64 = 0
+        for index in 0..<8 {
+            value |= UInt64(bytes[offset + index]) << UInt64(index * 8)
+        }
+        return value
     }
 
     private static func decompressBlockInfo(
