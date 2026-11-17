@@ -83,7 +83,8 @@ final class AoVSerializedFileRewriterTests: XCTestCase {
             assetBundleName: record.assetBundleName + "-updated",
             dependencies: dependencies,
             isStreamedSceneAssetBundle: record.isStreamedSceneAssetBundle,
-            trailingBytes: record.trailingBytes
+            trailingBytes: record.trailingBytes,
+            trailingData: record.trailingData
         )
     }
 
