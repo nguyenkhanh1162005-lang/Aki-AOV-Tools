@@ -14,7 +14,10 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
 
         let plan = AoVRuntimeCatalogMergePlanner.planPacker(
             current: current,
-            legacy: [("legacy.zip", legacy)]
+            legacy: [("legacy.zip", legacy)],
+            verifiedFinalEntries: [
+                "assetbundle/legacy-only.assetbundle": legacyNewEntry
+            ]
         )
 
         XCTAssertTrue(plan.safeToWrite)
@@ -31,6 +34,42 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
         )
         XCTAssertEqual(plan.candidateCatalog?.version, current.version)
         XCTAssertEqual(plan.candidateCatalog?.svnRevision, current.svnRevision)
+    }
+
+    func testPackerPlannerBlocksNewPathWithoutVerifiedAssetBundlePayload() {
+        let newEntry = pack("assetbundle/not-in-res.assetbundle", crc: 10)
+        let current = packer(entries: [], links: [])
+        let legacy = packer(entries: [newEntry], links: [])
+
+        let plan = AoVRuntimeCatalogMergePlanner.planPacker(
+            current: current,
+            legacy: [("legacy.zip", legacy)]
+        )
+
+        XCTAssertFalse(plan.safeToWrite)
+        XCTAssertNil(plan.candidateCatalog)
+        XCTAssertTrue(plan.issues.contains {
+            $0.reason == .assetBundlePayloadRequired &&
+            $0.path == "assetbundle/not-in-res.assetbundle"
+        })
+    }
+
+    func testPackerPlannerUpdatesExistingPathOnlyWithVerifiedFinalBundle() {
+        let currentEntry = pack("assetbundle/hero.assetbundle", crc: 10)
+        let legacyEntry = pack("assetbundle/hero.assetbundle", crc: 11)
+        let verifiedFinal = pack("assetbundle/hero.assetbundle", crc: 99)
+        let current = packer(entries: [currentEntry], links: [])
+        let legacy = packer(entries: [legacyEntry], links: [])
+
+        let plan = AoVRuntimeCatalogMergePlanner.planPacker(
+            current: current,
+            legacy: [("legacy.zip", legacy)],
+            verifiedFinalEntries: [verifiedFinal.pathInIFS: verifiedFinal]
+        )
+
+        XCTAssertTrue(plan.safeToWrite)
+        XCTAssertEqual(plan.updatedPaths, ["assetbundle/hero.assetbundle"])
+        XCTAssertEqual(plan.candidateCatalog?.allResourcePackInfo, [verifiedFinal])
     }
 
     func testPackerPlannerBlocksChangedExistingBundleInsteadOfOverwriting() {
