@@ -20,7 +20,7 @@ struct AoVRuntimeCatalogMergeIssue: Codable, Hashable, Sendable, Identifiable {
     var id: String { "\(reason.rawValue)|\(path)|\(sourceArchives.joined(separator: ","))" }
 }
 
-struct AoVRuntimePackerMergePlan: Sendable {
+struct AoVRuntimePackerMergePlan: Codable, Sendable {
     let candidateCatalog: AoVRuntimeResourcePackerCatalog?
     let addedPaths: [String]
     let unchangedPaths: [String]
@@ -31,7 +31,7 @@ struct AoVRuntimePackerMergePlan: Sendable {
     var safeToWrite: Bool { candidateCatalog != nil && issues.isEmpty }
 }
 
-struct AoVRuntimeVerificationMergePlan: Sendable {
+struct AoVRuntimeVerificationMergePlan: Codable, Sendable {
     let candidateCatalog: AoVRuntimeResourceVerificationCatalog?
     let addedZIPPaths: [String]
     let unchangedZIPPaths: [String]
