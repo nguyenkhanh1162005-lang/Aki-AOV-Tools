@@ -28,9 +28,9 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
         XCTAssertEqual(report.originalNodeBytes, UInt64("catalog-old".utf8.count))
         XCTAssertEqual(report.rewrittenNodeBytes, UInt64(replacement.count))
 
-        let info = try AoVUnityFSParser.inspect(report.data)
+        let info = try AoVUnityFSParser.inspect(report.payload)
         XCTAssertEqual(info.nodes.map(\.path), originalNodes.map(\.path))
-        let nodes = try AoVUnityFSParser.extractNodes(report.data)
+        let nodes = try AoVUnityFSParser.extractNodes(report.payload)
         XCTAssertEqual(nodes.map(\.flags), originalNodes.map(\.flags))
         let byPath = Dictionary(uniqueKeysWithValues: nodes.map { ($0.path, $0.data) })
         XCTAssertEqual(byPath["CAB-catalog"], replacement)
@@ -55,8 +55,8 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
             aovEncryption: true
         )
 
-        let info = try AoVUnityFSParser.inspect(report.data)
-        let extracted = try AoVUnityFSParser.extractNodes(report.data)
+        let info = try AoVUnityFSParser.inspect(report.payload)
+        let extracted = try AoVUnityFSParser.extractNodes(report.payload)
 
         XCTAssertTrue(info.usesAoVEncryption)
         XCTAssertNotEqual(info.flags & 0x200, 0)
@@ -83,8 +83,8 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
             aovEncryption: true
         )
 
-        let info = try AoVUnityFSParser.inspect(report.data)
-        let extracted = try AoVUnityFSParser.extractNodes(report.data)
+        let info = try AoVUnityFSParser.inspect(report.payload)
+        let extracted = try AoVUnityFSParser.extractNodes(report.payload)
 
         XCTAssertTrue(info.usesAoVEncryption)
         XCTAssertNotEqual(info.flags & 0x400, 0)
@@ -115,8 +115,8 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
             with: replacement
         )
 
-        let info = try AoVUnityFSParser.inspect(report.data)
-        let nodes = try AoVUnityFSParser.extractNodes(report.data)
+        let info = try AoVUnityFSParser.inspect(report.payload)
+        let nodes = try AoVUnityFSParser.extractNodes(report.payload)
         XCTAssertTrue(report.roundTripVerified)
         XCTAssertTrue(info.usesAoVEncryption)
         XCTAssertNotEqual(info.flags & 0x400, 0)
@@ -323,8 +323,9 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
             engineVersion: "2022.3.5f1"
         ).data
 
-        let report = try AoVUnityFSAssetBundleMergeExecutor.mergeImportingLegacyObjects(
-            in: destinationBundle,
+        let report = try AoVModRemakeExporter.mergeAssetBundleResource(
+            resourcePath: "1.64.1/assetbundle/test.assetbundle",
+            baseAssetBundle: destinationBundle,
             serializedFileNodePath: "CAB-current",
             legacyInputs: [
                 AoVAssetBundleLegacyObjectImportInput(
@@ -339,7 +340,7 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
 
         XCTAssertTrue(report.roundTripVerified)
         XCTAssertEqual(report.importedObjectCount, 2)
-        let finalBundleNodes = try AoVUnityFSParser.extractNodes(report.data)
+        let finalBundleNodes = try AoVUnityFSParser.extractNodes(report.payload)
         let finalSerializedFile = try XCTUnwrap(finalBundleNodes.first(where: { $0.path == "CAB-current" })?.data)
         let finalSummary = try AoVSerializedFileParser.inspect(finalSerializedFile)
         let finalRecord = try XCTUnwrap(finalSummary.assetBundleRecords.first(where: { $0.pathID == 5001 }))
