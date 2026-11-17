@@ -751,6 +751,7 @@ enum AoVUnityFSParser {
         reordered.append(contentsOf: bytes[12..<16].reversed())
 
         var output = Data(count: 16)
+        let outputCapacity = output.count
         var outputLength: size_t = 0
         let status = reordered.withUnsafeBytes { inputBytes in
             Self.aovHeaderAESKey.withUnsafeBytes { keyBytes in
@@ -766,7 +767,7 @@ enum AoVUnityFSParser {
                             inputBytes.baseAddress,
                             reordered.count,
                             outputBytes.baseAddress,
-                            output.count,
+                            outputCapacity,
                             &outputLength
                         )
                     }
