@@ -32,6 +32,8 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
             packerCatalogComparison: emptyPacker,
             verificationCatalogComparison: emptyVerification,
             runtimeCatalogComparison: emptyRuntimeCatalogReport(),
+            runtimePackerMergePlan: nil,
+            runtimeVerificationMergePlan: nil,
             catalogMergePlanFindings: [],
             warnings: []
         )
