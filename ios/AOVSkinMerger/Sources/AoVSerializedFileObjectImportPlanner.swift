@@ -100,6 +100,76 @@ enum AoVSerializedFileObjectImportPlanner {
     private static let maximumSingleObjectBytes: UInt64 = 16 * 1024 * 1024
     private static let maximumBatchBytes: UInt64 = 512 * 1024 * 1024
 
+    /// Expands seed objects to their transitive local-PPtr dependency
+    /// closure before planning the import. External PPtrs are deliberately
+    /// not followed here; the main planner must still validate their exact
+    /// GUID/path and target pathID mappings.
+    static func planDependencyClosure(
+        source: Data,
+        destination: Data,
+        seedPathIDs: Set<Int64>,
+        externalFileIDMap: [Int32: Int32] = [:],
+        externalPathIDMaps: [Int32: [Int64: Int64]] = [:],
+        availableExternalTargetPathIDs: [Int32: Set<Int64>] = [:]
+    ) throws -> AoVSerializedFileObjectImportPlan {
+        guard !seedPathIDs.isEmpty else {
+            throw AoVSerializedFileObjectImportPlanError.noObjects
+        }
+        let sourceSummary = try AoVSerializedFileParser.inspect(source)
+        guard sourceSummary.fileSize == UInt64(source.count) else {
+            throw AoVSerializedFileObjectImportPlanError.invalidSerializedFile("nguồn")
+        }
+        guard sourceSummary.serializedObjects.count <= maximumObjects else {
+            throw AoVSerializedFileObjectImportPlanError.tooManyObjects(
+                sourceSummary.serializedObjects.count
+            )
+        }
+        let sourceObjectsByID = Dictionary(uniqueKeysWithValues: sourceSummary.serializedObjects.map {
+            ($0.pathID, $0)
+        })
+        var pending = Array(seedPathIDs)
+        var closure = Set<Int64>()
+        while let pathID = pending.popLast() {
+            guard let object = sourceObjectsByID[pathID] else {
+                throw AoVSerializedFileObjectImportPlanError.selectedObjectMissing(pathID)
+            }
+            guard closure.insert(pathID).inserted else { continue }
+            guard closure.count <= maximumObjects else {
+                throw AoVSerializedFileObjectImportPlanError.tooManyObjects(closure.count)
+            }
+            guard let typeInfo = sourceSummary.typeInfo(for: object),
+                  !typeInfo.typeTreeNodes.isEmpty else {
+                throw AoVSerializedFileObjectImportPlanError.missingTypeTree(pathID)
+            }
+            let value = try AoVSerializedFileParser.decodeObjectWithTypeTree(
+                pathID: pathID,
+                in: source,
+                summary: sourceSummary
+            )
+            let localTargets = try AoVUnityTypeTreePointerRemapper.collectLocalTargets(
+                nodes: typeInfo.typeTreeNodes,
+                value: value
+            )
+            for targetPathID in localTargets where !closure.contains(targetPathID) {
+                guard sourceObjectsByID[targetPathID] != nil else {
+                    throw AoVSerializedFileObjectImportPlanError.pointerAuditFailed(
+                        pathID,
+                        "local PPtr pathID \\(targetPathID) không tồn tại trong source SerializedFile."
+                    )
+                }
+                pending.append(targetPathID)
+            }
+        }
+        return try plan(
+            source: source,
+            destination: destination,
+            selectedPathIDs: closure,
+            externalFileIDMap: externalFileIDMap,
+            externalPathIDMaps: externalPathIDMaps,
+            availableExternalTargetPathIDs: availableExternalTargetPathIDs
+        )
+    }
+
     static func plan(
         source: Data,
         destination: Data,
