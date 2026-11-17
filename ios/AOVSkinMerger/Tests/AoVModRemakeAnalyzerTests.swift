@@ -10,6 +10,8 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
     }
 
     func testReportNeverClaimsRebuildIsAvailable() {
+        let emptyPacker = emptyCatalogReport(.packer)
+        let emptyVerification = emptyCatalogReport(.verification)
         let report = AoVModRemakeReport(
             base: ArchiveInventory(
                 id: UUID(), fileName: "new-res.zip", fileSize: 1, fileCount: 0,
@@ -27,9 +29,157 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
             baseHasVerificationCatalog: true,
             legacyHasPackerCatalog: [],
             legacyHasVerificationCatalog: [],
+            packerCatalogComparison: emptyPacker,
+            verificationCatalogComparison: emptyVerification,
             warnings: []
         )
 
         XCTAssertFalse(report.rebuildAvailable)
+    }
+
+    func testCatalogComparisonMatchesBundleAndReportsChangedPointersAndDependencies() {
+        let old = record(
+            source: "old-mod.zip",
+            bundle: "actor/1001",
+            entries: [
+                entry("Assets/Hero.prefab", pathID: 10, preloadIndex: 0, preloadSize: 4),
+                entry("Assets/OldEffect.prefab", pathID: 11, preloadIndex: 4, preloadSize: 2)
+            ],
+            dependencies: ["common", "actor/shared"]
+        )
+        let current = record(
+            source: "new-res.zip",
+            bundle: "actor/1001",
+            entries: [
+                entry("Assets/Hero.prefab", pathID: 90, preloadIndex: 0, preloadSize: 6),
+                entry("Assets/NewEffect.prefab", pathID: 91, preloadIndex: 6, preloadSize: 2)
+            ],
+            dependencies: ["common", "actor/shared", "shader/new"]
+        )
+
+        let report = AoVModRemakeAnalyzer.compareCatalogRecords(
+            current: [current],
+            legacy: [old],
+            kind: .packer
+        )
+
+        XCTAssertEqual(report.mappedRecordCount, 1)
+        XCTAssertEqual(report.missingCurrentRecordCount, 0)
+        XCTAssertEqual(report.mappedContainerKeyCount, 1)
+        XCTAssertEqual(report.legacyOnlyContainerKeyCount, 1)
+        XCTAssertEqual(report.currentOnlyContainerKeyCount, 1)
+        XCTAssertEqual(report.changedAssetPointerCount, 1)
+        XCTAssertEqual(report.changedPreloadRangeCount, 1)
+        XCTAssertEqual(report.dependenciesAddedInCurrentCount, 1)
+        XCTAssertEqual(report.dependenciesRemovedInCurrentCount, 0)
+        XCTAssertEqual(report.findings.first?.legacyOnlyKeySamples, ["Assets/OldEffect.prefab"])
+        XCTAssertEqual(report.findings.first?.currentOnlyKeySamples, ["Assets/NewEffect.prefab"])
+        XCTAssertEqual(report.findings.first?.changedPointerKeySamples, ["Assets/Hero.prefab"])
+        XCTAssertEqual(report.findings.first?.status, .mappedCandidate)
+    }
+
+    func testCatalogComparisonFlagsMissingAndAmbiguousBundleRecords() {
+        let missing = record(source: "mod.zip", bundle: "actor/missing", entries: [], dependencies: [])
+        let duplicateA = record(source: "new-res.zip", bundle: "actor/duplicate", entries: [], dependencies: [])
+        let duplicateB = record(source: "new-res.zip", bundle: "actor/duplicate", entries: [], dependencies: [])
+        let oldDuplicate = record(source: "mod.zip", bundle: "actor/duplicate", entries: [], dependencies: [])
+
+        let report = AoVModRemakeAnalyzer.compareCatalogRecords(
+            current: [duplicateA, duplicateB],
+            legacy: [missing, oldDuplicate],
+            kind: .verification
+        )
+
+        XCTAssertEqual(report.missingCurrentRecordCount, 1)
+        XCTAssertEqual(report.ambiguousRecordCount, 1)
+        XCTAssertEqual(report.currentOnlyRecordCount, 0)
+        XCTAssertEqual(Set(report.findings.map(\.status)), [.missingFromCurrent, .ambiguousCurrentMatch])
+    }
+
+    func testCatalogComparisonDoesNotSilentlyResolveDuplicateContainerKeys() {
+        let old = record(
+            source: "mod.zip",
+            bundle: "actor/2002",
+            entries: [
+                entry("Assets/Duplicate.prefab", pathID: 1),
+                entry("Assets/Duplicate.prefab", pathID: 2)
+            ],
+            dependencies: []
+        )
+        let current = record(
+            source: "new-res.zip",
+            bundle: "actor/2002",
+            entries: [entry("Assets/Duplicate.prefab", pathID: 3)],
+            dependencies: []
+        )
+
+        let report = AoVModRemakeAnalyzer.compareCatalogRecords(
+            current: [current],
+            legacy: [old],
+            kind: .packer
+        )
+
+        XCTAssertEqual(report.ambiguousContainerKeyCount, 1)
+        XCTAssertEqual(report.mappedContainerKeyCount, 0)
+    }
+
+    private func emptyCatalogReport(_ kind: AoVRemakeCatalogKind) -> AoVRemakeCatalogKindReport {
+        AoVRemakeCatalogKindReport(
+            kind: kind,
+            currentRecordCount: 0,
+            legacyRecordCount: 0,
+            mappedRecordCount: 0,
+            missingCurrentRecordCount: 0,
+            ambiguousRecordCount: 0,
+            currentOnlyRecordCount: 0,
+            mappedContainerKeyCount: 0,
+            legacyOnlyContainerKeyCount: 0,
+            currentOnlyContainerKeyCount: 0,
+            ambiguousContainerKeyCount: 0,
+            changedAssetPointerCount: 0,
+            changedPreloadRangeCount: 0,
+            dependenciesAddedInCurrentCount: 0,
+            dependenciesRemovedInCurrentCount: 0,
+            findings: []
+        )
+    }
+
+    private func record(
+        source: String,
+        bundle: String,
+        entries: [AoVRemakeCatalogEntrySnapshot],
+        dependencies: [String]
+    ) -> AoVRemakeCatalogRecordSnapshot {
+        AoVRemakeCatalogRecordSnapshot(
+            sourceArchive: source,
+            catalogPath: "assetbundle/resourcepackerinfosetall.assetbundle",
+            nodePath: "CAB-catalog",
+            serializedFormatVersion: 17,
+            unityVersion: "2020.3.34f1",
+            targetPlatform: 13,
+            objectPathID: 100,
+            name: bundle,
+            assetBundleName: bundle,
+            preloadCount: 8,
+            mainAssetFileID: 0,
+            mainAssetPathID: 200,
+            dependencies: dependencies,
+            containerEntries: entries
+        )
+    }
+
+    private func entry(
+        _ key: String,
+        pathID: Int64,
+        preloadIndex: Int32 = 0,
+        preloadSize: Int32 = 1
+    ) -> AoVRemakeCatalogEntrySnapshot {
+        AoVRemakeCatalogEntrySnapshot(
+            key: key,
+            preloadIndex: preloadIndex,
+            preloadSize: preloadSize,
+            assetFileID: 0,
+            assetPathID: pathID
+        )
     }
 }
