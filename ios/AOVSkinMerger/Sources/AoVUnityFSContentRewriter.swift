@@ -74,9 +74,20 @@ enum AoVUnityFSContentRewriter {
             maximumExpandedBytes: UInt64(512 * 1024 * 1024),
             maximumNodeCount: max(rechecked.nodes.count, 1)
         )
-        let verifiedTarget = verifiedNodes.first(where: { $0.path == nodePath })
-        guard verifiedTarget?.data == replacement,
-              verifiedNodes.count == extracted.count,
+        let verifiedTargets = verifiedNodes.filter { $0.path == nodePath }
+        let allNodesRoundTrip = extracted.count == verifiedNodes.count &&
+            zip(extracted, verifiedNodes).allSatisfy { original, verified in
+                guard original.path == verified.path,
+                      original.flags == verified.flags else {
+                    return false
+                }
+                return original.path == nodePath
+                    ? verified.data == replacement
+                    : verified.data == original.data
+            }
+        guard verifiedTargets.count == 1,
+              verifiedTargets.first?.data == replacement,
+              allNodesRoundTrip,
               rechecked.nodes.map(\.path) == info.nodes.map(\.path) else {
             throw AoVUnityFSRepackError.verificationFailed("Thay node \(nodePath) không vượt qua kiểm tra round-trip.")
         }
