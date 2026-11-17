@@ -17,24 +17,24 @@ enum AoVUnityFSRuntimeCatalogMergeExecutorError: LocalizedError {
         case .expandedArchiveTooLarge:
             return "UnityFS runtime catalog vượt giới hạn giải nén 512 MiB."
         case .nodeNotFound(let path):
-            return "Không tìm thấy UnityFS node \\(path)."
+            return "Không tìm thấy UnityFS node \(path)."
         case .ambiguousNode(let path):
-            return "UnityFS có nhiều node trùng đường dẫn \\(path)."
+            return "UnityFS có nhiều node trùng đường dẫn \(path)."
         case .objectNotFound(let pathID):
-            return "Không tìm thấy MonoBehaviour pathID \\(pathID)."
+            return "Không tìm thấy MonoBehaviour pathID \(pathID)."
         case .ambiguousObject(let pathID):
-            return "SerializedFile có nhiều object pathID \\(pathID)."
+            return "SerializedFile có nhiều object pathID \(pathID)."
         case .objectNotMonoBehaviour(let pathID):
-            return "Object pathID \\(pathID) không thuộc MonoBehaviour class 114."
+            return "Object pathID \(pathID) không thuộc MonoBehaviour class 114."
         case .catalogNotRecognized(let pathID):
-            return "MonoBehaviour pathID \\(pathID) không phải runtime catalog Packer/Verification được hỗ trợ."
+            return "MonoBehaviour pathID \(pathID) không phải runtime catalog Packer/Verification được hỗ trợ."
         case .wrongCatalogType:
             return "Loại runtime catalog không khớp yêu cầu ghi."
         case .planBlocked(let issues):
-            let first = issues.first.map { "\\($0.path): \\($0.reason.rawValue)" } ?? "không rõ"
-            return "Runtime catalog merge plan bị chặn \\(issues.count) vấn đề). Ví dụ: \\(first)."
+            let first = issues.first.map { "\($0.path): \($0.reason.rawValue)" } ?? "không rõ"
+            return "Runtime catalog merge plan bị chặn \(issues.count) vấn đề). Ví dụ: \(first)."
         case .verificationFailed(let reason):
-            return "Runtime catalog UnityFS không vượt qua round-trip: \\(reason)"
+            return "Runtime catalog UnityFS không vượt qua round-trip: \(reason)"
         }
     }
 }
