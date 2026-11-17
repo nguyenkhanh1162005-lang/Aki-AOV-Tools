@@ -41,11 +41,11 @@ enum AoVSerializedFileObjectAppenderError: LocalizedError {
         case .objectAlreadyExists(let id):
             return "SerializedFile nền đã có pathID \\(id)."
         case .invalidType(let id, let classID):
-            return "TypeID (id) không tồn tại hoặc không khớp classID \\(classID)."
+            return "TypeID \\(id) không tồn tại hoặc không khớp classID \\(classID)."
         case .emptyPayload(let id):
-            return "Object pathID (id) có payload rỗng."
+            return "Object pathID \\(id) có payload rỗng."
         case .payloadTooLarge(let id):
-            return "Object pathID (id) vượt giới hạn 16 MiB."
+            return "Object pathID \\(id) vượt giới hạn 16 MiB."
         case .resourceLimit:
             return "SerializedFile sau import vượt giới hạn 512 MiB hoặc tràn số."
         }
@@ -174,6 +174,7 @@ enum AoVSerializedFileObjectAppender {
             }
         }
 
+        let orderedObjects = objects.sorted { $0.pathID < $1.pathID }
         let beforeObjectTable = source.subdata(
             in: summary.metadataStartOffset..<summary.objectTableStartOffset
         )
@@ -200,7 +201,7 @@ enum AoVSerializedFileObjectAppender {
         )
         alignData(&dataRegion, to: 16)
 
-        for object in objects {
+        for object in orderedObjects {
             alignData(&dataRegion, to: 16)
             guard let relativeOffset = UInt64(exactly: dataRegion.count) else {
                 throw AoVSerializedFileObjectAppenderError.resourceLimit
@@ -254,7 +255,7 @@ enum AoVSerializedFileObjectAppender {
                 "object table count did not survive parser round-trip."
             )
         }
-        for object in objects {
+        for object in orderedObjects {
             guard let verifiedObject = verified.serializedObjects.first(where: {
                 $0.pathID == object.pathID
             }),
@@ -266,14 +267,14 @@ enum AoVSerializedFileObjectAppender {
             start >= 0, start <= output.count, size <= output.count - start,
             output.subdata(in: start..<(start + size)) == object.payload else {
                 throw AoVSerializedFileObjectAppenderError.invalidSource(
-                    "appended object (object.pathID) differs after parser round-trip."
+                    "appended object \\(object.pathID) differs after parser round-trip."
                 )
             }
         }
 
         return AoVSerializedFileObjectAppendReport(
             data: output,
-            appendedPathIDs: objects.map(\.pathID),
+            appendedPathIDs: orderedObjects.map(\.pathID),
             originalObjectCount: summary.objectCount,
             finalObjectCount: verified.objectCount,
             originalFileSize: summary.fileSize,
