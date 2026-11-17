@@ -679,6 +679,12 @@ struct ContentView: View {
                                         .font(.caption2.monospaced())
                                         .foregroundColor(.secondary)
                                 }
+                                if let summary = node.serializedFileSummary {
+                                    Text(summary)
+                                        .font(.caption2)
+                                        .foregroundColor(summary.hasPrefix("SerializedFile") ? .green : .orange)
+                                        .textSelection(.enabled)
+                                }
                                 ForEach(node.stringHints, id: \.self) { hint in
                                     Text("Chuỗi đọc được: \(hint)")
                                         .font(.caption2)
