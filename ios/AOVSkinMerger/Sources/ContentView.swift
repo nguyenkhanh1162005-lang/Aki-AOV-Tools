@@ -1252,6 +1252,29 @@ struct ContentView: View {
             metric("IFix patch đã ghép", "\(report.mergedIFixPatches.count)")
             metric("AssetRef duy nhất giữ nguyên", "\(report.preservedAssetReferenceSets.count)")
             metric("Wwise BNK thêm nguyên trạng (append-only)", "\(report.preservedWwiseBanks.count)")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Nhật ký xử lý")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.white)
+                ForEach(report.pipelineEvents) { event in
+                    HStack(alignment: .top, spacing: 9) {
+                        Image(systemName: event.stage.systemImage)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.green)
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(event.stage.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.white)
+                            Text(event.detail)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            .padding(.top, 5)
             ShareLink(item: report.outputURL) {
                 Label("Chia sẻ / lưu ZIP kết quả", systemImage: "square.and.arrow.up")
                     .frame(maxWidth: .infinity)
@@ -1386,6 +1409,11 @@ private struct ZIPDocumentPicker: UIViewControllerRepresentable {
             asCopy: true
         )
         picker.delegate = context.coordinator
+        // Keep the Files browser edge-to-edge on iPhone. The surrounding
+        // SwiftUI fullScreenCover alone does not always override the picker's
+        // preferred card presentation on newer iOS releases.
+        picker.modalPresentationStyle = .fullScreen
+        picker.modalTransitionStyle = .coverVertical
         picker.allowsMultipleSelection = true
         picker.shouldShowFileExtensions = true
         return picker
