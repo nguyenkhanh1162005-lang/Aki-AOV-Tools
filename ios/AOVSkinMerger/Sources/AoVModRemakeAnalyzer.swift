@@ -630,8 +630,20 @@ enum AoVModRemakeAnalyzer {
                 throw AoVModRemakeError.invalidArchive(url.lastPathComponent)
             }
             let namedInventory = relabel(inventory, as: url.lastPathComponent)
-            packer.append(contentsOf: runtimePackerCatalogs(in: namedInventory))
-            verification.append(contentsOf: runtimeVerificationCatalogs(in: namedInventory))
+            let sourcePacker = runtimePackerCatalogs(in: namedInventory)
+            let sourceVerification = runtimeVerificationCatalogs(in: namedInventory)
+            for source in sourcePacker where source.catalog.version != baseVersion {
+                throw AoVModRemakeError.versionMismatch(
+                    url.lastPathComponent, source.catalog.version, baseVersion
+                )
+            }
+            for source in sourceVerification where source.catalog.version != baseVersion {
+                throw AoVModRemakeError.versionMismatch(
+                    url.lastPathComponent, source.catalog.version, baseVersion
+                )
+            }
+            packer.append(contentsOf: sourcePacker)
+            verification.append(contentsOf: sourceVerification)
         }
         return AoVModRemakeCatalogInputs(packer: packer, verification: verification)
     }
