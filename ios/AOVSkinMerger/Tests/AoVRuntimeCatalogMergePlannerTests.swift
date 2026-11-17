@@ -54,6 +54,25 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
         })
     }
 
+    func testVerificationPlannerBlocksDuplicateDatabinPathInsideOneLegacyCatalog() {
+        let path = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
+        let duplicate = verify(path, crc: 123)
+        let current = verification(zip: [], databin: [])
+        let legacy = verification(zip: [], databin: [duplicate, duplicate])
+
+        let plan = AoVRuntimeCatalogMergePlanner.planVerification(
+            current: current,
+            legacy: [("legacy.zip", legacy)]
+        )
+
+        XCTAssertFalse(plan.safeToWrite)
+        XCTAssertNil(plan.candidateCatalog)
+        XCTAssertTrue(plan.issues.contains {
+            $0.reason == .duplicateLegacyVerificationPath &&
+            $0.path == path
+        })
+    }
+
     func testVerificationPlannerBlocksDuplicatePathInsideOneLegacyCatalog() {
         let path = "Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes"
         let duplicate = verify(path, crc: 123)
