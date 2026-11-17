@@ -47,6 +47,42 @@ final class AoVModArchiveMergerTests: XCTestCase {
                        "Opaque .bytes payload should be stored without wasteful DEFLATE compression.")
     }
 
+    func testMergesSkinResourcesFromSeveralUnlistedActorPackages() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Multi-Actor-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let firstMOD = root.appendingPathComponent("creator-actor-731.zip")
+        let secondMOD = root.appendingPathComponent("creator-actor-842.zip")
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.3.2\n".utf8)),
+            ("Data/base-resource.bin", Data("base".utf8))
+        ], root: root)
+        try makeArchive(firstMOD, entries: [
+            ("version.txt", Data("1.64.3.2\n".utf8)),
+            ("Skins/Actor_731/CreatorSkinA.bytes", Data("actor-731-skin-a".utf8))
+        ], root: root)
+        try makeArchive(secondMOD, entries: [
+            ("version.txt", Data("1.64.3.2\n".utf8)),
+            ("Skins/Actor_842/CreatorSkinB.bytes", Data("actor-842-skin-b".utf8))
+        ], root: root)
+
+        let report = try AoVModArchiveMerger.merge(
+            [firstMOD, baseURL, secondMOD],
+            baseURL: baseURL
+        )
+        XCTAssertEqual(report.sourceCount, 3)
+        XCTAssertEqual(report.baseSource, "clean-res.zip")
+
+        let output = try Archive(url: report.outputURL, accessMode: .read)
+        let paths = Set(output.filter { $0.type == .file }.map(\.path))
+        XCTAssertTrue(paths.contains("Skins/Actor_731/CreatorSkinA.bytes"))
+        XCTAssertTrue(paths.contains("Skins/Actor_842/CreatorSkinB.bytes"))
+        XCTAssertTrue(paths.contains("Data/base-resource.bin"))
+    }
+
     func testThirtyTwoMiBOpaquePayloadMergeStaysUnderTenSeconds() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-Merger-Benchmark-\(UUID().uuidString)", isDirectory: true)
