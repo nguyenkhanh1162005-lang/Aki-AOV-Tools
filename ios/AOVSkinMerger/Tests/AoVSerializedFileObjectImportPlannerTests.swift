@@ -167,6 +167,86 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
         )
     }
 
+    func testPlansTransitiveLocalDependencyClosureFromSeedObject() throws {
+        let nodes = pointerNodes()
+        let payloads = try [
+            AoVUnityTypeTreeWriter.write(
+                nodes: nodes,
+                value: pointerValue(fileID: 0, pathID: 1002),
+                littleEndian: true
+            ),
+            AoVUnityTypeTreeWriter.write(
+                nodes: nodes,
+                value: pointerValue(fileID: 0, pathID: 1003),
+                littleEndian: true
+            ),
+            AoVUnityTypeTreeWriter.write(
+                nodes,
+                value: pointerValue(fileID: 0, pathID: 0),
+                littleEndian: true
+            )
+        ]
+        let file = makeSerializedFile(
+            pathIDs: [1001, 1002, 1003],
+            payloads: payloads,
+            typeTreeNodes: nodes
+        )
+
+        let plan = try AoVSerializedFileObjectImportPlanner.planDependencyClosure(
+            source: file,
+            destination: file,
+            seedPathIDs: [1001]
+        )
+
+        XCTAssertEqual(plan.pathIDMap, [1001: 1004, 1002: 1005, 1003: 1006])
+        XCTAssertEqual(plan.objects.map(\\.sourcePathID), [1001, 1002, 1003])
+        XCTAssertEqual(plan.objects.map(\\.remappedLocalPointers), [1, 1, 0])
+        let first = try AoVUnityTypeTreeReader.read(
+            nodes: nodes,
+            data: plan.objects[0].data,
+            littleEndian: true
+        )
+        let second = try AoVUnityTypeTreeReader.read(
+            nodes: nodes,
+            data: plan.objects[1].data,
+            littleEndian: true
+        )
+        XCTAssertEqual(first.objectValue?["m_GameObject"]?.objectValue?["m_PathID"]?.intValue, 1005)
+        XCTAssertEqual(second.objectValue?["m_GameObject"]?.objectValue?["m_PathID"]?.intValue, 1006)
+    }
+
+    func testDependencyClosureRejectsMissingLocalTarget() throws {
+        let nodes = pointerNodes()
+        let first = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: pointerValue(fileID: 0, pathID: 1003),
+            littleEndian: true
+        )
+        let second = try AoVUnityTypeTreeWriter.write(
+            nodes,
+            value: pointerValue(fileID: 0, pathID: 0),
+            littleEndian: true
+        )
+        let file = makeSerializedFile(
+            pathIDs: [1001, 1002],
+            payloads: [first, second],
+            typeTreeNodes: nodes
+        )
+
+        XCTAssertThrowsError(
+            try AoVSerializedFileObjectImportPlanner.planDependencyClosure(
+                source: file,
+                destination: file,
+                seedPathIDs: [1001]
+            )
+        ) { error in
+            guard let planError = error as? AoVSerializedFileObjectImportPlanError,
+                  case .pointerAuditFailed(1001, _) = planError else {
+                return XCTFail("Expected missing dependency rejection, got \\(error)")
+            }
+        }
+    }
+
     func testRejectsReferencesToSourceObjectsOutsideSelectedImportBatch() throws {
         let nodes = pointerNodes()
         let first = try AoVUnityTypeTreeWriter.write(
