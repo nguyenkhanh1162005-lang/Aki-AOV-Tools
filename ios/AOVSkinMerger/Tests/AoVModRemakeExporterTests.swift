@@ -285,7 +285,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
         try makeArchive(baseURL, entries: sharedEntries, root: root)
         try makeArchive(legacyURL, entries: sharedEntries, root: root)
 
-        let runtimePath = "Ages/Legacy/Actor_731/CreatorSkin.pkg.bytes"
+        let runtimePath = "Databin/Client/Legacy/Actor_731/CreatorSkin.pkg.bytes"
         let payloadBytes = Data("verified legacy skin package".utf8)
         let report = try AoVModRemakeExporter.exportVerifiedRES(
             baseRESURL: baseURL,
