@@ -116,6 +116,183 @@ final class AoVSerializedFileParserTests: XCTestCase {
         XCTAssertThrowsError(try AoVSerializedFileParser.inspect(Data(repeating: 0, count: 19)))
     }
 
+    func testAssetBundleWriterRewritesAndExpandsAssetBundleObject() throws {
+        let originalData = makeSerializedFile()
+        let originalSummary = try AoVSerializedFileParser.inspect(originalData)
+        let originalRecord = try XCTUnwrap(originalSummary.assetBundleRecords.first)
+        let replacementRecord = safeRecordWithNullPointers(from: originalRecord)
+
+        let rewrittenData = try AoVSerializedAssetBundleWriter.rewrite(
+            serializedFile: originalData,
+            assetBundleRecord: replacementRecord
+        )
+        let rewrittenSummary = try AoVSerializedFileParser.inspect(rewrittenData)
+        let rewrittenRecord = try XCTUnwrap(rewrittenSummary.assetBundleRecords.first)
+        let oldObject = try XCTUnwrap(originalSummary.assetBundleObjects.first)
+        let newObject = try XCTUnwrap(rewrittenSummary.assetBundleObjects.first)
+
+        XCTAssertGreaterThan(rewrittenData.count, originalData.count)
+        XCTAssertEqual(rewrittenSummary.fileSize, UInt64(rewrittenData.count))
+        XCTAssertEqual(rewrittenSummary.dataOffset, originalSummary.dataOffset)
+        XCTAssertEqual(rewrittenRecord, replacementRecord)
+        XCTAssertGreaterThan(newObject.byteSize, oldObject.byteSize)
+        XCTAssertGreaterThan(newObject.byteOffset, oldObject.byteOffset)
+        XCTAssertEqual(
+            rewrittenData.subdata(in: Int(newObject.byteOffset)..<(Int(newObject.byteOffset) + Int(newObject.byteSize))),
+            try AoVSerializedAssetBundleWriter.serialize(
+                replacementRecord,
+                formatVersion: rewrittenSummary.formatVersion,
+                unityVersion: rewrittenSummary.unityVersion,
+                littleEndian: rewrittenSummary.littleEndian
+            )
+        )
+    }
+
+    func testAssetBundleWriterSupportsExtendedBigEndianSerializedFile() throws {
+        let originalData = makeSerializedFile(formatVersion: 22, littleEndian: false)
+        let originalSummary = try AoVSerializedFileParser.inspect(originalData)
+        let originalRecord = try XCTUnwrap(originalSummary.assetBundleRecords.first)
+        let replacementRecord = safeRecordWithNullPointers(from: originalRecord)
+
+        let rewrittenData = try AoVSerializedAssetBundleWriter.rewrite(
+            serializedFile: originalData,
+            assetBundleRecord: replacementRecord
+        )
+        let rewrittenSummary = try AoVSerializedFileParser.inspect(rewrittenData)
+
+        XCTAssertFalse(rewrittenSummary.littleEndian)
+        XCTAssertEqual(rewrittenSummary.formatVersion, 22)
+        XCTAssertEqual(rewrittenSummary.fileSize, UInt64(rewrittenData.count))
+        XCTAssertEqual(rewrittenSummary.assetBundleRecords.first, replacementRecord)
+    }
+
+    func testAssetBundleWriterRejectsInvalidPreloadRanges() throws {
+        let summary = try AoVSerializedFileParser.inspect(makeSerializedFile())
+        let original = try XCTUnwrap(summary.assetBundleRecords.first)
+        var replacement = safeRecordWithNullPointers(from: original)
+        let first = try XCTUnwrap(replacement.containerEntries.first)
+        let invalidEntry = AoVSerializedAssetBundleEntry(
+            key: first.key,
+            preloadIndex: 2,
+            preloadSize: 1,
+            asset: first.asset
+        )
+        replacement = copyRecord(replacement, containerEntries: [invalidEntry] + replacement.containerEntries.dropFirst())
+
+        XCTAssertThrowsError(
+            try AoVSerializedAssetBundleWriter.rewrite(
+                serializedFile: makeSerializedFile(),
+                assetBundleRecord: replacement
+            )
+        ) { error in
+            guard let writerError = error as? AoVSerializedAssetBundleWriteError,
+                  case .invalidPreloadRange = writerError else {
+                return XCTFail("Expected invalid preload range rejection, got \(error)")
+            }
+        }
+    }
+
+    func testAssetBundleWriterRejectsUnresolvedLocalPointers() throws {
+        let originalData = makeSerializedFile()
+        let summary = try AoVSerializedFileParser.inspect(originalData)
+        let original = try XCTUnwrap(summary.assetBundleRecords.first)
+        var replacement = safeRecordWithNullPointers(from: original)
+        replacement = copyRecord(
+            replacement,
+            preloadReferences: [
+                AoVSerializedAssetPointer(fileID: 0, pathID: 999_999),
+                replacement.preloadReferences[1]
+            ]
+        )
+
+        XCTAssertThrowsError(
+            try AoVSerializedAssetBundleWriter.rewrite(
+                serializedFile: originalData,
+                assetBundleRecord: replacement
+            )
+        ) { error in
+            guard let writerError = error as? AoVSerializedAssetBundleWriteError,
+                  case .unresolvedPointer = writerError else {
+                return XCTFail("Expected unresolved PPtr rejection, got \(error)")
+            }
+        }
+    }
+
+    private func safeRecordWithNullPointers(
+        from record: AoVSerializedAssetBundleRecord
+    ) -> AoVSerializedAssetBundleRecord {
+        let nullPointer = AoVSerializedAssetPointer(fileID: 0, pathID: 0)
+        var entries = record.containerEntries.map {
+            AoVSerializedAssetBundleEntry(
+                key: $0.key,
+                preloadIndex: 0,
+                preloadSize: 1,
+                asset: nullPointer
+            )
+        }
+        entries.append(
+            AoVSerializedAssetBundleEntry(
+                key: "assets/aki-remake-test.prefab",
+                preloadIndex: 1,
+                preloadSize: 1,
+                asset: nullPointer
+            )
+        )
+        let compatibility = record.classCompatibilityEntries.map {
+            AoVSerializedClassCompatibilityEntry(
+                classID: $0.classID,
+                info: AoVSerializedAssetInfo(
+                    preloadIndex: 0,
+                    preloadSize: 1,
+                    asset: nullPointer
+                )
+            )
+        }
+        return AoVSerializedAssetBundleRecord(
+            pathID: record.pathID,
+            name: record.name,
+            preloadReferences: [nullPointer, nullPointer],
+            containerEntries: entries,
+            mainAsset: nullPointer,
+            mainAssetPreloadIndex: 0,
+            mainAssetPreloadSize: 2,
+            scriptCompatibilityEntries: record.scriptCompatibilityEntries,
+            classCompatibilityIDs: record.classCompatibilityIDs,
+            classCompatibilityEntries: compatibility,
+            runtimeCompatibility: record.runtimeCompatibility,
+            assetBundleName: record.assetBundleName,
+            dependencies: record.dependencies,
+            isStreamedSceneAssetBundle: record.isStreamedSceneAssetBundle,
+            trailingBytes: record.trailingBytes,
+            trailingData: record.trailingData
+        )
+    }
+
+    private func copyRecord(
+        _ record: AoVSerializedAssetBundleRecord,
+        preloadReferences: [AoVSerializedAssetPointer]? = nil,
+        containerEntries: [AoVSerializedAssetBundleEntry]? = nil
+    ) -> AoVSerializedAssetBundleRecord {
+        AoVSerializedAssetBundleRecord(
+            pathID: record.pathID,
+            name: record.name,
+            preloadReferences: preloadReferences ?? record.preloadReferences,
+            containerEntries: containerEntries ?? record.containerEntries,
+            mainAsset: record.mainAsset,
+            mainAssetPreloadIndex: record.mainAssetPreloadIndex,
+            mainAssetPreloadSize: record.mainAssetPreloadSize,
+            scriptCompatibilityEntries: record.scriptCompatibilityEntries,
+            classCompatibilityIDs: record.classCompatibilityIDs,
+            classCompatibilityEntries: record.classCompatibilityEntries,
+            runtimeCompatibility: record.runtimeCompatibility,
+            assetBundleName: record.assetBundleName,
+            dependencies: record.dependencies,
+            isStreamedSceneAssetBundle: record.isStreamedSceneAssetBundle,
+            trailingBytes: record.trailingBytes,
+            trailingData: record.trailingData
+        )
+    }
+
     private func makeSerializedFile(
         formatVersion: UInt32 = 17,
         objectByteStart: UInt32 = 0,
