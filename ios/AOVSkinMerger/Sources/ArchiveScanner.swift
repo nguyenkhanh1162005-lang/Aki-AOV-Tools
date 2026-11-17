@@ -512,13 +512,25 @@ enum ArchiveScanner {
                                     maximumNodeCount: 256
                                 )
                                 catalogSamples = extracted.map { node in
-                                    AoVUnityFSCatalogNodeSample(
+                                    let serializedSummary: String?
+                                    do {
+                                        let serialized = try AoVSerializedFileParser.inspect(node.data)
+                                        let bundleObjects = serialized.assetBundleObjects
+                                            .map { "pathID \($0.pathID) · offset \($0.byteOffset) · \($0.byteSize) byte" }
+                                            .joined(separator: "; ")
+                                        serializedSummary = "SerializedFile v\(serialized.formatVersion) · Unity \(serialized.unityVersion) · platform \(serialized.targetPlatform) · \(serialized.objectCount) object · AssetBundle class 142: \(serialized.assetBundleObjectCount)" +
+                                            (bundleObjects.isEmpty ? "" : " · \(bundleObjects)")
+                                    } catch {
+                                        serializedSummary = "Không nhận diện SerializedFile: \(error.localizedDescription)"
+                                    }
+                                    return AoVUnityFSCatalogNodeSample(
                                         path: node.path,
                                         size: UInt64(node.data.count),
                                         prefixHex: node.data.prefix(16)
                                             .map { String(format: "%02X", $0) }
                                             .joined(separator: " "),
-                                        stringHints: AoVUnityFSParser.asciiStringHints(node.data)
+                                        stringHints: AoVUnityFSParser.asciiStringHints(node.data),
+                                        serializedFileSummary: serializedSummary
                                     )
                                 }
                                 catalogStatus = "Đã trích xuất read-only \(extracted.count) node."
