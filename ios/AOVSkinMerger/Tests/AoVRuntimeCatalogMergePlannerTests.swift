@@ -193,6 +193,56 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
         )
     }
 
+    func testVerificationPlannerAddsNewZIPEntryFromVerifiedFinalChecksumWithoutLegacyCatalogRow() {
+        let path = "Skins/Actor_731/CreatorSkin.pkg.bytes"
+        let current = verification(zip: [], databin: [])
+        let plan = AoVRuntimeCatalogMergePlanner.planVerification(
+            current: current,
+            legacy: [],
+            verifiedFinalZIPChecksumValues: [path: 987654]
+        )
+
+        XCTAssertTrue(plan.safeToWrite)
+        XCTAssertEqual(plan.addedZIPPaths, [path])
+        XCTAssertEqual(
+            plan.candidateCatalog?.allZipVerificationInfo,
+            [verify(path, crc: 987654)]
+        )
+    }
+
+    func testVerificationPlannerAddsNewDatabinEntryFromVerifiedFinalChecksumWithoutLegacyCatalogRow() {
+        let path = "Databin/Client/Actor/CreatorSkin.bytes"
+        let current = verification(zip: [], databin: [])
+        let plan = AoVRuntimeCatalogMergePlanner.planVerification(
+            current: current,
+            legacy: [],
+            verifiedFinalDatabinChecksumValues: [path: 123456]
+        )
+
+        XCTAssertTrue(plan.safeToWrite)
+        XCTAssertEqual(plan.addedDatabinPaths, [path])
+        XCTAssertEqual(
+            plan.candidateCatalog?.allDatabinVerificationInfo,
+            [verify(path, crc: 123456)]
+        )
+    }
+
+    func testVerificationPlannerReconcilesConflictingLegacyZIPRowsWithVerifiedFinalChecksum() {
+        let path = "Ages/CreatorSkin/Combined.pkg.bytes"
+        let current = verification(zip: [], databin: [])
+        let first = verification(zip: [verify(path, crc: 1)], databin: [])
+        let second = verification(zip: [verify(path, crc: 2)], databin: [])
+        let plan = AoVRuntimeCatalogMergePlanner.planVerification(
+            current: current,
+            legacy: [("creator-a.zip", first), ("creator-b.zip", second)],
+            verifiedFinalZIPChecksumValues: [path: 98765]
+        )
+
+        XCTAssertTrue(plan.safeToWrite)
+        XCTAssertEqual(plan.addedZIPPaths, [path])
+        XCTAssertEqual(plan.candidateCatalog?.allZipVerificationInfo, [verify(path, crc: 98765)])
+    }
+
     func testVerificationPlannerRequiresVerifiedChecksumForNewZIPEntries() {
         let path = "New/Legacy.pkg.bytes"
         let current = verification(zip: [], databin: [])
