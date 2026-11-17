@@ -44,6 +44,23 @@ struct AoVAssetBundleLegacyRecordInput: Sendable {
     let serializedFile: AoVSerializedFileSummary
 }
 
+struct AoVAssetBundleLegacyObjectImportInput: Sendable {
+    let source: String
+    let serializedFile: Data
+    let legacyObjectPathID: Int64
+    let destinationObjectPathID: Int64
+}
+
+struct AoVUnityFSAssetBundleObjectImportExecutionReport: Sendable {
+    let data: Data
+    let nodePath: String
+    let importedPathIDs: [Int64]
+    let importedObjectCount: Int
+    let plans: [AoVAssetBundleCatalogMergePlan]
+    let rewrite: AoVUnityFSContentRewriteReport
+    let roundTripVerified: Bool
+}
+
 struct AoVUnityFSAssetBundleBatchMergeExecutionReport: Sendable {
     let data: Data
     let nodePath: String
@@ -298,4 +315,311 @@ enum AoVUnityFSAssetBundleMergeExecutor {
             roundTripVerified: true
         )
     }
+    /// Imports the object dependency closure for every missing legacy container
+    /// entry, remaps local PPtrs to fresh IDs, updates the class-142 catalog, and
+    /// repacks the destination UnityFS node once. Unsupported or unaudited links
+    /// abort the entire in-memory operation.
+    static func mergeImportingLegacyObjects(
+        in destinationBundle: Data,
+        serializedFileNodePath: String,
+        legacyInputs: [AoVAssetBundleLegacyObjectImportInput],
+        availableCurrentBundleNames: Set<String>,
+        verifiedExternalTargetFiles: [String: Data] = [:]
+    ) throws -> AoVUnityFSAssetBundleObjectImportExecutionReport {
+        guard !legacyInputs.isEmpty else {
+            throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                "Không có SerializedFile MOD cũ để nhập."
+            )
+        }
+        let bundleInfo = try AoVUnityFSParser.inspect(destinationBundle)
+        try AoVUnityFSContentRewriter.validateWritableTemplate(bundleInfo)
+        guard bundleInfo.totalUncompressedBytes <= maximumExpandedBytes else {
+            throw AoVUnityFSAssetBundleMergeExecutorError.expandedArchiveTooLarge
+        }
+        let destinationNodes = try AoVUnityFSParser.extractNodes(
+            destinationBundle,
+            maximumExpandedBytes: maximumExpandedBytes,
+            maximumNodeCount: max(bundleInfo.nodes.count, 1)
+        )
+        let nodeMatches = destinationNodes.filter { $0.path == serializedFileNodePath }
+        guard nodeMatches.count == 1, let destinationNode = nodeMatches.first else {
+            if nodeMatches.count > 1 {
+                throw AoVUnityFSAssetBundleMergeExecutorError.ambiguousNode(serializedFileNodePath)
+            }
+            throw AoVUnityFSAssetBundleMergeExecutorError.nodeNotFound(serializedFileNodePath)
+        }
+
+        let verifiedExternalTargetPathIDs = try AoVAssetBundleCatalogMerger.auditExternalTargetPathIDs(
+            serializedFilesByExternalTargetKey: verifiedExternalTargetFiles
+        )
+        var serializedOutput = destinationNode.data
+        var allImportedPathIDs = Set<Int64>()
+        var plans: [AoVAssetBundleCatalogMergePlan] = []
+        var changedCatalogPathIDs = Set<Int64>()
+
+        for input in legacyInputs {
+            let legacySummary = try AoVSerializedFileParser.inspect(input.serializedFile)
+            guard legacySummary.fileSize == UInt64(input.serializedFile.count) else {
+                throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                    "SerializedFile nguồn \(input.source) có fileSize không khớp."
+                )
+            }
+            let legacyRecords = legacySummary.assetBundleRecords.filter {
+                $0.pathID == input.legacyObjectPathID
+            }
+            guard legacyRecords.count == 1, let legacyRecord = legacyRecords.first else {
+                if legacyRecords.count > 1 {
+                    throw AoVUnityFSAssetBundleMergeExecutorError.ambiguousObject(input.legacyObjectPathID)
+                }
+                throw AoVUnityFSAssetBundleMergeExecutorError.objectNotFound(input.legacyObjectPathID)
+            }
+
+            let destinationSummary = try AoVSerializedFileParser.inspect(serializedOutput)
+            let currentRecords = destinationSummary.assetBundleRecords.filter {
+                $0.pathID == input.destinationObjectPathID
+            }
+            guard currentRecords.count == 1, let currentRecord = currentRecords.first else {
+                if currentRecords.count > 1 {
+                    throw AoVUnityFSAssetBundleMergeExecutorError.ambiguousObject(input.destinationObjectPathID)
+                }
+                throw AoVUnityFSAssetBundleMergeExecutorError.objectNotFound(input.destinationObjectPathID)
+            }
+
+            let selectedPathIDs = try requiredLocalObjectClosure(
+                legacyRecord: legacyRecord,
+                currentRecord: currentRecord,
+                sourceData: input.serializedFile,
+                sourceSummary: legacySummary
+            )
+            let externalMappings = auditedExternalMappings(
+                source: legacySummary,
+                destination: destinationSummary,
+                auditedTargets: verifiedExternalTargetPathIDs
+            )
+            let preservedRootMap = [
+                input.legacyObjectPathID: input.destinationObjectPathID
+            ]
+
+            var importedPathIDMap = preservedRootMap
+            var importedObjectIDs = Set<Int64>()
+            if !selectedPathIDs.isEmpty {
+                let importPlan = try AoVSerializedFileObjectImportPlanner.plan(
+                    source: input.serializedFile,
+                    destination: serializedOutput,
+                    selectedPathIDs: selectedPathIDs,
+                    preservedLocalPathIDMap: preservedRootMap,
+                    externalFileIDMap: externalMappings.fileIDMap,
+                    availableExternalTargetPathIDs: externalMappings.availableTargetPathIDs
+                )
+                let appendInputs = importPlan.objects.map {
+                    AoVSerializedObjectAppendInput(
+                        pathID: $0.destinationPathID,
+                        classID: $0.classID,
+                        typeID: $0.destinationTypeID,
+                        payload: $0.data
+                    )
+                }
+                let appendReport = try AoVSerializedFileObjectAppender.append(
+                    to: serializedOutput,
+                    objects: appendInputs
+                )
+                guard appendReport.roundTripVerified else {
+                    throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                        "Object appender không xác minh được SerializedFile sau khi nhập."
+                    )
+                }
+                serializedOutput = appendReport.data
+                importedPathIDMap = importPlan.pathIDMap
+                importedObjectIDs = Set(importPlan.objects.map(\.destinationPathID))
+                allImportedPathIDs.formUnion(importedObjectIDs)
+            }
+
+            let catalogPlan = try AoVAssetBundleCatalogMerger.plan(
+                current: currentRecord,
+                legacy: legacyRecord,
+                currentSerializedFile: destinationSummary,
+                legacySerializedFile: legacySummary,
+                availableCurrentBundleNames: availableCurrentBundleNames,
+                verifiedExternalTargetPathIDs: verifiedExternalTargetPathIDs,
+                importedLocalPathIDMap: importedPathIDMap,
+                availableImportedLocalPathIDs: importedObjectIDs
+            )
+            guard !catalogPlan.externalTargetAuditRequired else {
+                throw AoVUnityFSAssetBundleMergeExecutorError.externalTargetAuditRequired(
+                    catalogPlan.externalTargetAuditSamples
+                )
+            }
+            guard catalogPlan.mergedRecord != currentRecord else {
+                if !importedObjectIDs.isEmpty {
+                    throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                        "Có object được nhập nhưng class-142 catalog không tham chiếu tới object mới."
+                    )
+                }
+                continue
+            }
+
+            let rewritten = try AoVSerializedFileRewriter.replaceAssetBundleRecord(
+                in: serializedOutput,
+                pathID: input.destinationObjectPathID,
+                with: catalogPlan.mergedRecord
+            )
+            guard rewritten.roundTripVerified else {
+                throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                    "AssetBundle class-142 pathID \(input.destinationObjectPathID) không qua round-trip."
+                )
+            }
+            serializedOutput = rewritten.data
+            plans.append(catalogPlan)
+            changedCatalogPathIDs.insert(input.destinationObjectPathID)
+        }
+
+        guard !changedCatalogPathIDs.isEmpty else {
+            throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                "Không có container entry mới nào để nhập."
+            )
+        }
+
+        let finalSerializedSummary = try AoVSerializedFileParser.inspect(serializedOutput)
+        for plan in plans {
+            guard finalSerializedSummary.assetBundleRecords.first(where: {
+                $0.pathID == plan.mergedRecord.pathID
+            }) == plan.mergedRecord else {
+                throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                    "AssetBundle class-142 \(plan.mergedRecord.pathID) không khớp merge plan cuối."
+                )
+            }
+        }
+
+        let rewrite = try AoVUnityFSContentRewriter.replaceNode(
+            in: destinationBundle,
+            nodePath: serializedFileNodePath,
+            with: serializedOutput
+        )
+        let verifiedBundle = try AoVUnityFSParser.inspect(rewrite.data)
+        let verifiedNodes = try AoVUnityFSParser.extractNodes(
+            rewrite.data,
+            maximumExpandedBytes: maximumExpandedBytes,
+            maximumNodeCount: max(verifiedBundle.nodes.count, 1)
+        )
+        let verifiedTargets = verifiedNodes.filter { $0.path == serializedFileNodePath }
+        guard verifiedTargets.count == 1,
+              verifiedTargets.first?.data == serializedOutput,
+              rewrite.roundTripVerified else {
+            throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                "UnityFS SerializedFile node không khớp dữ liệu sau repack."
+            )
+        }
+
+        return AoVUnityFSAssetBundleObjectImportExecutionReport(
+            data: rewrite.data,
+            nodePath: serializedFileNodePath,
+            importedPathIDs: allImportedPathIDs.sorted(),
+            importedObjectCount: allImportedPathIDs.count,
+            plans: plans,
+            rewrite: rewrite,
+            roundTripVerified: true
+        )
+    }
+
+    static func requiredLocalObjectClosure(
+        legacyRecord: AoVSerializedAssetBundleRecord,
+        currentRecord: AoVSerializedAssetBundleRecord,
+        sourceData: Data,
+        sourceSummary: AoVSerializedFileSummary
+    ) throws -> Set<Int64> {
+        let currentKeys = Set(currentRecord.containerEntries.map(\.key))
+        var pending: [Int64] = []
+        for entry in legacyRecord.containerEntries where !currentKeys.contains(entry.key) {
+            if entry.asset.fileID == 0, entry.asset.pathID != 0 {
+                pending.append(entry.asset.pathID)
+            }
+            let start = Int(entry.preloadIndex)
+            let count = Int(entry.preloadSize)
+            guard start >= 0, count >= 0,
+                  start <= legacyRecord.preloadReferences.count,
+                  count <= legacyRecord.preloadReferences.count - start else {
+                throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                    "Preload range không hợp lệ tại \(entry.key)."
+                )
+            }
+            for pointer in legacyRecord.preloadReferences[start..<(start + count)] {
+                if pointer.fileID == 0, pointer.pathID != 0 {
+                    pending.append(pointer.pathID)
+                }
+            }
+        }
+
+        var selected = Set<Int64>()
+        let sourceObjectsByID = Dictionary(
+            grouping: sourceSummary.serializedObjects,
+            by: \.pathID
+        )
+        let sourceBundleRootIDs = Set(sourceSummary.assetBundleRecords.map(\.pathID))
+        while let pathID = pending.popLast() {
+            if pathID == legacyRecord.pathID { continue }
+            guard let matches = sourceObjectsByID[pathID], matches.count == 1,
+                  let object = matches.first else {
+                throw AoVUnityFSAssetBundleMergeExecutorError.objectNotFound(pathID)
+            }
+            guard !sourceBundleRootIDs.contains(pathID), object.classID != 142 else {
+                throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                    "PPtr dependency \(pathID) trỏ tới AssetBundle root khác, chưa có quy tắc ánh xạ."
+                )
+            }
+            guard selected.insert(pathID).inserted else { continue }
+            guard let typeInfo = sourceSummary.typeInfo(for: object),
+                  !typeInfo.typeTreeNodes.isEmpty else {
+                throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                    "Object dependency \(pathID) không có TypeTree đầy đủ."
+                )
+            }
+            let decoded = try AoVSerializedFileParser.decodeObjectWithTypeTree(
+                pathID: pathID,
+                in: sourceData,
+                summary: sourceSummary
+            )
+            let targets = try AoVUnityTypeTreePointerRemapper.collectLocalTargets(
+                nodes: typeInfo.typeTreeNodes,
+                value: decoded
+            )
+            pending.append(contentsOf: targets)
+        }
+        return selected
+    }
+
+    private static func auditedExternalMappings(
+        source: AoVSerializedFileSummary,
+        destination: AoVSerializedFileSummary,
+        auditedTargets: [String: Set<Int64>]
+    ) -> (fileIDMap: [Int32: Int32], availableTargetPathIDs: [Int32: Set<Int64>]) {
+        var fileIDMap: [Int32: Int32] = [:]
+        var available: [Int32: Set<Int64>] = [:]
+        for (sourceIndex, sourceReference) in source.externalReferences.enumerated() {
+            let matching = destination.externalReferences.enumerated().filter { _, candidate in
+                candidate.guidHex.lowercased() == sourceReference.guidHex.lowercased() &&
+                normalizedExternalPath(candidate.path) == normalizedExternalPath(sourceReference.path)
+            }
+            guard matching.count == 1, let match = matching.first,
+                  let sourceFileID = Int32(exactly: sourceIndex + 1),
+                  let destinationFileID = Int32(exactly: match.offset + 1) else {
+                continue
+            }
+            let key = AoVAssetBundleCatalogMerger.externalTargetKey(
+                guidHex: match.element.guidHex,
+                path: match.element.path
+            )
+            guard let pathIDs = auditedTargets[key] else { continue }
+            fileIDMap[sourceFileID] = destinationFileID
+            available[destinationFileID] = pathIDs
+        }
+        return (fileIDMap, available)
+    }
+
+    private static func normalizedExternalPath(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+
 }
