@@ -291,7 +291,7 @@ enum AoVSerializedAssetBundleWriter {
                 &output,
                 at: summary.fileSizeFieldOffset,
                 value: fileSize,
-                littleEndian: summary.littleEndian
+                littleEndian: false
             )
         } else {
             guard let relative = UInt32(exactly: relativeStart),
