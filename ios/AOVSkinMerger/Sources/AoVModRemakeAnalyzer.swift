@@ -197,6 +197,7 @@ struct AoVRemakeCatalogPlanFinding: Codable, Sendable, Identifiable {
     let status: AoVRemakeCatalogPlanStatus
     let addedContainerKeys: [String]
     let alreadyPresentContainerKeys: [String]
+    let currentVersionRetainedPointerConflictKeys: [String]
     let addedPreloadReferenceCount: Int
     let addedDependencies: [String]
     let remappedExternalPointerCount: Int
@@ -229,6 +230,7 @@ private struct AoVRemakeCatalogPlanAccumulator {
     var sourceArchives = Set<String>()
     var addedKeys = Set<String>()
     var alreadyPresentKeys = Set<String>()
+    var currentVersionRetainedPointerConflicts = Set<String>()
     var addedPreloadReferences = 0
     var addedDependencies = Set<String>()
     var remappedExternalPointers = 0
@@ -584,6 +586,7 @@ enum AoVModRemakeAnalyzer {
                 workingRecords[target.id] = plan.mergedRecord
                 accumulator.addedKeys.formUnion(plan.addedContainerKeys)
                 accumulator.alreadyPresentKeys.formUnion(plan.alreadyPresentContainerKeys)
+                accumulator.currentVersionRetainedPointerConflicts.formUnion(plan.currentVersionRetainedPointerConflictKeys)
                 accumulator.addedPreloadReferences += plan.addedPreloadReferenceCount
                 accumulator.addedDependencies.formUnion(plan.addedDependencies)
                 accumulator.remappedExternalPointers += plan.remappedExternalPointerCount
@@ -619,6 +622,7 @@ enum AoVModRemakeAnalyzer {
                 status: status,
                 addedContainerKeys: accumulator.addedKeys.sorted(),
                 alreadyPresentContainerKeys: accumulator.alreadyPresentKeys.sorted(),
+                currentVersionRetainedPointerConflictKeys: accumulator.currentVersionRetainedPointerConflicts.sorted(),
                 addedPreloadReferenceCount: accumulator.addedPreloadReferences,
                 addedDependencies: accumulator.addedDependencies.sorted(),
                 remappedExternalPointerCount: accumulator.remappedExternalPointers,
