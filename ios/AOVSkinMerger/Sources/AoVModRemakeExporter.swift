@@ -480,7 +480,7 @@ enum AoVModRemakeExporter {
               !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw AoVModRemakeExporterError.invalidArchivePath(raw)
         }
-        let versionPattern = #"^\\d+\\.\\d+(?:\\.\\d+)?$"#
+        let versionPattern = #"^\d+(?:\.\d+){1,3}$"#
         if parts.count >= 2, parts[0] == "Resources" {
             if parts.count >= 3,
                parts[1].range(of: versionPattern, options: .regularExpression) != nil {
@@ -497,7 +497,7 @@ enum AoVModRemakeExporter {
         guard let first = components.first else {
             throw AoVModRemakeExporterError.invalidArchivePath(normalizedResourcePath)
         }
-        let versionPattern = #"^\d+\.\d+(?:\.\d+)?$"#
+        let versionPattern = #"^\d+(?:\.\d+){1,3}$"#
         if first.range(of: versionPattern, options: .regularExpression) != nil,
            components.count >= 2 {
             return components.dropFirst().joined(separator: "/")
