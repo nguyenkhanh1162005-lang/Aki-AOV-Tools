@@ -588,7 +588,7 @@ enum AoVModRemakeAnalyzer {
     ) -> [(source: String, catalog: AoVRuntimeResourcePackerCatalog)] {
         inventory.unityFSBundles
             .filter { ($0.path as NSString).lastPathComponent.lowercased() == AoVRemakeCatalogKind.packer.fileName }
-            .flatMap(\\.catalogNodeSamples)
+            .flatMap(\.catalogNodeSamples)
             .compactMap { sample in
                 guard let catalog = sample.serializedFile?.resourcePackerCatalog else { return nil }
                 return (inventory.fileName, catalog)
@@ -600,7 +600,7 @@ enum AoVModRemakeAnalyzer {
     ) -> [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)] {
         inventory.unityFSBundles
             .filter { ($0.path as NSString).lastPathComponent.lowercased() == AoVRemakeCatalogKind.verification.fileName }
-            .flatMap(\\.catalogNodeSamples)
+            .flatMap(\.catalogNodeSamples)
             .compactMap { sample in
                 guard let catalog = sample.serializedFile?.resourceVerificationCatalog else { return nil }
                 return (inventory.fileName, catalog)
