@@ -138,6 +138,65 @@ final class AoVSerializedRuntimeCatalogWriterTests: XCTestCase {
         )
     }
 
+    func testRuntimeCatalogWriterFlowsThroughUnityFSContentRewriter() throws {
+        let originalSerializedFile = makeSerializedFile(with: .packer(makePackerCatalog()))
+        let originalSummary = try AoVSerializedFileParser.inspect(originalSerializedFile)
+        let object = try XCTUnwrap(originalSummary.serializedObjects.first(where: { $0.classID == 114 }))
+        let originalCatalog = try XCTUnwrap(originalSummary.resourcePackerCatalog)
+
+        let replacement = AoVRuntimeResourcePackerCatalog(
+            name: originalCatalog.name,
+            version: "1.64.2.1",
+            svnRevision: "1800000",
+            setName: originalCatalog.setName,
+            allResourcePackInfo: originalCatalog.allResourcePackInfo + [
+                AoVRuntimeResourcePackInfo(
+                    pathInIFS: "assetbundle/aki-new.assetbundle",
+                    pkgType: 0,
+                    crcXor: 998877,
+                    tag: "Hero",
+                    flags: 512,
+                    resourceInfos: [
+                        AoVRuntimeResourceItem(hashCode: 123456, extensionName: "assetbundle")
+                    ]
+                )
+            ],
+            allParentIndexToChild: originalCatalog.allParentIndexToChild,
+            trailingData: originalCatalog.trailingData
+        )
+
+        let unityFS = try AoVUnityFSRepacker.repack(
+            [AoVUnityFSRepackNode(path: "CAB-packer", data: originalSerializedFile, flags: 7)],
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2022.3.5f1",
+            blockInfoLayout: .arenaOfValor
+        )
+        XCTAssertTrue(unityFS.roundTripVerified)
+
+        let rewritten = try AoVUnityFSContentRewriter.replaceRuntimeCatalog(
+            in: unityFS.data,
+            serializedFileNodePath: "CAB-packer",
+            objectPathID: object.pathID,
+            with: .packer(replacement)
+        )
+        XCTAssertTrue(rewritten.roundTripVerified)
+
+        let bundleInfo = try AoVUnityFSParser.inspect(rewritten.data)
+        let nodes = try AoVUnityFSParser.extractNodes(
+            rewritten.data,
+            maximumExpandedBytes: 1024 * 1024,
+            maximumNodeCount: 8
+        )
+        let node = try XCTUnwrap(nodes.first(where: { $0.path == "CAB-packer" }))
+        let verifiedSerialized = try AoVSerializedFileParser.inspect(node.data)
+
+        XCTAssertEqual(bundleInfo.engineVersion, "2022.3.5f1")
+        XCTAssertEqual(bundleInfo.nodes.map(\\.path), ["CAB-packer"])
+        XCTAssertEqual(verifiedSerialized.resourcePackerCatalog, replacement)
+        XCTAssertEqual(verifiedSerialized.resourceVerificationCatalog, nil)
+    }
+
     private func makePackerCatalog() -> AoVRuntimeResourcePackerCatalog {
         AoVRuntimeResourcePackerCatalog(
             name: "ResourcePackerInfoSetXML",
