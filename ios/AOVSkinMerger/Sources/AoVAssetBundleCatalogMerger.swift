@@ -11,6 +11,7 @@ enum AoVAssetBundleCatalogMergeError: LocalizedError {
     case nullAssetPointer(String)
     case dependencyUnavailable(String)
     case integerOverflow
+    case replacementKeyNotPresent(String)
 
     var errorDescription: String? {
         switch self {
@@ -34,6 +35,8 @@ enum AoVAssetBundleCatalogMergeError: LocalizedError {
             return "Dependency bắt buộc chưa có trong Packer Catalog RES mới: \(name)."
         case .integerOverflow:
             return "Số lượng preload hoặc index vượt giới hạn của SerializedFile."
+        case .replacementKeyNotPresent(let key):
+            return "Không thể thay container key \(key) vì key này chưa tồn tại trong RES nền."
         }
     }
 }
@@ -42,6 +45,7 @@ struct AoVAssetBundleCatalogMergePlan: Sendable {
     let mergedRecord: AoVSerializedAssetBundleRecord
     let addedContainerKeys: [String]
     let alreadyPresentContainerKeys: [String]
+    let replacedContainerKeys: [String]
     let currentVersionRetainedPointerConflictKeys: [String]
     let addedPreloadReferenceCount: Int
     let addedDependencies: [String]
@@ -64,18 +68,21 @@ enum AoVAssetBundleCatalogMerger {
         availableCurrentBundleNames: Set<String>,
         verifiedExternalTargetPathIDs: [String: Set<Int64>] = [:],
         importedLocalPathIDMap: [Int64: Int64] = [:],
-        availableImportedLocalPathIDs: Set<Int64> = []
+        availableImportedLocalPathIDs: Set<Int64> = [],
+        replacingContainerKeys: Set<String> = []
     ) throws -> AoVAssetBundleCatalogMergePlan {
         guard identity(for: current) == identity(for: legacy) else {
             throw AoVAssetBundleCatalogMergeError.bundleIdentityMismatch
         }
 
         var currentByKey: [String: AoVSerializedAssetBundleEntry] = [:]
-        for entry in current.containerEntries {
+        var currentIndexByKey: [String: Int] = [:]
+        for (index, entry) in current.containerEntries.enumerated() {
             guard currentByKey[entry.key] == nil else {
                 throw AoVAssetBundleCatalogMergeError.duplicateCurrentKey(entry.key)
             }
             currentByKey[entry.key] = entry
+            currentIndexByKey[entry.key] = index
             try validatePreloadRange(
                 entry,
                 preloadCount: current.preloadReferences.count
@@ -93,10 +100,15 @@ enum AoVAssetBundleCatalogMerger {
             )
         }
 
+        let currentKeys = Set(currentByKey.keys)
+        for key in replacingContainerKeys where !currentKeys.contains(key) {
+            throw AoVAssetBundleCatalogMergeError.replacementKeyNotPresent(key)
+        }
         var mergedPreloads = current.preloadReferences
         var mergedEntries = current.containerEntries
         var addedKeys: [String] = []
         var alreadyPresent: [String] = []
+        var replacedKeys: [String] = []
         var currentVersionRetainedPointerConflicts: [String] = []
         var externalRemaps = 0
         var auditedExternalRemaps = 0
@@ -104,6 +116,72 @@ enum AoVAssetBundleCatalogMerger {
 
         for legacyEntry in legacy.containerEntries {
             if let currentEntry = currentByKey[legacyEntry.key] {
+                if replacingContainerKeys.contains(legacyEntry.key) {
+                    guard legacyEntry.asset.pathID != 0 else {
+                        throw AoVAssetBundleCatalogMergeError.nullAssetPointer(legacyEntry.key)
+                    }
+                    let start = Int(legacyEntry.preloadIndex)
+                    let count = Int(legacyEntry.preloadSize)
+                    guard start >= 0, count >= 0,
+                          start <= legacy.preloadReferences.count,
+                          count <= legacy.preloadReferences.count - start else {
+                        throw AoVAssetBundleCatalogMergeError.invalidLegacyPreloadRange(legacyEntry.key)
+                    }
+                    guard let newPreloadStart = Int32(exactly: mergedPreloads.count),
+                          let newPreloadSize = Int32(exactly: count),
+                          let currentIndex = currentIndexByKey[legacyEntry.key] else {
+                        throw AoVAssetBundleCatalogMergeError.integerOverflow
+                    }
+                    let legacyPreloadSlice = legacy.preloadReferences[start..<(start + count)]
+                    var remappedPreloads: [AoVSerializedAssetPointer] = []
+                    remappedPreloads.reserveCapacity(count)
+                    for (index, pointer) in legacyPreloadSlice.enumerated() {
+                        let result = try remapPointer(
+                            pointer,
+                            field: "\(legacyEntry.key).preload[\(index)]",
+                            from: legacySerializedFile,
+                            to: currentSerializedFile,
+                            verifiedExternalTargetPathIDs: verifiedExternalTargetPathIDs,
+                            importedLocalPathIDMap: importedLocalPathIDMap,
+                            availableImportedLocalPathIDs: availableImportedLocalPathIDs
+                        )
+                        remappedPreloads.append(result.pointer)
+                        if result.wasExternal {
+                            externalRemaps += 1
+                            if result.targetAudited {
+                                auditedExternalRemaps += 1
+                            } else if unauditedExternalSamples.count < 16 {
+                                unauditedExternalSamples.append("\(legacyEntry.key).preload[\(index)]")
+                            }
+                        }
+                    }
+                    let remappedAsset = try remapPointer(
+                        legacyEntry.asset,
+                        field: "\(legacyEntry.key).asset",
+                        from: legacySerializedFile,
+                        to: currentSerializedFile,
+                        verifiedExternalTargetPathIDs: verifiedExternalTargetPathIDs,
+                        importedLocalPathIDMap: importedLocalPathIDMap,
+                        availableImportedLocalPathIDs: availableImportedLocalPathIDs
+                    )
+                    if remappedAsset.wasExternal {
+                        externalRemaps += 1
+                        if remappedAsset.targetAudited {
+                            auditedExternalRemaps += 1
+                        } else if unauditedExternalSamples.count < 16 {
+                            unauditedExternalSamples.append("\(legacyEntry.key).asset")
+                        }
+                    }
+                    mergedPreloads.append(contentsOf: remappedPreloads)
+                    mergedEntries[currentIndex] = AoVSerializedAssetBundleEntry(
+                        key: legacyEntry.key,
+                        preloadIndex: newPreloadStart,
+                        preloadSize: newPreloadSize,
+                        asset: remappedAsset.pointer
+                    )
+                    replacedKeys.append(legacyEntry.key)
+                    continue
+                }
                 alreadyPresent.append(legacyEntry.key)
                 if currentEntry.asset != legacyEntry.asset ||
                     currentEntry.preloadIndex != legacyEntry.preloadIndex ||
@@ -226,6 +304,7 @@ enum AoVAssetBundleCatalogMerger {
             mergedRecord: mergedRecord,
             addedContainerKeys: addedKeys,
             alreadyPresentContainerKeys: alreadyPresent,
+            replacedContainerKeys: replacedKeys,
             currentVersionRetainedPointerConflictKeys: currentVersionRetainedPointerConflicts,
             addedPreloadReferenceCount: mergedPreloads.count - current.preloadReferences.count,
             addedDependencies: addedDependencies,
