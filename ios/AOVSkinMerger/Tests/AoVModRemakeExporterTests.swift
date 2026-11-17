@@ -18,9 +18,9 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
         try makeArchive(baseURL, entries: [
             ("version.txt", Data("1.64.1.12\n".utf8)),
-            ("1.64.1/assetbundle/resourcepackerinfosetall.assetbundle", packerBundle),
-            ("1.64.1/assetbundle/resourceverificationinfosetall.assetbundle", verificationBundle),
-            ("1.64.1/assetbundle/current.assetbundle", Data("existing-bundle".utf8))
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle", packerBundle),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle", verificationBundle),
+            ("1.64.1.12/assetbundle/current.assetbundle", Data("existing-bundle".utf8))
         ], root: root)
 
         let finalBundlePath = "assetbundle/creator731.assetbundle"
@@ -39,12 +39,12 @@ final class AoVModRemakeExporterTests: XCTestCase {
         let finalDatabinBytes = Data("creator-731-final-databin".utf8)
         let payloads = [
             AoVModRemakeResourcePayload(
-                archivePath: "1.64.1/assetbundle/creator731.assetbundle",
+                archivePath: "1.64.1.12/assetbundle/creator731.assetbundle",
                 ifsPath: finalBundlePath,
                 data: finalBundleBytes
             ),
             AoVModRemakeResourcePayload(
-                archivePath: "1.64.1/Databin/Client/Actor/creator731.bytes",
+                archivePath: "1.64.1.12/Databin/Client/Actor/creator731.bytes",
                 ifsPath: finalDatabinPath,
                 data: finalDatabinBytes
             )
@@ -74,10 +74,10 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
         let output = try Archive(url: report.outputURL, accessMode: .read)
         let finalBundleEntry = try XCTUnwrap(output.first(where: {
-            $0.type == .file && $0.path == "1.64.1/assetbundle/creator731.assetbundle"
+            $0.type == .file && $0.path == "1.64.1.12/assetbundle/creator731.assetbundle"
         }))
         let finalDatabinEntry = try XCTUnwrap(output.first(where: {
-            $0.type == .file && $0.path == "1.64.1/Databin/Client/Actor/creator731.bytes"
+            $0.type == .file && $0.path == "1.64.1.12/Databin/Client/Actor/creator731.bytes"
         }))
         var extractedBundle = Data()
         _ = try output.extract(finalBundleEntry, bufferSize: 64 * 1024) {
@@ -92,11 +92,11 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
         let outputPacker = try readEntry(
             output,
-            path: "1.64.1/assetbundle/resourcepackerinfosetall.assetbundle"
+            path: "1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle"
         )
         let outputVerification = try readEntry(
             output,
-            path: "1.64.1/assetbundle/resourceverificationinfosetall.assetbundle"
+            path: "1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle"
         )
         let packerInfo = try AoVUnityFSParser.inspect(outputPacker)
         let verificationInfo = try AoVUnityFSParser.inspect(outputVerification)
@@ -136,11 +136,11 @@ final class AoVModRemakeExporterTests: XCTestCase {
         let innerURL = root.appendingPathComponent("Resources.zip")
         let outerURL = root.appendingPathComponent("clean-res-wrapper.zip")
         try makeArchive(innerURL, entries: [
-            ("1.64.1/assetbundle/resourcepackerinfosetall.assetbundle",
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
              try makeUnityFS(with: .packer(makePackerCatalog()))),
-            ("1.64.1/assetbundle/resourceverificationinfosetall.assetbundle",
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
              try makeUnityFS(with: .verification(makeVerificationCatalog()))),
-            ("1.64.1/assetbundle/current.assetbundle", Data("current".utf8))
+            ("1.64.1.12/assetbundle/current.assetbundle", Data("current".utf8))
         ], root: root)
 
         let outer = try Archive(url: outerURL, accessMode: .create)
@@ -172,7 +172,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
             ]
         )
         let payload = AoVModRemakeResourcePayload(
-            archivePath: "1.64.1/assetbundle/nested-creator.assetbundle",
+            archivePath: "1.64.1.12/assetbundle/nested-creator.assetbundle",
             ifsPath: runtimePath,
             data: Data("nested-final-bundle".utf8)
         )
@@ -198,14 +198,14 @@ final class AoVModRemakeExporterTests: XCTestCase {
         _ = try outputOuter.extract(outputResourcesEntry, to: extractedInner, bufferSize: 64 * 1024)
         let outputInner = try Archive(url: extractedInner, accessMode: .read)
         XCTAssertEqual(
-            try readEntry(outputInner, path: "1.64.1/assetbundle/nested-creator.assetbundle"),
+            try readEntry(outputInner, path: "1.64.1.12/assetbundle/nested-creator.assetbundle"),
             Data("nested-final-bundle".utf8)
         )
         XCTAssertNotNil(outputInner.first(where: {
-            $0.type == .file && $0.path == "1.64.1/assetbundle/resourcepackerinfosetall.assetbundle"
+            $0.type == .file && $0.path == "1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle"
         }))
         XCTAssertNotNil(outputInner.first(where: {
-            $0.type == .file && $0.path == "1.64.1/assetbundle/resourceverificationinfosetall.assetbundle"
+            $0.type == .file && $0.path == "1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle"
         }))
     }
 
@@ -222,8 +222,8 @@ final class AoVModRemakeExporterTests: XCTestCase {
         let verification = try makeUnityFS(with: .verification(makeVerificationCatalog()))
         let entries = [
             ("version.txt", version),
-            ("1.64.1/assetbundle/resourcepackerinfosetall.assetbundle", packer),
-            ("1.64.1/assetbundle/resourceverificationinfosetall.assetbundle", verification)
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle", packer),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle", verification)
         ]
         try makeArchive(baseURL, entries: entries, root: root)
         try makeArchive(legacyURL, entries: entries, root: root)
@@ -279,8 +279,8 @@ final class AoVModRemakeExporterTests: XCTestCase {
         let verificationBytes = try makeUnityFS(with: .verification(makeVerificationCatalog()))
         let sharedEntries = [
             ("version.txt", Data("1.64.1.12\\n".utf8)),
-            ("1.64.1/assetbundle/resourcepackerinfosetall.assetbundle", packerBytes),
-            ("1.64.1/assetbundle/resourceverificationinfosetall.assetbundle", verificationBytes)
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle", packerBytes),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle", verificationBytes)
         ]
         try makeArchive(baseURL, entries: sharedEntries, root: root)
         try makeArchive(legacyURL, entries: sharedEntries, root: root)
@@ -292,7 +292,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
             legacyMODURLs: [legacyURL],
             resourcePayloads: [
                 AoVModRemakeResourcePayload(
-                    archivePath: "1.64.1/" + runtimePath,
+                    archivePath: "1.64.1.12/" + runtimePath,
                     ifsPath: runtimePath,
                     data: payloadBytes
                 )
@@ -310,12 +310,12 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
         let output = try Archive(url: report.outputURL, accessMode: .read)
         XCTAssertEqual(
-            try readEntry(output, path: "1.64.1/" + runtimePath),
+            try readEntry(output, path: "1.64.1.12/" + runtimePath),
             payloadBytes
         )
         let verificationData = try readEntry(
             output,
-            path: "1.64.1/assetbundle/resourceverificationinfosetall.assetbundle"
+            path: "1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle"
         )
         let target = try AoVUnityFSRuntimeCatalogMergeExecutor.locateVerificationCatalog(
             in: verificationData
@@ -337,9 +337,9 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
         let baseURL = root.appendingPathComponent("clean-res.zip")
         try makeArchive(baseURL, entries: [
-            ("1.64.1/assetbundle/resourcepackerinfosetall.assetbundle",
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
              try makeUnityFS(with: .packer(makePackerCatalog()))),
-            ("1.64.1/assetbundle/resourceverificationinfosetall.assetbundle",
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
              try makeUnityFS(with: .verification(makeVerificationCatalog())))
         ], root: root)
 
@@ -348,7 +348,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
                 baseRESURL: baseURL,
                 resourcePayloads: [
                     AoVModRemakeResourcePayload(
-                        archivePath: "1.64.1/Ages/Legacy.pkg.bytes",
+                        archivePath: "1.64.1.12/Ages/Legacy.pkg.bytes",
                         ifsPath: "Ages/Legacy.pkg.bytes",
                         data: Data("legacy-package".utf8)
                     )
@@ -385,7 +385,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
                 baseRESURL: baseURL,
                 resourcePayloads: [
                     AoVModRemakeResourcePayload(
-                        archivePath: "1.64.1/Databin/Client/Actor/unverified.bytes",
+                        archivePath: "1.64.1.12/Databin/Client/Actor/unverified.bytes",
                         ifsPath: "Databin/Client/Actor/unverified.bytes",
                         data: Data("unverified".utf8)
                     )
