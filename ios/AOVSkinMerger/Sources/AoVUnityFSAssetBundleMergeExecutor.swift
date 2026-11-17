@@ -157,13 +157,17 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         }
 
         let rewrittenSerializedSummary = try AoVSerializedFileParser.inspect(serializedOutput)
-        for plan in plans {
+        let finalPlansByPathID = Dictionary(
+            plans.map { ($0.mergedRecord.pathID, $0) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+        for plan in finalPlansByPathID.values {
             let finalRecord = rewrittenSerializedSummary.assetBundleRecords.first(where: {
                 $0.pathID == plan.mergedRecord.pathID
             })
             guard finalRecord == plan.mergedRecord else {
                 throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
-                    "AssetBundle pathID \(plan.mergedRecord.pathID) không khớp batch merge plan."
+                    "AssetBundle pathID \(plan.mergedRecord.pathID) không khớp batch merge plan cuối cùng."
                 )
             }
         }
