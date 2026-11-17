@@ -31,6 +31,7 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
         let info = try AoVUnityFSParser.inspect(report.data)
         XCTAssertEqual(info.nodes.map(\.path), originalNodes.map(\.path))
         let nodes = try AoVUnityFSParser.extractNodes(report.data)
+        XCTAssertEqual(nodes.map(\.flags), originalNodes.map(\.flags))
         let byPath = Dictionary(uniqueKeysWithValues: nodes.map { ($0.path, $0.data) })
         XCTAssertEqual(byPath["CAB-catalog"], replacement)
         XCTAssertEqual(byPath["CAB-assets"], Data("asset-data-stays".utf8))
