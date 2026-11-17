@@ -127,6 +127,88 @@ final class AoVModRemakeExporterTests: XCTestCase {
         )
     }
 
+    func testExportsNestedResourcesZIPWhilePreservingOuterWrapperFiles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Nested-RES-Exporter-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root, includingPropertiesForKeys: nil) }
+
+        let innerURL = root.appendingPathComponent("Resources.zip")
+        let outerURL = root.appendingPathComponent("clean-res-wrapper.zip")
+        try makeArchive(innerURL, entries: [
+            ("1.64.1/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(makePackerCatalog()))),
+            ("1.64.1/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(makeVerificationCatalog()))),
+            ("1.64.1/assetbundle/current.assetbundle", Data("current".utf8))
+        ], root: root)
+
+        let outer = try Archive(url: outerURL, accessMode: .create)
+        try outer.addEntry(
+            with: "Resources.zip",
+            fileURL: innerURL,
+            compressionMethod: .none,
+            bufferSize: 64 * 1024
+        )
+        let skinListURL = root.appendingPathComponent("DanhSachSkin.txt")
+        let skinList = Data("Danh sách skin nền\n".utf8)
+        try skinList.write(to: skinListURL)
+        try outer.addEntry(
+            with: "DanhSachSkin.txt",
+            fileURL: skinListURL,
+            compressionMethod: .deflate,
+            bufferSize: 64 * 1024
+        )
+
+        let runtimePath = "assetbundle/nested-creator.assetbundle"
+        let finalEntry = AoVRuntimeResourcePackInfo(
+            pathInIFS: runtimePath,
+            pkgType: 0,
+            crcXor: 10101,
+            tag: "Hero",
+            flags: 512,
+            resourceInfos: [
+                AoVRuntimeResourceItem(hashCode: 20202, extensionName: "assetbundle")
+            ]
+        )
+        let payload = AoVModRemakeResourcePayload(
+            archivePath: "1.64.1/assetbundle/nested-creator.assetbundle",
+            ifsPath: runtimePath,
+            data: Data("nested-final-bundle".utf8)
+        )
+
+        let report = try AoVModRemakeExporter.exportVerifiedRES(
+            baseRESURL: outerURL,
+            resourcePayloads: [payload],
+            legacyPackerCatalogs: [],
+            verifiedFinalPackerEntries: [runtimePath: finalEntry],
+            legacyVerificationCatalogs: [],
+            verifiedFinalDatabinChecksumValues: [:],
+            verifiedFinalZIPChecksumValues: [runtimePath: 30303]
+        )
+        defer { try? FileManager.default.removeItem(at: report.outputURL) }
+
+        let outputOuter = try Archive(url: report.outputURL, accessMode: .read)
+        let outputSkinList = try readEntry(outputOuter, path: "DanhSachSkin.txt")
+        XCTAssertEqual(outputSkinList, skinList)
+        let outputResourcesEntry = try XCTUnwrap(outputOuter.first(where: {
+            $0.type == .file && $0.path == "Resources.zip"
+        }))
+        let extractedInner = root.appendingPathComponent("output-Resources.zip")
+        _ = try outputOuter.extract(outputResourcesEntry, to: extractedInner, bufferSize: 64 * 1024)
+        let outputInner = try Archive(url: extractedInner, accessMode: .read)
+        XCTAssertEqual(
+            try readEntry(outputInner, path: "1.64.1/assetbundle/nested-creator.assetbundle"),
+            Data("nested-final-bundle".utf8)
+        )
+        XCTAssertNotNil(outputInner.first(where: {
+            $0.type == .file && $0.path == "1.64.1/assetbundle/resourcepackerinfosetall.assetbundle"
+        }))
+        XCTAssertNotNil(outputInner.first(where: {
+            $0.type == .file && $0.path == "1.64.1/assetbundle/resourceverificationinfosetall.assetbundle"
+        }))
+    }
+
     func testExporterRefusesNewDatabinWithoutVerifiedChecksum() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-RES-Exporter-Guard-Test-\(UUID().uuidString)", isDirectory: true)
