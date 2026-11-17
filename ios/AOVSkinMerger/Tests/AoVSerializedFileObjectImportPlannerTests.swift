@@ -3,6 +3,92 @@ import XCTest
 @testable import AOVSkinMerger
 
 final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
+    func testDetectsChangedObjectPayloadBehindAnUnchangedContainerPointer() throws {
+        let nodes = [
+            AoVUnityTypeTreeNode(type: "Texture2D", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_TestPathID", level: 1, byteSize: 8, metaFlags: 0)
+        ]
+        let currentPayload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: .object(["m_TestPathID": .signed(100)]),
+            littleEndian: true
+        )
+        let legacyPayload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: .object(["m_TestPathID": .signed(200)]),
+            littleEndian: true
+        )
+        let currentData = makeSerializedFile(
+            pathIDs: [1001],
+            payloads: [currentPayload],
+            typeTreeNodes: nodes
+        )
+        let legacyData = makeSerializedFile(
+            pathIDs: [1001],
+            payloads: [legacyPayload],
+            typeTreeNodes: nodes
+        )
+        let currentSummary = try AoVSerializedFileParser.inspect(currentData)
+        let legacySummary = try AoVSerializedFileParser.inspect(legacyData)
+        let pointer = AoVSerializedAssetPointer(fileID: 0, pathID: 1001)
+        let entry = AoVSerializedAssetBundleEntry(
+            key: "assets/hero.prefab",
+            preloadIndex: 0,
+            preloadSize: 0,
+            asset: pointer
+        )
+        let currentRecord = makeBundleRecord(entry: entry)
+        let legacyRecord = makeBundleRecord(entry: entry)
+
+        let changed = try AoVUnityFSAssetBundleMergeExecutor.changedContainerKeys(
+            legacyRecord: legacyRecord,
+            currentRecord: currentRecord,
+            sourceData: legacyData,
+            destinationData: currentData,
+            sourceSummary: legacySummary,
+            destinationSummary: currentSummary
+        )
+
+        XCTAssertEqual(changed, ["assets/hero.prefab"])
+    }
+
+    func testDoesNotReplaceContainerWhenSamePointerAndObjectBytesMatch() throws {
+        let nodes = [
+            AoVUnityTypeTreeNode(type: "Texture2D", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_TestPathID", level: 1, byteSize: 8, metaFlags: 0)
+        ]
+        let payload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: .object(["m_TestPathID": .signed(100)]),
+            littleEndian: true
+        )
+        let data = makeSerializedFile(
+            pathIDs: [1001],
+            payloads: [payload],
+            typeTreeNodes: nodes
+        )
+        let summary = try AoVSerializedFileParser.inspect(data)
+        let pointer = AoVSerializedAssetPointer(fileID: 0, pathID: 1001)
+        let entry = AoVSerializedAssetBundleEntry(
+            key: "assets/hero.prefab",
+            preloadIndex: 0,
+            preloadSize: 0,
+            asset: pointer
+        )
+        let record = makeBundleRecord(entry: entry)
+
+        let changed = try AoVUnityFSAssetBundleMergeExecutor.changedContainerKeys(
+            legacyRecord: record,
+            currentRecord: record,
+            sourceData: data,
+            destinationData: data,
+            sourceSummary: summary,
+            destinationSummary: summary
+        )
+
+        XCTAssertTrue(changed.isEmpty)
+    }
+
     func testPlansTypeTreeObjectImportWithFreshDestinationPathID() throws {
         let nodes = [
             AoVUnityTypeTreeNode(type: "Texture2D", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
@@ -523,6 +609,29 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
 
         XCTAssertEqual(closure, [1002, 1003])
         XCTAssertFalse(closure.contains(1001))
+    }
+
+    private func makeBundleRecord(
+        entry: AoVSerializedAssetBundleEntry
+    ) -> AoVSerializedAssetBundleRecord {
+        AoVSerializedAssetBundleRecord(
+            pathID: 5001,
+            name: "actor/change-detection",
+            preloadReferences: [],
+            containerEntries: [entry],
+            mainAsset: AoVSerializedAssetPointer(fileID: 0, pathID: 0),
+            mainAssetPreloadIndex: 0,
+            mainAssetPreloadSize: 0,
+            scriptCompatibilityEntries: [],
+            classCompatibilityIDs: [],
+            classCompatibilityEntries: [],
+            runtimeCompatibility: 0,
+            assetBundleName: "actor/change-detection",
+            dependencies: [],
+            isStreamedSceneAssetBundle: false,
+            trailingBytes: 0,
+            trailingData: Data()
+        )
     }
 
     private func pointerNodes() -> [AoVUnityTypeTreeNode] {
