@@ -6,6 +6,7 @@ enum AoVSerializedFileRewriteError: LocalizedError {
     case missingObject(Int64)
     case objectIsNotAssetBundle(Int64)
     case invalidObjectLayout(Int64)
+    case missingTypeTree(Int64)
     case verificationFailed(String)
 
     var errorDescription: String? {
@@ -20,10 +21,21 @@ enum AoVSerializedFileRewriteError: LocalizedError {
             return "Object pathID \(pathID) không phải AssetBundle class 142."
         case .invalidObjectLayout(let pathID):
             return "Object pathID \(pathID) có layout dữ liệu không hợp lệ."
+        case .missingTypeTree(let pathID):
+            return "Object pathID \(pathID) không có TypeTree schema được hỗ trợ."
         case .verificationFailed(let reason):
             return "SerializedFile sau ghi catalog không vượt qua kiểm tra: \(reason)"
         }
     }
+}
+
+struct AoVSerializedObjectValueRewriteReport: Sendable {
+    let data: Data
+    let pathID: Int64
+    let classID: Int32
+    let originalObjectSize: UInt32
+    let rewrittenObjectSize: UInt32
+    let roundTripVerified: Bool
 }
 
 struct AoVSerializedFileRewriteReport: Sendable {
@@ -37,6 +49,71 @@ struct AoVSerializedFileRewriteReport: Sendable {
 }
 
 enum AoVSerializedFileRewriter {
+    /// Rewrites one TypeTree-backed object payload while keeping its SerializedType
+    /// record and every other object untouched.
+    static func replaceObjectValue(
+        in source: Data,
+        pathID: Int64,
+        with value: AoVUnityTypeTreeValue
+    ) throws -> AoVSerializedObjectValueRewriteReport {
+        let summary = try AoVSerializedFileParser.inspect(source)
+        guard summary.fileSize == UInt64(source.count) else {
+            throw AoVSerializedFileRewriteError.fileSizeMismatch
+        }
+        let matches = summary.serializedObjects.filter { $0.pathID == pathID }
+        guard matches.count == 1, let object = matches.first else {
+            throw AoVSerializedFileRewriteError.missingObject(pathID)
+        }
+        guard let typeInfo = summary.typeInfo(for: object),
+              !typeInfo.typeTreeNodes.isEmpty else {
+            throw AoVSerializedFileRewriteError.missingTypeTree(pathID)
+        }
+
+        let replacementPayload = try AoVUnityTypeTreeWriter.write(
+            nodes: typeInfo.typeTreeNodes,
+            value: value,
+            littleEndian: summary.littleEndian
+        )
+        let rewritten = try AoVSerializedAssetBundleWriter.replaceObjectPayload(
+            in: source,
+            pathID: pathID,
+            with: replacementPayload
+        )
+        let verified = try AoVSerializedFileParser.inspect(rewritten)
+        guard let verifiedObject = verified.serializedObjects.first(where: { $0.pathID == pathID }),
+              verifiedObject.classID == object.classID,
+              verifiedObject.typeID == object.typeID,
+              verified.serializedObjects.count == summary.serializedObjects.count else {
+            throw AoVSerializedFileRewriteError.verificationFailed(
+                "Object ID/type hoặc số lượng object thay đổi sau khi ghi."
+            )
+        }
+        let verifiedValue = try AoVSerializedFileParser.decodeObjectWithTypeTree(
+            pathID: pathID,
+            in: rewritten,
+            summary: verified
+        )
+        let reserialized = try AoVUnityTypeTreeWriter.write(
+            nodes: typeInfo.typeTreeNodes,
+            value: verifiedValue,
+            littleEndian: summary.littleEndian
+        )
+        guard reserialized == replacementPayload else {
+            throw AoVSerializedFileRewriteError.verificationFailed(
+                "TypeTree payload sau parse lại khác payload đầu ra."
+            )
+        }
+
+        return AoVSerializedObjectValueRewriteReport(
+            data: rewritten,
+            pathID: pathID,
+            classID: object.classID,
+            originalObjectSize: object.byteSize,
+            rewrittenObjectSize: verifiedObject.byteSize,
+            roundTripVerified: true
+        )
+    }
+
     /// Delegates object serialization and pointer validation to the stricter
     /// AssetBundle writer. That writer appends the replacement object at an
     /// aligned data offset, then updates the object's metadata and file size.
