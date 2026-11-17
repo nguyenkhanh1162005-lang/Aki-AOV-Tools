@@ -277,6 +277,27 @@ final class AoVUnityFSParserTests: XCTestCase {
         XCTAssertEqual(extracted.first?.flags, 3)
     }
 
+    func testLegacyRebuilderRejectsAOVEncryptedTemplateInsteadOfDroppingEncryption() throws {
+        let encrypted = try AoVUnityFSRepacker.repack(
+            [AoVUnityFSRepackNode(path: "CAB-encrypted", data: Data("protected".utf8))],
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2022.3.5f1",
+            blockInfoLayout: .arenaOfValor,
+            aovEncryption: true
+        ).data
+        let nodes = try AoVUnityFSParser.extractNodes(encrypted)
+
+        XCTAssertThrowsError(
+            try AoVUnityFSRebuilder.rebuild(template: encrypted, nodes: nodes)
+        ) { error in
+            guard let rebuildError = error as? AoVUnityFSRebuildError,
+                  case .unsupportedTemplate = rebuildError else {
+                return XCTFail("Expected encrypted-template rejection, got \(error)")
+            }
+        }
+    }
+
     func testRebuilderRejectsDuplicateNodePaths() {
         let nodes = [
             AoVUnityFSExtractedNode(path: "CAB-same", data: Data([1])),
