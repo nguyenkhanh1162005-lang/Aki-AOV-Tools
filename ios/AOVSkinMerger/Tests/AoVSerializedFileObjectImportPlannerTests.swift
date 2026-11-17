@@ -124,6 +124,39 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
         )
     }
 
+    func testDependencyClosureKeepsExplicitlyPreservedAssetBundleRoot() throws {
+        let nodes = pointerNodes()
+        let nullPayload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: pointerValue(fileID: 0, pathID: 0),
+            littleEndian: true
+        )
+        let childPayload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: pointerValue(fileID: 0, pathID: 1001),
+            littleEndian: true
+        )
+        let source = makeSerializedFile(
+            pathIDs: [1001, 1002],
+            payloads: [nullPayload, childPayload],
+            typeTreeNodes: nodes
+        )
+        let destination = makeSerializedFile(
+            pathIDs: [5001],
+            payloads: [nullPayload],
+            typeTreeNodes: nodes
+        )
+
+        let plan = try AoVSerializedFileObjectImportPlanner.planDependencyClosure(
+            source: source,
+            destination: destination,
+            seedPathIDs: [1002],
+            preservedLocalPathIDMap: [1001: 5001]
+        )
+        XCTAssertEqual(plan.pathIDMap, [1001: 5001, 1002: 5002])
+        XCTAssertEqual(plan.objects.map(\.destinationPathID), [5002])
+    }
+
     func testPreservesExplicitSourceRootPointerWhileImportingSelectedObjects() throws {
         let nodes = pointerNodes()
         let rootPayload = try AoVUnityTypeTreeWriter.write(
