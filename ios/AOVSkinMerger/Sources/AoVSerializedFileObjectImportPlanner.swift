@@ -150,7 +150,8 @@ enum AoVSerializedFileObjectImportPlanner {
         var nextPathID = maximumKnownPathID + 1
         var pathIDMap: [Int64: Int64] = [:]
         var allocatedPathIDs = Set<Int64>()
-        for pathID in sourceIDs where selected.contains(pathID) {
+        let selectedIDsInOrder = sourceIDs.filter { selected.contains($0) }
+        for (index, pathID) in selectedIDsInOrder.enumerated() {
             while destinationIDSet.contains(nextPathID) || !allocatedPathIDs.insert(nextPathID).inserted {
                 guard nextPathID < Int64.max else {
                     throw AoVSerializedFileObjectImportPlanError.pathIDOverflow
@@ -160,7 +161,7 @@ enum AoVSerializedFileObjectImportPlanner {
             pathIDMap[pathID] = nextPathID
             if nextPathID < Int64.max {
                 nextPathID += 1
-            } else if pathID != selected.max() {
+            } else if index != selectedIDsInOrder.count - 1 {
                 throw AoVSerializedFileObjectImportPlanError.pathIDOverflow
             }
         }
