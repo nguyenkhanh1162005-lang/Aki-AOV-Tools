@@ -502,6 +502,12 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
         XCTAssertEqual(readUInt64BE(appendReport.data, at: 24), finalSummary.fileSize)
         XCTAssertEqual(readUInt64BE(appendReport.data, at: 32), finalSummary.dataOffset)
         XCTAssertEqual(finalSummary.serializedObjects.map(\.pathID), [1234, 1235])
+        let originalValue = try AoVSerializedFileParser.decodeObjectWithTypeTree(
+            pathID: 1234,
+            in: appendReport.data,
+            summary: finalSummary
+        )
+        XCTAssertEqual(originalValue.objectValue?["m_TestPathID"]?.intValue, 1001)
         let importedValue = try AoVSerializedFileParser.decodeObjectWithTypeTree(
             pathID: 1235,
             in: appendReport.data,
