@@ -156,6 +156,37 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
         }
     }
 
+    func testRejectsLocalPointerToMissingSourceObjectEvenIfItMatchesNextAllocatedID() throws {
+        let nodes = pointerNodes()
+        let first = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: pointerValue(fileID: 0, pathID: 1003),
+            littleEndian: true
+        )
+        let second = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: pointerValue(fileID: 0, pathID: 0),
+            littleEndian: true
+        )
+        let file = makeSerializedFile(
+            pathIDs: [1001, 1002],
+            payloads: [first, second],
+            typeTreeNodes: nodes
+        )
+
+        XCTAssertThrowsError(
+            try AoVSerializedFileObjectImportPlanner.plan(
+                source: file,
+                destination: file
+            )
+        ) { error in
+            guard let planError = error as? AoVSerializedFileObjectImportPlanError,
+                  case .pointerAuditFailed(1001, _) = planError else {
+                return XCTFail("Expected a missing source-local PPtr rejection, got \\(error)")
+            }
+        }
+    }
+
     func testRejectsExternalPointerWithoutExactDestinationMapping() throws {
         let nodes = pointerNodes()
         let first = try AoVUnityTypeTreeWriter.write(
