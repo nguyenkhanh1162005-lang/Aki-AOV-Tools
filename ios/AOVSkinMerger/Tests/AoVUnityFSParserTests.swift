@@ -32,6 +32,13 @@ final class AoVUnityFSParserTests: XCTestCase {
         XCTAssertEqual(info.nodes.map(\.path), ["CAB-test"])
     }
 
+    func testInspectsLZ4CompressedBlockInfo() throws {
+        let bundle = makeBundle(flags: 0x42)
+        let info = try AoVUnityFSParser.inspect(bundle)
+        XCTAssertEqual(info.blockInfoCompression, "LZ4")
+        XCTAssertEqual(info.nodes.first?.path, "CAB-test")
+    }
+
     func testHonorsBlockInfoPaddingFlagForNewUnityRevisions() throws {
         let bundle = makeBundle(
             engineVersion: "2022.3.1f1",
@@ -113,6 +120,20 @@ final class AoVUnityFSParserTests: XCTestCase {
         blockInfo.append(Data("CAB-test\0".utf8))
 
         let dataBlock = Data([0x11, 0x22, 0x33, 0x44])
+        let infoCompression = flags & 0x3F
+        var storedBlockInfo = blockInfo
+        if infoCompression == 2 || infoCompression == 3 {
+            var lz4 = Data([0xF0])
+            var remaining = blockInfo.count - 15
+            while remaining >= 255 {
+                lz4.append(255)
+                remaining -= 255
+            }
+            lz4.append(UInt8(remaining))
+            lz4.append(blockInfo)
+            storedBlockInfo = lz4
+        }
+
         var bundle = Data("UnityFS\0".utf8)
         appendBE(formatVersion, to: &bundle)
         bundle.append(Data("5.0.0\0".utf8))
@@ -120,10 +141,9 @@ final class AoVUnityFSParserTests: XCTestCase {
 
         let sizeOffset = bundle.count
         appendBE(UInt64(0), to: &bundle)
-        appendBE(UInt32(blockInfo.count), to: &bundle)
+        appendBE(UInt32(storedBlockInfo.count), to: &bundle)
         appendBE(UInt32(blockInfo.count), to: &bundle)
         appendBE(flags, to: &bundle)
-
         let versionParts = engineVersion.split(separator: ".")
         let is2019Aligned = versionParts.count >= 3 &&
             versionParts[0] == "2019" &&
@@ -136,9 +156,9 @@ final class AoVUnityFSParserTests: XCTestCase {
         if flags & 0x80 != 0 {
             if flags & 0x200 != 0 { align16(&bundle) }
             bundle.append(dataBlock)
-            bundle.append(blockInfo)
+            bundle.append(storedBlockInfo)
         } else {
-            bundle.append(blockInfo)
+            bundle.append(storedBlockInfo)
             if flags & 0x200 != 0 { align16(&bundle) }
             bundle.append(dataBlock)
         }
