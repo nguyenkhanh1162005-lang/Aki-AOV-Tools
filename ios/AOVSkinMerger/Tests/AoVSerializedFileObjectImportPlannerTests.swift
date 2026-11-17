@@ -200,6 +200,55 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
         }
     }
 
+    func testImportsAndAppendsTypeTreeObjectIntoDestinationSerializedFile() throws {
+        let nodes = [
+            AoVUnityTypeTreeNode(type: "Texture2D", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_TestPathID", level: 1, byteSize: 8, metaFlags: 0)
+        ]
+        let value: AoVUnityTypeTreeValue = .object([
+            "m_TestPathID": .signed(1001)
+        ])
+        let payload = try AoVUnityTypeTreeWriter.write(nodes: nodes, value: value, littleEndian: true)
+        let sourceAndDestination = makeSerializedFile(
+            pathIDs: [1234],
+            payloads: [payload],
+            typeTreeNodes: nodes
+        )
+
+        let plan = try AoVSerializedFileObjectImportPlanner.plan(
+            source: sourceAndDestination,
+            destination: sourceAndDestination
+        )
+        let appendInputs = plan.objects.map {
+            AoVSerializedObjectAppendInput(
+                pathID: $0.destinationPathID,
+                classID: $0.classID,
+                typeID: $0.destinationTypeID,
+                payload: $0.data
+            )
+        }
+        let appendReport = try AoVSerializedFileObjectAppender.append(
+            to: sourceAndDestination,
+            objects: appendInputs
+        )
+
+        XCTAssertTrue(plan.roundTripVerified)
+        XCTAssertTrue(appendReport.roundTripVerified)
+        XCTAssertEqual(appendReport.originalObjectCount, 1)
+        XCTAssertEqual(appendReport.finalObjectCount, 2)
+        XCTAssertEqual(appendReport.appendedPathIDs, [1235])
+
+        let finalSummary = try AoVSerializedFileParser.inspect(appendReport.data)
+        XCTAssertEqual(finalSummary.fileSize, UInt64(appendReport.data.count))
+        XCTAssertEqual(finalSummary.serializedObjects.map(\.pathID), [1234, 1235])
+        let importedValue = try AoVSerializedFileParser.decodeObjectWithTypeTree(
+            pathID: 1235,
+            in: appendReport.data,
+            summary: finalSummary
+        )
+        XCTAssertEqual(importedValue.objectValue?["m_TestPathID"]?.intValue, 1001)
+    }
+
     private func pointerNodes() -> [AoVUnityTypeTreeNode] {
         [
             AoVUnityTypeTreeNode(type: "MonoBehaviour", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
