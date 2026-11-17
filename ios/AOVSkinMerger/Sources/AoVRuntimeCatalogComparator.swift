@@ -55,9 +55,9 @@ enum AoVRuntimeCatalogComparator {
         legacy inventories: [ArchiveInventory]
     ) -> AoVRuntimeCatalogComparisonReport {
         let currentPacker = packerCatalogs(in: inventory)
-        let legacyPacker = packerCatalogSources(in: legacy)
+        let legacyPacker = packerCatalogSources(in: inventories)
         let currentVerification = verificationCatalogs(in: inventory)
-        let legacyVerification = verificationCatalogSources(in: legacy)
+        let legacyVerification = verificationCatalogSources(in: inventories)
 
         let currentPackerEntries = currentPacker.flatMap(\.allResourcePackInfo)
         let legacyPackerEntries = legacyPacker.flatMap { source in
@@ -171,7 +171,7 @@ enum AoVRuntimeCatalogComparator {
     ) -> [(source: String, catalog: AoVRuntimeResourcePackerCatalog)] {
         inventories.flatMap { inventory in
             inventory.unityFSBundles
-                .filter { ($0.path as NSString).lastPathComponent.lowercased() == kind.fileName }
+                .filter { ($0.path as NSString).lastPathComponent.lowercased() == AoVRemakeCatalogKind.packer.fileName }
                 .flatMap(\.catalogNodeSamples)
                 .compactMap { sample -> (source: String, catalog: AoVRuntimeResourcePackerCatalog)? in
                     guard let catalog = sample.serializedFile?.resourcePackerCatalog else { return nil }
@@ -185,7 +185,7 @@ enum AoVRuntimeCatalogComparator {
     ) -> [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)] {
         inventories.flatMap { inventory in
             inventory.unityFSBundles
-                .filter { ($0.path as NSString).lastPathComponent.lowercased() == kind.fileName }
+                .filter { ($0.path as NSString).lastPathComponent.lowercased() == AoVRemakeCatalogKind.verification.fileName }
                 .flatMap(\.catalogNodeSamples)
                 .compactMap { sample -> (source: String, catalog: AoVRuntimeResourceVerificationCatalog)? in
                     guard let catalog = sample.serializedFile?.resourceVerificationCatalog else { return nil }
