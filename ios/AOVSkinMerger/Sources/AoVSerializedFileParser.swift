@@ -717,6 +717,9 @@ enum AoVSerializedFileParser {
             isStreamedSceneAssetBundle = try reader.readBoolean("m_IsStreamedSceneAssetBundle")
         }
 
+        let trailingBytes = data.count - reader.offset
+        let trailingData = trailingBytes == 0 ? Data() : data.subdata(in: reader.offset..<data.count)
+
         return AoVSerializedAssetBundleRecord(
             pathID: pathID,
             name: name,
