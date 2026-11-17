@@ -143,33 +143,44 @@ enum AoVSerializedFileObjectImportPlanner {
         }
 
         let destinationIDSet = Set(destinationIDs)
-        let maximumDestinationID = destinationIDs.max() ?? 0
-        guard maximumDestinationID < Int64.max else {
+        let maximumKnownPathID = max(sourceIDs.max() ?? 0, destinationIDs.max() ?? 0)
+        guard maximumKnownPathID < Int64.max else {
             throw AoVSerializedFileObjectImportPlanError.pathIDOverflow
         }
-        var nextPathID = maximumDestinationID + 1
+        var nextPathID = maximumKnownPathID + 1
         var pathIDMap: [Int64: Int64] = [:]
+        var allocatedPathIDs = Set<Int64>()
         for pathID in sourceIDs where selected.contains(pathID) {
-            while destinationIDSet.contains(nextPathID) || pathIDMap.values.contains(nextPathID) {
+            while destinationIDSet.contains(nextPathID) || !allocatedPathIDs.insert(nextPathID).inserted {
                 guard nextPathID < Int64.max else {
                     throw AoVSerializedFileObjectImportPlanError.pathIDOverflow
                 }
                 nextPathID += 1
             }
             pathIDMap[pathID] = nextPathID
-            guard nextPathID < Int64.max || pathID == sourceIDs.last else {
+            if nextPathID < Int64.max {
+                nextPathID += 1
+            } else if pathID != selected.max() {
                 throw AoVSerializedFileObjectImportPlanError.pathIDOverflow
             }
-            nextPathID += 1
         }
 
-        let unavailableSentinel = Int64.min
+        var unavailableSentinel = Int64.min
+        while destinationIDSet.contains(unavailableSentinel) ||
+            allocatedPathIDs.contains(unavailableSentinel) {
+            guard unavailableSentinel < Int64.max else {
+                throw AoVSerializedFileObjectImportPlanError.pathIDOverflow
+            }
+            unavailableSentinel += 1
+        }
         var completeLocalPathIDMap: [Int64: Int64] = [:]
         for sourcePathID in sourceIDs {
             completeLocalPathIDMap[sourcePathID] = pathIDMap[sourcePathID] ?? unavailableSentinel
         }
-        var availableLocalPathIDs = destinationIDSet
-        availableLocalPathIDs.formUnion(pathIDMap.values)
+        // fileID == 0 is local to the source SerializedFile. Only newly
+        // allocated imported IDs are valid destinations for those pointers.
+        // Existing destination IDs must be reached through audited external refs.
+        let availableLocalPathIDs = allocatedPathIDs
 
         try validateExternalMappings(
             source: sourceSummary,
