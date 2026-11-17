@@ -107,6 +107,16 @@ struct AoVSerializedFileSummary: Codable, Sendable {
     }
 
     var assetBundleObjectCount: Int { assetBundleObjects.count }
+
+    func typeInfo(for object: AoVSerializedFileObject) -> AoVSerializedFileTypeInfo? {
+        guard object.typeID >= 0,
+              let index = Int(exactly: object.typeID),
+              serializedTypes.indices.contains(index) else {
+            return nil
+        }
+        let typeInfo = serializedTypes[index]
+        return typeInfo.classID == object.classID ? typeInfo : nil
+    }
 }
 
 enum AoVSerializedFileError: LocalizedError {
@@ -278,6 +288,39 @@ enum AoVSerializedFileParser {
     private static let maximumTypeTreeNodes = 100_000
     private static let maximumStringBufferBytes = 16 * 1024 * 1024
     private static let assetBundleClassID: Int32 = 142
+
+    static func decodeObjectWithTypeTree(
+        pathID: Int64,
+        in data: Data,
+        summary: AoVSerializedFileSummary? = nil
+    ) throws -> AoVUnityTypeTreeValue {
+        let inspected = try summary ?? inspect(data)
+        guard inspected.fileSize == UInt64(data.count) else {
+            throw AoVSerializedFileError.invalidHeader("SerializedFile size differs from the supplied byte buffer.")
+        }
+        let matches = inspected.serializedObjects.filter { $0.pathID == pathID }
+        guard matches.count == 1, let object = matches.first else {
+            throw AoVSerializedFileError.invalidObjectRange(pathID)
+        }
+        guard let typeInfo = inspected.typeInfo(for: object),
+              !typeInfo.typeTreeNodes.isEmpty else {
+            throw AoVSerializedFileError.unsupportedTypeTreeVersion(inspected.formatVersion)
+        }
+        guard object.byteSize > 0,
+              object.byteSize <= 16 * 1024 * 1024,
+              let start = Int(exactly: object.byteOffset),
+              let size = Int(exactly: object.byteSize),
+              start >= 0, size > 0,
+              start <= data.count, size <= data.count - start else {
+            throw AoVSerializedFileError.invalidObjectRange(pathID)
+        }
+        let payload = data.subdata(in: start..<(start + size))
+        return try AoVUnityTypeTreeReader.read(
+            nodes: typeInfo.typeTreeNodes,
+            data: payload,
+            littleEndian: inspected.littleEndian
+        )
+    }
 
     static func inspect(_ data: Data) throws -> AoVSerializedFileSummary {
         guard data.count >= 20 else {
