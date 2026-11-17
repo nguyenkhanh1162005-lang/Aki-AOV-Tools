@@ -126,7 +126,8 @@ enum AoVUnityFSRepacker {
         formatVersion: UInt32 = 6,
         playerVersion: String = "5.0.0",
         engineVersion: String,
-        blockInfoLayout: AoVUnityFSBlockInfoLayout = .standard
+        blockInfoLayout: AoVUnityFSBlockInfoLayout = .standard,
+        aovEncryption: Bool = false
     ) throws -> AoVUnityFSRepackReport {
         guard !nodes.isEmpty else { throw AoVUnityFSRepackError.noNodes }
         guard nodes.count <= maximumNodes else { throw AoVUnityFSRepackError.tooManyNodes(nodes.count) }
@@ -196,6 +197,12 @@ enum AoVUnityFSRepacker {
               let infoSize = UInt32(exactly: blockInfo.data.count) else {
             throw AoVUnityFSRepackError.blockInfoTooLarge
         }
+        let storedBlockInfo = aovEncryption
+            ? try AoVUnityFSParser.cryptAoVBlockInfo(blockInfo.data, decrypt: false)
+            : blockInfo.data
+        let aovEncryptionFlag = aovEncryption
+            ? try AoVUnityFSParser.aovEncryptionFlag(for: engineVersion)
+            : 0
 
         var writer = AoVUnityFSBinaryWriter()
         writer.appendCString("UnityFS")
@@ -203,19 +210,17 @@ enum AoVUnityFSRepacker {
         writer.appendCString(playerVersion)
         writer.appendCString(engineVersion)
 
-        let fileSizeOffset = writer.data.count
+        let headerFieldsOffset = writer.data.count
         writer.appendUInt64BE(0)
-        let compressedInfoSizeOffset = writer.data.count
         writer.appendUInt32BE(infoSize)
-        let uncompressedInfoSizeOffset = writer.data.count
         writer.appendUInt32BE(infoSize)
-        writer.appendUInt32BE(archiveFlags)
+        writer.appendUInt32BE(archiveFlags | aovEncryptionFlag)
 
         if formatVersion >= 7 || needsHeaderAlignment(engineVersion) {
             writer.align(16)
         }
 
-        writer.data.append(blockInfo.data)
+        writer.data.append(storedBlockInfo)
         writer.data.append(expanded)
 
         let totalSize = UInt64(writer.data.count)
@@ -224,11 +229,21 @@ enum AoVUnityFSRepacker {
             throw AoVUnityFSRepackError.payloadTooLarge
         }
         _ = totalSizeInt
-        try writer.replaceUInt64BE(at: fileSizeOffset, with: totalSize)
-        try writer.replaceUInt32BE(at: compressedInfoSizeOffset, with: infoSize)
-        try writer.replaceUInt32BE(at: uncompressedInfoSizeOffset, with: infoSize)
-
-        let output = writer.data
+        var output = writer.data
+        if aovEncryption {
+            var plaintextHeaderFields = Data()
+            appendUInt64LE(totalSize, to: &plaintextHeaderFields)
+            appendUInt32LE(infoSize, to: &plaintextHeaderFields)
+            appendUInt32LE(infoSize, to: &plaintextHeaderFields)
+            let encryptedHeaderFields = try AoVUnityFSParser.encryptAoVHeader(plaintextHeaderFields)
+            output.replaceSubrange(
+                headerFieldsOffset..<(headerFieldsOffset + 16),
+                with: encryptedHeaderFields
+            )
+        } else {
+            try writer.replaceUInt64BE(at: headerFieldsOffset, with: totalSize)
+            output = writer.data
+        }
         do {
             let inspected = try AoVUnityFSParser.inspect(output)
             guard inspected.formatVersion == formatVersion,
@@ -270,6 +285,18 @@ enum AoVUnityFSRepacker {
             throw error
         } catch {
             throw AoVUnityFSRepackError.verificationFailed(error.localizedDescription)
+        }
+    }
+
+    private static func appendUInt32LE(_ value: UInt32, to data: inout Data) {
+        for shift in stride(from: 0, through: 24, by: 8) {
+            data.append(UInt8(truncatingIfNeeded: value >> shift))
+        }
+    }
+
+    private static func appendUInt64LE(_ value: UInt64, to data: inout Data) {
+        for shift in stride(from: 0, through: 56, by: 8) {
+            data.append(UInt8(truncatingIfNeeded: value >> shift))
         }
     }
 
