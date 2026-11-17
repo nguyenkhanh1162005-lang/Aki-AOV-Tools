@@ -219,7 +219,9 @@ final class AoVAssetBundleCatalogMergerTests: XCTestCase {
             serializedObjects: objects,
             assetBundleObjects: [],
             externalReferences: externalReferences,
-            assetBundleRecords: []
+            assetBundleRecords: [],
+            resourcePackerCatalog: nil,
+            resourceVerificationCatalog: nil
         )
     }
 
