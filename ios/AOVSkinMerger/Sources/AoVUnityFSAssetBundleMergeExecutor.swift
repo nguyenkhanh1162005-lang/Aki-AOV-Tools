@@ -607,9 +607,15 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         sourceSummary: AoVSerializedFileSummary,
         destinationSummary: AoVSerializedFileSummary
     ) throws -> Set<String> {
-        let currentByKey = Dictionary(
-            uniqueKeysWithValues: currentRecord.containerEntries.map { ($0.key, $0) }
-        )
+        var currentByKey: [String: AoVSerializedAssetBundleEntry] = [:]
+        for entry in currentRecord.containerEntries {
+            guard currentByKey[entry.key] == nil else {
+                throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                    "RES có container key trùng: \(entry.key)."
+                )
+            }
+            currentByKey[entry.key] = entry
+        }
         var changed = Set<String>()
         for legacyEntry in legacyRecord.containerEntries {
             guard let currentEntry = currentByKey[legacyEntry.key] else {
