@@ -200,6 +200,110 @@ final class AoVSerializedRuntimeCatalogWriterTests: XCTestCase {
         XCTAssertEqual(verifiedSerialized.resourceVerificationCatalog, nil)
     }
 
+    func testRuntimePackerMergeExecutorWritesVerifiedCandidateIntoUnityFS() throws {
+        let currentCatalog = makePackerCatalog()
+        let addedEntry = AoVRuntimeResourcePackInfo(
+            pathInIFS: "assetbundle/aki-verified-new.assetbundle",
+            pkgType: 0,
+            crcXor: 777,
+            tag: "Hero",
+            flags: 512,
+            resourceInfos: [
+                AoVRuntimeResourceItem(hashCode: 888, extensionName: "assetbundle")
+            ]
+        )
+        let legacyCatalog = AoVRuntimeResourcePackerCatalog(
+            name: currentCatalog.name,
+            version: currentCatalog.version,
+            svnRevision: currentCatalog.svnRevision,
+            setName: currentCatalog.setName,
+            allResourcePackInfo: currentCatalog.allResourcePackInfo + [addedEntry],
+            allParentIndexToChild: [
+                AoVPackInfoMapItem(parentIdx: 0, childIdx: 0),
+                AoVPackInfoMapItem(parentIdx: 0, childIdx: 1)
+            ],
+            trailingData: currentCatalog.trailingData
+        )
+        let serialized = makeSerializedFile(with: .packer(currentCatalog))
+        let summary = try AoVSerializedFileParser.inspect(serialized)
+        let object = try XCTUnwrap(summary.serializedObjects.first(where: { $0.classID == 114 }))
+        let unityFS = try AoVUnityFSRepacker.repack(
+            [AoVUnityFSRepackNode(path: "CAB-packer", data: serialized, flags: 7)],
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2022.3.5f1"
+        )
+
+        let report = try AoVUnityFSRuntimeCatalogMergeExecutor.mergePacker(
+            in: unityFS.data,
+            serializedFileNodePath: "CAB-packer",
+            objectPathID: object.pathID,
+            legacy: [("legacy-mod.zip", legacyCatalog)],
+            verifiedFinalEntries: [addedEntry.pathInIFS: addedEntry]
+        )
+
+        XCTAssertTrue(report.roundTripVerified)
+        XCTAssertTrue(report.rewrite?.roundTripVerified == true)
+        XCTAssertEqual(report.plan.addedPaths, [addedEntry.pathInIFS])
+        let nodes = try AoVUnityFSParser.extractNodes(report.data)
+        let node = try XCTUnwrap(nodes.first(where: { $0.path == "CAB-packer" }))
+        let verified = try AoVSerializedFileParser.inspect(node.data)
+        XCTAssertEqual(
+            verified.resourcePackerCatalog?.allResourcePackInfo.map(\.pathInIFS),
+            currentCatalog.allResourcePackInfo.map(\.pathInIFS) + [addedEntry.pathInIFS]
+        )
+        XCTAssertEqual(
+            verified.resourcePackerCatalog?.allParentIndexToChild,
+            legacyCatalog.allParentIndexToChild
+        )
+    }
+
+    func testRuntimeVerificationMergeExecutorRequiresAndWritesVerifiedChecksums() throws {
+        let currentCatalog = makeVerificationCatalog()
+        let zipPath = currentCatalog.allZipVerificationInfo[0].pathInIFS
+        let databinPath = currentCatalog.allDatabinVerificationInfo[0].pathInIFS
+        let legacyCatalog = AoVRuntimeResourceVerificationCatalog(
+            name: currentCatalog.name,
+            version: currentCatalog.version,
+            svnRevision: currentCatalog.svnRevision,
+            allZipVerificationInfo: [
+                AoVRuntimeVerificationEntry(pathInIFS: zipPath, crcXor: 111)
+            ],
+            allDatabinVerificationInfo: [
+                AoVRuntimeVerificationEntry(pathInIFS: databinPath, crcXor: 222)
+            ],
+            trailingData: currentCatalog.trailingData
+        )
+        let serialized = makeSerializedFile(with: .verification(currentCatalog))
+        let summary = try AoVSerializedFileParser.inspect(serialized)
+        let object = try XCTUnwrap(summary.serializedObjects.first(where: { $0.classID == 114 }))
+        let unityFS = try AoVUnityFSRepacker.repack(
+            [AoVUnityFSRepackNode(path: "CAB-verification", data: serialized, flags: 3)],
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2022.3.5f1"
+        )
+
+        let report = try AoVUnityFSRuntimeCatalogMergeExecutor.mergeVerification(
+            in: unityFS.data,
+            serializedFileNodePath: "CAB-verification",
+            objectPathID: object.pathID,
+            legacy: [("legacy-mod.zip", legacyCatalog)],
+            verifiedFinalDatabinChecksumValues: [databinPath: 333],
+            verifiedFinalZIPChecksumValues: [zipPath: 444]
+        )
+
+        XCTAssertTrue(report.roundTripVerified)
+        XCTAssertTrue(report.rewrite?.roundTripVerified == true)
+        XCTAssertEqual(report.plan.updatedZIPPaths, [zipPath])
+        XCTAssertEqual(report.plan.updatedDatabinPaths, [databinPath])
+        let nodes = try AoVUnityFSParser.extractNodes(report.data)
+        let node = try XCTUnwrap(nodes.first(where: { $0.path == "CAB-verification" }))
+        let verified = try AoVSerializedFileParser.inspect(node.data)
+        XCTAssertEqual(verified.resourceVerificationCatalog?.allZipVerificationInfo.first?.crcXor, 444)
+        XCTAssertEqual(verified.resourceVerificationCatalog?.allDatabinVerificationInfo.first?.crcXor, 333)
+    }
+
     private func makePackerCatalog() -> AoVRuntimeResourcePackerCatalog {
         AoVRuntimeResourcePackerCatalog(
             name: "ResourcePackerInfoSetXML",
