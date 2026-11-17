@@ -366,6 +366,10 @@ struct ContentView: View {
             metric("Key trùng không an toàn", "\(report.ambiguousContainerKeyCount)")
             metric("Asset pointer thay đổi", "\(report.changedAssetPointerCount)")
             metric("Preload range thay đổi", "\(report.changedPreloadRangeCount)")
+            metric("Preload range sai trong MOD cũ", "\(report.invalidLegacyPreloadRangeCount)")
+            metric("Preload range sai trong RES mới", "\(report.invalidCurrentPreloadRangeCount)")
+            metric("Main asset pointer thay đổi", "\(report.changedMainAssetPointerCount)")
+            metric("Class compatibility thay đổi", "\(report.changedClassCompatibilityCount)")
             metric("Dependency mới ở RES", "\(report.dependenciesAddedInCurrentCount)")
             metric("Dependency cũ không còn", "\(report.dependenciesRemovedInCurrentCount)")
 
@@ -382,6 +386,14 @@ struct ContentView: View {
                     }
                     Text("MOD: \(finding.sourceArchive) · key khớp \(finding.mappedContainerKeyCount) · pointer đổi \(finding.changedAssetPointerCount)")
                         .font(.caption2).foregroundColor(.secondary)
+                    if finding.invalidLegacyPreloadRangeCount > 0 || finding.invalidCurrentPreloadRangeCount > 0 {
+                        Text("Preload range lỗi: MOD \(finding.invalidLegacyPreloadRangeCount) · RES \(finding.invalidCurrentPreloadRangeCount)")
+                            .font(.caption2).foregroundColor(.orange)
+                    }
+                    if finding.mainAssetPointerChanged || finding.classCompatibilityChanged {
+                        Text("Metadata đổi: main asset \(finding.mainAssetPointerChanged ? "có" : "không") · class compatibility \(finding.classCompatibilityChanged ? "có" : "không")")
+                            .font(.caption2).foregroundColor(.orange)
+                    }
                     if !finding.legacyOnlyKeySamples.isEmpty {
                         Text("MOD-only: " + finding.legacyOnlyKeySamples.joined(separator: ", "))
                             .font(.caption2.monospaced()).foregroundColor(.orange)
