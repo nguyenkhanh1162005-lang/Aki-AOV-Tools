@@ -98,6 +98,9 @@ final class AoVSerializedFileParserTests: XCTestCase {
         metadata.append(0)
         appendSerialized(Int16(-1), to: &metadata, littleEndian: littleEndian)
         metadata.append(Data(repeating: 0, count: 16))
+        if formatVersion >= 21 {
+            appendSerialized(Int32(0), to: &metadata, littleEndian: littleEndian) // type dependencies
+        }
         appendSerialized(Int32(1), to: &metadata, littleEndian: littleEndian)
         align4(&metadata)
         appendSerialized(Int64(1234), to: &metadata, littleEndian: littleEndian)
@@ -108,12 +111,8 @@ final class AoVSerializedFileParserTests: XCTestCase {
         }
         appendSerialized(UInt32(payload.count), to: &metadata, littleEndian: littleEndian)
         appendSerialized(objectTypeIndex, to: &metadata, littleEndian: littleEndian)
-        appendSerialized(Int32(0), to: &metadata, littleEndian: littleEndian)
-        appendSerialized(Int32(0), to: &metadata, littleEndian: littleEndian)
-        if formatVersion >= 21 {
-            appendSerialized(Int32(0), to: &metadata, littleEndian: littleEndian) // type dependencies
-        }
-        metadata.append(0) // script count has already been written above
+        appendSerialized(Int32(0), to: &metadata, littleEndian: littleEndian) // script count
+        appendSerialized(Int32(0), to: &metadata, littleEndian: littleEndian) // external count
         if formatVersion >= 20 {
             appendSerialized(Int32(0), to: &metadata, littleEndian: littleEndian) // reference types
         }
