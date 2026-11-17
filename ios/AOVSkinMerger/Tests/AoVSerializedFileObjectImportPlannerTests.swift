@@ -223,7 +223,7 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
             littleEndian: true
         )
         let second = try AoVUnityTypeTreeWriter.write(
-            nodes,
+            nodes: nodes,
             value: pointerValue(fileID: 0, pathID: 0),
             littleEndian: true
         )
