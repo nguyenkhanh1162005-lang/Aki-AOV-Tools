@@ -326,7 +326,7 @@ struct ContentView: View {
                 title: "Packer",
                 planExists: report.runtimePackerMergePlan != nil,
                 safeToWrite: report.runtimePackerMergePlan?.safeToWrite ?? false,
-                details: report.runtimePackerMergePlan.map {
+                details: report.runtimePackerMergePlan.map { plan in
                     [
                         "Mục Packer mới: \(plan.addedPaths.count)",
                         "Bundle cùng path nhưng khác nội dung: \(plan.changedExistingPaths.count)",
@@ -339,7 +339,7 @@ struct ContentView: View {
                 title: "Verification",
                 planExists: report.runtimeVerificationMergePlan != nil,
                 safeToWrite: report.runtimeVerificationMergePlan?.safeToWrite ?? false,
-                details: report.runtimeVerificationMergePlan.map {
+                details: report.runtimeVerificationMergePlan.map { plan in
                     [
                         "ZIP entry mới: \(plan.addedZIPPaths.count)",
                         "ZIP checksum đã cập nhật: \(plan.updatedZIPPaths.count)",
