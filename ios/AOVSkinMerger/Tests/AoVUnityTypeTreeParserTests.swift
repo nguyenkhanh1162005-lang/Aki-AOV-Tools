@@ -124,7 +124,11 @@ final class AoVUnityTypeTreeParserTests: XCTestCase {
 
     private func appendAlignedString(_ value: String, to data: inout Data, littleEndian: Bool = true) {
         let bytes = Data(value.utf8)
-        appendLE(Int32(bytes.count), to: &data)
+        if littleEndian {
+            appendLE(Int32(bytes.count), to: &data)
+        } else {
+            appendBE(UInt32(bytes.count), to: &data)
+        }
         data.append(bytes)
         while data.count % 4 != 0 { data.append(0) }
     }
