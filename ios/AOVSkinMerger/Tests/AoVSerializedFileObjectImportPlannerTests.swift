@@ -124,6 +124,49 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
         )
     }
 
+    func testPreservesExplicitSourceRootPointerWhileImportingSelectedObjects() throws {
+        let nodes = pointerNodes()
+        let rootPayload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: pointerValue(fileID: 0, pathID: 0),
+            littleEndian: true
+        )
+        let childPayload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: pointerValue(fileID: 0, pathID: 1001),
+            littleEndian: true
+        )
+        let source = makeSerializedFile(
+            pathIDs: [1001, 1002],
+            payloads: [rootPayload, childPayload],
+            typeTreeNodes: nodes
+        )
+        let destination = makeSerializedFile(
+            pathIDs: [5001],
+            payloads: [rootPayload],
+            typeTreeNodes: nodes
+        )
+
+        let plan = try AoVSerializedFileObjectImportPlanner.plan(
+            source: source,
+            destination: destination,
+            selectedPathIDs: [1002],
+            preservedLocalPathIDMap: [1001: 5001]
+        )
+
+        XCTAssertEqual(plan.pathIDMap, [1001: 5001, 1002: 5002])
+        XCTAssertEqual(plan.objects.map(\.destinationPathID), [5002])
+        let imported = try AoVUnityTypeTreeReader.read(
+            nodes: nodes,
+            data: try XCTUnwrap(plan.objects.first?.data),
+            littleEndian: true
+        )
+        XCTAssertEqual(
+            imported.objectValue?["m_GameObject"]?.objectValue?["m_PathID"]?.intValue,
+            5001
+        )
+    }
+
     func testRejectsReferencesToSourceObjectsOutsideSelectedImportBatch() throws {
         let nodes = pointerNodes()
         let first = try AoVUnityTypeTreeWriter.write(
