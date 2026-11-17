@@ -1,6 +1,6 @@
 import Foundation
 
-struct AoVUnityTypeTreeNode: Hashable, Sendable {
+struct AoVUnityTypeTreeNode: Codable, Hashable, Sendable {
     let type: String
     let name: String
     let level: UInt8
