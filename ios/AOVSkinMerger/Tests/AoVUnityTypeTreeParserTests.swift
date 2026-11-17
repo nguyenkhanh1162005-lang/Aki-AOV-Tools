@@ -112,6 +112,7 @@ final class AoVUnityTypeTreeParserTests: XCTestCase {
             AoVUnityTypeTreeNode(type: "int", name: "m_FileID", level: 2, byteSize: 4, metaFlags: 0),
             AoVUnityTypeTreeNode(type: "SInt64", name: "m_PathID", level: 2, byteSize: 8, metaFlags: 0),
             AoVUnityTypeTreeNode(type: "string", name: "m_Name", level: 1, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "vector", name: "m_Pointers", level: 1, byteSize: -1, metaFlags: 0),
             AoVUnityTypeTreeNode(type: "Array", name: "Array", level: 2, byteSize: -1, metaFlags: 0),
             AoVUnityTypeTreeNode(type: "int", name: "size", level: 3, byteSize: 4, metaFlags: 0),
             AoVUnityTypeTreeNode(type: "PPtr<Object>", name: "data", level: 3, byteSize: -1, metaFlags: 0),
@@ -129,7 +130,7 @@ final class AoVUnityTypeTreeParserTests: XCTestCase {
                 "m_PathID": .signed(2002)
             ]),
             "m_Name": .string("AKI creator skin"),
-            "Array": .array([
+            "m_Pointers": .array([
                 .object(["m_FileID": .signed(0), "m_PathID": .signed(3003)]),
                 .object(["m_FileID": .signed(2), "m_PathID": .signed(4004)])
             ])
@@ -153,7 +154,7 @@ final class AoVUnityTypeTreeParserTests: XCTestCase {
 
         guard case .object(var fields) = decoded,
               case .object(var gameObject) = fields["m_GameObject"],
-              case .array(var pointers) = fields["Array"],
+              case .array(var pointers) = fields["m_Pointers"],
               case .object(var firstPointer) = pointers.first else {
             return XCTFail("Decoded TypeTree object does not match the expected structured PPtr layout.")
         }
@@ -161,7 +162,7 @@ final class AoVUnityTypeTreeParserTests: XCTestCase {
         fields["m_GameObject"] = .object(gameObject)
         firstPointer["m_PathID"] = .signed(9002)
         pointers[0] = .object(firstPointer)
-        fields["Array"] = .array(pointers)
+        fields["m_Pointers"] = .array(pointers)
         let changed: AoVUnityTypeTreeValue = .object(fields)
 
         let rewritten = try AoVUnityTypeTreeWriter.write(
