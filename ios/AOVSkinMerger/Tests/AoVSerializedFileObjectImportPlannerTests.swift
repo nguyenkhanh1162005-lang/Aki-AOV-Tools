@@ -475,10 +475,11 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
 
         let finalSummary = try AoVSerializedFileParser.inspect(appendReport.data)
         XCTAssertEqual(finalSummary.fileSize, UInt64(appendReport.data.count))
-        XCTAssertEqual(readUInt32BE(appendReport.data, at: 0), UInt32(finalSummary.metadataSize))
+        let metadataSize = UInt32(finalSummary.metadataEndOffset - finalSummary.metadataStartOffset)
+        XCTAssertEqual(readUInt32BE(appendReport.data, at: 0), metadataSize)
         XCTAssertEqual(readUInt32BE(appendReport.data, at: 4), UInt32(finalSummary.fileSize))
         XCTAssertEqual(readUInt32BE(appendReport.data, at: 12), UInt32(finalSummary.dataOffset))
-        XCTAssertEqual(readUInt32BE(appendReport.data, at: 20), UInt32(finalSummary.metadataSize))
+        XCTAssertEqual(readUInt32BE(appendReport.data, at: 20), metadataSize)
         XCTAssertEqual(readUInt64BE(appendReport.data, at: 24), finalSummary.fileSize)
         XCTAssertEqual(readUInt64BE(appendReport.data, at: 32), finalSummary.dataOffset)
         XCTAssertEqual(finalSummary.serializedObjects.map(\.pathID), [1234, 1235])
@@ -583,14 +584,11 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
     }
 
     private func readUInt64BE(_ data: Data, at offset: Int) -> UInt64 {
-        (UInt64(data[offset]) << 56)
-            | (UInt64(data[offset + 1]) << 48)
-            | (UInt64(data[offset + 2]) << 40)
-            | (UInt64(data[offset + 3]) << 32)
-            | (UInt64(data[offset + 4]) << 24)
-            | (UInt64(data[offset + 5]) << 16)
-            | (UInt64(data[offset + 6]) << 8)
-            | UInt64(data[offset + 7])
+        var value: UInt64 = 0
+        for index in 0..<8 {
+            value = (value << 8) | UInt64(data[offset + index])
+        }
+        return value
     }
 
     private func appendTypeTree(
