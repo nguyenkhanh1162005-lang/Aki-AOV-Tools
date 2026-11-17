@@ -28,7 +28,11 @@ final class AoVSerializedFileParserTests: XCTestCase {
         XCTAssertEqual(summary.assetBundleRecords.first?.containerEntries.first?.preloadSize, 1)
         XCTAssertEqual(summary.assetBundleRecords.first?.containerEntries.first?.asset.pathID, 7002)
         XCTAssertEqual(summary.assetBundleRecords.first?.mainAsset.pathID, 7003)
+        XCTAssertEqual(summary.assetBundleRecords.first?.mainAssetPreloadIndex, 0)
+        XCTAssertEqual(summary.assetBundleRecords.first?.mainAssetPreloadSize, 1)
         XCTAssertEqual(summary.assetBundleRecords.first?.classCompatibilityIDs, [28])
+        XCTAssertEqual(summary.assetBundleRecords.first?.classCompatibilityEntries.first?.info.asset.pathID, 7004)
+        XCTAssertEqual(summary.assetBundleRecords.first?.classCompatibilityEntries.first?.info.preloadSize, 1)
         XCTAssertEqual(summary.assetBundleRecords.first?.trailingBytes, 0)
     }
 
