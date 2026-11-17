@@ -978,7 +978,7 @@ enum AoVSerializedFileParser {
             try reader.skip(16, "\(label) old type hash")
         }
         if enableTypeTree {
-            try skipTypeTree(&reader, formatVersion: formatVersion, label: label)
+            _ = try readTypeTree(&reader, formatVersion: formatVersion, label: label)
         }
         if formatVersion >= 21 {
             _ = try reader.readCString("\(label) class name")
