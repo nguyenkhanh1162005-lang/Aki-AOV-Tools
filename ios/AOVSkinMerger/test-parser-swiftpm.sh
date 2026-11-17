@@ -9,6 +9,8 @@ TEST_DIR="$PACKAGE_DIR/Tests/AOVSkinMergerTests"
 mkdir -p "$SOURCE_DIR" "$TEST_DIR"
 cp "$SCRIPT_DIR/Sources/AoVSerializedFileParser.swift" \
    "$SOURCE_DIR/AoVSerializedFileParser.swift"
+cp "$SCRIPT_DIR/Sources/AoVSerializedAssetBundleWriter.swift" \
+   "$SOURCE_DIR/AoVSerializedAssetBundleWriter.swift"
 cp "$SCRIPT_DIR/Tests/AoVSerializedFileParserTests.swift" \
    "$TEST_DIR/AoVSerializedFileParserTests.swift"
 cp "$SCRIPT_DIR/Sources/AoVUnityCommonStrings.swift" \
