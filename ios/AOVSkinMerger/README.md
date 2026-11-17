@@ -1,4 +1,4 @@
-# AKI AOV SKIN for iOS — prototype 0.5.0 (build 17)
+# AKI AOV SKIN for iOS — prototype 0.5.3 (build 20)
 
 This is an **unsigned iOS device-build prototype**. It is not a universal or game-certified AoV skin merger. The current project target is iOS 26.5.
 
@@ -7,7 +7,9 @@ This is an **unsigned iOS device-build prototype**. It is not a universal or gam
 - Import multiple MOD ZIP archives from the iOS Files picker. Source files remain in the app sandbox and are not uploaded.
 - Inventory ZIP entries, validate CRC, calculate SHA-256, inspect nested `Resources.zip`, validate paths, and compare game version markers.
 - Decode and encode the currently supported AoV AES-CBC, AES+Zstandard, and standalone Zstandard wrappers; preserve wrapper mode and require round-trip verification.
-- Inspect UnityFS AssetBundle headers, engine/format versions, archive flags, block-info metadata, block compression descriptors, and directory node paths. For read-only inspection, decompress block payloads using none/LZ4/LZ4HC and extract directory nodes under a 128 MiB catalog budget. Extracted catalog nodes are checked for Unity SerializedFile type/object tables and class 142 AssetBundle objects; supported Android/iOS layouts expose preload counts, container keys, bundle names and dependency strings. This is inventory only and does not modify catalog bytes.
+- Inspect UnityFS AssetBundle headers, engine/format versions, archive flags, block-info metadata, block compression descriptors, and directory node paths. Extract directory nodes under bounded memory limits and inspect Unity SerializedFile class 142 AssetBundle records plus class 114 Packer/Verification MonoBehaviours.
+- Build conservative class 142 merge plans that remap local/external PPtrs, append new container keys/preload ranges and check dependencies. An execution primitive can rewrite one AssetBundle record inside a UnityFS node and verify the rebuilt bundle by parsing it again.
+- Build Packer/Verification runtime-catalog plans. A separate executor can write a catalog inside UnityFS only when the caller supplies final AssetBundle metadata and checksum values already verified by an upstream adapter. Unknown checksum algorithms are never guessed.
 - Detect Actor IDs and merge supported MSES v7 rows, IFix HeroSkin patches, and supported CommonActions tracks/skin conditions with schema and round-trip checks.
 - Preserve unique-path AssetReferenceSet resources byte-for-byte. This does not merge conflicting baseSubset/skinSubset graphs.
 - Add new Wwise BNK files byte-for-byte only when the read-only append-only checker validates Wwise version, bank IDs, DIDX media IDs/payload hashes, HIRC object IDs/types/payload hashes, and overlapping platform/locale namespaces.
@@ -27,12 +29,13 @@ This is an **unsigned iOS device-build prototype**. It is not a universal or gam
 
 ## Not yet implemented or verified
 
-- UnityFS AssetBundle rebuilding, LZMA/LZHAM data-block support, and modification of extracted bundle contents. Current extraction is read-only.
-- Merging Packer/Verification catalog objects, rewriting dependency IDs, container references or verification checksums, and rebuilding UnityFS. The current build parses supported class 142 AssetBundle fields read-only; unsupported target-platform layouts and catalog-dependent merges remain blocked.
+- End-to-end RMK/RES orchestration across a complete ZIP: matching all CAB/SerializedFile nodes, merging real skin payloads, updating every Packer/Verification entry and repacking the complete current RES wrapper.
+- Real-RES validation of class 142 pointer remapping, external target pathIDs, runtime catalog checksums and output compatibility. The single-record and runtime-catalog executors are structural primitives only; they do not yet produce a full remake ZIP.
+- LZHAM and unsupported UnityFS layouts. Unsupported layouts must remain blocked instead of being skipped or partially rewritten.
 - Semantic merge of AssetReferenceSet `baseSubset`/`skinSubset` graphs when the same AssetRef path has different payloads.
 - Wwise HIRC reference-graph parsing/remapping, standalone WEM pairing, external media, unknown Wwise chunks, and same-path BNK replacement.
 - Unknown MSES/IFix schemas and unsupported CommonActions condition trees.
-- Full VTK package-catalog merge.
+- Full VTK package-catalog merge and generic AssetReferenceSet subset graph union.
 - ZIP ↔ `.3105` conversion has not been completed or verified in this native iOS target.
 - Physical-iPhone in-game compatibility testing. A structurally valid ZIP does not prove Liên Quân will load the content or preserve every animation, sound, recall, kill notice, and UI element.
 
