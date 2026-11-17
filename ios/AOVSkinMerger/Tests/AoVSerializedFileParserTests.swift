@@ -220,6 +220,85 @@ final class AoVSerializedFileParserTests: XCTestCase {
         }
     }
 
+    func testUnityFSAssetBundleMergeExecutorWritesMergedClass142AndRoundTrips() throws {
+        let currentSerializedBytes = makeSerializedFile(useResolvedPointers: true)
+        let legacySerializedBytes = makeSerializedFile(useResolvedPointers: true)
+        let currentSummary = try AoVSerializedFileParser.inspect(currentSerializedBytes)
+        let legacySummary = try AoVSerializedFileParser.inspect(legacySerializedBytes)
+        let currentRecord = try XCTUnwrap(currentSummary.assetBundleRecords.first)
+        let legacySourceRecord = try XCTUnwrap(legacySummary.assetBundleRecords.first)
+        let validLocalPointer = AoVSerializedAssetPointer(fileID: 0, pathID: 1234)
+
+        let legacyRecord = AoVSerializedAssetBundleRecord(
+            pathID: legacySourceRecord.pathID,
+            name: legacySourceRecord.name,
+            preloadReferences: legacySourceRecord.preloadReferences + [validLocalPointer],
+            containerEntries: legacySourceRecord.containerEntries + [
+                AoVSerializedAssetBundleEntry(
+                    key: "assets/aki-remake-new.prefab",
+                    preloadIndex: 1,
+                    preloadSize: 1,
+                    asset: validLocalPointer
+                )
+            ],
+            mainAsset: legacySourceRecord.mainAsset,
+            mainAssetPreloadIndex: legacySourceRecord.mainAssetPreloadIndex,
+            mainAssetPreloadSize: legacySourceRecord.mainAssetPreloadSize,
+            scriptCompatibilityEntries: legacySourceRecord.scriptCompatibilityEntries,
+            classCompatibilityIDs: legacySourceRecord.classCompatibilityIDs,
+            classCompatibilityEntries: legacySourceRecord.classCompatibilityEntries,
+            runtimeCompatibility: legacySourceRecord.runtimeCompatibility,
+            assetBundleName: legacySourceRecord.assetBundleName,
+            dependencies: legacySourceRecord.dependencies,
+            isStreamedSceneAssetBundle: legacySourceRecord.isStreamedSceneAssetBundle,
+            trailingBytes: legacySourceRecord.trailingBytes,
+            trailingData: legacySourceRecord.trailingData
+        )
+
+        XCTAssertEqual(currentRecord.containerEntries.map(\.key), ["assets/hero.prefab"])
+        XCTAssertEqual(legacyRecord.containerEntries.count, 2)
+
+        let unityFS = try AoVUnityFSRepacker.repack(
+            [AoVUnityFSRepackNode(path: "CAB-catalog", data: currentSerializedBytes, flags: 7)],
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2020.3.34f1"
+        )
+        XCTAssertTrue(unityFS.roundTripVerified)
+
+        let execution = try AoVUnityFSAssetBundleMergeExecutor.merge(
+            in: unityFS.data,
+            serializedFileNodePath: "CAB-catalog",
+            objectPathID: currentRecord.pathID,
+            legacyRecord: legacyRecord,
+            legacySerializedFile: legacySummary,
+            availableCurrentBundleNames: Set(currentRecord.dependencies)
+        )
+
+        XCTAssertTrue(execution.roundTripVerified)
+        XCTAssertTrue(execution.rewrite.roundTripVerified)
+        XCTAssertEqual(execution.plan.addedContainerKeys, ["assets/aki-remake-new.prefab"])
+
+        let verifiedBundle = try AoVUnityFSParser.inspect(execution.data)
+        let verifiedNodes = try AoVUnityFSParser.extractNodes(
+            execution.data,
+            maximumExpandedBytes: 1_048_576,
+            maximumNodeCount: 8
+        )
+        let verifiedNode = try XCTUnwrap(verifiedNodes.first(where: { $0.path == "CAB-catalog" }))
+        let verifiedFile = try AoVSerializedFileParser.inspect(verifiedNode.data)
+        let verifiedRecord = try XCTUnwrap(
+            verifiedFile.assetBundleRecords.first(where: { $0.pathID == currentRecord.pathID })
+        )
+
+        XCTAssertEqual(verifiedBundle.nodes.map(\.path), ["CAB-catalog"])
+        XCTAssertEqual(verifiedRecord, execution.plan.mergedRecord)
+        XCTAssertEqual(verifiedRecord.containerEntries.map(\.key), [
+            "assets/hero.prefab",
+            "assets/aki-remake-new.prefab"
+        ])
+    }
+
     private func safeRecordWithNullPointers(
         from record: AoVSerializedAssetBundleRecord
     ) -> AoVSerializedAssetBundleRecord {
@@ -302,11 +381,13 @@ final class AoVSerializedFileParserTests: XCTestCase {
         targetPlatform: Int32 = 13,
         objectPayload: Data? = nil,
         littleEndian: Bool = true,
-        unityVersion: String = "2020.3.34f1"
+        unityVersion: String = "2020.3.34f1",
+        useResolvedPointers: Bool = false
     ) -> Data {
         let payload = objectPayload ?? makeAssetBundleObject(
             littleEndian: littleEndian,
-            unityVersion: unityVersion
+            unityVersion: unityVersion,
+            useResolvedPointers: useResolvedPointers
         )
         var metadata = Data()
         metadata.append(Data((unityVersion + "\0").utf8))
@@ -364,23 +445,28 @@ final class AoVSerializedFileParserTests: XCTestCase {
 
     private func makeAssetBundleObject(
         littleEndian: Bool,
-        unityVersion: String
+        unityVersion: String,
+        useResolvedPointers: Bool = false
     ) -> Data {
+        let preloadPathID: Int64 = useResolvedPointers ? 1234 : 7001
+        let containerPathID: Int64 = useResolvedPointers ? 1234 : 7002
+        let mainAssetPathID: Int64 = useResolvedPointers ? 1234 : 7003
+        let compatibilityPathID: Int64 = useResolvedPointers ? 1234 : 7004
         var object = Data()
         appendAlignedString("catalog", to: &object, littleEndian: littleEndian)
         appendSerialized(Int32(1), to: &object, littleEndian: littleEndian) // preload count
         appendSerialized(Int32(0), to: &object, littleEndian: littleEndian)
-        appendSerialized(Int64(7001), to: &object, littleEndian: littleEndian)
+        appendSerialized(preloadPathID, to: &object, littleEndian: littleEndian)
         appendSerialized(Int32(1), to: &object, littleEndian: littleEndian) // container count
         appendAlignedString("assets/hero.prefab", to: &object, littleEndian: littleEndian)
         appendSerialized(Int32(0), to: &object, littleEndian: littleEndian) // preload index
         appendSerialized(Int32(1), to: &object, littleEndian: littleEndian) // preload size
         appendSerialized(Int32(0), to: &object, littleEndian: littleEndian)
-        appendSerialized(Int64(7002), to: &object, littleEndian: littleEndian)
+        appendSerialized(containerPathID, to: &object, littleEndian: littleEndian)
         appendSerialized(Int32(0), to: &object, littleEndian: littleEndian) // main preload index
         appendSerialized(Int32(1), to: &object, littleEndian: littleEndian) // main preload size
         appendSerialized(Int32(0), to: &object, littleEndian: littleEndian)
-        appendSerialized(Int64(7003), to: &object, littleEndian: littleEndian)
+        appendSerialized(mainAssetPathID, to: &object, littleEndian: littleEndian)
         if unityVersion.hasPrefix("5.4.") {
             appendSerialized(Int32(1), to: &object, littleEndian: littleEndian)
             appendSerialized(Int32(111), to: &object, littleEndian: littleEndian)
@@ -391,7 +477,7 @@ final class AoVSerializedFileParserTests: XCTestCase {
         appendSerialized(Int32(0), to: &object, littleEndian: littleEndian)
         appendSerialized(Int32(1), to: &object, littleEndian: littleEndian)
         appendSerialized(Int32(0), to: &object, littleEndian: littleEndian)
-        appendSerialized(Int64(7004), to: &object, littleEndian: littleEndian)
+        appendSerialized(compatibilityPathID, to: &object, littleEndian: littleEndian)
         appendSerialized(UInt32(0), to: &object, littleEndian: littleEndian)
         appendAlignedString("resource-packer", to: &object, littleEndian: littleEndian)
         appendSerialized(Int32(2), to: &object, littleEndian: littleEndian)
