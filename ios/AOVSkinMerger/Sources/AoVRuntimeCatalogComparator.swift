@@ -55,9 +55,9 @@ enum AoVRuntimeCatalogComparator {
         legacy inventories: [ArchiveInventory]
     ) -> AoVRuntimeCatalogComparisonReport {
         let currentPacker = packerCatalogs(in: inventory)
-        let legacyPacker = inventories(in: legacy, kind: .packer)
+        let legacyPacker = packerCatalogSources(in: legacy)
         let currentVerification = verificationCatalogs(in: inventory)
-        let legacyVerification = inventories(in: legacy, kind: .verification)
+        let legacyVerification = verificationCatalogSources(in: legacy)
 
         let currentPackerEntries = currentPacker.flatMap(\.allResourcePackInfo)
         let legacyPackerEntries = legacyPacker.flatMap { source in
@@ -166,9 +166,8 @@ enum AoVRuntimeCatalogComparator {
             .compactMap { $0.serializedFile?.resourceVerificationCatalog }
     }
 
-    private static func inventories(
-        in inventories: [ArchiveInventory],
-        kind: AoVRemakeCatalogKind
+    private static func packerCatalogSources(
+        in inventories: [ArchiveInventory]
     ) -> [(source: String, catalog: AoVRuntimeResourcePackerCatalog)] {
         inventories.flatMap { inventory in
             inventory.unityFSBundles
@@ -181,9 +180,8 @@ enum AoVRuntimeCatalogComparator {
         }
     }
 
-    private static func inventories(
-        in inventories: [ArchiveInventory],
-        kind: AoVRemakeCatalogKind
+    private static func verificationCatalogSources(
+        in inventories: [ArchiveInventory]
     ) -> [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)] {
         inventories.flatMap { inventory in
             inventory.unityFSBundles
