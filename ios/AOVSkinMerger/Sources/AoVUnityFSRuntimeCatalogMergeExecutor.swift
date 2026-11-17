@@ -202,6 +202,7 @@ enum AoVUnityFSRuntimeCatalogMergeExecutor {
         objectPathID: Int64
     ) throws -> (catalog: AoVRuntimeResourceCatalog, serializedFile: AoVSerializedFileSummary) {
         let bundle = try AoVUnityFSParser.inspect(source)
+        try AoVUnityFSContentRewriter.validateWritableTemplate(bundle)
         guard bundle.totalUncompressedBytes <= maximumExpandedBytes else {
             throw AoVUnityFSRuntimeCatalogMergeExecutorError.expandedArchiveTooLarge
         }
