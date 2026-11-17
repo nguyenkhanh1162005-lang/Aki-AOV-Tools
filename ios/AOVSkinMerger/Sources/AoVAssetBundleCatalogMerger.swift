@@ -60,7 +60,8 @@ enum AoVAssetBundleCatalogMerger {
         legacy: AoVSerializedAssetBundleRecord,
         currentSerializedFile: AoVSerializedFileSummary,
         legacySerializedFile: AoVSerializedFileSummary,
-        availableCurrentBundleNames: Set<String>
+        availableCurrentBundleNames: Set<String>,
+        verifiedExternalTargetPathIDs: [String: Set<Int64>] = [:]
     ) throws -> AoVAssetBundleCatalogMergePlan {
         guard identity(for: current) == identity(for: legacy) else {
             throw AoVAssetBundleCatalogMergeError.bundleIdentityMismatch
@@ -95,7 +96,8 @@ enum AoVAssetBundleCatalogMerger {
         var alreadyPresent: [String] = []
         var currentVersionRetainedPointerConflicts: [String] = []
         var externalRemaps = 0
-        var externalSamples: [String] = []
+        var auditedExternalRemaps = 0
+        var unauditedExternalSamples: [String] = []
 
         for legacyEntry in legacy.containerEntries {
             if let currentEntry = currentByKey[legacyEntry.key] {
@@ -131,13 +133,16 @@ enum AoVAssetBundleCatalogMerger {
                     pointer,
                     field: "\(legacyEntry.key).preload[\(index)]",
                     from: legacySerializedFile,
-                    to: currentSerializedFile
+                    to: currentSerializedFile,
+                    verifiedExternalTargetPathIDs: verifiedExternalTargetPathIDs
                 )
                 remappedPreloads.append(result.pointer)
                 if result.wasExternal {
                     externalRemaps += 1
-                    if externalSamples.count < 16 {
-                        externalSamples.append("\(legacyEntry.key).preload[\(index)]")
+                    if result.targetAudited {
+                        auditedExternalRemaps += 1
+                    } else if unauditedExternalSamples.count < 16 {
+                        unauditedExternalSamples.append("\(legacyEntry.key).preload[\(index)]")
                     }
                 }
             }
@@ -146,12 +151,15 @@ enum AoVAssetBundleCatalogMerger {
                 legacyEntry.asset,
                 field: "\(legacyEntry.key).asset",
                 from: legacySerializedFile,
-                to: currentSerializedFile
+                to: currentSerializedFile,
+                    verifiedExternalTargetPathIDs: verifiedExternalTargetPathIDs
             )
             if remappedAsset.wasExternal {
                 externalRemaps += 1
-                if externalSamples.count < 16 {
-                    externalSamples.append("\(legacyEntry.key).asset")
+                if remappedAsset.targetAudited {
+                    auditedExternalRemaps += 1
+                } else if unauditedExternalSamples.count < 16 {
+                    unauditedExternalSamples.append("\(legacyEntry.key).asset")
                 }
             }
 
@@ -215,8 +223,8 @@ enum AoVAssetBundleCatalogMerger {
             addedPreloadReferenceCount: mergedPreloads.count - current.preloadReferences.count,
             addedDependencies: addedDependencies,
             remappedExternalPointerCount: externalRemaps,
-            externalTargetAuditRequired: externalRemaps > 0,
-            externalTargetAuditSamples: externalSamples
+            externalTargetAuditRequired: auditedExternalRemaps < externalRemaps,
+            externalTargetAuditSamples: unauditedExternalSamples
         )
     }
 
@@ -244,14 +252,15 @@ enum AoVAssetBundleCatalogMerger {
         _ pointer: AoVSerializedAssetPointer,
         field: String,
         from source: AoVSerializedFileSummary,
-        to destination: AoVSerializedFileSummary
-    ) throws -> (pointer: AoVSerializedAssetPointer, wasExternal: Bool) {
+        to destination: AoVSerializedFileSummary,
+        verifiedExternalTargetPathIDs: [String: Set<Int64>]
+    ) throws -> (pointer: AoVSerializedAssetPointer, wasExternal: Bool, targetAudited: Bool) {
         guard pointer.fileID >= 0 else {
             throw AoVAssetBundleCatalogMergeError.unresolvedExternalReference(field)
         }
         if pointer.fileID == 0 {
             if pointer.pathID == 0 {
-                return (pointer, false)
+                return (pointer, false, false)
             }
             guard destination.serializedObjectPathIDs.contains(pointer.pathID) else {
                 throw AoVAssetBundleCatalogMergeError.unresolvedLocalPointer(field)
@@ -279,10 +288,21 @@ enum AoVAssetBundleCatalogMerger {
               let mappedFileID = Int32(exactly: matches[0].offset + 1) else {
             throw AoVAssetBundleCatalogMergeError.ambiguousExternalReference(field)
         }
+        let destinationReference = matches[0].element
+        let targetKey = externalTargetKey(
+            guidHex: destinationReference.guidHex,
+            path: destinationReference.path
+        )
+        let targetAudited = verifiedExternalTargetPathIDs[targetKey]?.contains(pointer.pathID) == true
         return (
             AoVSerializedAssetPointer(fileID: mappedFileID, pathID: pointer.pathID),
-            true
+            true,
+            targetAudited
         )
+    }
+
+    static func externalTargetKey(guidHex: String, path: String) -> String {
+        "\(guidHex.lowercased())|\(normalizedReferencePath(path))"
     }
 
     private static func normalizedReferencePath(_ value: String) -> String {
