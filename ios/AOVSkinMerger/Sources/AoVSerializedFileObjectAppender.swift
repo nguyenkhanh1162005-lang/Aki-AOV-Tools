@@ -336,7 +336,7 @@ enum AoVSerializedFileObjectAppender {
             }
         }
 
-        return AoVSerializedFileObjectAppendReport(
+        return AoVSerializedObjectAppendReport(
             data: output,
             appendedPathIDs: orderedObjects.map(\.pathID),
             originalObjectCount: summary.objectCount,
