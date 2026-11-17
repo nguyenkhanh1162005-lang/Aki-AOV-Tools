@@ -276,7 +276,9 @@ final class AoVSerializedFileParserTests: XCTestCase {
             [AoVUnityFSRepackNode(path: "CAB-catalog", data: currentSerializedBytes, flags: 7)],
             formatVersion: 8,
             playerVersion: "5.0.0",
-            engineVersion: "2020.3.34f1"
+            engineVersion: "2020.3.34f1",
+            blockInfoLayout: .arenaOfValor,
+            aovEncryption: true
         )
         XCTAssertTrue(unityFS.roundTripVerified)
 
