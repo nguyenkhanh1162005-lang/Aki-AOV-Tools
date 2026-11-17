@@ -62,6 +62,168 @@ def _track_key(track: ET.Element) -> tuple[str, str, str]:
     )
 
 
+_SKIN_CONDITION_EVENT_TYPES = {"CheckSkinIdTick", "CheckSkinIdVirtualTick"}
+
+
+def _condition_skin_info(
+    track: ET.Element,
+    actor_prefixes: set[str] | None,
+) -> dict | None:
+    """Recognize the direct scalar/array skin-ID condition forms used by AoV XML.
+
+    Only a single direct Event with a matching eventType and a direct targetId
+    TemplateObject is accepted. Unknown/nested condition layouts fail closed.
+    """
+    event_type = track.attrib.get("eventType", "")
+    if event_type not in _SKIN_CONDITION_EVENT_TYPES:
+        return None
+    if any(node.tag == "SkinOrAvatarList" for node in track.iter()):
+        return None
+    events = track.findall("Event")
+    if len(events) != 1:
+        raise CommonActionsMergeError(
+            f"Track {_normalized_track_name(track)}: {event_type} phải có đúng một Event trực tiếp."
+        )
+    event = events[0]
+    if event.attrib.get("eventName") != event_type:
+        raise CommonActionsMergeError(
+            f"Track {_normalized_track_name(track)}: eventName không khớp eventType {event_type}."
+        )
+    target_nodes = [
+        node for node in list(event)
+        if node.tag == "TemplateObject" and node.attrib.get("name") == "targetId"
+    ]
+    if len(target_nodes) != 1 or target_nodes[0].attrib.get("objectName") not in {"self", "target"}:
+        raise CommonActionsMergeError(
+            f"Track {_normalized_track_name(track)}: targetId không thuộc layout đã hỗ trợ."
+        )
+
+    scalar_nodes = [
+        node for node in list(event)
+        if node.tag == "int" and node.attrib.get("name") == "skinId"
+    ]
+    array_nodes = [
+        node for node in list(event)
+        if node.tag == "Array" and node.attrib.get("name") == "skinIdArray"
+    ]
+    if len(scalar_nodes) > 1 or len(array_nodes) > 1 or (not scalar_nodes and not array_nodes):
+        raise CommonActionsMergeError(
+            f"Track {_normalized_track_name(track)}: skinId/skinIdArray bị thiếu hoặc lặp."
+        )
+
+    scalar_id = None
+    if scalar_nodes:
+        scalar_id = scalar_nodes[0].attrib.get("value", "")
+        if not scalar_id.isdigit():
+            raise CommonActionsMergeError(
+                f"Track {_normalized_track_name(track)}: skinId không phải số."
+            )
+
+    array_values: list[str] = []
+    array_node = array_nodes[0] if array_nodes else None
+    if array_node is not None:
+        if array_node.attrib.get("type") != "int":
+            raise CommonActionsMergeError(
+                f"Track {_normalized_track_name(track)}: skinIdArray không phải Array<int>."
+            )
+        children = list(array_node)
+        if not children or any(node.tag != "int" for node in children):
+            raise CommonActionsMergeError(
+                f"Track {_normalized_track_name(track)}: skinIdArray có child không hỗ trợ."
+            )
+        array_values = [node.attrib.get("value", "") for node in children]
+        if any(not value.isdigit() for value in array_values):
+            raise CommonActionsMergeError(
+                f"Track {_normalized_track_name(track)}: skinIdArray có phần tử không phải số."
+            )
+        if len(array_values) != len(set(array_values)):
+            raise CommonActionsMergeError(
+                f"Track {_normalized_track_name(track)}: skinIdArray có skin ID trùng."
+            )
+        negate_nodes = [
+            node for node in list(event)
+            if node.tag == "bool" and node.attrib.get("name") == "useNegateValue"
+        ]
+        if len(negate_nodes) > 1 or (
+            negate_nodes and negate_nodes[0].attrib.get("value") not in {"true", "false"}
+        ):
+            raise CommonActionsMergeError(
+                f"Track {_normalized_track_name(track)}: useNegateValue không hợp lệ."
+            )
+
+    def is_owned(value: str) -> bool:
+        return actor_prefixes is None or value in actor_prefixes or value[:3] in actor_prefixes
+
+    owned_ids = {
+        value for value in ([scalar_id] if scalar_id else []) + array_values
+        if is_owned(value)
+    }
+    if not owned_ids:
+        return None
+
+    # An array-based condition can be safely unioned only when its scalar
+    # discriminator is not itself actor-owned. The combined owned-scalar +
+    # array variant is held back because its conjunction semantics need a
+    # separate schema fixture.
+    if array_node is not None and scalar_id and actor_prefixes is not None and is_owned(scalar_id):
+        raise CommonActionsMergeError(
+            f"Track {_normalized_track_name(track)}: kết hợp scalar skinId và skinIdArray "
+            "cùng thuộc Actor chưa có quy tắc ghép đã xác minh."
+        )
+
+    return {
+        "kind": "array" if array_node is not None else "scalar",
+        "event_type": event_type,
+        "scalar_id": scalar_id,
+        "array_values": array_values,
+        "owned_ids": owned_ids,
+        "array_node": array_node,
+    }
+
+
+def _condition_array_template_signature(track: ET.Element) -> str:
+    clone = copy.deepcopy(track)
+    for event in clone.findall("Event"):
+        for array_node in list(event.findall("Array")):
+            if array_node.attrib.get("name") == "skinIdArray":
+                for child in list(array_node):
+                    array_node.remove(child)
+    return _track_signature(clone)
+
+
+def _condition_array_key(track: ET.Element) -> tuple[str, str, str]:
+    return (
+        _normalized_track_name(track),
+        track.attrib.get("eventType", ""),
+        _condition_array_template_signature(track),
+    )
+
+
+def _track_actor_gate_ids(
+    track: ET.Element,
+    actor_prefixes: set[str] | None,
+) -> set[str]:
+    skin_nodes = list(track.iter("SkinOrAvatarList"))
+    direct_nodes = track.findall("SkinOrAvatarList")
+    if skin_nodes and len(skin_nodes) != len(direct_nodes):
+        raise CommonActionsMergeError(
+            f"Track {_normalized_track_name(track)} có SkinOrAvatarList lồng ở vị trí chưa hỗ trợ."
+        )
+    if skin_nodes:
+        result = set()
+        for node in direct_nodes:
+            value = node.attrib.get("id", "")
+            if not value.isdigit():
+                raise CommonActionsMergeError(
+                    f"Track {_normalized_track_name(track)} có SkinOrAvatarList ID không phải số."
+                )
+            if actor_prefixes is None or value in actor_prefixes or value[:3] in actor_prefixes:
+                result.add(value)
+        return result
+    condition = _condition_skin_info(track, actor_prefixes)
+    return set(condition["owned_ids"]) if condition else set()
+
+
 def _unique_track_name(original: str, used: set[str], next_index: list[int]) -> str:
     if original and original not in used:
         return original
@@ -80,11 +242,12 @@ def merge_action_xml(
     *,
     special_ids: set[str] | None = None,
 ) -> tuple[bytes, dict]:
-    """Merge only explicitly actor-gated CommonActions tracks.
+    """Merge actor-gated skin lists and verified scalar/array skin conditions.
 
-    This parser supports direct-child SkinOrAvatarList gates only. Condition-index
-    based CheckSkinIdTick logic used by some MOD packs is a separate format and
-    must not be treated as equivalent to these explicit skin-list gates.
+    Supported condition forms are direct CheckSkinIdTick/CheckSkinIdVirtualTick
+    events with targetId plus scalar skinId, or a typed skinIdArray whose values
+    can be unioned under an otherwise identical condition. Unknown layouts fail
+    closed; nested condition-index structures are never rewritten.
     """
     target_ids = {str(value) for value in (SPECIAL_IDS if special_ids is None else special_ids)}
     if not target_ids or any(not value.isdigit() for value in target_ids):
@@ -126,70 +289,11 @@ def merge_action_xml(
     appended = []
     already_present = []
     merged_into_existing = []
+    condition_appended = []
+    condition_merged = []
 
-    for source_track in overlay_tracks:
-        source_skin_nodes = list(source_track.iter("SkinOrAvatarList"))
-        if not source_skin_nodes:
-            continue
-        if not _is_special_track(source_track, target_ids):
-            continue
-        # The supported track schema keeps SkinOrAvatarList as direct children.
-        # Refuse an unknown nested layout instead of moving nodes to a different
-        # event location during the merge.
-        direct_skin_nodes = source_track.findall("SkinOrAvatarList")
-        if len(direct_skin_nodes) != len(source_skin_nodes):
-            raise CommonActionsMergeError(
-                f"{resource_name}: track {_normalized_track_name(source_track)} "
-                "có SkinOrAvatarList lồng ở vị trí chưa được hỗ trợ."
-            )
-        # Only import IDs explicitly assigned to this overlay. Some packs can
-        # contain shared/common track metadata for other actors as well.
-        filtered_track = copy.deepcopy(source_track)
-        for node in list(filtered_track.findall("SkinOrAvatarList")):
-            if node.attrib.get("id") not in target_ids:
-                filtered_track.remove(node)
-        if not filtered_track.findall("SkinOrAvatarList"):
-            continue
-        name = _normalized_track_name(filtered_track)
-        key = _track_key(filtered_track)
-        candidates = index.get(key, [])
-        if candidates:
-            target = candidates[0]
-            was_special = _is_special_track(target, target_ids)
-            existing_nodes = {
-                node.attrib.get("id"): node
-                for node in target.findall("SkinOrAvatarList")
-            }
-            changed = False
-            for source_node in filtered_track.findall("SkinOrAvatarList"):
-                skin_id = source_node.attrib.get("id")
-                current = existing_nodes.get(skin_id)
-                cloned = copy.deepcopy(source_node)
-                if current is None:
-                    target.append(cloned)
-                    existing_nodes[skin_id] = cloned
-                    changed = True
-                elif current.attrib != cloned.attrib:
-                    position = list(target).index(current)
-                    target.remove(current)
-                    target.insert(position, cloned)
-                    existing_nodes[skin_id] = cloned
-                    changed = True
-
-            for attr in ("useRefParam", "refParamName"):
-                if attr not in target.attrib and attr in source_track.attrib:
-                    target.attrib[attr] = source_track.attrib[attr]
-                    changed = True
-            if changed:
-                if was_special:
-                    merged_into_existing.append(name)
-                else:
-                    replaced.append(name)
-            else:
-                already_present.append(name)
-            continue
-
-        addition = filtered_track
+    def append_track(track: ET.Element, key: tuple[str, str, str], label: str) -> None:
+        addition = copy.deepcopy(track)
         original_name = addition.attrib.get("trackName", "")
         addition.attrib["trackName"] = _unique_track_name(original_name, used_names, next_index)
         addition.attrib.setdefault(
@@ -201,36 +305,150 @@ def merge_action_xml(
         base_action.append(addition)
         used_names.add(addition.attrib["trackName"])
         index.setdefault(key, []).append(addition)
-        appended.append(name)
+        appended.append(label)
 
-    if not replaced and not appended and not already_present and not merged_into_existing:
-        raise CommonActionsMergeError(
-            f"{resource_name}: overlay không có track tham chiếu SkinOrAvatarList 59500/59501."
-        )
-
-    # Every source event variant and every special skin ID must remain represented.
-    output_by_key: dict[tuple[str, str, str], set[str]] = {}
-    for track in base_action.iter("Track"):
-        key = _track_key(track)
-        output_by_key.setdefault(key, set()).update(
-            node.attrib.get("id")
-            for node in track.iter("SkinOrAvatarList")
-            if node.attrib.get("id") in target_ids
-        )
-    for source_track in overlay_action.iter("Track"):
-        if not _is_special_track(source_track, target_ids):
-            continue
-        key = _track_key(source_track)
-        source_ids = {
-            node.attrib.get("id")
-            for node in source_track.iter("SkinOrAvatarList")
-            if node.attrib.get("id") in target_ids
-        }
-        if not source_ids.issubset(output_by_key.get(key, set())):
+    for source_track in overlay_tracks:
+        direct_skin_nodes = source_track.findall("SkinOrAvatarList")
+        all_skin_nodes = list(source_track.iter("SkinOrAvatarList"))
+        if all_skin_nodes and len(direct_skin_nodes) != len(all_skin_nodes):
             raise CommonActionsMergeError(
-                f"{resource_name}: thiếu skin IDs {sorted(source_ids - output_by_key.get(key, set()))} "
-                f"trong track {key[0]}."
+                f"{resource_name}: track {_normalized_track_name(source_track)} "
+                "có SkinOrAvatarList lồng ở vị trí chưa được hỗ trợ."
             )
+        condition = None if all_skin_nodes else _condition_skin_info(source_track, target_ids)
+
+        if direct_skin_nodes:
+            source_ids = {
+                node.attrib.get("id") for node in direct_skin_nodes
+                if node.attrib.get("id") in target_ids
+            }
+            if not source_ids:
+                continue
+            filtered_track = copy.deepcopy(source_track)
+            for node in list(filtered_track.findall("SkinOrAvatarList")):
+                if node.attrib.get("id") not in target_ids:
+                    filtered_track.remove(node)
+            name = _normalized_track_name(filtered_track)
+            key = _track_key(filtered_track)
+            candidates = index.get(key, [])
+            if candidates:
+                target = candidates[0]
+                was_special = _is_special_track(target, target_ids)
+                existing_nodes = {
+                    node.attrib.get("id"): node
+                    for node in target.findall("SkinOrAvatarList")
+                }
+                changed = False
+                for source_node in filtered_track.findall("SkinOrAvatarList"):
+                    skin_id = source_node.attrib.get("id")
+                    current = existing_nodes.get(skin_id)
+                    cloned = copy.deepcopy(source_node)
+                    if current is None:
+                        target.append(cloned)
+                        existing_nodes[skin_id] = cloned
+                        changed = True
+                    elif current.attrib != cloned.attrib:
+                        position = list(target).index(current)
+                        target.remove(current)
+                        target.insert(position, cloned)
+                        existing_nodes[skin_id] = cloned
+                        changed = True
+                for attr in ("useRefParam", "refParamName"):
+                    if attr not in target.attrib and attr in source_track.attrib:
+                        target.attrib[attr] = source_track.attrib[attr]
+                        changed = True
+                if changed:
+                    if was_special:
+                        merged_into_existing.append(name)
+                    else:
+                        replaced.append(name)
+                else:
+                    already_present.append(name)
+                continue
+            append_track(filtered_track, key, name)
+            continue
+
+        if not condition:
+            continue
+
+        name = _normalized_track_name(source_track)
+        if condition["kind"] == "scalar":
+            scalar_id = condition["scalar_id"]
+            scalar_key = (name, condition["event_type"], scalar_id)
+            candidates = [
+                track for track in list(base_action)
+                if track.tag == "Track"
+                and _track_key(track) == _track_key(source_track)
+                and (info := _condition_skin_info(track, None)) is not None
+                and info["kind"] == "scalar"
+                and info["scalar_id"] == scalar_id
+            ]
+            if candidates:
+                already_present.append(name)
+                continue
+            scalar_track_key = _track_key(source_track)
+            append_track(source_track, scalar_track_key, name)
+            condition_appended.append(name)
+            continue
+
+        # Array<int> skinIdArray: union only the IDs owned by this overlay.
+        source_array = condition["array_node"]
+        owned_array_values = [
+            value for value in condition["array_values"]
+            if value in target_ids or value[:3] in target_ids
+        ]
+        if not owned_array_values:
+            continue
+        array_key = _condition_array_key(source_track)
+        candidates = []
+        for target_track in list(base_action):
+            if target_track.tag != "Track":
+                continue
+            if (
+                _normalized_track_name(target_track),
+                target_track.attrib.get("eventType", ""),
+            ) == array_key[:2]:
+                target_info = _condition_skin_info(target_track, None)
+                if target_info and target_info["kind"] == "array" and _condition_array_key(target_track) == array_key:
+                    candidates.append(target_track)
+        if candidates:
+            changed_any = False
+            for target in candidates:
+                target_info = _condition_skin_info(target, None)
+                target_array = target_info["array_node"]
+                current_values = [child.attrib["value"] for child in list(target_array)]
+                merged_values = current_values + [
+                    value for value in owned_array_values if value not in current_values
+                ]
+                if merged_values != current_values:
+                    child_template = copy.deepcopy(list(target_array)[0])
+                    for child in list(target_array):
+                        target_array.remove(child)
+                    for value in merged_values:
+                        cloned = copy.deepcopy(child_template)
+                        cloned.attrib["value"] = value
+                        target_array.append(cloned)
+                    changed_any = True
+            if changed_any:
+                condition_merged.append(name)
+            else:
+                already_present.append(name)
+            continue
+        filtered_track = copy.deepcopy(source_track)
+        filtered_array = next(
+            node for node in filtered_track.find("Event").findall("Array")
+            if node.attrib.get("name") == "skinIdArray"
+        )
+        child_template = copy.deepcopy(list(filtered_array)[0])
+        for child in list(filtered_array):
+            filtered_array.remove(child)
+        for value in owned_array_values:
+            cloned = copy.deepcopy(child_template)
+            cloned.attrib["value"] = value
+            filtered_array.append(cloned)
+        filtered_key = _track_key(filtered_track)
+        append_track(filtered_track, filtered_key, name)
+        condition_appended.append(name)
 
     output_xml = ET.tostring(base_root, encoding="utf-8", xml_declaration=True)
     try:
@@ -242,28 +460,72 @@ def merge_action_xml(
             raise CommonActionsMergeError(
                 f"{resource_name}: Action node biến mất sau encode/decode."
             )
-        verified_by_key: dict[tuple[str, str, str], set[str]] = {}
-        for track in verified_action.iter("Track"):
-            key = _track_key(track)
-            verified_by_key.setdefault(key, set()).update(
-                node.attrib.get("id")
-                for node in track.iter("SkinOrAvatarList")
-                if node.attrib.get("id") in target_ids
-            )
-        for source_track in overlay_action.iter("Track"):
-            source_ids = {
-                node.attrib.get("id")
-                for node in source_track.iter("SkinOrAvatarList")
-                if node.attrib.get("id") in target_ids
-            }
-            if not source_ids:
+        # Re-scan the serialized output and prove every overlay-owned gate survived.
+        verified_tracks = [node for node in list(verified_action) if node.tag == "Track"]
+        for source_track in overlay_tracks:
+            source_gate = _track_actor_gate_ids(source_track, target_ids)
+            if not source_gate:
                 continue
-            key = _track_key(source_track)
-            if not source_ids.issubset(verified_by_key.get(key, set())):
-                raise CommonActionsMergeError(
-                    f"{resource_name}: IDs {sorted(source_ids - verified_by_key.get(key, set()))} "
-                    f"không còn sau round-trip tại track {key[0]}."
-                )
+            if (
+                source_track.attrib.get("eventType") in _SKIN_CONDITION_EVENT_TYPES
+                and not any(node.tag == "SkinOrAvatarList" for node in source_track.iter())
+            ):
+                source_info = _condition_skin_info(source_track, target_ids)
+                if not source_info:
+                    continue
+                if source_info["kind"] == "scalar":
+                    matches = []
+                    for candidate in verified_tracks:
+                        info = _condition_skin_info(candidate, target_ids)
+                        if (
+                            info and info["kind"] == "scalar"
+                            and _normalized_track_name(candidate) == _normalized_track_name(source_track)
+                            and candidate.attrib.get("eventType") == source_track.attrib.get("eventType")
+                            and info["scalar_id"] == source_info["scalar_id"]
+                            and _track_signature(candidate) == _track_signature(source_track)
+                        ):
+                            matches.append(candidate)
+                    if not matches:
+                        raise CommonActionsMergeError(
+                            f"{resource_name}: điều kiện skinId {source_info['scalar_id']} "
+                            f"không còn sau round-trip tại track {name}."
+                        )
+                else:
+                    source_array_values = source_info["owned_ids"]
+                    matches = []
+                    for candidate in verified_tracks:
+                        if any(node.tag == "SkinOrAvatarList" for node in candidate.iter()):
+                            continue
+                        info = _condition_skin_info(candidate, None)
+                        if info and info["kind"] == "array" and _condition_array_key(candidate) == _condition_array_key(source_track):
+                            matches.append(info)
+                    present = set()
+                    for info in matches:
+                        present.update(info["array_values"])
+                    if len(matches) != 1 or not source_array_values.issubset(present):
+                        raise CommonActionsMergeError(
+                            f"{resource_name}: thiếu skinIdArray {sorted(source_array_values - present)} "
+                            f"sau round-trip tại track {_normalized_track_name(source_track)}."
+                        )
+            else:
+                key = _track_key(source_track)
+                output_by_key: dict[tuple[str, str, str], set[str]] = {}
+                for candidate in verified_tracks:
+                    candidate_key = _track_key(candidate)
+                    output_by_key.setdefault(candidate_key, set()).update(
+                        node.attrib.get("id")
+                        for node in candidate.findall("SkinOrAvatarList")
+                        if node.attrib.get("id") in target_ids
+                    )
+                source_ids = {
+                    node.attrib.get("id") for node in source_track.findall("SkinOrAvatarList")
+                    if node.attrib.get("id") in target_ids
+                }
+                if not source_ids.issubset(output_by_key.get(key, set())):
+                    raise CommonActionsMergeError(
+                        f"{resource_name}: thiếu SkinOrAvatarList IDs {sorted(source_ids - output_by_key.get(key, set()))} "
+                        f"sau round-trip tại track {_normalized_track_name(source_track)}."
+                    )
     except (AOVBytesError, ET.ParseError) as exc:
         raise CommonActionsMergeError(f"{resource_name}: không xác minh được XML sau ghép: {exc}") from exc
 
@@ -276,6 +538,8 @@ def merge_action_xml(
         "appended_tracks": appended,
         "already_present_tracks": already_present,
         "merged_into_existing_tracks": merged_into_existing,
+        "condition_appended_tracks": condition_appended,
+        "condition_merged_tracks": condition_merged,
         "verified": True,
     }
 
@@ -415,9 +679,8 @@ def merge_common_actions_pkg(
                     decoded_overlay, _ = decode_aov_resource(overlay_data, name)
                     overlay_root = ET.fromstring(decoded_overlay)
                     has_target_gate = any(
-                        node.attrib.get("id") in target_ids
+                        _track_actor_gate_ids(track, target_ids)
                         for track in overlay_root.iter("Track")
-                        for node in track.findall("SkinOrAvatarList")
                     )
                     if has_target_gate:
                         merged, report = merge_action_xml(
@@ -473,14 +736,8 @@ def merge_common_actions_pkg(
 def _overlay_actor_track_signatures(
     overlay_package: bytes,
     special_ids: set[str],
-) -> dict[tuple[str, tuple[str, str, str], str], str]:
-    """Fingerprint actor-gated XML conditions contributed by one overlay.
-
-    The fingerprint intentionally keeps the full SkinOrAvatarList element,
-    while the track key normalizes generated names/GUIDs. This lets the
-    multi-overlay path detect two sources trying to define the same actor
-    condition differently without confusing distinct event variants.
-    """
+) -> dict[tuple, str]:
+    """Fingerprint direct list gates and supported scalar/array skin conditions."""
     merge_candidates = set(_COMMON_ACTIONS_MERGE_CANDIDATES)
     try:
         archive = zipfile.ZipFile(io.BytesIO(overlay_package), "r")
@@ -489,7 +746,7 @@ def _overlay_actor_track_signatures(
             "CommonActions.pkg.bytes không phải ZIP hợp lệ."
         ) from exc
 
-    signatures: dict[tuple[str, tuple[str, str, str], str], str] = {}
+    signatures: dict[tuple, str] = {}
     try:
         entries: dict[str, zipfile.ZipInfo] = {}
         for info in archive.infolist():
@@ -516,37 +773,51 @@ def _overlay_actor_track_signatures(
 
             for track in action.iter("Track"):
                 all_skin_nodes = list(track.iter("SkinOrAvatarList"))
-                target_skin_nodes = [
-                    node for node in all_skin_nodes
-                    if node.attrib.get("id") in special_ids
-                ]
-                if not target_skin_nodes:
-                    continue
-                direct_target_nodes = [
-                    node for node in track.findall("SkinOrAvatarList")
-                    if node.attrib.get("id") in special_ids
-                ]
-                if len(direct_target_nodes) != len(target_skin_nodes):
-                    raise CommonActionsMergeError(
-                        f"{name}: track {_normalized_track_name(track)} có "
-                        "SkinOrAvatarList của actor mục tiêu lồng ở vị trí "
-                        "chưa được hỗ trợ."
-                    )
-                track_key = _track_key(track)
-                for node in direct_target_nodes:
-                    skin_id = node.attrib.get("id")
-                    key = (name, track_key, skin_id)
-                    digest = hashlib.sha256(
-                        ET.tostring(node, encoding="utf-8")
-                    ).hexdigest()
-                    previous = signatures.get(key)
-                    if previous is not None and previous != digest:
+                direct_skin_nodes = track.findall("SkinOrAvatarList")
+                if all_skin_nodes:
+                    target_nodes = [
+                        node for node in direct_skin_nodes
+                        if node.attrib.get("id") in special_ids
+                    ]
+                    if len(direct_skin_nodes) != len(all_skin_nodes) and any(
+                        node.attrib.get("id") in special_ids for node in all_skin_nodes
+                    ):
                         raise CommonActionsMergeError(
-                            f"{name}: một overlay tự khai báo nhiều điều kiện "
-                            f"khác nhau cho skin ID {skin_id} tại track "
-                            f"{track_key[0]}."
+                            f"{name}: track {_normalized_track_name(track)} có "
+                            "SkinOrAvatarList của actor mục tiêu lồng ở vị trí chưa hỗ trợ."
                         )
-                    signatures[key] = digest
+                    for node in target_nodes:
+                        skin_id = node.attrib.get("id")
+                        key = (name, "SkinOrAvatarList", _track_key(track), skin_id)
+                        digest = hashlib.sha256(
+                            ET.tostring(node, encoding="utf-8")
+                        ).hexdigest()
+                        previous = signatures.get(key)
+                        if previous is not None and previous != digest:
+                            raise CommonActionsMergeError(
+                                f"{name}: một overlay tự khai báo nhiều điều kiện khác nhau "
+                                f"cho skin ID {skin_id} tại track {_normalized_track_name(track)}."
+                            )
+                        signatures[key] = digest
+                    continue
+
+                condition = _condition_skin_info(track, special_ids)
+                if condition is None:
+                    continue
+                if condition["kind"] == "scalar":
+                    skin_id = condition["scalar_id"]
+                    key = (name, "CheckSkinIdScalar", _track_key(track), skin_id)
+                    digest = _track_signature(track)
+                else:
+                    key = (name, "CheckSkinIdArray", _condition_array_key(track))
+                    digest = _condition_array_template_signature(track)
+                previous = signatures.get(key)
+                if previous is not None and previous != digest:
+                    raise CommonActionsMergeError(
+                        f"{name}: nhiều overlay định nghĩa điều kiện skin khác nhau "
+                        f"cho track {_normalized_track_name(track)}."
+                    )
+                signatures[key] = digest
     finally:
         archive.close()
 
@@ -584,10 +855,23 @@ def merge_common_actions_packages(
         for key, digest in signatures.items():
             previous = seen_conditions.get(key)
             if previous is not None and previous[0] != digest:
-                name, track_key, skin_id = key
+                name = key[0]
+                condition_kind = key[1] if len(key) > 1 else "unknown"
+                track_identity = key[2] if len(key) > 2 else "unknown"
+                track_name = (
+                    track_identity[0]
+                    if isinstance(track_identity, tuple) and track_identity
+                    else str(track_identity)
+                )
+                if condition_kind in {"SkinOrAvatarList", "CheckSkinIdScalar"} and len(key) > 3:
+                    condition_label = f"skin ID {key[3]}"
+                elif condition_kind == "CheckSkinIdArray":
+                    condition_label = "skinIdArray"
+                else:
+                    condition_label = "điều kiện skin"
                 raise CommonActionsMergeError(
                     f"{name}: nhiều overlay định nghĩa điều kiện khác nhau cho "
-                    f"skin ID {skin_id} tại track {track_key[0]} "
+                    f"{condition_label} tại track {track_name} "
                     f"(overlay {previous[1]} và {index}); không tự chọn bản thắng."
                 )
             seen_conditions[key] = (digest, index)
@@ -634,7 +918,7 @@ def _inspect_common_actions_overlay(
     package_bytes: bytes,
     actor_prefixes: set[str] | None = None,
 ) -> tuple[set[str], dict]:
-    """Read explicit actor skin gates from the supported CommonActions XML files."""
+    """Read actor-owned list and condition-based skin gates from supported CommonActions XML."""
     try:
         archive = zipfile.ZipFile(io.BytesIO(package_bytes), "r")
     except zipfile.BadZipFile as exc:
@@ -680,32 +964,39 @@ def _inspect_common_actions_overlay(
                 )
             for track in action.iter("Track"):
                 skin_nodes = list(track.iter("SkinOrAvatarList"))
-                if not skin_nodes:
-                    continue
                 direct_nodes = track.findall("SkinOrAvatarList")
-                if len(direct_nodes) != len(skin_nodes):
-                    raise CommonActionsMergeError(
-                        f"{source_name}: {name}, track "
-                        f"{_normalized_track_name(track)} có SkinOrAvatarList lồng "
-                        "ở vị trí chưa được hỗ trợ."
-                    )
-                owned_nodes = []
-                for node in direct_nodes:
-                    skin_id = node.attrib.get("id", "")
-                    if not skin_id.isdigit():
+                if skin_nodes and len(direct_nodes) != len(skin_nodes):
+                    if any(
+                        node.attrib.get("id", "")[:3] in (actor_prefixes or set())
+                        or node.attrib.get("id") in (actor_prefixes or set())
+                        for node in skin_nodes
+                    ):
                         raise CommonActionsMergeError(
                             f"{source_name}: {name}, track "
-                            f"{_normalized_track_name(track)} có skin ID không phải số."
+                            f"{_normalized_track_name(track)} có SkinOrAvatarList lồng "
+                            "ở vị trí chưa được hỗ trợ."
                         )
-                    if actor_prefixes and skin_id[:3] not in actor_prefixes:
-                        continue
-                    owned_nodes.append(node)
-                if not owned_nodes:
+                condition = None if skin_nodes else _condition_skin_info(track, actor_prefixes)
+
+                if skin_nodes:
+                    owned_ids = set()
+                    for node in direct_nodes:
+                        skin_id = node.attrib.get("id", "")
+                        if not skin_id.isdigit():
+                            raise CommonActionsMergeError(
+                                f"{source_name}: {name}, track "
+                                f"{_normalized_track_name(track)} có skin ID không phải số."
+                            )
+                        if actor_prefixes is None or skin_id in actor_prefixes or skin_id[:3] in actor_prefixes:
+                            owned_ids.add(skin_id)
+                else:
+                    owned_ids = set(condition["owned_ids"]) if condition else set()
+
+                if not owned_ids:
                     continue
                 gated_tracks += 1
-                for node in owned_nodes:
-                    skin_ids.add(node.attrib["id"])
-                    gated_conditions += 1
+                skin_ids.update(owned_ids)
+                gated_conditions += len(owned_ids)
     finally:
         archive.close()
 

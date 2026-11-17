@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import re
+import tempfile
 import stat
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -16,7 +16,7 @@ MAX_FILES = 10
 MAX_ENTRIES = 20000
 MAX_TOTAL_UNCOMPRESSED = 1024 * 1024 * 1024
 MAX_ENTRY_UNCOMPRESSED = 256 * 1024 * 1024
-MAX_ASSETBUNDLE_DEPENDENCY_INSPECT_BYTES = 64 * 1024 * 1024
+MAX_ASSETBUNDLE_DEPENDENCY_INSPECT_BYTES = 16 * 1024 * 1024
 MAX_NESTED_ZIP_DEPTH = 1
 
 
@@ -192,7 +192,7 @@ def _build_manifest_item(
                 item["dependency_inspection_error"] = str(exc)[:240]
         else:
             item["dependency_inspection_error"] = (
-                "AssetBundle vượt quá giới hạn phân tích dependency 64 MiB."
+                "AssetBundle vượt quá giới hạn phân tích dependency 16 MiB."
             )
     return item
 
@@ -251,29 +251,40 @@ def build_resource_manifest(paths: list[str]) -> dict[str, Any]:
                     and MAX_NESTED_ZIP_DEPTH >= 1
                 ):
                     try:
-                        nested_bytes = archive.read(info)
-                        with zipfile.ZipFile(io.BytesIO(nested_bytes), "r") as nested:
-                            nested_seen_paths: set[str] = set()
-                            for nested_info in nested.infolist():
-                                if nested_info.is_dir():
-                                    continue
-                                nested_canonical_path = _safe_path(nested_info.filename)
-                                if nested_canonical_path in nested_seen_paths:
-                                    raise ResourceManifestError(
-                                        "ZIP lồng chứa nhiều entry trùng đường dẫn sau chuẩn hóa: "
-                                        f"{nested_canonical_path} ({item['path']})"
+                        # Spool large nested containers to disk instead of holding an
+                        # entire Resources.zip byte string alongside the manifest.
+                        with tempfile.SpooledTemporaryFile(
+                            max_size=16 * 1024 * 1024, mode="w+b"
+                        ) as nested_stream:
+                            with archive.open(info, "r") as source_stream:
+                                while True:
+                                    block = source_stream.read(1024 * 1024)
+                                    if not block:
+                                        break
+                                    nested_stream.write(block)
+                            nested_stream.seek(0)
+                            with zipfile.ZipFile(nested_stream, "r") as nested:
+                                nested_seen_paths: set[str] = set()
+                                for nested_info in nested.infolist():
+                                    if nested_info.is_dir():
+                                        continue
+                                    nested_canonical_path = _safe_path(nested_info.filename)
+                                    if nested_canonical_path in nested_seen_paths:
+                                        raise ResourceManifestError(
+                                            "ZIP lồng chứa nhiều entry trùng đường dẫn sau chuẩn hóa: "
+                                            f"{nested_canonical_path} ({item['path']})"
+                                        )
+                                    nested_seen_paths.add(nested_canonical_path)
+                                    account_entry(nested_info)
+                                    nested_item = _build_manifest_item(
+                                        nested,
+                                        nested_info,
+                                        source,
+                                        container_path=item["path"],
+                                        archive_depth=1,
                                     )
-                                nested_seen_paths.add(nested_canonical_path)
-                                account_entry(nested_info)
-                                nested_item = _build_manifest_item(
-                                    nested,
-                                    nested_info,
-                                    source,
-                                    container_path=item["path"],
-                                    archive_depth=1,
-                                )
-                                resources.append(nested_item)
-                                source_count += 1
+                                    resources.append(nested_item)
+                                    source_count += 1
                     except (zipfile.BadZipFile, RuntimeError, OSError, EOFError) as exc:
                         raise ResourceManifestError(
                             f"ZIP lồng bên trong không hợp lệ: {item['path']}"

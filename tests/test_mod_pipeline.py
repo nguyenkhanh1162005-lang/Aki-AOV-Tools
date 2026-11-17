@@ -513,7 +513,7 @@ class ModPipelineTests(unittest.TestCase):
         self.assertEqual(bundle["adapter_state"], "inspect_only")
 
         sound = _resource_merge_guidance("Sound/iOS/ZMOD_MaChao_SFX.bnk")
-        self.assertEqual(sound["adapter_state"], "inspect_only")
+        self.assertEqual(sound["adapter_state"], "append_only_id_namespace")
         self.assertIn("không nối byte", sound["safety_rule"].casefold())
 
         actor_actions = _resource_merge_guidance(
@@ -563,7 +563,7 @@ class ModPipelineTests(unittest.TestCase):
         self.assertEqual(by_id["effects_recall"]["unresolved_count"], 1)
         self.assertEqual(by_id["ui_buttons"]["unresolved_count"], 1)
         self.assertEqual(by_id["audio"]["unresolved_count"], 1)
-        self.assertEqual(by_id["audio"]["top_items"][0]["adapter_state"], "inspect_only")
+        self.assertEqual(by_id["audio"]["top_items"][0]["adapter_state"], "append_only_id_namespace")
         self.assertFalse(any(item["merge_authorized"] for item in gates))
         self.assertFalse(any(item["game_tested"] for item in gates))
 

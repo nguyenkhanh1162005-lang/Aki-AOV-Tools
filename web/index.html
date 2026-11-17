@@ -128,7 +128,7 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
     <h1>Ghép MOD thông minh.<br>Giữ nguyên tài nguyên.</h1>
     <p>Kiểm tra, đối chiếu và hợp nhất tài nguyên Liên Quân iOS theo adapter. Ưu tiên giữ hiệu ứng kỹ năng, biến về, thông báo hạ gục, giao diện và âm thanh; xung đột chưa có quy tắc sẽ được báo rõ thay vì tự ghi đè.</p>
   </div>
-  <div class="hero-stat"><strong>500 MB</strong><span>Tổng ZIP · khối 4 MB · 3 luồng song song · tự tiếp tục khi mạng gián đoạn</span></div>
+  <div class="hero-stat"><strong>500 MB</strong><span>Tổng ZIP · khối 4 MB · iPhone 1 luồng ổn định, máy tính tối đa 4 luồng · tự tiếp tục khi mạng gián đoạn</span></div>
 </section>
 
 
@@ -148,7 +148,7 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
       <div class="progress-wrap">
         <div class="progress-head"><span id="transferLabel">SẴN SÀNG TẢI LÊN</span><strong id="transferPct">0%</strong></div>
         <div class="progress-track"><div class="progress-fill" id="transferBar"></div></div>
-        <div class="progress-meta" id="transferMeta">0 MB / 500 MB · tối đa 4 luồng song song</div>
+        <div class="progress-meta" id="transferMeta">0 MB / 500 MB · iPhone 1 luồng, máy tính tối đa 4 luồng</div>
       </div>
       <div class="preserve-panel">
         <div class="preserve-heading"><strong>ƯU TIÊN BẢO TOÀN</strong><span>Không tự ghi đè khi chưa có quy tắc</span></div>
@@ -251,7 +251,9 @@ footer{margin-top:19px;color:#73869e;text-align:center;font-size:10px;letter-spa
 </div>
 <script>
 const driveLinks=document.querySelector('#driveLinks'),driveImport=document.querySelector('#driveImport'),driveMerge=document.querySelector('#driveMerge');let driveUploadId=null,localAovUploadId=null;let aovAdapterEnabled=false;const input=document.querySelector('#upload'),autoProcessBtn=document.querySelector('#autoProcess'),go=document.querySelector('#go'),aovMerge=document.querySelector('#aovMerge'),decodeBytesBtn=document.querySelector('#decodeBytes'),noticeScanBtn=document.querySelector('#noticeScan'),brandNoticeBtn=document.querySelector('#brandNotice'),downloadNoticeReportBtn=document.querySelector('#downloadNoticeReport'),brandingScanBtn=document.querySelector('#brandingScan'),downloadBrandingReportBtn=document.querySelector('#downloadBrandingReport'),downloadAovPreflightReportBtn=document.querySelector('#downloadAovPreflightReport'),compatibilityBtn=document.querySelector('#compatibility'),aovPreflightBtn=document.querySelector('#aovPreflight'),inspectBtn=document.querySelector('#inspect'),report=document.querySelector('#report'),list=document.querySelector('#files'),status=document.querySelector('#status');
-const CHUNK_BYTES=4*1024*1024,UPLOAD_CONCURRENCY=4;let noticeScanReport=null,brandingScanReport=null,aovPreflightReport=null,transferStartedAt=0;
+const CHUNK_BYTES=4*1024*1024,UPLOAD_CONCURRENCY=4;
+const IS_IOS_UPLOAD=/iP(hone|ad|od)/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+const ACTIVE_UPLOAD_CONCURRENCY=IS_IOS_UPLOAD?1:UPLOAD_CONCURRENCY;let noticeScanReport=null,brandingScanReport=null,aovPreflightReport=null,transferStartedAt=0;
 const transferBar=document.querySelector('#transferBar'),transferPct=document.querySelector('#transferPct'),transferLabel=document.querySelector('#transferLabel'),transferMeta=document.querySelector('#transferMeta');
 function setTransferProgress(done,total,label){
   const pct=total?Math.min(100,done/total*100):0;
@@ -263,7 +265,7 @@ function setTransferProgress(done,total,label){
   const elapsed=transferStartedAt?Math.max(.1,(Date.now()-transferStartedAt)/1000):0;
   const speed=elapsed>0?((done/1048576)/elapsed):0;
   const eta=speed>0&&total>done?' · còn khoảng '+Math.ceil((total-done)/1048576/speed)+' giây':'';
-  transferMeta.textContent=(done/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB'+(speed>0?' · '+speed.toFixed(1)+' MB/s':'')+eta+' · tối đa 4 luồng';
+  transferMeta.textContent=(done/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB'+(speed>0?' · '+speed.toFixed(1)+' MB/s':'')+eta+(IS_IOS_UPLOAD?' · iPhone 1 luồng':' · tối đa 4 luồng');
 }
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const capabilityList=document.querySelector('#capabilityList'),capabilityNote=document.querySelector('#capabilityNote');
@@ -396,6 +398,78 @@ function renderPreflightDashboard(data){
   }
   preservation.append(preservationGrid);root.append(preservation);
 
+  const wwise=analysis.wwise_analysis||{};
+  if(wwise.state&&wwise.state!=='NO_OVERLAY_BNKS'){
+    const wwiseSection=dashboardElement('section','preflight-group');
+    wwiseSection.append(dashboardElement('h3','','KIỂM TRA WWISE BANK / MEDIA / HIRC ID'));
+    const wwiseState=wwise.state==='APPEND_ONLY_SAFE'?'SAFE':'warning';
+    const stateLabel=wwise.state==='APPEND_ONLY_SAFE'
+      ?'CÓ THỂ THÊM BNK NGUYÊN TRẠNG'
+      :wwise.state==='BLOCKED'?'BỊ CHẶN DO XUNG ĐỘT / THIẾU THAM CHIẾU':'CHƯA CÓ BNK OVERLAY';
+    wwiseSection.append(dashboardElement('span','preflight-tag '+wwiseState,stateLabel));
+    if(wwise.reason)wwiseSection.append(dashboardElement('p','danger',wwise.reason));
+    const summary=[
+      (wwise.bank_count||0)+' BNK đã kiểm tra',
+      (wwise.standalone_wem_count||0)+' WEM rời',
+      (wwise.identical_duplicate_count||0)+' bản trùng byte'
+    ];
+    wwiseSection.append(dashboardElement('p','',summary.join(' · ')));
+    for(const source of (wwise.sources||[])){
+      wwiseSection.append(dashboardElement(
+        'p','',
+        source.source+' · '+source.bank_count+' BNK · '+source.standalone_wem_count+' WEM'
+      ));
+    }
+    if(wwise.assessment){
+      wwiseSection.append(dashboardElement('p','',
+        'Kiểm tra Bank ID, Media ID + SHA-256, HIRC object ID/type/payload và namespace platform/ngôn ngữ. Không sửa/remap BNK.'
+      ));
+    }
+    wwiseSection.append(dashboardElement('p','','Phân tích Wwise chỉ xác nhận cấu trúc và ID namespace; không chứng minh âm thanh phát đúng trong game.'));
+    root.append(wwiseSection);
+  }
+
+  const assetref=analysis.assetref_analysis||{};
+  if(assetref.state&&assetref.state!=='NO_ASSETREFS'){
+    const assetrefSection=dashboardElement('section','preflight-group');
+    assetrefSection.append(dashboardElement('h3','','KIỂM TRA ASSETREFERENCESET / ASSETREF'));
+    const assetrefState=assetref.state==='UNIQUE_PATHS_PASSTHROUGH'?'SAFE':'warning';
+    const assetrefLabel=assetref.state==='UNIQUE_PATHS_PASSTHROUGH'
+      ?'ĐƯỜNG DẪN RIÊNG · GIỮ NGUYÊN BYTE'
+      :'BỊ CHẶN DO TRÙNG ĐƯỜNG DẪN KHÁC NỘI DUNG';
+    assetrefSection.append(dashboardElement('span','preflight-tag '+assetrefState,assetrefLabel));
+    if(assetref.reason)assetrefSection.append(dashboardElement('p','danger',assetref.reason));
+    const assetrefSummary=[
+      (assetref.assetref_count||0)+' file AssetRef',
+      (assetref.unique_path_count||0)+' đường dẫn riêng',
+      (assetref.actor_count||0)+' Actor',
+      (assetref.conflict_count||0)+' xung đột khác byte',
+      (assetref.identical_duplicate_count||0)+' bản trùng byte'
+    ];
+    assetrefSection.append(dashboardElement('p','',assetrefSummary.join(' · ')));
+    if((assetref.actor_ids||[]).length){
+      assetrefSection.append(dashboardElement('p','','Actor ID: '+assetref.actor_ids.join(', ')));
+    }
+    for(const source of (assetref.source_assetref_counts||[])){
+      assetrefSection.append(dashboardElement(
+        'p','',source.source+' · '+source.assetref_count+' AssetRef'
+      ));
+    }
+    for(const conflict of (assetref.conflicts||[])){
+      assetrefSection.append(dashboardElement(
+        'p','danger',conflict.path+' · '+(conflict.sources||[]).join(' / ')
+      ));
+    }
+    assetrefSection.append(dashboardElement(
+      'p','',
+      assetref.note||'AssetRef có đường dẫn mới được giữ nguyên; chưa có bộ ghép subset tổng quát.'
+    ));
+    assetrefSection.append(dashboardElement(
+      'p','','Nhận dạng cấu trúc và giữ nguyên byte không đồng nghĩa đã xác minh tương thích trong game.'
+    ));
+    root.append(assetrefSection);
+  }
+
   const mses=analysis.mses_diagnostics||{};
   if(mses.tables?.length){
     const msesSection=dashboardElement('section','preflight-group');
@@ -447,7 +521,10 @@ function renderPreflightDashboard(data){
       item.source_family_hint||item.source_role||'Chưa phân loại',
       item.actor_asset_ids?.length?'AssetBundle Actor '+item.actor_asset_ids.join(', '):'',
       item.actor_action_ids?.length?'Actions Actor '+item.actor_action_ids.join(', '):'',
-      item.source_part_number?'Phần '+item.source_part_number:''
+      item.source_part_number?'Phần '+item.source_part_number:'',
+      item.version_marker_values?.length?'Build '+item.version_marker_values.join(' / '):
+        (item.has_version_txt?'version.txt không hợp lệ':
+          item.source_family_hint==='VTK'?'Không có marker riêng · cần adapter VTK ghim nguồn':'Thiếu version.txt')
     ].filter(Boolean);
     card.append(dashboardElement('span','',details.join(' · ')));
     sourceGrid.append(card);
@@ -469,7 +546,19 @@ function renderPreflightDashboard(data){
       card.append(dashboardElement('span','',item.state+(item.files?.length?' · '+item.files.join(', '):'')));
       targetGrid.append(card);
     }
-    targetCard.append(targetGrid);root.append(targetCard);
+    targetCard.append(targetGrid);
+    if(Array.isArray(target.blockers)&&target.blockers.length){
+      const blockerList=dashboardElement('ul','preflight-blockers');
+      for(const reason of target.blockers)blockerList.append(dashboardElement('li','',reason));
+      targetCard.append(blockerList);
+    }
+    if(Array.isArray(target.notes)&&target.notes.length){
+      const notesList=dashboardElement('ul','');
+      for(const note of target.notes)notesList.append(dashboardElement('li','',note));
+      targetCard.append(notesList);
+    }
+    targetCard.append(dashboardElement('p','',target.evidence_note||''));
+    root.append(targetCard);
   }
 
 
@@ -595,16 +684,21 @@ async function loadCapabilities(){
     const adapters=data.adapters||[];
     const mergeableIds=new Set([
       'aov_p9_p10_skin_union_1.64.1',
+      'aov_p9_p10_vtk_actor595_1.64.1',
       'aov_kpm100_vtk_actor595_1.64.1',
-      'aov_mod_to_mod_vtk_actor595_1.64.1'
+      'aov_mod_to_mod_vtk_actor595_1.64.1',
+      'aov_multi_actor_auto_detect'
     ]);
     const supportedAdapters=adapters.filter(item=>
-      mergeableIds.has(item.id)&&item.status==='merge_supported_version_locked'
+      mergeableIds.has(item.id)&&(
+        item.status==='merge_supported_version_locked'||
+        item.status==='merge_supported_conditional'
+      )
     );
     aovAdapterEnabled=supportedAdapters.length>0;
     aovMerge.disabled=!aovAdapterEnabled||input.files.length<2||input.files.length>10;
     driveMerge.disabled=!aovAdapterEnabled;
-    aovMerge.textContent='Ghép AOV: P9 + P10 (19 skin) / KPM100 + Vấn Tâm Kiếm';
+    aovMerge.textContent='Ghép AOV: P9/P10 · Vấn Tâm Kiếm · MOD nhận diện';
     driveMerge.textContent='Ghép mod AOV từ Drive';
     capabilityList.replaceChildren();
     for(const adapter of adapters){
@@ -644,6 +738,39 @@ async function sha256Hex(buffer){
   const digest=await crypto.subtle.digest('SHA-256',buffer);
   return [...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,'0')).join('');
 }
+function readBlobAsArrayBuffer(blob){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(reader.result);
+    reader.onerror=()=>reject(reader.error||Error('iPhone không đọc được khối ZIP đã chọn.'));
+    reader.onabort=()=>reject(Error('Đọc file ZIP bị hủy trước khi tải lên.'));
+    reader.readAsArrayBuffer(blob);
+  });
+}
+function uploadBlobChunk(url,blob,headers,onProgress,attempt=0){
+  return new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest();
+    xhr.open('PUT',url,true);
+    xhr.timeout=180000;
+    xhr.responseType='text';
+    for(const [name,value] of Object.entries(headers))xhr.setRequestHeader(name,value);
+    xhr.upload.addEventListener('progress',event=>{if(onProgress)onProgress(event.lengthComputable?event.loaded:0);});
+    xhr.onload=()=>{
+      let payload={};
+      try{payload=JSON.parse(xhr.responseText||'{}')}catch{}
+      if(xhr.status>=200&&xhr.status<300){resolve(payload);return;}
+      const error=Error(payload.detail||('Máy chủ trả HTTP '+xhr.status));error.status=xhr.status;reject(error);
+    };
+    xhr.onerror=()=>{const error=Error('Kết nối mạng bị ngắt khi gửi khối ZIP.');error.retryable=true;reject(error);};
+    xhr.ontimeout=()=>{const error=Error('Gửi khối ZIP quá thời gian chờ. Đang thử lại khối hiện tại.');error.retryable=true;reject(error);};
+    xhr.onabort=()=>{const error=Error('Yêu cầu tải ZIP bị hủy.');error.retryable=true;reject(error);};
+    xhr.send(blob);
+  }).catch(async error=>{
+    const retryable=error.retryable||[408,429,500,502,503,504].includes(error.status);
+    if(retryable&&attempt<2){await sleep(900*(attempt+1));return uploadBlobChunk(url,blob,headers,onProgress,attempt+1);}
+    throw error;
+  });
+}
 async function verifyResumableChunks(files,sessionFiles,protocol){
   for(let index=0;index<files.length;index++){
     const file=files[index],item=sessionFiles[index],received=item.received||0;
@@ -652,7 +779,7 @@ async function verifyResumableChunks(files,sessionFiles,protocol){
       for(const chunk of item.received_chunks){
         if(!Number.isInteger(chunk.index)||chunk.index<0||chunk.index>=Math.ceil(file.size/CHUNK_BYTES)||!/^([0-9a-f]{64})$/.test(chunk.sha256||''))return false;
         const offset=chunk.index*CHUNK_BYTES;
-        const bytes=await file.slice(offset,Math.min(offset+CHUNK_BYTES,file.size)).arrayBuffer();
+        const bytes=await readBlobAsArrayBuffer(file.slice(offset,Math.min(offset+CHUNK_BYTES,file.size)));
         if(await sha256Hex(bytes)!==chunk.sha256)return false;
       }
       continue;
@@ -663,7 +790,7 @@ async function verifyResumableChunks(files,sessionFiles,protocol){
     if(!Array.isArray(hashes)||hashes.length!==count)return false;
     for(let chunkIndex=0;chunkIndex<count;chunkIndex++){
       const offset=chunkIndex*CHUNK_BYTES;
-      const bytes=await file.slice(offset,Math.min(offset+CHUNK_BYTES,received)).arrayBuffer();
+      const bytes=await readBlobAsArrayBuffer(file.slice(offset,Math.min(offset+CHUNK_BYTES,received)));
       if(await sha256Hex(bytes)!==hashes[chunkIndex])return false;
     }
   }
@@ -718,41 +845,54 @@ async function uploadInChunks(files){
         if(!received.has(chunkIndex))tasks.push({fileIndex,chunkIndex});
       }
     }
-    setTransferProgress(sent,total,'ĐANG TẢI LÊN · 4 LUỒNG');
+    const inFlightProgress=new Map();
+    setTransferProgress(sent,total,IS_IOS_UPLOAD?'ĐANG TẢI LÊN · iPHONE 1 LUỒNG':'ĐANG TẢI LÊN · 4 LUỒNG');
     let cursor=0;
     async function worker(){
       while(true){
         const task=tasks[cursor++];if(!task)return;
         const file=files[task.fileIndex],offset=task.chunkIndex*CHUNK_BYTES;
         const part=file.slice(offset,Math.min(offset+CHUNK_BYTES,file.size));
-        const bytes=await part.arrayBuffer(),chunkHash=await sha256Hex(bytes);
-        const response=await fetchWithRetry('/api/upload/'+uploadId+'/'+task.fileIndex,{
-          method:'PUT',headers:{'Content-Type':'application/octet-stream','X-Chunk-Offset':String(offset),'X-Chunk-SHA256':chunkHash},body:bytes
+        const taskKey=task.fileIndex+':'+task.chunkIndex;
+        status.textContent='Đang gửi '+file.name+' · khối '+(task.chunkIndex+1)+'/'+Math.ceil(file.size/CHUNK_BYTES);
+        const ack=await uploadBlobChunk('/api/upload/'+uploadId+'/'+task.fileIndex,part,{
+          'Content-Type':'application/octet-stream','X-Chunk-Offset':String(offset)
+        },loaded=>{
+          inFlightProgress.set(taskKey,loaded);
+          const activeBytes=[...inFlightProgress.values()].reduce((sum,value)=>sum+value,0);
+          setTransferProgress(sent+activeBytes,total,IS_IOS_UPLOAD?'ĐANG TẢI LÊN · iPHONE 1 LUỒNG':'ĐANG TẢI LÊN · 4 LUỒNG');
         });
-        const ack=await response.json();
         if(ack.chunk_received!==true||ack.chunk_index!==task.chunkIndex)throw Error('Máy chủ chưa xác nhận đúng khối tải lên.');
-        sent+=part.size;setTransferProgress(sent,total,'ĐANG TẢI LÊN · '+file.name);
+        sent+=part.size;inFlightProgress.delete(taskKey);setTransferProgress(sent,total,'ĐANG TẢI LÊN · '+file.name);
         status.textContent='Đang tải '+file.name+' · '+(sent/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB';
       }
     }
-    await Promise.all(Array.from({length:Math.min(UPLOAD_CONCURRENCY,tasks.length)},()=>worker()));
+    await Promise.all(Array.from({length:Math.min(ACTIVE_UPLOAD_CONCURRENCY,tasks.length)},()=>worker()));
   }else{
     sent=offsets.reduce((sum,value)=>sum+value,0);
     setTransferProgress(sent,total,'ĐANG TẢI LÊN');
     let nextFileIndex=0;
+    const inFlightProgress=new Map();
     async function uploadFile(index){
       const file=files[index];
       for(let offset=offsets[index];offset<file.size;offset+=CHUNK_BYTES){
-        const part=file.slice(offset,Math.min(offset+CHUNK_BYTES,file.size)),bytes=await part.arrayBuffer(),chunkHash=await sha256Hex(bytes);
-        const response=await fetchWithRetry('/api/upload/'+uploadId+'/'+index,{method:'PUT',headers:{'Content-Type':'application/octet-stream','X-Chunk-Offset':String(offset),'X-Chunk-SHA256':chunkHash},body:bytes});
-        const ack=await response.json(),expected=Math.min(offset+part.size,file.size);
+        const part=file.slice(offset,Math.min(offset+CHUNK_BYTES,file.size));
+        status.textContent='Đang gửi '+file.name+' · '+(Math.floor(offset/CHUNK_BYTES)+1)+'/'+Math.ceil(file.size/CHUNK_BYTES);
+        const ack=await uploadBlobChunk('/api/upload/'+uploadId+'/'+index,part,{
+          'Content-Type':'application/octet-stream','X-Chunk-Offset':String(offset)
+        },loaded=>{
+          inFlightProgress.set(index,loaded);
+          const activeBytes=[...inFlightProgress.values()].reduce((sum,value)=>sum+value,0);
+          setTransferProgress(sent+activeBytes,total,IS_IOS_UPLOAD?'ĐANG TẢI LÊN · iPHONE 1 LUỒNG':'ĐANG TẢI LÊN');
+        });
+        const expected=Math.min(offset+part.size,file.size);
         if(ack.received!==expected)throw Error('Máy chủ xác nhận sai vị trí khối tải lên.');
-        sent+=part.size;setTransferProgress(sent,total,'ĐANG TẢI LÊN · '+file.name);
+        sent+=part.size;inFlightProgress.delete(index);setTransferProgress(sent,total,'ĐANG TẢI LÊN · '+file.name);
         status.textContent='Đang tải '+file.name+' · '+(sent/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB';
       }
     }
     async function worker(){while(true){const index=nextFileIndex++;if(index>=files.length)return;await uploadFile(index);}}
-    await Promise.all(Array.from({length:Math.min(UPLOAD_CONCURRENCY,files.length)},()=>worker()));
+    await Promise.all(Array.from({length:Math.min(ACTIVE_UPLOAD_CONCURRENCY,files.length)},()=>worker()));
   }
   setTransferProgress(total,total,'TẢI LÊN HOÀN TẤT');
   return uploadId;
@@ -810,7 +950,9 @@ autoProcessBtn.addEventListener('click',async()=>{
     const supportedAovAdapters=[
       'aov_p9_p10_skin_union_1.64.1',
       'aov_kpm100_vtk_actor595_1.64.1',
-      'aov_mod_to_mod_vtk_actor595_1.64.1'
+      'aov_mod_to_mod_vtk_actor595_1.64.1',
+      'aov_multi_actor_auto_detect',
+      'aov_p9_p10_vtk_actor595_1.64.1'
     ];
     let mergeResponse=null;
     let mergeKind='';
@@ -824,7 +966,9 @@ autoProcessBtn.addEventListener('click',async()=>{
       );
     }else if(analysis.ready_to_merge===true&&supportedAovAdapters.includes(adapter)){
       mergeKind='aov';
-      status.textContent='Đã khớp adapter AoV đã xác minh. Bước 2/2: đang ghép tài nguyên và kiểm tra checksum, bảng dữ liệu, AssetBundle...';
+      status.textContent=adapter==='aov_multi_actor_auto_detect'
+        ?'Đã khớp bộ ghép nhiều Actor có điều kiện. Bước 2/2: máy chủ sẽ kiểm tra parser, version, checksum và metadata; xung đột chưa hỗ trợ sẽ bị chặn...'
+        :'Đã khớp adapter AoV đã xác minh. Bước 2/2: đang ghép tài nguyên và kiểm tra checksum, bảng dữ liệu, AssetBundle...';
       mergeResponse=await fetchWithRetry(
         '/api/upload/'+encodeURIComponent(uploadId)+'/aov-merge',
         {method:'POST'}

@@ -1,16 +1,38 @@
 import struct
 import unittest
 
-from app.wwise_bnk import WwiseBNKError, compare_wwise_bnk, inspect_wwise_bnk
+from app.wwise_bnk import (
+    WwiseBNKError,
+    assess_wwise_bnk_overlay_set,
+    compare_wwise_bnk,
+    inspect_wwise_bnk,
+)
 
 
 def chunk(name, payload):
     return name.encode("ascii") + struct.pack("<I", len(payload)) + payload
 
 
-def make_bank(*extra_chunks, version=134):
-    header = chunk("BKHD", struct.pack("<II", version, 12345))
+def make_bank(*extra_chunks, version=134, bank_id=12345):
+    header = chunk("BKHD", struct.pack("<II", version, bank_id))
     return header + b"".join(extra_chunks)
+
+
+
+def make_identity_bank(
+    bank_id, media_id, media_payload, object_id, object_payload=b"node", *, version=135
+):
+    didx = chunk("DIDX", struct.pack("<III", media_id, 0, len(media_payload)))
+    data = chunk("DATA", media_payload)
+    body = struct.pack("<I", object_id) + object_payload
+    hirc = chunk(
+        "HIRC",
+        struct.pack("<I", 1)
+        + bytes([2])
+        + struct.pack("<I", len(body))
+        + body,
+    )
+    return make_bank(didx, data, hirc, version=version, bank_id=bank_id)
 
 
 class WwiseBNKInspectorTests(unittest.TestCase):
@@ -145,6 +167,145 @@ class WwiseBNKInspectorTests(unittest.TestCase):
         hirc = chunk("HIRC", struct.pack("<I", 0) + b"extra")
         with self.assertRaisesRegex(WwiseBNKError, "dữ liệu thừa"):
             inspect_wwise_bnk(make_bank(hirc))
+
+    def test_append_only_accepts_disjoint_bank_media_and_hirc_ids(self):
+        base = [
+            ("Sound/iOS/Base.bnk", make_identity_bank(100, 1000, b"base-media", 2000)),
+        ]
+        overlay = [
+            ("Sound/iOS/Creator.bnk", make_identity_bank(101, 1001, b"new-media", 2001)),
+        ]
+        report = assess_wwise_bnk_overlay_set(base, overlay)
+        self.assertTrue(report["verified"])
+        self.assertTrue(report["no_id_remapping_required"])
+        self.assertEqual(report["overlay_bank_count"], 1)
+        self.assertEqual(
+            report["overlay_banks"][0]["scope"],
+            "ios|default",
+        )
+
+    def test_append_only_rejects_bank_id_collision_in_same_namespace(self):
+        base = [("Sound/iOS/Base.bnk", make_identity_bank(100, 1000, b"a", 2000))]
+        overlay = [("Sound/iOS/Overlay.bnk", make_identity_bank(100, 1001, b"b", 2001))]
+        with self.assertRaisesRegex(WwiseBNKError, "Bank ID 100"):
+            assess_wwise_bnk_overlay_set(base, overlay)
+
+    def test_append_only_rejects_media_id_collision_with_different_payload(self):
+        base = [("Sound/iOS/Base.bnk", make_identity_bank(100, 1000, b"base", 2000))]
+        overlay = [("Sound/iOS/Overlay.bnk", make_identity_bank(101, 1000, b"changed", 2001))]
+        with self.assertRaisesRegex(WwiseBNKError, "Media ID 1000"):
+            assess_wwise_bnk_overlay_set(base, overlay)
+
+    def test_append_only_rejects_hirc_id_collision_with_different_payload(self):
+        base = [("Sound/iOS/Base.bnk", make_identity_bank(100, 1000, b"base", 2000))]
+        overlay = [("Sound/iOS/Overlay.bnk", make_identity_bank(101, 1001, b"new", 2000, b"changed"))]
+        with self.assertRaisesRegex(WwiseBNKError, "HIRC object ID 2000"):
+            assess_wwise_bnk_overlay_set(base, overlay)
+
+    def test_append_only_allows_identical_shared_media_and_hirc_payloads(self):
+        base = [("Sound/iOS/Base.bnk", make_identity_bank(100, 1000, b"shared", 2000))]
+        overlay = [("Sound/iOS/Overlay.bnk", make_identity_bank(101, 1000, b"shared", 2000))]
+        report = assess_wwise_bnk_overlay_set(base, overlay)
+        self.assertTrue(report["no_id_remapping_required"])
+
+    def test_append_only_allows_same_bank_ids_in_distinct_locales(self):
+        base = [
+            (
+                "Sound/iOS/English(US)/Hero_Show.bnk",
+                make_identity_bank(100, 1000, b"english", 2000),
+            )
+        ]
+        overlay = [
+            (
+                "Sound/iOS/Vietnamese/Hero_Show.bnk",
+                make_identity_bank(100, 1000, b"vietnamese", 2000, b"translated"),
+            )
+        ]
+        report = assess_wwise_bnk_overlay_set(base, overlay)
+        self.assertEqual(report["overlay_banks"][0]["scope"], "ios|vietnamese")
+
+    def test_append_only_rejects_same_bank_id_in_same_locale(self):
+        base = [
+            (
+                "Sound/iOS/English(US)/Base.bnk",
+                make_identity_bank(100, 1000, b"english", 2000),
+            )
+        ]
+        overlay = [
+            (
+                "Sound/iOS/English(US)/Overlay.bnk",
+                make_identity_bank(100, 1001, b"new", 2001),
+            )
+        ]
+        with self.assertRaisesRegex(WwiseBNKError, "Bank ID 100"):
+            assess_wwise_bnk_overlay_set(base, overlay)
+
+    def test_append_only_keeps_ios_and_android_ids_in_separate_namespaces(self):
+        base = [("Sound/iOS/Base.bnk", make_identity_bank(100, 1000, b"ios", 2000))]
+        overlay = [("Sound/Android/Overlay.bnk", make_identity_bank(100, 1000, b"android", 2000, b"android"))]
+        report = assess_wwise_bnk_overlay_set(base, overlay)
+        self.assertEqual(report["overlay_banks"][0]["scope"], "android|default")
+
+    def test_append_only_global_bank_collides_with_platform_bank(self):
+        base = [("Sound/iOS/Base.bnk", make_identity_bank(100, 1000, b"ios", 2000))]
+        overlay = [("Global/Overlay.bnk", make_identity_bank(100, 1001, b"global", 2001))]
+        with self.assertRaisesRegex(WwiseBNKError, "Bank ID 100"):
+            assess_wwise_bnk_overlay_set(base, overlay)
+
+    def test_append_only_platform_default_bank_overlaps_all_locales(self):
+        base = [
+            (
+                "Sound/iOS/English(US)/Locale.bnk",
+                make_identity_bank(100, 1000, b"english-media", 2000),
+            ),
+            (
+                "Sound/iOS/Vietnamese/Locale.bnk",
+                make_identity_bank(101, 1001, b"vietnamese-media", 2001),
+            ),
+        ]
+        overlay = [
+            (
+                "Sound/iOS/Shared_SFX.bnk",
+                make_identity_bank(100, 1002, b"shared-media", 2002),
+            )
+        ]
+        with self.assertRaisesRegex(WwiseBNKError, "Bank ID 100"):
+            assess_wwise_bnk_overlay_set(base, overlay)
+
+    def test_append_only_requires_same_wwise_version_across_locales(self):
+        base = [
+            (
+                "Sound/iOS/English(US)/Locale.bnk",
+                make_identity_bank(100, 1000, b"english-media", 2000, version=135),
+            )
+        ]
+        overlay = [
+            (
+                "Sound/iOS/Vietnamese/Locale.bnk",
+                make_identity_bank(101, 1001, b"vietnamese-media", 2001, version=134),
+            )
+        ]
+        with self.assertRaisesRegex(WwiseBNKError, "Wwise version"):
+            assess_wwise_bnk_overlay_set(base, overlay)
+
+
+    def test_append_only_rejects_unknown_chunks(self):
+        overlay = [("Sound/iOS/Overlay.bnk", make_bank(chunk("JUNK", b"opaque"), bank_id=400))]
+        with self.assertRaisesRegex(WwiseBNKError, "chunk Wwise chưa được giải nghĩa"):
+            assess_wwise_bnk_overlay_set([], overlay)
+
+    def test_append_only_rejects_unresolved_external_wem_media(self):
+        didx = chunk("DIDX", struct.pack("<III", 7001, 0, 0))
+        data = chunk("DATA", b"")
+        overlay = [("Sound/iOS/Overlay.bnk", make_bank(didx, data, bank_id=400))]
+        with self.assertRaisesRegex(WwiseBNKError, "external media ID"):
+            assess_wwise_bnk_overlay_set([], overlay)
+
+    def test_append_only_rejects_different_wwise_versions(self):
+        base = [("Sound/iOS/Base.bnk", make_identity_bank(100, 1000, b"base", 2000, version=135))]
+        overlay = [("Sound/iOS/Overlay.bnk", make_identity_bank(101, 1001, b"new", 2001, version=134))]
+        with self.assertRaisesRegex(WwiseBNKError, "Wwise version"):
+            assess_wwise_bnk_overlay_set(base, overlay)
 
 
 if __name__ == "__main__":

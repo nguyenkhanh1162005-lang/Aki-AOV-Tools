@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import struct
 from dataclasses import dataclass
 from typing import Any
@@ -264,3 +265,196 @@ def compare_wwise_bnk(base_data: bytes, overlay_data: bytes) -> dict[str, Any]:
         "scope": "BKHD version/bank ID, DIDX media payload hashes and HIRC object payload hashes only; no HIRC reference graph, event semantics, serializer or in-game validation",
         "reasons": reasons,
     }
+
+_LANGUAGE_SEGMENTS = {
+    "arabic", "chinese", "chinesesimplified", "chinesetraditional",
+    "dutch", "english", "englishus", "englishuk", "french", "german",
+    "greek", "hindi", "indonesian", "italian", "japanese", "korean",
+    "malay", "polish", "portuguese", "portuguesebrazil", "russian",
+    "spanish", "thai", "turkish", "ukrainian", "vietnamese",
+}
+
+
+def _wwise_identity_scope(resource_path: str) -> str:
+    """Partition IDs by platform and explicitly named localization directory.
+
+    A global sound bank overlaps every platform/locale. A platform-local bank
+    overlaps only that platform, and a localized bank overlaps only that
+    platform + locale. Unknown directory names are not guessed to be locales.
+    """
+    parts = [part for part in str(resource_path).replace("\\", "/").split("/") if part]
+    lowered = [part.casefold() for part in parts]
+    for index, part in enumerate(lowered):
+        if part != "sound" or index + 2 >= len(parts):
+            continue
+        platform = lowered[index + 1]
+        if platform not in {"ios", "android"}:
+            continue
+        possible_locale = parts[index + 2]
+        normalized_locale = "".join(
+            character for character in possible_locale.casefold()
+            if character.isalnum()
+        )
+        is_language = (
+            normalized_locale in _LANGUAGE_SEGMENTS
+            or bool(re.fullmatch(
+                r"[a-z]{2,3}(?:[-_][a-z0-9]{2,8})?",
+                possible_locale.casefold(),
+            ))
+        )
+        has_bank_below_locale = index + 3 < len(parts)
+        if is_language and has_bank_below_locale:
+            return f"{platform}|{normalized_locale}"
+        return f"{platform}|default"
+    return "global"
+
+
+def _wwise_scopes_overlap(left: str, right: str) -> bool:
+    if left == "global" or right == "global":
+        return True
+    left_platform, left_locale = left.split("|", 1)
+    right_platform, right_locale = right.split("|", 1)
+    if left_platform != right_platform:
+        return False
+    return (
+        left_locale == "default"
+        or right_locale == "default"
+        or left_locale == right_locale
+    )
+
+
+def assess_wwise_bnk_overlay_set(
+    base_banks: list[tuple[str, bytes]],
+    overlay_banks: list[tuple[str, bytes]],
+) -> dict[str, Any]:
+    """Authorize append-only BNK files only when their IDs need no remapping.
+
+    This function never edits a BNK. It verifies Bank IDs, Media IDs and HIRC
+    object IDs across every namespace that can be loaded together. Platform and
+    explicitly named language directories are treated as mutually exclusive
+    namespaces; global banks overlap all of them. Unknown chunks and external
+    WEM references remain blocked because their IDs/references are not decoded.
+    """
+    if not overlay_banks:
+        raise WwiseBNKError("Cần ít nhất một Wwise BNK overlay.")
+
+    inventories: list[dict[str, Any]] = []
+    seen_paths: dict[str, str] = {}
+    all_inputs = [("base", item) for item in base_banks] + [
+        ("overlay", item) for item in overlay_banks
+    ]
+
+    for role, (raw_path, payload) in all_inputs:
+        path = str(raw_path).replace("\\", "/").lstrip("/")
+        if not path or not isinstance(payload, bytes) or not payload:
+            raise WwiseBNKError("Đường dẫn hoặc payload Wwise BNK rỗng/không hợp lệ.")
+        digest = hashlib.sha256(payload).hexdigest()
+        previous_path_digest = seen_paths.get(path)
+        if previous_path_digest is not None:
+            if previous_path_digest != digest:
+                raise WwiseBNKError(
+                    f"{path}: cùng đường dẫn Wwise BNK nhưng payload khác nhau."
+                )
+            raise WwiseBNKError(
+                f"{path}: Wwise BNK bị đưa vào kiểm tra nhiều lần."
+            )
+        seen_paths[path] = digest
+        try:
+            report = inspect_wwise_bnk(payload)
+        except WwiseBNKError as exc:
+            raise WwiseBNKError(f"{path}: {exc}") from exc
+        if report["unknown_chunks"]:
+            raise WwiseBNKError(
+                f"{path}: có chunk Wwise chưa được giải nghĩa "
+                f"({', '.join(report['unknown_chunks'])}); không thể xác nhận ID namespace."
+            )
+        external_media = [
+            item["id"] for item in report["media"] if item["size"] == 0
+        ]
+        if external_media:
+            raise WwiseBNKError(
+                f"{path}: có {len(external_media)} external media ID cần WEM riêng; "
+                "luồng append-only hiện chưa xác minh cặp BNK/WEM."
+            )
+        inventories.append({
+            "role": role,
+            "path": path,
+            "sha256": digest,
+            "scope": _wwise_identity_scope(path),
+            "report": report,
+        })
+
+    for index, current in enumerate(inventories):
+        current_report = current["report"]
+        for previous in inventories[:index]:
+            previous_report = previous["report"]
+            if current_report["version"] != previous_report["version"]:
+                raise WwiseBNKError(
+                    f"{current['path']}: Wwise version {current_report['version']} "
+                    f"không khớp {previous['path']} ({previous_report['version']})."
+                )
+            if not _wwise_scopes_overlap(current["scope"], previous["scope"]):
+                continue
+            if current_report["bank_id"] == previous_report["bank_id"]:
+                raise WwiseBNKError(
+                    f"{current['path']}: Bank ID {current_report['bank_id']} "
+                    f"đã được dùng bởi {previous['path']} trong namespace có thể tải cùng nhau."
+                )
+
+            previous_media = {
+                item["id"]: item for item in previous_report["media"]
+            }
+            for item in current_report["media"]:
+                old = previous_media.get(item["id"])
+                if old and old["sha256"] != item["sha256"]:
+                    raise WwiseBNKError(
+                        f"{current['path']}: Media ID {item['id']} trùng nhưng payload khác "
+                        f"với {previous['path']}."
+                    )
+
+            previous_objects = {
+                item["id"]: item for item in previous_report["hirc_objects"]
+            }
+            for item in current_report["hirc_objects"]:
+                old = previous_objects.get(item["id"])
+                if old and (
+                    old["type"] != item["type"]
+                    or old["sha256"] != item["sha256"]
+                ):
+                    raise WwiseBNKError(
+                        f"{current['path']}: HIRC object ID {item['id']} trùng nhưng "
+                        f"payload/type khác với {previous['path']}."
+                    )
+
+    overlay_reports = [
+        {
+            "path": item["path"],
+            "scope": item["scope"],
+            "bank_id": item["report"]["bank_id"],
+            "version": item["report"]["version"],
+            "media_count": item["report"]["media_count"],
+            "hirc_object_count": item["report"]["hirc_object_count"],
+            "sha256": item["sha256"],
+            "append_only": True,
+        }
+        for item in inventories if item["role"] == "overlay"
+    ]
+    return {
+        "adapter": "wwise_bnk_append_only_disjoint_id_namespaces",
+        "base_bank_count": sum(item["role"] == "base" for item in inventories),
+        "overlay_bank_count": len(overlay_reports),
+        "overlay_banks": overlay_reports,
+        "identity_checks": [
+            "Wwise version",
+            "Bank ID",
+            "Media ID payload SHA-256",
+            "HIRC object ID/type/payload SHA-256",
+            "platform and explicit locale namespace",
+        ],
+        "no_id_remapping_required": True,
+        "unknown_chunks_allowed": False,
+        "external_wem_allowed": False,
+        "verified": True,
+        "game_tested": False,
+    }
+
