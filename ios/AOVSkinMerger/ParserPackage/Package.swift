@@ -17,6 +17,7 @@ let package = Package(
                 "AoVAssetBundleCatalogMerger.swift",
                 "AoVUnityCommonStrings.swift",
                 "AoVUnityTypeTreeParser.swift",
+                "AoVUnityTypeTreeWriter.swift",
                 "AoVRuntimeCatalogMergePlanner.swift",
                 "AoVSerializedRuntimeCatalogWriter.swift"
             ]
