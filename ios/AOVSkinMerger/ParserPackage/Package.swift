@@ -14,6 +14,7 @@ let package = Package(
                 "AoVSerializedFileParser.swift",
                 "AoVRuntimeResourceCatalogParser.swift",
                 "AoVSerializedAssetBundleWriter.swift",
+                "AoVSerializedFileRewriter.swift",
                 "AoVAssetBundleCatalogMerger.swift",
                 "AoVUnityCommonStrings.swift",
                 "AoVUnityTypeTreeParser.swift",
