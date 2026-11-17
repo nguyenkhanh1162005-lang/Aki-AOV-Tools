@@ -41,6 +41,35 @@ final class AoVSerializedFileParserTests: XCTestCase {
 
 
 
+    func testPreservesBlobTypeTreeNodesBySerializedTypeID() throws {
+        let nodes = [
+            AoVUnityTypeTreeNode(
+                type: "AssetBundle",
+                name: "Base",
+                level: 0,
+                byteSize: -1,
+                metaFlags: 0
+            ),
+            AoVUnityTypeTreeNode(
+                type: "SInt64",
+                name: "m_PathID",
+                level: 1,
+                byteSize: 8,
+                metaFlags: 0
+            )
+        ]
+        let data = makeSerializedFile(formatVersion: 22, typeTreeNodes: nodes)
+        let summary = try AoVSerializedFileParser.inspect(data)
+
+        XCTAssertEqual(summary.serializedTypes.count, 1)
+        XCTAssertEqual(summary.serializedTypes.first?.typeID, 0)
+        XCTAssertEqual(summary.serializedTypes.first?.classID, 142)
+        XCTAssertEqual(summary.serializedTypes.first?.oldTypeHash.count, 16)
+        XCTAssertEqual(summary.serializedTypes.first?.typeTreeNodes, nodes)
+        XCTAssertEqual(summary.serializedObjects.first?.typeID, 0)
+        XCTAssertEqual(summary.assetBundleObjects.first?.classID, summary.serializedTypes.first?.classID)
+    }
+
     func testParsesUnity2020ExtendedSerializedFileHeader() throws {
         let data = makeSerializedFile(formatVersion: 22, littleEndian: false)
         let summary = try AoVSerializedFileParser.inspect(data)
@@ -480,7 +509,8 @@ final class AoVSerializedFileParserTests: XCTestCase {
         objectPayload: Data? = nil,
         littleEndian: Bool = true,
         unityVersion: String = "2020.3.34f1",
-        useResolvedPointers: Bool = false
+        useResolvedPointers: Bool = false,
+        typeTreeNodes: [AoVUnityTypeTreeNode]? = nil
     ) -> Data {
         let payload = objectPayload ?? makeAssetBundleObject(
             littleEndian: littleEndian,
@@ -490,12 +520,15 @@ final class AoVSerializedFileParserTests: XCTestCase {
         var metadata = Data()
         metadata.append(Data((unityVersion + "\0").utf8))
         appendSerialized(targetPlatform, to: &metadata, littleEndian: littleEndian)
-        metadata.append(0)
+        metadata.append(typeTreeNodes == nil ? 0 : 1)
         appendSerialized(Int32(1), to: &metadata, littleEndian: littleEndian)
         appendSerialized(Int32(142), to: &metadata, littleEndian: littleEndian)
         metadata.append(0)
         appendSerialized(Int16(-1), to: &metadata, littleEndian: littleEndian)
         metadata.append(Data(repeating: 0, count: 16))
+        if let typeTreeNodes {
+            appendTypeTreeBlob(typeTreeNodes, to: &metadata, littleEndian: littleEndian, formatVersion: formatVersion)
+        }
         if formatVersion >= 21 {
             appendSerialized(Int32(0), to: &metadata, littleEndian: littleEndian) // type dependencies
         }
@@ -539,6 +572,41 @@ final class AoVSerializedFileParserTests: XCTestCase {
         while file.count < dataOffset { file.append(0) }
         file.append(payload)
         return file
+    }
+
+    private func appendTypeTreeBlob(
+        _ nodes: [AoVUnityTypeTreeNode],
+        to data: inout Data,
+        littleEndian: Bool,
+        formatVersion: UInt32
+    ) {
+        var strings = Data()
+        var offsets: [String: UInt32] = [:]
+        func intern(_ value: String) -> UInt32 {
+            if let existing = offsets[value] { return existing }
+            let offset = UInt32(strings.count)
+            strings.append(Data(value.utf8))
+            strings.append(0)
+            offsets[value] = offset
+            return offset
+        }
+        let stringOffsets = nodes.map { (intern($0.type), intern($0.name)) }
+        appendSerialized(Int32(nodes.count), to: &data, littleEndian: littleEndian)
+        appendSerialized(Int32(strings.count), to: &data, littleEndian: littleEndian)
+        for (index, node) in nodes.enumerated() {
+            appendSerialized(Int16(1), to: &data, littleEndian: littleEndian)
+            data.append(node.level)
+            data.append(0) // type flags
+            appendSerialized(stringOffsets[index].0, to: &data, littleEndian: littleEndian)
+            appendSerialized(stringOffsets[index].1, to: &data, littleEndian: littleEndian)
+            appendSerialized(node.byteSize, to: &data, littleEndian: littleEndian)
+            appendSerialized(Int32(index), to: &data, littleEndian: littleEndian)
+            appendSerialized(node.metaFlags, to: &data, littleEndian: littleEndian)
+            if formatVersion >= 19 {
+                appendSerialized(UInt64(0), to: &data, littleEndian: littleEndian)
+            }
+        }
+        data.append(strings)
     }
 
     private func makeAssetBundleObject(
