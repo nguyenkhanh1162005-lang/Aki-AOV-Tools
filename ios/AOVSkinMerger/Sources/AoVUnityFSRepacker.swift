@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 enum AoVUnityFSRepackError: LocalizedError {
     case noNodes
@@ -164,7 +165,7 @@ enum AoVUnityFSRepacker {
         }
 
         var blockInfo = AoVUnityFSBinaryWriter()
-        blockInfo.data.append(Data(repeating: 0, count: 16)) // Unity bundle hash field
+        blockInfo.data.append(Data(Insecure.MD5.hash(data: expanded)))
         blockInfo.appendUInt32BE(1) // block count
         switch blockInfoLayout {
         case .standard:
