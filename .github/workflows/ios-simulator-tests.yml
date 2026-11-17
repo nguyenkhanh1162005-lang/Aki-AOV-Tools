@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feat/ios-offline-app-prototype
+  pull_request:
+    branches:
+      - feat/multi-actor-aov-archive-merge
 
 permissions:
   contents: read
