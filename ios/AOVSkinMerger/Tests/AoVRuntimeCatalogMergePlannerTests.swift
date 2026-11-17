@@ -36,6 +36,43 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
         XCTAssertEqual(plan.candidateCatalog?.svnRevision, current.svnRevision)
     }
 
+    func testPackerPlannerBlocksDuplicatePathInsideOneLegacyCatalog() {
+        let duplicated = pack("assetbundle/repeated.assetbundle", crc: 10)
+        let current = packer(entries: [], links: [])
+        let legacy = packer(entries: [duplicated, duplicated], links: [])
+
+        let plan = AoVRuntimeCatalogMergePlanner.planPacker(
+            current: current,
+            legacy: [("legacy.zip", legacy)]
+        )
+
+        XCTAssertFalse(plan.safeToWrite)
+        XCTAssertNil(plan.candidateCatalog)
+        XCTAssertTrue(plan.issues.contains {
+            $0.reason == .duplicateLegacyPath &&
+            $0.path == "assetbundle/repeated.assetbundle"
+        })
+    }
+
+    func testVerificationPlannerBlocksDuplicatePathInsideOneLegacyCatalog() {
+        let path = "Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes"
+        let duplicate = verify(path, crc: 123)
+        let current = verification(zip: [], databin: [])
+        let legacy = verification(zip: [duplicate, duplicate], databin: [])
+
+        let plan = AoVRuntimeCatalogMergePlanner.planVerification(
+            current: current,
+            legacy: [("legacy.zip", legacy)]
+        )
+
+        XCTAssertFalse(plan.safeToWrite)
+        XCTAssertNil(plan.candidateCatalog)
+        XCTAssertTrue(plan.issues.contains {
+            $0.reason == .duplicateLegacyVerificationPath &&
+            $0.path == path
+        })
+    }
+
     func testPackerPlannerBlocksNewPathWithoutVerifiedAssetBundlePayload() {
         let newEntry = pack("assetbundle/not-in-res.assetbundle", crc: 10)
         let current = packer(entries: [], links: [])
