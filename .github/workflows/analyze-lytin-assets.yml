@@ -1,0 +1,153 @@
+name: Analyze Lixin KPM and VTK assets (read-only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Download original release ZIPs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p source reports
+          gh release download aov-upload-01 \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir source \
+            --pattern 'Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip' \
+            --pattern 'VTK.IOS.VIP.zip'
+
+      - name: Verify original archives
+        run: |
+          cd source
+          echo "944d01f6a4e31dbaa7ea31c14d292b799818843a4e3533860b2e16ff4bb77aa0  Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip" | sha256sum -c -
+          echo "b78976a7d9c0d7ce2420fdd631cdf47136bc9b0f313fbfcbbb6cb9af3a582249  VTK.IOS.VIP.zip" | sha256sum -c -
+          unzip -tqq 'Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip'
+          unzip -tqq 'VTK.IOS.VIP.zip'
+
+      - name: Inventory and compare Lixin-related entries (read-only)
+        run: |
+          python - <<'PY'
+          import csv, hashlib, json, os, re, zipfile
+          from pathlib import PurePosixPath
+
+          sources = {
+              "KPM": "source/Mod.VN.100.Skin.Ver.12.-.iOS.KHAM.PHA.MOBILE.zip",
+              "VTK": "source/VTK.IOS.VIP.zip",
+          }
+          pattern = re.compile(r"(595|lixin|li[_ -]?xin|actor.?595)", re.I)
+          manifests = {}
+          summary = {}
+
+          def digest_member(zf, info):
+              h = hashlib.sha256()
+              with zf.open(info, "r") as stream:
+                  while True:
+                      block = stream.read(1024 * 1024)
+                      if not block:
+                          break
+                      h.update(block)
+              return h.hexdigest()
+
+          for label, archive in sources.items():
+              rows = []
+              with zipfile.ZipFile(archive) as zf:
+                  bad = zf.testzip()
+                  if bad:
+                      raise SystemExit(f"{label}: CRC failure at {bad}")
+                  for info in zf.infolist():
+                      if info.is_dir():
+                          continue
+                      path = info.filename
+                      if pattern.search(path):
+                          rows.append({
+                              "archive": label,
+                              "path": path,
+                              "size": info.file_size,
+                              "compressed_size": info.compress_size,
+                              "crc32": f"{info.CRC:08x}",
+                              "sha256": digest_member(zf, info),
+                              "suffix": PurePosixPath(path).suffix.lower(),
+                          })
+              manifests[label] = rows
+              summary[label] = {
+                  "zip_entries": len(zipfile.ZipFile(archive).infolist()),
+                  "lixin_candidate_entries": len(rows),
+                  "candidate_uncompressed_bytes": sum(x["size"] for x in rows),
+              }
+
+          os.makedirs("reports", exist_ok=True)
+          fields = ["archive", "path", "size", "compressed_size", "crc32", "sha256", "suffix"]
+          with open("reports/lixin_candidates.csv", "w", newline="", encoding="utf-8") as f:
+              w = csv.DictWriter(f, fieldnames=fields)
+              w.writeheader()
+              for label in ("KPM", "VTK"):
+                  w.writerows(manifests[label])
+
+          def index(rows):
+              out = {}
+              for row in rows:
+                  out.setdefault(row["path"], []).append(row)
+              return out
+
+          kpm_idx, vtk_idx = index(manifests["KPM"]), index(manifests["VTK"])
+          comparisons = []
+          for path in sorted(set(kpm_idx) | set(vtk_idx)):
+              a, b = kpm_idx.get(path, []), vtk_idx.get(path, [])
+              status = "only_kpm" if a and not b else "only_vtk" if b and not a else "same_sha256" if a[0]["sha256"] == b[0]["sha256"] else "same_path_different_content"
+              comparisons.append({
+                  "path": path,
+                  "status": status,
+                  "kpm_count": len(a),
+                  "vtk_count": len(b),
+                  "kpm_sha256": a[0]["sha256"] if a else "",
+                  "vtk_sha256": b[0]["sha256"] if b else "",
+                  "kpm_size": a[0]["size"] if a else "",
+                  "vtk_size": b[0]["size"] if b else "",
+              })
+
+          with open("reports/lixin_path_comparison.csv", "w", newline="", encoding="utf-8") as f:
+              fields2 = ["path", "status", "kpm_count", "vtk_count", "kpm_sha256", "vtk_sha256", "kpm_size", "vtk_size"]
+              w = csv.DictWriter(f, fieldnames=fields2)
+              w.writeheader()
+              w.writerows(comparisons)
+
+          result = {
+              "mode": "read-only; no archive members replaced",
+              "archives": summary,
+              "path_comparison": {
+                  "unique_candidate_paths": len(comparisons),
+                  "same_sha256": sum(x["status"] == "same_sha256" for x in comparisons),
+                  "same_path_different_content": sum(x["status"] == "same_path_different_content" for x in comparisons),
+                  "only_kpm": sum(x["status"] == "only_kpm" for x in comparisons),
+                  "only_vtk": sum(x["status"] == "only_vtk" for x in comparisons),
+              },
+              "limitations": [
+                  "Filename matching is a candidate filter, not proof that every entry belongs to Lixin.",
+                  "This workflow does not decrypt, decompress proprietary wrappers, rewrite indexes, or merge assets.",
+                  "No in-game compatibility is claimed."
+              ]
+          }
+          with open("reports/analysis_summary.json", "w", encoding="utf-8") as f:
+              json.dump(result, f, ensure_ascii=False, indent=2)
+          with open("reports/ANALYSIS_REPORT.md", "w", encoding="utf-8") as f:
+              f.write("# Lixin asset comparison report\\n\\n")
+              f.write("Read-only analysis. No ZIP contents were modified.\\n\\n")
+              f.write("## Summary\\n\\n")
+              f.write("```json\\n" + json.dumps(result, ensure_ascii=False, indent=2) + "\\n```\\n")
+              f.write("## Outputs\\n- `lixin_candidates.csv`: candidate entries and hashes\\n- `lixin_path_comparison.csv`: path/hash comparison\\n- `analysis_summary.json`: machine-readable summary\\n")
+          print(json.dumps(result, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload analysis reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: lixin-readonly-analysis
+          path: reports/
+          if-no-files-found: error
+          retention-days: 7
