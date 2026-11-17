@@ -30,7 +30,8 @@ This is an **unsigned iOS device-build prototype**. It is not a universal or gam
 
 ## Not yet implemented or verified
 
-- End-to-end RMK/RES orchestration across a complete ZIP: matching all CAB/SerializedFile nodes, merging real skin payloads, updating every Packer/Verification entry and repacking the complete current RES wrapper.
+- End-to-end RMK/RES orchestration across a complete ZIP: matching all CAB/SerializedFile nodes, importing new serialized objects and their dependency/PPtr graph from legacy CABs, updating every Packer/Verification entry and repacking the complete current RES wrapper.
+- The class-142 executor currently merges the container/preload table only. It does not yet copy the underlying prefab/texture/mesh/object payloads from a legacy CAB into the clean RES CAB. A remapped pointer is not proof that the pointed-to asset has been imported.
 - Real-RES validation of class 142 pointer remapping, external target pathIDs, runtime catalog checksums and output compatibility. The single-record and runtime-catalog executors are structural primitives only; they do not yet produce a full remake ZIP.
 - LZHAM and unsupported UnityFS layouts. Unsupported layouts must remain blocked instead of being skipped or partially rewritten.
 - Semantic merge of AssetReferenceSet `baseSubset`/`skinSubset` graphs when the same AssetRef path has different payloads.
