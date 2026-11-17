@@ -141,6 +141,7 @@ struct ContentView: View {
                             statusRow("CommonActions: direct list + skinId conditions", true)
                             statusRow("MSES / IFix: adapter theo schema đã nhận diện", true)
                             statusRow("Wwise BNK: append-only nếu ID không xung đột", true)
+                            statusRow("UnityFS header / block-directory inspection (read-only)", true)
                             statusRow("AssetBundle Packer / Verification metadata", false)
                             statusRow("AssetRef subset merge khi cùng path khác payload", false)
                             statusRow("Xuất ZIP với kiểm CRC khi không còn blocker", true)
@@ -635,6 +636,41 @@ struct ContentView: View {
             metric("File đã đọc và kiểm CRC", "\(report.crcValidatedFiles)")
             metric("Đường dẫn trùng, payload giống", "\(report.identicalDuplicatePaths)")
             metric("Đường dẫn trùng, payload khác", "\(report.conflictingPaths)")
+            if !report.unityFSBundles.isEmpty {
+                Divider().overlay(.white.opacity(0.12))
+                Label("UnityFS AssetBundle đã đọc metadata", systemImage: "shippingbox.fill")
+                    .font(.subheadline.weight(.semibold))
+                metric("UnityFS đọc được", "\(report.unityFSBundles.count)")
+                metric("AssetBundle không phải UnityFS", "\(report.unityFSUnrecognizedCount)")
+                metric("Quá giới hạn kiểm tra", "\(report.unityFSTooLargeCount)")
+                ForEach(report.unityFSBundles.prefix(40)) { bundle in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(bundle.path)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                        Text("Unity \(bundle.engineVersion) · format v\(bundle.formatVersion) · \(bundle.blockCount) block · \(bundle.nodeCount) node")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text("Block info: \(bundle.blockInfoCompression) · \(bundle.blockInfoAtEnd ? "ở cuối file" : "sau header") · dữ liệu khai báo \(formatByteCount(bundle.totalUncompressedBytes))")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        ForEach(bundle.nodePathSamples, id: \.self) { nodePath in
+                            Text(nodePath)
+                                .font(.caption2.monospaced())
+                                .foregroundColor(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(.vertical, 5)
+                    Divider()
+                }
+            }
+            if !report.unityFSInspectionFailures.isEmpty {
+                Text("UnityFS chưa đọc được").font(.subheadline.weight(.semibold))
+                ForEach(Array(report.unityFSInspectionFailures.enumerated()), id: \.offset) { _, failure in
+                    Text(failure).font(.caption2).foregroundColor(.orange).textSelection(.enabled)
+                }
+            }
             ForEach(report.archives) { archive in
                 VStack(alignment: .leading, spacing: 3) {
                     Text(archive.fileName).font(.subheadline.weight(.semibold)).lineLimit(1)
@@ -662,6 +698,9 @@ struct ContentView: View {
                     Divider()
                 }
             }
+            Text("UnityFS hiện chỉ được đọc header, block table và directory để kiểm tra cấu trúc. App chưa giải nén AssetBundle, sửa catalog Packer/Verification hoặc chứng minh game sẽ nạp được bundle sau khi ghép.")
+                .font(.footnote)
+                .foregroundColor(.orange)
             Text("Quét đã đọc từng payload và xác minh CRC. Đường dẫn có payload khác nhau chỉ được đánh dấu xung đột, chưa tự chọn bản để ghi đè. Bản này chưa tạo ZIP skin hoàn chỉnh.")
                 .font(.footnote).foregroundColor(.orange)
         }.panel()
