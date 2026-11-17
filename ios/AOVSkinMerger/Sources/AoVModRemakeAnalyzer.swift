@@ -140,6 +140,8 @@ struct AoVRemakeCatalogRecordFinding: Codable, Sendable, Identifiable {
     let unresolvedCurrentLocalPointerCount: Int
     let invalidLegacyExternalPointerCount: Int
     let invalidCurrentExternalPointerCount: Int
+    let legacyPointerAuditSamples: [String]
+    let currentPointerAuditSamples: [String]
     let dependenciesAddedInCurrent: [String]
     let dependenciesRemovedInCurrent: [String]
     let legacyOnlyKeySamples: [String]
@@ -357,7 +359,20 @@ enum AoVModRemakeAnalyzer {
             verificationCatalogComparison.currentRecordCount == 0 {
             warnings.append("Một hoặc cả hai catalog chưa có AssetBundle record class 142 đọc được; cần kiểm tra lại RES đầu vào hoặc layout SerializedFile.")
         }
-        warnings.append("Catalog đã được phân tích sâu ở mức AssetBundle class 142, container key, preload range và dependency. Các pointer chỉ là ứng viên ánh xạ, chưa được ghi ngược vào file.")
+        let unresolvedLocalPointers =
+            packerCatalogComparison.unresolvedLegacyLocalPointerCount +
+            packerCatalogComparison.unresolvedCurrentLocalPointerCount +
+            verificationCatalogComparison.unresolvedLegacyLocalPointerCount +
+            verificationCatalogComparison.unresolvedCurrentLocalPointerCount
+        let invalidExternalPointers =
+            packerCatalogComparison.invalidLegacyExternalPointerCount +
+            packerCatalogComparison.invalidCurrentExternalPointerCount +
+            verificationCatalogComparison.invalidLegacyExternalPointerCount +
+            verificationCatalogComparison.invalidCurrentExternalPointerCount
+        if unresolvedLocalPointers > 0 || invalidExternalPointers > 0 {
+            warnings.append("Có pointer chưa phân giải được: local object không tìm thấy = \(unresolvedLocalPointers), external fileID không hợp lệ = \(invalidExternalPointers). Không được tự động remap các record này.")
+        }
+        warnings.append("Catalog đã được phân tích sâu ở mức AssetBundle class 142, container key, preload range, pointer và dependency. Các pointer chỉ là ứng viên ánh xạ, chưa được ghi ngược vào file.")
         warnings.append("Bản phân tích này không tạo ZIP remake. Cần xác minh remap pointer, checksum và UnityFS rebuild trên bộ RES/MOD thật trước khi xuất.")
         
         return AoVModRemakeReport(
@@ -559,6 +574,8 @@ enum AoVModRemakeAnalyzer {
                         unresolvedCurrentLocalPointerCount: 0,
                         invalidLegacyExternalPointerCount: oldRecord.invalidExternalPointerCount,
                         invalidCurrentExternalPointerCount: 0,
+                        legacyPointerAuditSamples: oldRecord.pointerAuditSamples,
+                        currentPointerAuditSamples: [],
                         dependenciesAddedInCurrent: [],
                         dependenciesRemovedInCurrent: [],
                         legacyOnlyKeySamples: Array(oldRecord.containerEntries.prefix(8).map(\.key)),
@@ -600,6 +617,8 @@ enum AoVModRemakeAnalyzer {
                         unresolvedCurrentLocalPointerCount: candidates.reduce(0) { $0 + $1.unresolvedLocalPointerCount },
                         invalidLegacyExternalPointerCount: oldRecord.invalidExternalPointerCount,
                         invalidCurrentExternalPointerCount: candidates.reduce(0) { $0 + $1.invalidExternalPointerCount },
+                        legacyPointerAuditSamples: oldRecord.pointerAuditSamples,
+                        currentPointerAuditSamples: Array(candidates.flatMap(\.pointerAuditSamples).prefix(12)),
                         dependenciesAddedInCurrent: [],
                         dependenciesRemovedInCurrent: [],
                         legacyOnlyKeySamples: [],
@@ -703,6 +722,8 @@ enum AoVModRemakeAnalyzer {
                     unresolvedCurrentLocalPointerCount: recordUnresolvedCurrentLocalPointers,
                     invalidLegacyExternalPointerCount: recordInvalidLegacyExternalPointers,
                     invalidCurrentExternalPointerCount: recordInvalidCurrentExternalPointers,
+                    legacyPointerAuditSamples: oldRecord.pointerAuditSamples,
+                    currentPointerAuditSamples: newRecord.pointerAuditSamples,
                     dependenciesAddedInCurrent: Array(added.prefix(12)),
                     dependenciesRemovedInCurrent: Array(removed.prefix(12)),
                     legacyOnlyKeySamples: legacyOnlySamples,
