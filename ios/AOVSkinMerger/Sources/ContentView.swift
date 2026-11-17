@@ -673,7 +673,7 @@ struct ContentView: View {
                 Text("THÔNG TIN").font(.system(size: 10, weight: .black, design: .rounded)).tracking(2).foregroundStyle(.white.opacity(0.55))
                 Text("AKI AOV SKIN").font(.system(size: 27, weight: .black, design: .rounded)).foregroundStyle(.white)
                 VStack(alignment: .leading, spacing: 12) {
-                    infoRow("Phiên bản", "0.5.1")
+                    infoRow("Phiên bản", "0.5.2")
                     infoRow("Nền tảng", "iOS 26.5+")
                     infoRow("Xử lý file", "Trực tiếp trên iPhone")
                     infoRow("Máy chủ", "Không tải ZIP lên")
@@ -817,7 +817,7 @@ struct ContentView: View {
                 Text("GỘP SKIN · TRẢI NGHIỆM ĐỈNH CAO")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .tracking(1.2).foregroundStyle(Color.white.opacity(0.72))
-                Text("Bản iOS 0.5.1 · yêu cầu iOS 26.5+")
+                Text("Bản iOS 0.5.2 · yêu cầu iOS 26.5+")
                     .font(.caption2.weight(.semibold)).foregroundStyle(.white.opacity(0.58))
                 Text("Xử lý file ngay trên iPhone. Bộ ghép sẽ dừng khi gặp xung đột chưa có adapter đã xác minh.")
                     .font(.footnote).foregroundStyle(.white.opacity(0.78))
