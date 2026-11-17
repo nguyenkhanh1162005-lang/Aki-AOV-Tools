@@ -266,6 +266,7 @@ enum AoVRuntimeCatalogMergePlanner {
                         sourceArchives: []
                     )
                 )
+                continue
             }
         }
 
