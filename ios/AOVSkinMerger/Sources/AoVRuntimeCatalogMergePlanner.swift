@@ -35,6 +35,7 @@ struct AoVRuntimeVerificationMergePlan: Codable, Sendable {
     let candidateCatalog: AoVRuntimeResourceVerificationCatalog?
     let addedZIPPaths: [String]
     let unchangedZIPPaths: [String]
+    let updatedZIPPaths: [String]
     let updatedDatabinPaths: [String]
     let addedDatabinPaths: [String]
     let unchangedDatabinPaths: [String]
@@ -228,7 +229,8 @@ enum AoVRuntimeCatalogMergePlanner {
     static func planVerification(
         current: AoVRuntimeResourceVerificationCatalog,
         legacy: [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)],
-        finalDatabinPayloads: [String: Data] = [:]
+        finalDatabinPayloads: [String: Data] = [:],
+        finalZIPChecksumValues: [String: Int64] = [:]
     ) -> AoVRuntimeVerificationMergePlan {
         var issues: [AoVRuntimeCatalogMergeIssue] = []
 
@@ -266,8 +268,10 @@ enum AoVRuntimeCatalogMergePlanner {
         let legacyZIP = Dictionary(grouping: legacyZIPRows, by: { $0.value.pathInIFS })
         let legacyDatabin = Dictionary(grouping: legacyDatabinRows, by: { $0.value.pathInIFS })
 
+        var zipEntries = current.allZipVerificationInfo
         var addedZIP: [AoVRuntimeVerificationEntry] = []
         var unchangedZIP: [String] = []
+        var updatedZIP: [String] = []
         for path in legacyZIP.keys.sorted() {
             guard let rows = legacyZIP[path], let candidate = rows.first?.value else { continue }
             guard !path.isEmpty else {
@@ -291,8 +295,11 @@ enum AoVRuntimeCatalogMergePlanner {
                 )
                 continue
             }
-            if let existingRows = currentZIP[path] {
-                if existingRows.count == 1, existingRows[0].crcXor == candidate.crcXor {
+
+            guard let verifiedChecksum = finalZIPChecksumValues[path] else {
+                if let existingRows = currentZIP[path],
+                   existingRows.count == 1,
+                   existingRows[0].crcXor == candidate.crcXor {
                     unchangedZIP.append(path)
                 } else {
                     issues.append(
@@ -303,8 +310,33 @@ enum AoVRuntimeCatalogMergePlanner {
                         )
                     )
                 }
+                continue
+            }
+
+            let verifiedEntry = AoVRuntimeVerificationEntry(
+                pathInIFS: path,
+                crcXor: verifiedChecksum
+            )
+            if let existingRows = currentZIP[path] {
+                guard existingRows.count == 1,
+                      let index = zipEntries.firstIndex(where: { $0.pathInIFS == path }) else {
+                    issues.append(
+                        AoVRuntimeCatalogMergeIssue(
+                            path: path,
+                            reason: .duplicateCurrentVerificationPath,
+                            sourceArchives: []
+                        )
+                    )
+                    continue
+                }
+                if existingRows[0].crcXor == verifiedChecksum {
+                    unchangedZIP.append(path)
+                } else {
+                    zipEntries[index] = verifiedEntry
+                    updatedZIP.append(path)
+                }
             } else {
-                addedZIP.append(candidate)
+                addedZIP.append(verifiedEntry)
             }
         }
 
@@ -381,7 +413,7 @@ enum AoVRuntimeCatalogMergePlanner {
                 name: current.name,
                 version: current.version,
                 svnRevision: current.svnRevision,
-                allZipVerificationInfo: current.allZipVerificationInfo + addedZIP,
+                allZipVerificationInfo: zipEntries + addedZIP,
                 allDatabinVerificationInfo: databinEntries,
                 trailingData: current.trailingData
             )
@@ -393,6 +425,7 @@ enum AoVRuntimeCatalogMergePlanner {
             candidateCatalog: candidateCatalog,
             addedZIPPaths: addedZIP.map(\.pathInIFS).sorted(),
             unchangedZIPPaths: unchangedZIP.sorted(),
+            updatedZIPPaths: updatedZIP.sorted(),
             updatedDatabinPaths: updatedDatabin.sorted(),
             addedDatabinPaths: addedDatabin.sorted(),
             unchangedDatabinPaths: unchangedDatabin.sorted(),
