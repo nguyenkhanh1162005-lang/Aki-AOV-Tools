@@ -172,6 +172,105 @@ final class AoVUnityFSParserTests: XCTestCase {
         XCTAssertEqual(extracted.first?.data, payload)
     }
 
+    func testRebuilderRoundTripsMultipleNodesAndRawBlocks() throws {
+        let template = makeBundle()
+        let nodes = [
+            AoVUnityFSExtractedNode(
+                path: "CAB-test",
+                data: Data("new payload".utf8),
+                flags: 7
+            ),
+            AoVUnityFSExtractedNode(
+                path: "CAB-second",
+                data: Data([0x80, 0x81]),
+                flags: 9
+            )
+        ]
+
+        let rebuilt = try AoVUnityFSRebuilder.rebuild(
+            template: template,
+            nodes: nodes,
+            blockSize: 4
+        )
+        let info = try AoVUnityFSParser.inspect(rebuilt.data)
+        let extracted = try AoVUnityFSParser.extractNodes(
+            rebuilt.data,
+            maximumExpandedBytes: 1024
+        )
+
+        XCTAssertEqual(rebuilt.nodeCount, 2)
+        XCTAssertEqual(rebuilt.blockCount, 4)
+        XCTAssertEqual(rebuilt.uncompressedBytes, 13)
+        XCTAssertEqual(rebuilt.dataMD5.count, 32)
+        XCTAssertEqual(info.blockInfoCompression, "none")
+        XCTAssertFalse(info.blockInfoAtEnd)
+        XCTAssertFalse(info.blockPaddingAtStart)
+        XCTAssertEqual(info.flags, 0x40)
+        XCTAssertEqual(info.nodes.map(\.path), ["CAB-test", "CAB-second"])
+        XCTAssertEqual(info.nodes.map(\.flags), [7, 9])
+        XCTAssertEqual(extracted.map(\.path), nodes.map(\.path))
+        XCTAssertEqual(extracted.map(\.data), nodes.map(\.data))
+        XCTAssertEqual(extracted.map(\.flags), nodes.map(\.flags))
+    }
+
+    func testRebuilderPreservesUnity2019HeaderAlignment() throws {
+        let template = makeBundle(
+            formatVersion: 6,
+            engineVersion: "2019.4.20f1"
+        )
+        let sourceNodes = try AoVUnityFSParser.extractNodes(template)
+        let rebuilt = try AoVUnityFSRebuilder.rebuild(
+            template: template,
+            nodes: sourceNodes
+        )
+        let info = try AoVUnityFSParser.inspect(rebuilt.data)
+        let extracted = try AoVUnityFSParser.extractNodes(rebuilt.data)
+
+        XCTAssertEqual(info.formatVersion, 6)
+        XCTAssertEqual(info.engineVersion, "2019.4.20f1")
+        XCTAssertEqual(extracted.first?.data, sourceNodes.first?.data)
+    }
+
+    func testRebuilderSupportsEmptyNodePayload() throws {
+        let template = makeBundle()
+        let nodes = [
+            AoVUnityFSExtractedNode(path: "CAB-empty", data: Data(), flags: 3)
+        ]
+
+        let rebuilt = try AoVUnityFSRebuilder.rebuild(template: template, nodes: nodes)
+        let info = try AoVUnityFSParser.inspect(rebuilt.data)
+        let extracted = try AoVUnityFSParser.extractNodes(rebuilt.data)
+
+        XCTAssertEqual(rebuilt.blockCount, 0)
+        XCTAssertEqual(info.nodes.count, 1)
+        XCTAssertEqual(info.totalUncompressedBytes, 0)
+        XCTAssertEqual(extracted.first?.path, "CAB-empty")
+        XCTAssertEqual(extracted.first?.data, Data())
+        XCTAssertEqual(extracted.first?.flags, 3)
+    }
+
+    func testRebuilderRejectsDuplicateNodePaths() {
+        let nodes = [
+            AoVUnityFSExtractedNode(path: "CAB-same", data: Data([1])),
+            AoVUnityFSExtractedNode(path: "CAB-same", data: Data([2]))
+        ]
+
+        XCTAssertThrowsError(try AoVUnityFSRebuilder.rebuild(template: makeBundle(), nodes: nodes)) { error in
+            guard case AoVUnityFSRebuildError.duplicateNodePath("CAB-same") = error else {
+                return XCTFail("Expected duplicate path rejection, got \(error)")
+            }
+        }
+    }
+
+    func testRebuilderRejectsUnsafeNodePaths() {
+        let nodes = [AoVUnityFSExtractedNode(path: "../escape", data: Data([1]))]
+        XCTAssertThrowsError(try AoVUnityFSRebuilder.rebuild(template: makeBundle(), nodes: nodes)) { error in
+            guard case AoVUnityFSRebuildError.unsafeNodePath("../escape") = error else {
+                return XCTFail("Expected unsafe path rejection, got \(error)")
+            }
+        }
+    }
+
     private func makeBundle(
         formatVersion: UInt32 = 6,
         engineVersion: String = "2020.3.34f1",
