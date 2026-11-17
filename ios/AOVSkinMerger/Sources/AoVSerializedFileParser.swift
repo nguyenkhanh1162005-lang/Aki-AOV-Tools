@@ -103,15 +103,12 @@ struct AoVSerializedFileSummary: Codable, Sendable {
     let objectCount: Int
     let serializedObjects: [AoVSerializedFileObject]
     let serializedObjectsByPathID: [Int64: AoVSerializedFileObject]
+    let serializedObjectPathIDs: Set<Int64>
     let assetBundleObjects: [AoVSerializedFileObject]
     let externalReferences: [AoVSerializedFileExternalReference]
     let assetBundleRecords: [AoVSerializedAssetBundleRecord]
     let resourcePackerCatalog: AoVRuntimeResourcePackerCatalog?
     let resourceVerificationCatalog: AoVRuntimeResourceVerificationCatalog?
-
-    var serializedObjectPathIDs: Set<Int64> {
-        Set(serializedObjects.map(\.pathID))
-    }
 
     var assetBundleObjectCount: Int { assetBundleObjects.count }
 
@@ -736,6 +733,7 @@ enum AoVSerializedFileParser {
             objectCount: objectCount,
             serializedObjects: serializedObjects,
             serializedObjectsByPathID: serializedObjectsByPathID,
+            serializedObjectPathIDs: Set(serializedObjectsByPathID.keys),
             assetBundleObjects: assetBundleObjects,
             externalReferences: externalReferences,
             assetBundleRecords: assetBundleRecords,
