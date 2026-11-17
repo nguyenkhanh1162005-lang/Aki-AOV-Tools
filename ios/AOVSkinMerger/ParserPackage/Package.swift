@@ -13,6 +13,7 @@ let package = Package(
             sources: [
                 "AoVSerializedFileParser.swift",
                 "AoVSerializedAssetBundleWriter.swift",
+                "AoVAssetBundleCatalogMerger.swift",
                 "AoVUnityCommonStrings.swift",
                 "AoVUnityTypeTreeParser.swift"
             ]
