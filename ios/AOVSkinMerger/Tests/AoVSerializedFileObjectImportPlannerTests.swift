@@ -499,6 +499,79 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
         XCTAssertEqual(imported.objectValue?["m_TestPathID"]?.intValue, 1001)
     }
 
+    func testAssetBundleObjectClosureFollowsTransitiveLocalPointersWithoutImportingRoot() throws {
+        let nodes = pointerNodes()
+        let nullPointer = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: pointerValue(fileID: 0, pathID: 0),
+            littleEndian: true
+        )
+        let firstDependency = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: pointerValue(fileID: 0, pathID: 1003),
+            littleEndian: true
+        )
+        let source = makeSerializedFile(
+            pathIDs: [1001, 1002, 1003],
+            payloads: [nullPointer, firstDependency, nullPointer],
+            typeTreeNodes: nodes
+        )
+        let assetPointer = AoVSerializedAssetPointer(fileID: 0, pathID: 1002)
+        let legacyRecord = AoVSerializedAssetBundleRecord(
+            pathID: 1001,
+            name: "legacy-root",
+            preloadReferences: [assetPointer],
+            containerEntries: [
+                AoVSerializedAssetBundleEntry(
+                    key: "assets/new-skin.prefab",
+                    preloadIndex: 0,
+                    preloadSize: 1,
+                    asset: assetPointer
+                )
+            ],
+            mainAsset: AoVSerializedAssetPointer(fileID: 0, pathID: 0),
+            mainAssetPreloadIndex: 0,
+            mainAssetPreloadSize: 0,
+            scriptCompatibilityEntries: [],
+            classCompatibilityIDs: [],
+            classCompatibilityEntries: [],
+            runtimeCompatibility: nil,
+            assetBundleName: "actor/legacy",
+            dependencies: [],
+            isStreamedSceneAssetBundle: false,
+            trailingBytes: 0,
+            trailingData: Data()
+        )
+        let currentRecord = AoVSerializedAssetBundleRecord(
+            pathID: 9001,
+            name: "current-root",
+            preloadReferences: [],
+            containerEntries: [],
+            mainAsset: AoVSerializedAssetPointer(fileID: 0, pathID: 0),
+            mainAssetPreloadIndex: 0,
+            mainAssetPreloadSize: 0,
+            scriptCompatibilityEntries: [],
+            classCompatibilityIDs: [],
+            classCompatibilityEntries: [],
+            runtimeCompatibility: nil,
+            assetBundleName: "actor/legacy",
+            dependencies: [],
+            isStreamedSceneAssetBundle: false,
+            trailingBytes: 0,
+            trailingData: Data()
+        )
+        let sourceSummary = try AoVSerializedFileParser.inspect(source)
+        let closure = try AoVUnityFSAssetBundleMergeExecutor.requiredLocalObjectClosure(
+            legacyRecord: legacyRecord,
+            currentRecord: currentRecord,
+            sourceData: source,
+            sourceSummary: sourceSummary
+        )
+
+        XCTAssertEqual(closure, [1002, 1003])
+        XCTAssertFalse(closure.contains(1001))
+    }
+
     private func pointerNodes() -> [AoVUnityTypeTreeNode] {
         [
             AoVUnityTypeTreeNode(type: "MonoBehaviour", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
