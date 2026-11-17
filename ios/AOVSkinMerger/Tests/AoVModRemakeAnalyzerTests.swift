@@ -96,6 +96,36 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
         XCTAssertEqual(Set(report.findings.map(\.status)), [.missingFromCurrent, .ambiguousCurrentMatch])
     }
 
+    func testCatalogComparisonAuditsInvalidPreloadRangesAndCompatibilityChanges() {
+        let old = record(
+            source: "mod.zip",
+            bundle: "actor/3003",
+            entries: [entry("Assets/BadRange.prefab", pathID: 1, preloadIndex: 7, preloadSize: 2)],
+            dependencies: ["common"],
+            mainAssetPathID: 200,
+            classCompatibilityIDs: [28]
+        )
+        let current = record(
+            source: "new-res.zip",
+            bundle: "actor/3003",
+            entries: [entry("Assets/BadRange.prefab", pathID: 90, preloadIndex: 0, preloadSize: 1)],
+            dependencies: ["common"],
+            mainAssetPathID: 900,
+            classCompatibilityIDs: [28, 114]
+        )
+
+        let report = AoVModRemakeAnalyzer.compareCatalogRecords(
+            current: [current],
+            legacy: [old],
+            kind: .packer
+        )
+
+        XCTAssertEqual(report.invalidLegacyPreloadRangeCount, 1)
+        XCTAssertEqual(report.invalidCurrentPreloadRangeCount, 0)
+        XCTAssertEqual(report.changedMainAssetPointerCount, 1)
+        XCTAssertEqual(report.changedClassCompatibilityCount, 1)
+    }
+
     func testCatalogComparisonDoesNotSilentlyResolveDuplicateContainerKeys() {
         let old = record(
             source: "mod.zip",
@@ -152,7 +182,9 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
         source: String,
         bundle: String,
         entries: [AoVRemakeCatalogEntrySnapshot],
-        dependencies: [String]
+        dependencies: [String],
+        mainAssetPathID: Int64 = 200,
+        classCompatibilityIDs: [Int32] = [28]
     ) -> AoVRemakeCatalogRecordSnapshot {
         AoVRemakeCatalogRecordSnapshot(
             sourceArchive: source,
@@ -165,11 +197,11 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
             name: bundle,
             assetBundleName: bundle,
             preloadCount: 8,
-            invalidPreloadRangeCount: 0,
-            invalidPreloadRangeSamples: [],
-            classCompatibilityIDs: [28],
+            invalidPreloadRangeCount: entries.filter { !$0.preloadRangeValid }.count,
+            invalidPreloadRangeSamples: entries.filter { !$0.preloadRangeValid }.map(\.key),
+            classCompatibilityIDs: classCompatibilityIDs,
             mainAssetFileID: 0,
-            mainAssetPathID: 200,
+            mainAssetPathID: mainAssetPathID,
             dependencies: dependencies,
             containerEntries: entries
         )
