@@ -1,10 +1,16 @@
 import Foundation
 
+enum AoVUnityFSBlockInfoLayout: String, Codable, Hashable, Sendable {
+    case standard
+    case arenaOfValor
+}
+
 struct AoVUnityFSBlock: Codable, Hashable, Sendable, Identifiable {
     let index: Int
     let uncompressedSize: UInt32
     let compressedSize: UInt32
     let flags: UInt16
+    let reservedField: UInt16
     let compression: String
     var id: Int { index }
 }
@@ -24,7 +30,9 @@ struct AoVUnityFSBundleInfo: Codable, Sendable {
     let totalFileSize: UInt64
     let flags: UInt32
     let blockInfoCompression: String
+    let blockInfoLayout: AoVUnityFSBlockInfoLayout
     let blockInfoAtEnd: Bool
+    let usesAoVEncryption: Bool
     let blockPaddingAtStart: Bool
     let blocks: [AoVUnityFSBlock]
     let nodes: [AoVUnityFSNode]
@@ -66,7 +74,9 @@ struct AoVUnityFSScanResult: Codable, Sendable, Identifiable {
     let engineVersion: String
     let flags: UInt32
     let blockInfoCompression: String
+    let blockInfoLayout: AoVUnityFSBlockInfoLayout
     let blockInfoAtEnd: Bool
+    let usesAoVEncryption: Bool
     let blockCount: Int
     let nodeCount: Int
     let totalUncompressedBytes: UInt64
@@ -91,7 +101,9 @@ struct AoVUnityFSScanResult: Codable, Sendable, Identifiable {
         engineVersion = info.engineVersion
         flags = info.flags
         blockInfoCompression = info.blockInfoCompression
+        blockInfoLayout = info.blockInfoLayout
         blockInfoAtEnd = info.blockInfoAtEnd
+        usesAoVEncryption = info.usesAoVEncryption
         blockCount = info.blocks.count
         nodeCount = info.nodes.count
         totalUncompressedBytes = info.totalUncompressedBytes
@@ -109,6 +121,7 @@ enum AoVUnityFSError: LocalizedError {
     case fileSizeMismatch(expected: UInt64, actual: Int)
     case unsupportedEncryption(UInt32)
     case ambiguousLegacyFlag
+    case ambiguousBlockInfoLayout
     case unsupportedInfoCompression(UInt32)
     case unsupportedBlockCompression(UInt32)
     case invalidCompression(UInt32)
@@ -131,6 +144,8 @@ enum AoVUnityFSError: LocalizedError {
             return String(format: "UnityFS có cờ mã hóa chưa hỗ trợ (flags 0x%08X).", flags)
         case .ambiguousLegacyFlag:
             return "UnityFS không có phiên bản Unity rõ ràng và dùng cờ 0x200; chưa thể phân biệt padding với mã hóa."
+        case .ambiguousBlockInfoLayout:
+            return "Bảng block UnityFS khớp nhiều layout khác nhau; không thể tự chọn kiểu giải mã an toàn."
         case .unsupportedInfoCompression(let method):
             return "Bảng metadata UnityFS dùng kiểu nén \(method), chưa có bộ giải nén an toàn."
         case .unsupportedBlockCompression(let method):
@@ -234,6 +249,13 @@ private struct AoVUnityFSReader {
     }
 }
 
+private struct AoVUnityFSParsedBlockTable: Equatable {
+    let blocks: [AoVUnityFSBlock]
+    let nodes: [AoVUnityFSNode]
+    let totalUncompressedBytes: UInt64
+    let totalCompressedBlockBytes: UInt64
+}
+
 private struct AoVUnityEngineVersion {
     let major: Int
     let minor: Int
@@ -320,20 +342,29 @@ enum AoVUnityFSParser {
         let headerEnd = header.offset
 
         let usesLegacyFlags = engine?.usesLegacyEncryptionFlag
-        if flags & 0x400 != 0 || flags & 0x1000 != 0 {
+        if flags & 0x1000 != 0 {
             throw AoVUnityFSError.unsupportedEncryption(flags)
         }
-        if flags & 0x200 != 0 {
-            if usesLegacyFlags == true {
-                throw AoVUnityFSError.unsupportedEncryption(flags)
-            }
-            if usesLegacyFlags == nil {
-                throw AoVUnityFSError.ambiguousLegacyFlag
-            }
+        let usesAoVEncryption: Bool
+        if let usesLegacyFlags {
+            usesAoVEncryption = flags & (usesLegacyFlags ? 0x200 : 0x400) != 0
+        } else if flags & 0x600 != 0 {
+            throw AoVUnityFSError.ambiguousLegacyFlag
+        } else {
+            usesAoVEncryption = false
+        }
+        if usesAoVEncryption {
+            // Header AES + block-info SM4 are recognised separately from generic
+            // UnityFS. Repacking protected AOV archives remains disabled until the
+            // original protected variant can be reproduced and verified.
+            throw AoVUnityFSError.unsupportedEncryption(flags)
+        }
+        if usesLegacyFlags == nil && flags & 0x200 != 0 {
+            throw AoVUnityFSError.ambiguousLegacyFlag
         }
 
         let blockInfoAtEnd = flags & 0x80 != 0
-        let blockPaddingAtStart = flags & 0x200 != 0
+        let blockPaddingAtStart = (usesLegacyFlags == false) && (flags & 0x200 != 0)
         let compressedLength = Int(compressedInfoSize)
         let uncompressedLength = Int(uncompressedInfoSize)
 
@@ -374,11 +405,66 @@ enum AoVUnityFSParser {
             method: infoCompressionCode
         )
 
-        var reader = AoVUnityFSReader(data: infoCompression)
+        let standardTable = try? parseBlockDirectory(infoCompression, layout: .standard)
+        let aovTable = try? parseBlockDirectory(infoCompression, layout: .arenaOfValor)
+        let selectedTable: AoVUnityFSParsedBlockTable
+        let selectedLayout: AoVUnityFSBlockInfoLayout
+        switch (standardTable, aovTable) {
+        case (let standard?, nil):
+            selectedTable = standard
+            selectedLayout = .standard
+        case (nil, let aov?):
+            selectedTable = aov
+            selectedLayout = .arenaOfValor
+        case (let standard?, let aov?):
+            guard standard == aov else {
+                throw AoVUnityFSError.ambiguousBlockInfoLayout
+            }
+            selectedTable = standard
+            selectedLayout = .standard
+        case (nil, nil):
+            throw AoVUnityFSError.invalidBlockTable("Không khớp UnityFS chuẩn hoặc layout block-info AOV.")
+        }
+
+        guard dataStart >= headerEnd, dataEnd >= dataStart else {
+            throw AoVUnityFSError.invalidHeader("vùng dữ liệu block bị đảo hoặc chồng lấn.")
+        }
+        let availableBlockData = UInt64(dataEnd - dataStart)
+        guard selectedTable.totalCompressedBlockBytes <= availableBlockData else {
+            throw AoVUnityFSError.invalidBlockTable(
+                "các block khai báo \(selectedTable.totalCompressedBlockBytes) byte nén, chỉ có \(availableBlockData) byte trong bundle."
+            )
+        }
+
+        return AoVUnityFSBundleInfo(
+            formatVersion: formatVersion,
+            playerVersion: playerVersion,
+            engineVersion: engineVersion,
+            totalFileSize: declaredFileSize,
+            flags: flags,
+            blockInfoCompression: compressionName(infoCompressionCode),
+            blockInfoLayout: selectedLayout,
+            blockInfoAtEnd: blockInfoAtEnd,
+            blockPaddingAtStart: blockPaddingAtStart,
+            usesAoVEncryption: false,
+            blocks: selectedTable.blocks,
+            nodes: selectedTable.nodes,
+            totalUncompressedBytes: selectedTable.totalUncompressedBytes,
+            totalCompressedBlockBytes: selectedTable.totalCompressedBlockBytes,
+            availableBlockDataBytes: availableBlockData,
+            blockDataOffset: UInt64(dataStart)
+        )
+    }
+
+    private static func parseBlockDirectory(
+        _ data: Data,
+        layout: AoVUnityFSBlockInfoLayout
+    ) throws -> AoVUnityFSParsedBlockTable {
+        var reader = AoVUnityFSReader(data: data)
         _ = try reader.readBytes(16, "uncompressed data hash")
         let rawBlockCount = try reader.readInt32BE("block count")
         guard rawBlockCount >= 0, rawBlockCount <= maximumBlocks else {
-            throw AoVUnityFSError.resourceLimit("số block \(rawBlockCount) không hợp lệ hoặc vượt \(maximumBlocks).")
+            throw AoVUnityFSError.resourceLimit("số block \(rawBlockCount) không hợp lệ hoặc vượt giới hạn.")
         }
 
         var blocks: [AoVUnityFSBlock] = []
@@ -386,26 +472,38 @@ enum AoVUnityFSParser {
         var totalUncompressed: UInt64 = 0
         var totalCompressed: UInt64 = 0
         for index in 0..<Int(rawBlockCount) {
-            let uncompressed = try reader.readUInt32BE("block \(index) uncompressed size")
-            let compressed = try reader.readUInt32BE("block \(index) compressed size")
-            let blockFlags = try reader.readUInt16BE("block \(index) flags")
-            let method = UInt32(blockFlags & 0x3F)
-            guard method <= 4 else {
-                throw AoVUnityFSError.invalidCompression(method)
+            let uncompressed: UInt32
+            let compressed: UInt32
+            let blockFlags: UInt16
+            let reserved: UInt16
+            switch layout {
+            case .standard:
+                uncompressed = try reader.readUInt32BE("block \(index) uncompressed size")
+                compressed = try reader.readUInt32BE("block \(index) compressed size")
+                blockFlags = try reader.readUInt16BE("block \(index) flags")
+                reserved = 0
+            case .arenaOfValor:
+                blockFlags = try reader.readUInt16BE("AOV block \(index) flags")
+                reserved = try reader.readUInt16BE("AOV block \(index) reserved field")
+                compressed = try reader.readUInt32BE("AOV block \(index) compressed size")
+                uncompressed = try reader.readUInt32BE("AOV block \(index) uncompressed size")
             }
-            let sumUncompressed = totalUncompressed.addingReportingOverflow(UInt64(uncompressed))
-            let sumCompressed = totalCompressed.addingReportingOverflow(UInt64(compressed))
-            guard !sumUncompressed.overflow, !sumCompressed.overflow else {
+            let method = UInt32(blockFlags & 0x3F)
+            guard method <= 4 else { throw AoVUnityFSError.invalidCompression(method) }
+            let nextUncompressed = totalUncompressed.addingReportingOverflow(UInt64(uncompressed))
+            let nextCompressed = totalCompressed.addingReportingOverflow(UInt64(compressed))
+            guard !nextUncompressed.overflow, !nextCompressed.overflow else {
                 throw AoVUnityFSError.resourceLimit("tổng kích thước block bị tràn số.")
             }
-            totalUncompressed = sumUncompressed.partialValue
-            totalCompressed = sumCompressed.partialValue
+            totalUncompressed = nextUncompressed.partialValue
+            totalCompressed = nextCompressed.partialValue
             blocks.append(
                 AoVUnityFSBlock(
                     index: index,
                     uncompressedSize: uncompressed,
                     compressedSize: compressed,
                     flags: blockFlags,
+                    reservedField: reserved,
                     compression: compressionName(method)
                 )
             )
@@ -413,15 +511,23 @@ enum AoVUnityFSParser {
 
         let rawNodeCount = try reader.readInt32BE("node count")
         guard rawNodeCount >= 0, rawNodeCount <= maximumNodes else {
-            throw AoVUnityFSError.resourceLimit("số node \(rawNodeCount) không hợp lệ hoặc vượt \(maximumNodes).")
+            throw AoVUnityFSError.resourceLimit("số node \(rawNodeCount) không hợp lệ hoặc vượt giới hạn.")
         }
-
         var nodes: [AoVUnityFSNode] = []
         nodes.reserveCapacity(Int(rawNodeCount))
         var seenPaths = Set<String>()
+
         for index in 0..<Int(rawNodeCount) {
-            let rawOffset = try reader.readInt64BE("node \(index) offset")
-            let rawSize = try reader.readInt64BE("node \(index) size")
+            let rawOffset: Int64
+            let rawSize: Int64
+            switch layout {
+            case .standard:
+                rawOffset = try reader.readInt64BE("node \(index) offset")
+                rawSize = try reader.readInt64BE("node \(index) size")
+            case .arenaOfValor:
+                rawSize = try reader.readInt64BE("AOV node \(index) size")
+                rawOffset = try reader.readInt64BE("AOV node \(index) offset")
+            }
             let nodeFlags = try reader.readUInt32BE("node \(index) flags")
             let path = try reader.readCString("node \(index) path")
             guard rawOffset >= 0, rawSize >= 0 else {
@@ -447,34 +553,13 @@ enum AoVUnityFSParser {
             ))
         }
 
-        guard dataStart >= headerEnd, dataEnd >= dataStart else {
-            throw AoVUnityFSError.invalidHeader("vùng dữ liệu block bị đảo hoặc chồng lấn.")
-        }
-        let availableBlockData = UInt64(dataEnd - dataStart)
-        guard totalCompressed <= availableBlockData else {
-            throw AoVUnityFSError.invalidBlockTable(
-                "các block khai báo \(totalCompressed) byte nén, chỉ có \(availableBlockData) byte trong bundle."
-            )
-        }
-
-        return AoVUnityFSBundleInfo(
-            formatVersion: formatVersion,
-            playerVersion: playerVersion,
-            engineVersion: engineVersion,
-            totalFileSize: declaredFileSize,
-            flags: flags,
-            blockInfoCompression: compressionName(infoCompressionCode),
-            blockInfoAtEnd: blockInfoAtEnd,
-            blockPaddingAtStart: blockPaddingAtStart,
+        return AoVUnityFSParsedBlockTable(
             blocks: blocks,
             nodes: nodes,
             totalUncompressedBytes: totalUncompressed,
-            totalCompressedBlockBytes: totalCompressed,
-            availableBlockDataBytes: availableBlockData,
-            blockDataOffset: UInt64(dataStart)
+            totalCompressedBlockBytes: totalCompressed
         )
     }
-
 
     /// Extract UnityFS directory nodes for read-only inspection. This never rebuilds
     /// or modifies a bundle and enforces a caller-supplied expanded-size ceiling.
