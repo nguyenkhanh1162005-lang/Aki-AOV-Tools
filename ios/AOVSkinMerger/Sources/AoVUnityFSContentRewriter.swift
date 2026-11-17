@@ -150,12 +150,19 @@ enum AoVUnityFSContentRewriter {
         with replacement: AoVSerializedAssetBundleRecord
     ) throws -> AoVUnityFSContentRewriteReport {
         let info = try AoVUnityFSParser.inspect(source)
+        guard info.totalUncompressedBytes <= UInt64(512 * 1024 * 1024) else {
+            throw AoVUnityFSContentRewriteError.expandedArchiveTooLarge
+        }
         let extracted = try AoVUnityFSParser.extractNodes(
             source,
             maximumExpandedBytes: UInt64(512 * 1024 * 1024),
             maximumNodeCount: max(info.nodes.count, 1)
         )
-        guard let node = extracted.first(where: { $0.path == serializedFileNodePath }) else {
+        let matches = extracted.filter { $0.path == serializedFileNodePath }
+        guard matches.count == 1, let node = matches.first else {
+            if matches.count > 1 {
+                throw AoVUnityFSContentRewriteError.ambiguousTarget(serializedFileNodePath)
+            }
             throw AoVUnityFSContentRewriteError.nodeNotFound(serializedFileNodePath)
         }
         let serializedReport = try AoVSerializedFileRewriter.replaceAssetBundleRecord(
