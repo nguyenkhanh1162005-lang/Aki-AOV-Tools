@@ -53,6 +53,7 @@ struct AoVAssetBundleLegacyObjectImportInput: Sendable {
 
 private final class AoVAssetBundleGraphDiffCache {
     var values: [Int64: Bool] = [:]
+    var visited = Set<Int64>()
 }
 
 struct AoVUnityFSAssetBundleObjectImportExecutionReport: Sendable {
@@ -686,14 +687,12 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         destinationSummary: AoVSerializedFileSummary,
         graphDiffCache: AoVAssetBundleGraphDiffCache
     ) throws -> Bool {
-        var visited = Set<Int64>()
         return try localObjectGraphDiffers(
             pointer,
             sourceData: sourceData,
             destinationData: destinationData,
             sourceSummary: sourceSummary,
             destinationSummary: destinationSummary,
-            visited: &visited,
             graphDiffCache: graphDiffCache
         )
     }
@@ -704,7 +703,6 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         destinationData: Data,
         sourceSummary: AoVSerializedFileSummary,
         destinationSummary: AoVSerializedFileSummary,
-        visited: inout Set<Int64>,
         graphDiffCache: AoVAssetBundleGraphDiffCache
     ) throws -> Bool {
         guard pointer.fileID >= 0 else { return true }
@@ -721,7 +719,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         }
         guard pointer.pathID != 0 else { return false }
         if let cached = graphDiffCache.values[pointer.pathID] { return cached }
-        guard visited.insert(pointer.pathID).inserted else { return false }
+        guard graphDiffCache.visited.insert(pointer.pathID).inserted else { return false }
 
         let sourceMatches = sourceSummary.serializedObjects.filter { $0.pathID == pointer.pathID }
         let destinationMatches = destinationSummary.serializedObjects.filter { $0.pathID == pointer.pathID }
@@ -786,7 +784,6 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                 destinationData: destinationData,
                 sourceSummary: sourceSummary,
                 destinationSummary: destinationSummary,
-                visited: &visited,
                 graphDiffCache: graphDiffCache
             ) {
                 graphDiffCache.values[pointer.pathID] = true
