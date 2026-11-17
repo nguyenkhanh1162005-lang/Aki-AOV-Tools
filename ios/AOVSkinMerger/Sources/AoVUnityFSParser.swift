@@ -37,6 +37,13 @@ struct AoVUnityFSBundleInfo: Codable, Sendable {
 struct AoVUnityFSExtractedNode: Sendable {
     let path: String
     let data: Data
+    let flags: UInt32
+
+    init(path: String, data: Data, flags: UInt32 = 0) {
+        self.path = path
+        self.data = data
+        self.flags = flags
+    }
 }
 
 struct AoVUnityFSCatalogNodeSample: Codable, Sendable, Identifiable {
@@ -572,7 +579,8 @@ enum AoVUnityFSParser {
             extracted.append(
                 AoVUnityFSExtractedNode(
                     path: node.path,
-                    data: expanded.subdata(in: offset..<(offset + size))
+                    data: expanded.subdata(in: offset..<(offset + size)),
+                    flags: node.flags
                 )
             )
         }
