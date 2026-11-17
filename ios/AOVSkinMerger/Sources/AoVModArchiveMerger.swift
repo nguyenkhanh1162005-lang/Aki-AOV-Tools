@@ -228,9 +228,9 @@ enum AoVModArchiveMerger {
             .map(\.name)
         let versionDetail: String
         if missingVersionSources.isEmpty {
-            versionDetail = "Đã đối chiếu version.txt của toàn bộ gói: (baseVersion ?? "không rõ")."
+            versionDetail = "Đã đối chiếu version.txt của toàn bộ gói: \(baseVersion ?? "không rõ")."
         } else {
-            versionDetail = "Không có xung đột ở các version.txt đã đọc; thiếu version.txt ở: (missingVersionSources.joined(separator: ", ")). Không thể xác nhận các gói thiếu marker cùng build."
+            versionDetail = "Không có xung đột ở các version.txt đã đọc; thiếu version.txt ở: \(missingVersionSources.joined(separator: ", ")). Không thể xác nhận các gói thiếu marker cùng build."
         }
         pipelineEvents.append(
             AoVModMergePipelineEvent(stage: .versionCompatibility, detail: versionDetail)
