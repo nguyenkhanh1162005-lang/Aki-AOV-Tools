@@ -13,6 +13,7 @@ enum AoVAssetBundleCatalogMergeError: LocalizedError {
     case dependencyUnavailable(String)
     case integerOverflow
     case replacementKeyNotPresent(String)
+    case unsupportedMetadataChange(String)
 
     var errorDescription: String? {
         switch self {
@@ -40,6 +41,9 @@ enum AoVAssetBundleCatalogMergeError: LocalizedError {
             return "Số lượng preload hoặc index vượt giới hạn của SerializedFile."
         case .replacementKeyNotPresent(let key):
             return "Không thể thay container key \(key) vì key này chưa tồn tại trong RES nền."
+        case .unsupportedMetadataChange(let field):
+            return "MOD cũ thay đổi trường AssetBundle metadata chưa có adapter an toàn: \(field)."
+
         }
     }
 }
@@ -77,6 +81,7 @@ enum AoVAssetBundleCatalogMerger {
         guard identity(for: current) == identity(for: legacy) else {
             throw AoVAssetBundleCatalogMergeError.bundleIdentityMismatch
         }
+        try validateUnsupportedMetadataChanges(current: current, legacy: legacy)
 
         var currentByKey: [String: AoVSerializedAssetBundleEntry] = [:]
         var currentIndexByKey: [String: Int] = [:]
@@ -343,6 +348,68 @@ enum AoVAssetBundleCatalogMerger {
               end.partialValue <= Int64(preloadCount) else {
             throw AoVAssetBundleCatalogMergeError.invalidLegacyPreloadRange(entry.key)
         }
+    }
+
+    private static func validateUnsupportedMetadataChanges(
+        current: AoVSerializedAssetBundleRecord,
+        legacy: AoVSerializedAssetBundleRecord
+    ) throws {
+        guard current.mainAsset == legacy.mainAsset else {
+            throw AoVAssetBundleCatalogMergeError.unsupportedMetadataChange("mainAsset")
+        }
+        let currentMainPreloads = try preloadSlice(
+            current.mainAssetPreloadIndex,
+            size: current.mainAssetPreloadSize,
+            in: current,
+            isCurrent: true
+        )
+        let legacyMainPreloads = try preloadSlice(
+            legacy.mainAssetPreloadIndex,
+            size: legacy.mainAssetPreloadSize,
+            in: legacy,
+            isCurrent: false
+        )
+        guard currentMainPreloads == legacyMainPreloads else {
+            throw AoVAssetBundleCatalogMergeError.unsupportedMetadataChange("mainAsset preload")
+        }
+        guard current.scriptCompatibilityEntries == legacy.scriptCompatibilityEntries else {
+            throw AoVAssetBundleCatalogMergeError.unsupportedMetadataChange("scriptCompatibility")
+        }
+        guard current.classCompatibilityIDs == legacy.classCompatibilityIDs else {
+            throw AoVAssetBundleCatalogMergeError.unsupportedMetadataChange("classCompatibilityIDs")
+        }
+        guard current.classCompatibilityEntries == legacy.classCompatibilityEntries else {
+            throw AoVAssetBundleCatalogMergeError.unsupportedMetadataChange("classCompatibilityEntries")
+        }
+        guard current.runtimeCompatibility == legacy.runtimeCompatibility else {
+            throw AoVAssetBundleCatalogMergeError.unsupportedMetadataChange("runtimeCompatibility")
+        }
+        guard current.isStreamedSceneAssetBundle == legacy.isStreamedSceneAssetBundle else {
+            throw AoVAssetBundleCatalogMergeError.unsupportedMetadataChange("isStreamedSceneAssetBundle")
+        }
+        guard current.trailingBytes == legacy.trailingBytes,
+              current.trailingData == legacy.trailingData else {
+            throw AoVAssetBundleCatalogMergeError.unsupportedMetadataChange("trailingData")
+        }
+    }
+
+    private static func preloadSlice(
+        _ startValue: Int32,
+        size countValue: Int32,
+        in record: AoVSerializedAssetBundleRecord,
+        isCurrent: Bool
+    ) throws -> [AoVSerializedAssetPointer] {
+        let start = Int(startValue)
+        let count = Int(countValue)
+        let valid = start >= 0 && count >= 0 &&
+            start <= record.preloadReferences.count &&
+            count <= record.preloadReferences.count - start
+        guard valid else {
+            throw isCurrent
+                ? AoVAssetBundleCatalogMergeError.invalidCurrentPreloadRange("mainAsset")
+                : AoVAssetBundleCatalogMergeError.invalidLegacyPreloadRange("mainAsset")
+        }
+        return Array(record.preloadReferences[start..<(start + count)])
     }
 
     private static func preloadSlice(
