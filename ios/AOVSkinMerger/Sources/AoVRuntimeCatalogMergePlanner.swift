@@ -88,9 +88,24 @@ enum AoVRuntimeCatalogMergePlanner {
         }
         let legacyByPath = Dictionary(grouping: legacyRows, by: { $0.value.pathInIFS })
         var mergedEntries = current.allResourcePackInfo
-        var mergedIndexByPath = Dictionary(uniqueKeysWithValues: mergedEntries.enumerated().compactMap { index, item in
-            Int32(exactly: index).map { (item.pathInIFS, $0) }
-        })
+        var mergedIndexByPath: [String: Int32] = [:]
+        for (index, item) in mergedEntries.enumerated() {
+            guard let encodedIndex = Int32(exactly: index) else {
+                issues.append(
+                    AoVRuntimeCatalogMergeIssue(
+                        path: item.pathInIFS,
+                        reason: .invalidParentChildIndex,
+                        sourceArchives: []
+                    )
+                )
+                continue
+            }
+            // Duplicate paths were recorded above; retain the first index only
+            // so malformed input cannot trap Dictionary(uniqueKeysWithValues:).
+            if mergedIndexByPath[item.pathInIFS] == nil {
+                mergedIndexByPath[item.pathInIFS] = encodedIndex
+            }
+        }
         var additions: [String] = []
         var updates: [String] = []
         var unchanged: [String] = []
@@ -128,7 +143,8 @@ enum AoVRuntimeCatalogMergePlanner {
                     )
                     continue
                 }
-                if let existingIndex = mergedIndexByPath[path].flatMap(Int.init(exactly:)) {
+                if let existingIndexValue = mergedIndexByPath[path] {
+                    let existingIndex = Int(existingIndexValue)
                     guard mergedEntries.indices.contains(existingIndex) else {
                         issues.append(
                             AoVRuntimeCatalogMergeIssue(
