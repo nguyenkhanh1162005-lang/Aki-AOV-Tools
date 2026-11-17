@@ -530,9 +530,17 @@ enum ArchiveScanner {
                                                 (dependencies.isEmpty ? "" : " · deps=[\(dependencies)]") +
                                                 (containerSamples.isEmpty ? "" : " · entries=[\(containerSamples)]")
                                         }.joined(separator: " || ")
+                                        let packerSummary = serialized.resourcePackerCatalog.map {
+                                            " · AoV Packer \($0.version): \($0.allResourcePackInfo.count) bundle · \($0.allParentIndexToChild.count) parent-child map"
+                                        } ?? ""
+                                        let verificationSummary = serialized.resourceVerificationCatalog.map {
+                                            " · AoV Verification \($0.version): \($0.allZipVerificationInfo.count) ZIP · \($0.allDatabinVerificationInfo.count) Databin"
+                                        } ?? ""
                                         serializedSummary = "SerializedFile v\(serialized.formatVersion) · Unity \(serialized.unityVersion) · platform \(serialized.targetPlatform) · \(serialized.objectCount) object · AssetBundle class 142: \(serialized.assetBundleObjectCount)" +
                                             (bundleObjects.isEmpty ? "" : " · \(bundleObjects)") +
-                                            (catalogRecords.isEmpty ? "" : " · \(catalogRecords)")
+                                            (catalogRecords.isEmpty ? "" : " · \(catalogRecords)") +
+                                            packerSummary +
+                                            verificationSummary
                                     } catch {
                                         serializedFile = nil
                                         serializedSummary = "Không nhận diện SerializedFile: \(error.localizedDescription)"
