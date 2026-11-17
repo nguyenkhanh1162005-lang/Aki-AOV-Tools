@@ -775,7 +775,7 @@ enum AoVUnityFSParser {
             }
         }
         guard status == kCCSuccess, outputLength == 16 else {
-            throw AoVUnityFSError.decryptionFailed("AES-CBC header encrypt trả về trạng thái \\(status).")
+            throw AoVUnityFSError.decryptionFailed("AES-CBC header encrypt trả về trạng thái \(status).")
         }
         let bytes = Array(encrypted)
         var reordered = Data()
