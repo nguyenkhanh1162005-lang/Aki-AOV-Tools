@@ -206,7 +206,7 @@ enum AoVModArchiveMerger {
         pipelineEvents.append(
             AoVModMergePipelineEvent(
                 stage: .baseSelection,
-                detail: "Gói nền: (base.name) ((baseSelectionMode)); các gói còn lại là nguồn overlay."
+                detail: "Gói nền: \(base.name) (\(baseSelectionMode)); các gói còn lại là nguồn overlay."
             )
         )
         let baseVersion = base.version?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -472,16 +472,16 @@ enum AoVModArchiveMerger {
         }
 
         let adapterSummary = [
-            "CommonActions: (commonActionsFiles.count)",
-            "MSES: (mergedMSESTables.count)",
-            "IFix: (mergedIFixPatches.count)",
-            "AssetRef giữ nguyên: (assetRefUnique.count)",
-            "Wwise BNK append-only: (preservedWwiseBanks.count)"
+            "CommonActions: \(commonActionsFiles.count)",
+            "MSES: \(mergedMSESTables.count)",
+            "IFix: \(mergedIFixPatches.count)",
+            "AssetRef giữ nguyên: \(assetRefUnique.count)",
+            "Wwise BNK append-only: \(preservedWwiseBanks.count)"
         ].joined(separator: " · ")
         pipelineEvents.append(
             AoVModMergePipelineEvent(
                 stage: .adapterValidation,
-                detail: "(adapterSummary). Adapter nào được dùng đều phải vượt kiểm tra riêng; Wwise chỉ được thêm nguyên trạng khi kiểm tra append-only đạt."
+                detail: "\(adapterSummary). Adapter nào được dùng đều phải vượt kiểm tra riêng; Wwise chỉ được thêm nguyên trạng khi kiểm tra append-only đạt."
             )
         )
 
