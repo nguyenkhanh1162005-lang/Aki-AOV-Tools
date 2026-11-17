@@ -8,12 +8,12 @@ struct AoVUnityTypeTreeNode: Codable, Hashable, Sendable {
     let metaFlags: UInt32
 }
 
-struct AoVUnityTypeTreeMapEntry: Sendable {
+struct AoVUnityTypeTreeMapEntry: Sendable, Equatable {
     let key: AoVUnityTypeTreeValue
     let value: AoVUnityTypeTreeValue
 }
 
-indirect enum AoVUnityTypeTreeValue: Sendable {
+indirect enum AoVUnityTypeTreeValue: Sendable, Equatable {
     case signed(Int64)
     case unsigned(UInt64)
     case floating(Double)
