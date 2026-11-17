@@ -31,6 +31,7 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
             legacyHasVerificationCatalog: [],
             packerCatalogComparison: emptyPacker,
             verificationCatalogComparison: emptyVerification,
+            runtimeCatalogComparison: emptyRuntimeCatalogReport(),
             catalogMergePlanFindings: [],
             warnings: []
         )
@@ -182,6 +183,35 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
 
         XCTAssertEqual(report.ambiguousContainerKeyCount, 1)
         XCTAssertEqual(report.mappedContainerKeyCount, 0)
+    }
+
+
+    private func emptyRuntimeCatalogReport() -> AoVRuntimeCatalogComparisonReport {
+        func section(_ title: String) -> AoVRuntimeCatalogSectionReport {
+            AoVRuntimeCatalogSectionReport(
+                title: title,
+                currentCatalogVersions: [],
+                legacyCatalogVersions: [],
+                currentEntryCount: 0,
+                legacyEntryCount: 0,
+                uniqueLegacyPathCount: 0,
+                identicalEntryCount: 0,
+                changedEntryCount: 0,
+                legacyOnlyEntryCount: 0,
+                currentOnlyEntryCount: 0,
+                duplicateCurrentPathCount: 0,
+                duplicateLegacyPathCount: 0,
+                conflictingLegacyPathCount: 0,
+                invalidReferenceCount: 0,
+                findings: []
+            )
+        }
+        return AoVRuntimeCatalogComparisonReport(
+            packerResources: section("Packer resources"),
+            packerParentChildLinks: section("Packer parent-child links"),
+            verificationZIP: section("Verification ZIP"),
+            verificationDatabin: section("Verification Databin")
+        )
     }
 
     private func emptyCatalogReport(_ kind: AoVRemakeCatalogKind) -> AoVRemakeCatalogKindReport {
