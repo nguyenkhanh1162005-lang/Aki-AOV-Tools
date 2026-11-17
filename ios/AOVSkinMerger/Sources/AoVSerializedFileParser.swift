@@ -9,6 +9,34 @@ struct AoVSerializedFileObject: Codable, Hashable, Sendable, Identifiable {
     var id: String { "\(classID):\(pathID)" }
 }
 
+struct AoVSerializedAssetPointer: Codable, Hashable, Sendable {
+    let fileID: Int32
+    let pathID: Int64
+}
+
+struct AoVSerializedAssetBundleEntry: Codable, Hashable, Sendable, Identifiable {
+    let key: String
+    let preloadIndex: Int32
+    let preloadSize: Int32
+    let asset: AoVSerializedAssetPointer
+    var id: String { key }
+}
+
+struct AoVSerializedAssetBundleRecord: Codable, Sendable, Identifiable {
+    let pathID: Int64
+    let name: String
+    let preloadReferences: [AoVSerializedAssetPointer]
+    let containerEntries: [AoVSerializedAssetBundleEntry]
+    let mainAsset: AoVSerializedAssetPointer
+    let classCompatibilityIDs: [Int32]
+    let runtimeCompatibility: UInt32?
+    let assetBundleName: String
+    let dependencies: [String]
+    let isStreamedSceneAssetBundle: Bool
+    let trailingBytes: Int
+    var id: Int64 { pathID }
+}
+
 struct AoVSerializedFileSummary: Codable, Sendable {
     let formatVersion: UInt32
     let unityVersion: String
@@ -18,6 +46,7 @@ struct AoVSerializedFileSummary: Codable, Sendable {
     let typeCount: Int
     let objectCount: Int
     let assetBundleObjects: [AoVSerializedFileObject]
+    let assetBundleRecords: [AoVSerializedAssetBundleRecord]
 
     var assetBundleObjectCount: Int { assetBundleObjects.count }
 }
@@ -30,6 +59,8 @@ enum AoVSerializedFileError: LocalizedError {
     case unsupportedTypeTreeVersion(UInt32)
     case invalidTypeIndex(Int32)
     case invalidObjectRange(Int64)
+    case unsupportedTargetPlatform(Int32)
+    case invalidAssetBundle(String)
 
     var errorDescription: String? {
         switch self {
@@ -47,6 +78,10 @@ enum AoVSerializedFileError: LocalizedError {
             return "SerializedFile có type index không hợp lệ: \(index)."
         case .invalidObjectRange(let pathID):
             return "Object pathID \(pathID) nằm ngoài vùng dữ liệu SerializedFile."
+        case .unsupportedTargetPlatform(let platform):
+            return "AssetBundle class 142 có target platform \(platform), layout nền chưa được xác minh."
+        case .invalidAssetBundle(let reason):
+            return "AssetBundle class 142 không hợp lệ: \(reason)"
         }
     }
 }
@@ -159,6 +194,14 @@ private struct AoVSerializedReader {
         }
         try align(4)
         return value
+    }
+
+    mutating func readBoolean(_ field: String) throws -> Bool {
+        let value = try readByte(field)
+        guard value <= 1 else {
+            throw AoVSerializedFileError.invalidHeader("\(field) boolean byte không hợp lệ.")
+        }
+        return value == 1
     }
 
     mutating func readCount(_ field: String, maximum: Int) throws -> Int {
@@ -442,6 +485,27 @@ enum AoVSerializedFileParser {
             )
         }
 
+        let assetBundleRecords = try assetBundleObjects.map { object in
+            guard targetPlatform != -2 else {
+                throw AoVSerializedFileError.unsupportedTargetPlatform(targetPlatform)
+            }
+            guard object.byteSize > 0, object.byteSize <= 64 * 1024 * 1024,
+                  let start = Int(exactly: object.byteOffset),
+                  let size = Int(exactly: object.byteSize),
+                  start <= data.count, size <= data.count - start else {
+                throw AoVSerializedFileError.invalidAssetBundle(
+                    "object pathID \(object.pathID) rỗng hoặc vượt giới hạn 64 MiB."
+                )
+            }
+            let payload = data.subdata(in: start..<(start + size))
+            return try parseAssetBundleObject(
+                payload,
+                pathID: object.pathID,
+                serializedVersion: formatVersion,
+                unityVersion: unityVersion
+            )
+        }
+
         return AoVSerializedFileSummary(
             formatVersion: formatVersion,
             unityVersion: unityVersion,
@@ -450,8 +514,138 @@ enum AoVSerializedFileParser {
             dataOffset: dataOffset,
             typeCount: typeCount,
             objectCount: objectCount,
-            assetBundleObjects: assetBundleObjects
+            assetBundleObjects: assetBundleObjects,
+            assetBundleRecords: assetBundleRecords
         )
+    }
+
+    private static func parseAssetBundleObject(
+        _ data: Data,
+        pathID: Int64,
+        serializedVersion: UInt32,
+        unityVersion: String
+    ) throws -> AoVSerializedAssetBundleRecord {
+        var reader = AoVSerializedReader(data: data, littleEndian: true)
+        let name = try reader.readAlignedString("AssetBundle m_Name")
+        let preloadCount = try reader.readCount("AssetBundle m_PreloadTable count", maximum: 1_000_000)
+        var preloadReferences: [AoVSerializedAssetPointer] = []
+        preloadReferences.reserveCapacity(preloadCount)
+        for index in 0..<preloadCount {
+            preloadReferences.append(
+                try readAssetPointer(&reader, serializedVersion: serializedVersion, field: "m_PreloadTable[\(index)]")
+            )
+        }
+
+        let containerCount = try reader.readCount("AssetBundle m_Container count", maximum: 1_000_000)
+        var containerEntries: [AoVSerializedAssetBundleEntry] = []
+        containerEntries.reserveCapacity(containerCount)
+        for index in 0..<containerCount {
+            let key = try reader.readAlignedString("m_Container[\(index)] key")
+            let preloadIndex = try reader.readInt32("m_Container[\(index)] preload index")
+            let preloadSize = try reader.readInt32("m_Container[\(index)] preload size")
+            let asset = try readAssetPointer(
+                &reader,
+                serializedVersion: serializedVersion,
+                field: "m_Container[\(index)] asset"
+            )
+            containerEntries.append(
+                AoVSerializedAssetBundleEntry(
+                    key: key,
+                    preloadIndex: preloadIndex,
+                    preloadSize: preloadSize,
+                    asset: asset
+                )
+            )
+        }
+
+        let mainPreloadIndex = try reader.readInt32("m_MainAsset preload index")
+        let mainPreloadSize = try reader.readInt32("m_MainAsset preload size")
+        let mainAsset = try readAssetPointer(
+            &reader,
+            serializedVersion: serializedVersion,
+            field: "m_MainAsset asset"
+        )
+
+        let versionParts = unityVersion.split(separator: ".").prefix(3).map { part -> Int in
+            let digits = part.prefix(while: { $0.isNumber })
+            return Int(digits) ?? -1
+        }
+        guard versionParts.count >= 3, versionParts.allSatisfy({ $0 >= 0 }) else {
+            throw AoVSerializedFileError.invalidAssetBundle("Unity version không phân tích được: \(unityVersion)")
+        }
+        let major = versionParts[0]
+        let minor = versionParts[1]
+
+        if major == 5 && minor == 4 {
+            let scriptCompatibilityCount = try reader.readCount(
+                "m_ScriptCompatibility count",
+                maximum: 100_000
+            )
+            try reader.skip(scriptCompatibilityCount * 8, "m_ScriptCompatibility entries")
+        }
+
+        let classCompatibilityCount = try reader.readCount(
+            "m_ClassCompatibility count",
+            maximum: 100_000
+        )
+        var classCompatibilityIDs: [Int32] = []
+        classCompatibilityIDs.reserveCapacity(classCompatibilityCount)
+        for index in 0..<classCompatibilityCount {
+            classCompatibilityIDs.append(try reader.readInt32("m_ClassCompatibility[\(index)] class ID"))
+            _ = try reader.readInt32("m_ClassCompatibility[\(index)] preload index")
+            _ = try reader.readInt32("m_ClassCompatibility[\(index)] preload size")
+            _ = try readAssetPointer(
+                &reader,
+                serializedVersion: serializedVersion,
+                field: "m_ClassCompatibility[\(index)] asset"
+            )
+        }
+
+        var runtimeCompatibility: UInt32?
+        if major > 4 || (major == 4 && minor >= 2) {
+            runtimeCompatibility = try reader.readUInt32("m_RuntimeCompatibility")
+        }
+
+        var assetBundleName = ""
+        var dependencies: [String] = []
+        var isStreamedSceneAssetBundle = false
+        if major >= 5 {
+            assetBundleName = try reader.readAlignedString("m_AssetBundleName")
+            let dependencyCount = try reader.readCount("m_Dependencies count", maximum: 100_000)
+            dependencies.reserveCapacity(dependencyCount)
+            for index in 0..<dependencyCount {
+                dependencies.append(try reader.readAlignedString("m_Dependencies[\(index)]"))
+            }
+            isStreamedSceneAssetBundle = try reader.readBoolean("m_IsStreamedSceneAssetBundle")
+        }
+
+        _ = mainPreloadIndex
+        _ = mainPreloadSize
+        return AoVSerializedAssetBundleRecord(
+            pathID: pathID,
+            name: name,
+            preloadReferences: preloadReferences,
+            containerEntries: containerEntries,
+            mainAsset: mainAsset,
+            classCompatibilityIDs: classCompatibilityIDs,
+            runtimeCompatibility: runtimeCompatibility,
+            assetBundleName: assetBundleName,
+            dependencies: dependencies,
+            isStreamedSceneAssetBundle: isStreamedSceneAssetBundle,
+            trailingBytes: data.count - reader.offset
+        )
+    }
+
+    private static func readAssetPointer(
+        _ reader: inout AoVSerializedReader,
+        serializedVersion: UInt32,
+        field: String
+    ) throws -> AoVSerializedAssetPointer {
+        let fileID = try reader.readInt32("\(field) file ID")
+        let pathID = serializedVersion < 14
+            ? Int64(try reader.readInt32("\(field) path ID"))
+            : try reader.readInt64("\(field) path ID")
+        return AoVSerializedAssetPointer(fileID: fileID, pathID: pathID)
     }
 
     private static func skipTypeTree(
