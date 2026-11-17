@@ -280,6 +280,25 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
         }
     }
 
+    func testSerializedFileParserRejectsDuplicateObjectPathIDs() throws {
+        let nodes = pointerNodes()
+        let payload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: pointerValue(fileID: 0, pathID: 0),
+            littleEndian: true
+        )
+        let fixture = makeSerializedFile(
+            pathIDs: [1234, 1234],
+            payloads: [payload, payload],
+            typeTreeNodes: nodes
+        )
+        XCTAssertThrowsError(try AoVSerializedFileParser.inspect(fixture)) { error in
+            guard case AoVSerializedFileError.duplicateObjectPathID(1234) = error else {
+                return XCTFail("Expected duplicate pathID rejection, got \(error)")
+            }
+        }
+    }
+
     func testRejectsReferencesToSourceObjectsOutsideSelectedImportBatch() throws {
         let nodes = pointerNodes()
         let first = try AoVUnityTypeTreeWriter.write(
