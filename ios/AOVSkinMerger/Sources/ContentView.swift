@@ -636,7 +636,10 @@ struct ContentView: View {
             metric("File đã đọc và kiểm CRC", "\(report.crcValidatedFiles)")
             metric("Đường dẫn trùng, payload giống", "\(report.identicalDuplicatePaths)")
             metric("Đường dẫn trùng, payload khác", "\(report.conflictingPaths)")
-            if !report.unityFSBundles.isEmpty {
+            if !report.unityFSBundles.isEmpty ||
+                report.unityFSUnrecognizedCount > 0 ||
+                report.unityFSTooLargeCount > 0 ||
+                !report.unityFSInspectionFailures.isEmpty {
                 Divider().overlay(.white.opacity(0.12))
                 Label("UnityFS AssetBundle đã đọc metadata", systemImage: "shippingbox.fill")
                     .font(.subheadline.weight(.semibold))
