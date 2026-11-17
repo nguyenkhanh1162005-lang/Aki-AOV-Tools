@@ -299,9 +299,7 @@ enum AoVSerializedFileObjectAppender {
             throw AoVSerializedFileObjectAppenderError.invalidSource("dataOffset unexpectedly moved backwards.")
         }
         for originalObject in summary.serializedObjects {
-            guard let verifiedObject = verified.serializedObjects.first(where: {
-                $0.pathID == originalObject.pathID
-            }),
+            guard let verifiedObject = verified.serializedObjectsByPathID[originalObject.pathID],
             verifiedObject.classID == originalObject.classID,
             verifiedObject.typeID == originalObject.typeID,
             verifiedObject.byteSize == originalObject.byteSize else {
@@ -326,9 +324,7 @@ enum AoVSerializedFileObjectAppender {
             }
         }
         for object in orderedObjects {
-            guard let verifiedObject = verified.serializedObjects.first(where: {
-                $0.pathID == object.pathID
-            }),
+            guard let verifiedObject = verified.serializedObjectsByPathID[object.pathID],
             verifiedObject.classID == object.classID,
             verifiedObject.typeID == object.typeID,
             let start = Int(exactly: verifiedObject.byteOffset),
