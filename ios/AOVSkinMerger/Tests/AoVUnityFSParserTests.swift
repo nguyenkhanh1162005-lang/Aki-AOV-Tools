@@ -165,7 +165,7 @@ final class AoVUnityFSParserTests: XCTestCase {
             )
         ) { error in
             guard let parserError = error as? AoVUnityFSError,
-                  case .resourceLimit = parserError else {
+                  case .resourceLimit(_) = parserError else {
                 return XCTFail("Expected dictionary resource-limit rejection, got \(error)")
             }
         }
