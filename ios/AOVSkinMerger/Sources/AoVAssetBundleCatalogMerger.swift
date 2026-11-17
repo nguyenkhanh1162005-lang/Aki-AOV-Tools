@@ -53,7 +53,8 @@ struct AoVAssetBundleCatalogMergePlan: Sendable {
 /// Builds a candidate AssetBundle record while keeping the current RES record
 /// as the baseline. It never copies a legacy pathID blindly: local IDs must exist
 /// in the current SerializedFile and external IDs must map through an exact
-/// GUID + path match. External target-file pathIDs still need a separate audit.
+/// GUID + path match. External target-file pathIDs are writable only when the
+/// caller supplies a verified target-object inventory for that exact reference.
 enum AoVAssetBundleCatalogMerger {
     static func plan(
         current: AoVSerializedAssetBundleRecord,
