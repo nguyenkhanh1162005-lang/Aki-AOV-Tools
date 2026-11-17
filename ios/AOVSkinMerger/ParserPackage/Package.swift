@@ -18,6 +18,7 @@ let package = Package(
                 "AoVUnityCommonStrings.swift",
                 "AoVUnityTypeTreeParser.swift",
                 "AoVUnityTypeTreeWriter.swift",
+                "AoVUnityTypeTreePointerRemapper.swift",
                 "AoVRuntimeCatalogMergePlanner.swift",
                 "AoVSerializedRuntimeCatalogWriter.swift"
             ]
