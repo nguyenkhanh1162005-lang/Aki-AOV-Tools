@@ -740,8 +740,8 @@ enum AoVSerializedFileParser {
             assetBundleName: assetBundleName,
             dependencies: dependencies,
             isStreamedSceneAssetBundle: isStreamedSceneAssetBundle,
-            trailingBytes: data.count - reader.offset,
-            trailingData: data.subdata(in: reader.offset..<data.count)
+            trailingBytes: trailingBytes,
+            trailingData: trailingData
         )
     }
 
