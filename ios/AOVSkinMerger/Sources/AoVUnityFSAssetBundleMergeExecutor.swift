@@ -385,9 +385,21 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                 throw AoVUnityFSAssetBundleMergeExecutorError.objectNotFound(input.destinationObjectPathID)
             }
 
-            let selectedPathIDs = try requiredLocalObjectClosure(
+            let replacingContainerKeys = try changedContainerKeys(
                 legacyRecord: legacyRecord,
                 currentRecord: currentRecord,
+                sourceData: input.serializedFile,
+                destinationData: serializedOutput,
+                sourceSummary: legacySummary,
+                destinationSummary: destinationSummary
+            )
+            let currentContainerKeys = Set(currentRecord.containerEntries.map(\.key))
+            let selectedContainerKeys = Set(legacyRecord.containerEntries.map(\.key).filter {
+                !currentContainerKeys.contains($0) || replacingContainerKeys.contains($0)
+            })
+            let selectedPathIDs = try requiredLocalObjectClosure(
+                legacyRecord: legacyRecord,
+                selectedContainerKeys: selectedContainerKeys,
                 sourceData: input.serializedFile,
                 sourceSummary: legacySummary
             )
@@ -442,7 +454,8 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                 availableCurrentBundleNames: availableCurrentBundleNames,
                 verifiedExternalTargetPathIDs: verifiedExternalTargetPathIDs,
                 importedLocalPathIDMap: importedPathIDMap,
-                availableImportedLocalPathIDs: importedObjectIDs
+                availableImportedLocalPathIDs: importedObjectIDs,
+                replacingContainerKeys: replacingContainerKeys
             )
             guard !catalogPlan.externalTargetAuditRequired else {
                 throw AoVUnityFSAssetBundleMergeExecutorError.externalTargetAuditRequired(
@@ -523,13 +536,12 @@ enum AoVUnityFSAssetBundleMergeExecutor {
 
     static func requiredLocalObjectClosure(
         legacyRecord: AoVSerializedAssetBundleRecord,
-        currentRecord: AoVSerializedAssetBundleRecord,
+        selectedContainerKeys: Set<String>,
         sourceData: Data,
         sourceSummary: AoVSerializedFileSummary
     ) throws -> Set<Int64> {
-        let currentKeys = Set(currentRecord.containerEntries.map(\.key))
         var pending: [Int64] = []
-        for entry in legacyRecord.containerEntries where !currentKeys.contains(entry.key) {
+        for entry in legacyRecord.containerEntries where selectedContainerKeys.contains(entry.key) {
             if entry.asset.fileID == 0, entry.asset.pathID != 0 {
                 pending.append(entry.asset.pathID)
             }
@@ -585,6 +597,98 @@ enum AoVUnityFSAssetBundleMergeExecutor {
             pending.append(contentsOf: targets)
         }
         return selected
+    }
+
+    private static func changedContainerKeys(
+        legacyRecord: AoVSerializedAssetBundleRecord,
+        currentRecord: AoVSerializedAssetBundleRecord,
+        sourceData: Data,
+        destinationData: Data,
+        sourceSummary: AoVSerializedFileSummary,
+        destinationSummary: AoVSerializedFileSummary
+    ) throws -> Set<String> {
+        let currentByKey = Dictionary(
+            uniqueKeysWithValues: currentRecord.containerEntries.map { ($0.key, $0) }
+        )
+        var changed = Set<String>()
+        for legacyEntry in legacyRecord.containerEntries {
+            guard let currentEntry = currentByKey[legacyEntry.key] else {
+                changed.insert(legacyEntry.key)
+                continue
+            }
+            let legacyPreloads = try preloadSlice(legacyEntry, in: legacyRecord)
+            let currentPreloads = try preloadSlice(currentEntry, in: currentRecord)
+            if legacyEntry.asset != currentEntry.asset || legacyPreloads != currentPreloads {
+                changed.insert(legacyEntry.key)
+                continue
+            }
+            if localObjectPayloadDiffers(
+                legacyEntry.asset,
+                sourceData: sourceData,
+                destinationData: destinationData,
+                sourceSummary: sourceSummary,
+                destinationSummary: destinationSummary
+            ) {
+                changed.insert(legacyEntry.key)
+                continue
+            }
+            for pointer in legacyPreloads where localObjectPayloadDiffers(
+                pointer,
+                sourceData: sourceData,
+                destinationData: destinationData,
+                sourceSummary: sourceSummary,
+                destinationSummary: destinationSummary
+            ) {
+                changed.insert(legacyEntry.key)
+                break
+            }
+        }
+        return changed
+    }
+
+    private static func preloadSlice(
+        _ entry: AoVSerializedAssetBundleEntry,
+        in record: AoVSerializedAssetBundleRecord
+    ) throws -> [AoVSerializedAssetPointer] {
+        let start = Int(entry.preloadIndex)
+        let count = Int(entry.preloadSize)
+        guard start >= 0, count >= 0,
+              start <= record.preloadReferences.count,
+              count <= record.preloadReferences.count - start else {
+            throw AoVUnityFSAssetBundleMergeExecutorError.verificationFailed(
+                "Preload range không hợp lệ tại \(entry.key)."
+            )
+        }
+        return Array(record.preloadReferences[start..<(start + count)])
+    }
+
+    private static func localObjectPayloadDiffers(
+        _ pointer: AoVSerializedAssetPointer,
+        sourceData: Data,
+        destinationData: Data,
+        sourceSummary: AoVSerializedFileSummary,
+        destinationSummary: AoVSerializedFileSummary
+    ) -> Bool {
+        guard pointer.fileID == 0, pointer.pathID != 0 else { return false }
+        let sourceMatches = sourceSummary.serializedObjects.filter { $0.pathID == pointer.pathID }
+        let destinationMatches = destinationSummary.serializedObjects.filter { $0.pathID == pointer.pathID }
+        guard sourceMatches.count == 1, destinationMatches.count == 1,
+              let sourceObject = sourceMatches.first,
+              let destinationObject = destinationMatches.first,
+              sourceObject.classID == destinationObject.classID,
+              sourceObject.typeID == destinationObject.typeID,
+              sourceObject.byteSize == destinationObject.byteSize,
+              let sourceStart = Int(exactly: sourceObject.byteOffset),
+              let destinationStart = Int(exactly: destinationObject.byteOffset),
+              let size = Int(exactly: sourceObject.byteSize),
+              sourceStart >= 0, destinationStart >= 0,
+              sourceStart <= sourceData.count, size <= sourceData.count - sourceStart,
+              destinationStart <= destinationData.count, size <= destinationData.count - destinationStart else {
+            return true
+        }
+        return !sourceData[sourceStart..<(sourceStart + size)].elementsEqual(
+            destinationData[destinationStart..<(destinationStart + size)]
+        )
     }
 
     private static func auditedExternalMappings(
