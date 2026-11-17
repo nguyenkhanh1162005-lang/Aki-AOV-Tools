@@ -339,8 +339,10 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
         )
 
         XCTAssertTrue(report.roundTripVerified)
+        XCTAssertEqual(report.resourcePayload.archivePath, "1.64.1/assetbundle/test.assetbundle")
+        XCTAssertEqual(report.resourcePayload.ifsPath, "1.64.1/assetbundle/test.assetbundle")
         XCTAssertEqual(report.importedObjectCount, 2)
-        let finalBundleNodes = try AoVUnityFSParser.extractNodes(report.payload)
+        let finalBundleNodes = try AoVUnityFSParser.extractNodes(report.resourcePayload.data)
         let finalSerializedFile = try XCTUnwrap(finalBundleNodes.first(where: { $0.path == "CAB-current" })?.data)
         let finalSummary = try AoVSerializedFileParser.inspect(finalSerializedFile)
         let finalRecord = try XCTUnwrap(finalSummary.assetBundleRecords.first(where: { $0.pathID == 5001 }))
