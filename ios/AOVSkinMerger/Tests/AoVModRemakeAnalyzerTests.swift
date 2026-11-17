@@ -31,6 +31,7 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
             legacyHasVerificationCatalog: [],
             packerCatalogComparison: emptyPacker,
             verificationCatalogComparison: emptyVerification,
+            catalogMergePlanFindings: [],
             warnings: []
         )
 
