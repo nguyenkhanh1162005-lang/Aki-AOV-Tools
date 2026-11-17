@@ -273,7 +273,8 @@ enum AoVRuntimeCatalogMergePlanner {
 
         return AoVRuntimePackerMergePlan(
             candidateCatalog: candidate,
-            addedPaths: additions.map(\.pathInIFS).sorted(),
+            addedPaths: additions.sorted(),
+            updatedPaths: updates.sorted(),
             unchangedPaths: unchanged.sorted(),
             changedExistingPaths: changedExisting,
             addedParentChildLinkCount: max(0, mergedLinks.count - current.allParentIndexToChild.count),
