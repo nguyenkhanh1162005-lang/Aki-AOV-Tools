@@ -341,7 +341,7 @@ enum AoVRuntimeResourceCatalogParser {
             writer.data.append(catalog.trailingData)
         }
 
-        var output = payload.prefix(reader.offset)
+        var output = Data(payload.prefix(reader.offset))
         output.append(writer.data)
         guard let verified = try inspectMonoBehaviour(
             output,
