@@ -110,6 +110,22 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
         })
     }
 
+    func testPackerPlannerAddsVerifiedFinalEntryWhenLegacyCatalogOmitsPath() {
+        let path = "assetbundle/creator-731.assetbundle"
+        let current = packer(entries: [], links: [])
+        let verifiedFinal = pack(path, crc: 12345)
+
+        let plan = AoVRuntimeCatalogMergePlanner.planPacker(
+            current: current,
+            legacy: [],
+            verifiedFinalEntries: [path: verifiedFinal]
+        )
+
+        XCTAssertTrue(plan.safeToWrite)
+        XCTAssertEqual(plan.addedPaths, [path])
+        XCTAssertEqual(plan.candidateCatalog?.allResourcePackInfo, [verifiedFinal])
+    }
+
     func testPackerPlannerUpdatesExistingPathOnlyWithVerifiedFinalBundle() {
         let currentEntry = pack("assetbundle/hero.assetbundle", crc: 10)
         let legacyEntry = pack("assetbundle/hero.assetbundle", crc: 11)
