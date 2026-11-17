@@ -81,7 +81,6 @@ jobs:
           xcrun simctl list devices available
 
       - name: Run iOS unit tests on iPhone simulator
-        continue-on-error: true
         working-directory: ios/AOVSkinMerger
         run: >-
           xcodebuild test
