@@ -639,15 +639,17 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                 changed.insert(legacyEntry.key)
                 continue
             }
-            for pointer in legacyPreloads where try localObjectPayloadDiffers(
-                pointer,
-                sourceData: sourceData,
-                destinationData: destinationData,
-                sourceSummary: sourceSummary,
-                destinationSummary: destinationSummary
-            ) {
-                changed.insert(legacyEntry.key)
-                break
+            for pointer in legacyPreloads {
+                if try localObjectPayloadDiffers(
+                    pointer,
+                    sourceData: sourceData,
+                    destinationData: destinationData,
+                    sourceSummary: sourceSummary,
+                    destinationSummary: destinationSummary
+                ) {
+                    changed.insert(legacyEntry.key)
+                    break
+                }
             }
         }
         return changed
