@@ -126,6 +126,36 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
         XCTAssertEqual(report.changedClassCompatibilityCount, 1)
     }
 
+    func testCatalogComparisonReportsUnresolvedPointerReferences() {
+        let old = record(
+            source: "mod.zip",
+            bundle: "actor/4004",
+            entries: [entry("Assets/Hero.prefab", pathID: 10)],
+            dependencies: [],
+            unresolvedLocalPointerCount: 2,
+            invalidExternalPointerCount: 1
+        )
+        let current = record(
+            source: "new-res.zip",
+            bundle: "actor/4004",
+            entries: [entry("Assets/Hero.prefab", pathID: 90)],
+            dependencies: [],
+            unresolvedLocalPointerCount: 0,
+            invalidExternalPointerCount: 0
+        )
+
+        let report = AoVModRemakeAnalyzer.compareCatalogRecords(
+            current: [current],
+            legacy: [old],
+            kind: .packer
+        )
+
+        XCTAssertEqual(report.unresolvedLegacyLocalPointerCount, 2)
+        XCTAssertEqual(report.unresolvedCurrentLocalPointerCount, 0)
+        XCTAssertEqual(report.invalidLegacyExternalPointerCount, 1)
+        XCTAssertEqual(report.invalidCurrentExternalPointerCount, 0)
+    }
+
     func testCatalogComparisonDoesNotSilentlyResolveDuplicateContainerKeys() {
         let old = record(
             source: "mod.zip",
@@ -172,6 +202,10 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
             invalidCurrentPreloadRangeCount: 0,
             changedMainAssetPointerCount: 0,
             changedClassCompatibilityCount: 0,
+            unresolvedLegacyLocalPointerCount: 0,
+            unresolvedCurrentLocalPointerCount: 0,
+            invalidLegacyExternalPointerCount: 0,
+            invalidCurrentExternalPointerCount: 0,
             dependenciesAddedInCurrentCount: 0,
             dependenciesRemovedInCurrentCount: 0,
             findings: []
@@ -183,6 +217,8 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
         bundle: String,
         entries: [AoVRemakeCatalogEntrySnapshot],
         dependencies: [String],
+        unresolvedLocalPointerCount: Int = 0,
+        invalidExternalPointerCount: Int = 0,
         mainAssetPathID: Int64 = 200,
         classCompatibilityIDs: [Int32] = [28]
     ) -> AoVRemakeCatalogRecordSnapshot {
@@ -200,6 +236,12 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
             invalidPreloadRangeCount: entries.filter { !$0.preloadRangeValid }.count,
             invalidPreloadRangeSamples: entries.filter { !$0.preloadRangeValid }.map(\.key),
             classCompatibilityIDs: classCompatibilityIDs,
+            resolvedLocalPointerCount: 3,
+            externalPointerCount: 1,
+            nullPointerCount: 0,
+            unresolvedLocalPointerCount: unresolvedLocalPointerCount,
+            invalidExternalPointerCount: invalidExternalPointerCount,
+            pointerAuditSamples: [],
             mainAssetFileID: 0,
             mainAssetPathID: mainAssetPathID,
             dependencies: dependencies,
