@@ -97,11 +97,9 @@ enum AoVModRemakeAnalyzer {
 
         let baseScanURL = try resolveResourceArchive(baseRESURL, tempRoot: tempRoot)
         var legacyScanURLs: [URL] = []
-        var legacyScanURLByName: [String: URL] = [:]
         for (index, url) in legacyMODURLs.enumerated() {
             let scanURL = try resolveResourceArchive(url, tempRoot: tempRoot)
             legacyScanURLs.append(scanURL)
-            legacyScanURLByName[url.lastPathComponent] = scanURL
             _ = index
         }
 
@@ -110,13 +108,16 @@ enum AoVModRemakeAnalyzer {
         guard let baseInventory = try ArchiveScanner.analyze([baseScanURL]).archives.first else {
             throw AoVModRemakeError.invalidArchive(baseRESURL.lastPathComponent)
         }
-        let legacyInventories = try ArchiveScanner.analyze(legacyScanURLs).archives
+        let scannedLegacy = try ArchiveScanner.analyze(legacyScanURLs).archives
+        let baseInventory = relabel(scannedBase, as: baseRESURL.lastPathComponent)
+        let legacyInventories = scannedLegacy.enumerated().map { index, inventory in
+            relabel(inventory, as: legacyMODURLs[index].lastPathComponent)
+        }
         let baseVersion = try readVersionMarker(from: baseScanURL)
         var legacyVersions: [String: String] = [:]
-        for (index, inventory) in legacyInventories.enumerated() {
-            if let url = legacyScanURLByName[inventory.fileName] ?? legacyScanURLs[safe: index],
-               let version = try readVersionMarker(from: url) {
-                legacyVersions[inventory.fileName] = version
+        for index in legacyScanURLs.indices {
+            if let version = try readVersionMarker(from: legacyScanURLs[index]) {
+                legacyVersions[legacyMODURLs[index].lastPathComponent] = version
             }
         }
 
@@ -219,6 +220,29 @@ enum AoVModRemakeAnalyzer {
             legacyHasPackerCatalog: legacyPacker,
             legacyHasVerificationCatalog: legacyVerification,
             warnings: warnings
+        )
+    }
+
+    private static func relabel(_ inventory: ArchiveInventory, as name: String) -> ArchiveInventory {
+        ArchiveInventory(
+            id: inventory.id,
+            fileName: name,
+            fileSize: inventory.fileSize,
+            fileCount: inventory.fileCount,
+            uncompressedBytes: inventory.uncompressedBytes,
+            paths: inventory.paths,
+            pathDigests: inventory.pathDigests.map {
+                ArchivePathDigest(
+                    archiveName: name,
+                    path: $0.path,
+                    sha256: $0.sha256,
+                    uncompressedBytes: $0.uncompressedBytes
+                )
+            },
+            unityFSBundles: inventory.unityFSBundles,
+            unityFSUnrecognizedCount: inventory.unityFSUnrecognizedCount,
+            unityFSTooLargeCount: inventory.unityFSTooLargeCount,
+            unityFSInspectionFailures: inventory.unityFSInspectionFailures
         )
     }
 
