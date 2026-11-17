@@ -897,7 +897,7 @@ enum AoVModArchiveMerger {
                         to: output,
                         path: entry.path,
                         tempRoot: tempRoot,
-                        compressionMethod: storageMethod(for: relative)
+                        compressionMethod: storageMethod(for: entry)
                     )
                 }
                 emitted.insert(relative)
@@ -910,7 +910,7 @@ enum AoVModArchiveMerger {
                     to: output,
                     path: outputPath,
                     tempRoot: tempRoot,
-                    compressionMethod: storageMethod(for: relative)
+                    compressionMethod: storageMethod(for: reference.entry)
                 )
                 emitted.insert(relative)
             }
@@ -946,7 +946,7 @@ enum AoVModArchiveMerger {
                     to: output,
                     path: entry.path,
                     tempRoot: tempRoot,
-                    compressionMethod: storageMethod(for: relative)
+                    compressionMethod: storageMethod(for: entry)
                 )
             } else {
                 try copyEntry(
