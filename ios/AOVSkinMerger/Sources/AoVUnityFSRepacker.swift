@@ -250,6 +250,7 @@ enum AoVUnityFSRepacker {
                   inspected.playerVersion == playerVersion,
                   inspected.engineVersion == engineVersion,
                   inspected.blockInfoLayout == blockInfoLayout,
+                  inspected.usesAoVEncryption == aovEncryption,
                   inspected.nodes.count == nodes.count,
                   inspected.blocks.count == 1,
                   inspected.totalUncompressedBytes == UInt64(expanded.count) else {
