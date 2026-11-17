@@ -38,6 +38,64 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
         XCTAssertEqual(byPath["assets/skin.bin"], Data([1, 2, 3]))
     }
 
+    func testWritableTemplateGuardRejectsAOVEncryptedContainer() {
+        let encrypted = AoVUnityFSBundleInfo(
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2022.3.5f1",
+            totalFileSize: 128,
+            flags: 0x440,
+            blockInfoCompression: "none",
+            blockInfoLayout: .arenaOfValor,
+            blockInfoAtEnd: false,
+            usesAoVEncryption: true,
+            blockPaddingAtStart: false,
+            blocks: [],
+            nodes: [],
+            totalUncompressedBytes: 0,
+            totalCompressedBlockBytes: 0,
+            availableBlockDataBytes: 0,
+            blockDataOffset: 0
+        )
+
+        XCTAssertThrowsError(
+            try AoVUnityFSContentRewriter.validateWritableTemplate(encrypted)
+        ) { error in
+            guard case AoVUnityFSContentRewriteError.encryptedBundleNotWritable = error else {
+                return XCTFail("Expected encrypted UnityFS writer rejection, got (error)")
+            }
+        }
+    }
+
+    func testWritableTemplateGuardRejectsExpandedBundleBeyondLimit() {
+        let oversized = AoVUnityFSBundleInfo(
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2022.3.5f1",
+            totalFileSize: 128,
+            flags: 0x40,
+            blockInfoCompression: "none",
+            blockInfoLayout: .standard,
+            blockInfoAtEnd: false,
+            usesAoVEncryption: false,
+            blockPaddingAtStart: false,
+            blocks: [],
+            nodes: [],
+            totalUncompressedBytes: 512 * 1024 * 1024 + 1,
+            totalCompressedBlockBytes: 0,
+            availableBlockDataBytes: 0,
+            blockDataOffset: 0
+        )
+
+        XCTAssertThrowsError(
+            try AoVUnityFSContentRewriter.validateWritableTemplate(oversized)
+        ) { error in
+            guard case AoVUnityFSContentRewriteError.expandedArchiveTooLarge = error else {
+                return XCTFail("Expected expanded-size guard, got (error)")
+            }
+        }
+    }
+
     func testRejectsMissingNodeWithoutProducingOutput() throws {
         let original = try AoVUnityFSRepacker.repack(
             [AoVUnityFSRepackNode(path: "CAB-catalog", data: Data([1]))],
