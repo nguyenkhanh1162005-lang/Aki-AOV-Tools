@@ -328,8 +328,9 @@ struct ContentView: View {
                 safeToWrite: report.runtimePackerMergePlan?.safeToWrite ?? false,
                 details: report.runtimePackerMergePlan.map { plan in
                     [
-                        "Mục Packer mới: \(plan.addedPaths.count)",
-                        "Bundle cùng path nhưng khác nội dung: \(plan.changedExistingPaths.count)",
+                        "Mục Packer mới đã có bundle kiểm chứng: \(plan.addedPaths.count)",
+                        "Bundle hiện có được thay sau khi ghép kiểm chứng: \(plan.updatedPaths.count)",
+                        "Bundle cùng path còn bị chặn: \(plan.changedExistingPaths.count)",
                         "Parent-child link mới: \(plan.addedParentChildLinkCount)"
                     ]
                 } ?? [],
