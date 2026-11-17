@@ -130,6 +130,7 @@ enum ArchiveScanner {
     private static let maximumAESInspectInputBytes: UInt64 = 32 * 1024 * 1024
     private static let maximumUnityFSInspectEntryBytes: UInt64 = 64 * 1024 * 1024
     private static let maximumUnityFSInspectTotalBytes: UInt64 = 256 * 1024 * 1024
+    private static let maximumCatalogExpandedBytes: UInt64 = 128 * 1024 * 1024
 
     static func analyze(_ urls: [URL]) throws -> ArchiveAnalysis {
         var inventories: [ArchiveInventory] = []
@@ -497,11 +498,42 @@ enum ArchiveScanner {
                     bundlePayload.prefix(unitySignature.count) == unitySignature {
                     do {
                         let info = try AoVUnityFSParser.inspect(bundlePayload)
+                        let fileName = (path as NSString).lastPathComponent.lowercased()
+                        let isCatalogBundle = fileName == "resourcepackerinfosetall.assetbundle" ||
+                            fileName == "resourceverificationinfosetall.assetbundle"
+                        var catalogStatus: String?
+                        var catalogSamples: [AoVUnityFSCatalogNodeSample] = []
+
+                        if isCatalogBundle {
+                            do {
+                                let extracted = try AoVUnityFSParser.extractNodes(
+                                    bundlePayload,
+                                    maximumExpandedBytes: maximumCatalogExpandedBytes,
+                                    maximumNodeCount: 256
+                                )
+                                catalogSamples = extracted.map { node in
+                                    AoVUnityFSCatalogNodeSample(
+                                        path: node.path,
+                                        size: UInt64(node.data.count),
+                                        prefixHex: node.data.prefix(16)
+                                            .map { String(format: "%02X", $0) }
+                                            .joined(separator: " "),
+                                        stringHints: AoVUnityFSParser.asciiStringHints(node.data)
+                                    )
+                                }
+                                catalogStatus = "Đã trích xuất read-only \(extracted.count) node."
+                            } catch {
+                                catalogStatus = "Không trích xuất được: \(error.localizedDescription)"
+                            }
+                        }
+
                         unityFSBundles.append(
                             AoVUnityFSScanResult(
                                 archiveName: url.lastPathComponent,
                                 path: path,
-                                info: info
+                                info: info,
+                                catalogExtractionStatus: catalogStatus,
+                                catalogNodeSamples: catalogSamples
                             )
                         )
                     } catch {
