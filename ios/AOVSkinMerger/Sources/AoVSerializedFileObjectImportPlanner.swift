@@ -124,6 +124,11 @@ enum AoVSerializedFileObjectImportPlanner {
                 sourceSummary.serializedObjects.count
             )
         }
+        let sourceIDs = sourceSummary.serializedObjects.map(\\.pathID)
+        guard Set(sourceIDs).count == sourceIDs.count else {
+            let duplicate = firstDuplicate(sourceIDs) ?? 0
+            throw AoVSerializedFileObjectImportPlanError.duplicatePathID("nguồn", duplicate)
+        }
         let sourceObjectsByID = Dictionary(uniqueKeysWithValues: sourceSummary.serializedObjects.map {
             ($0.pathID, $0)
         })
