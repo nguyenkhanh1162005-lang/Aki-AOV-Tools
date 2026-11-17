@@ -61,7 +61,8 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
         XCTAssertThrowsError(
             try AoVUnityFSContentRewriter.validateWritableTemplate(encrypted)
         ) { error in
-            guard case AoVUnityFSContentRewriteError.encryptedBundleNotWritable = error else {
+            guard let rewriteError = error as? AoVUnityFSContentRewriteError,
+                  case .encryptedBundleNotWritable = rewriteError else {
                 return XCTFail("Expected encrypted UnityFS writer rejection, got (error)")
             }
         }
@@ -90,7 +91,8 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
         XCTAssertThrowsError(
             try AoVUnityFSContentRewriter.validateWritableTemplate(oversized)
         ) { error in
-            guard case AoVUnityFSContentRewriteError.expandedArchiveTooLarge = error else {
+            guard let rewriteError = error as? AoVUnityFSContentRewriteError,
+                  case .expandedArchiveTooLarge = rewriteError else {
                 return XCTFail("Expected expanded-size guard, got (error)")
             }
         }
