@@ -42,7 +42,7 @@ struct ArchiveAnalysis: Codable, Sendable {
     let conflictingPaths: Int
 
     var unityFSBundles: [AoVUnityFSScanResult] {
-        archives.flatMap(\\.unityFSBundles)
+        archives.flatMap(\.unityFSBundles)
     }
     var unityFSUnrecognizedCount: Int {
         archives.reduce(0) { $0 + $1.unityFSUnrecognizedCount }
@@ -51,7 +51,7 @@ struct ArchiveAnalysis: Codable, Sendable {
         archives.reduce(0) { $0 + $1.unityFSTooLargeCount }
     }
     var unityFSInspectionFailures: [String] {
-        archives.flatMap(\\.unityFSInspectionFailures)
+        archives.flatMap(\.unityFSInspectionFailures)
     }
 }
 
@@ -492,7 +492,7 @@ enum ArchiveScanner {
             let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
 
             if shouldInspectUnityFS {
-                let unitySignature = Data("UnityFS\\0".utf8)
+                let unitySignature = Data("UnityFS\0".utf8)
                 if bundlePayload.count >= unitySignature.count &&
                     bundlePayload.prefix(unitySignature.count) == unitySignature {
                     do {
@@ -507,7 +507,7 @@ enum ArchiveScanner {
                     } catch {
                         if unityFSInspectionFailures.count < 30 {
                             unityFSInspectionFailures.append(
-                                "\\(path): \\(error.localizedDescription)"
+                                "\(path): \(error.localizedDescription)"
                             )
                         }
                     }
