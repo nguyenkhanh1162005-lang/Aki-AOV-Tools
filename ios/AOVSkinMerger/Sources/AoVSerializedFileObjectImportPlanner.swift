@@ -130,9 +130,7 @@ enum AoVSerializedFileObjectImportPlanner {
             let duplicate = firstDuplicate(sourceIDs) ?? 0
             throw AoVSerializedFileObjectImportPlanError.duplicatePathID("nguồn", duplicate)
         }
-        let sourceObjectsByID = Dictionary(uniqueKeysWithValues: sourceSummary.serializedObjects.map {
-            ($0.pathID, $0)
-        })
+        let sourceObjectsByID = sourceSummary.serializedObjectsByPathID
         let destinationSummary = try AoVSerializedFileParser.inspect(destination)
         let destinationIDs = Set(destinationSummary.serializedObjects.map { $0.pathID })
         for (sourcePathID, destinationPathID) in preservedLocalPathIDMap {
@@ -242,9 +240,7 @@ enum AoVSerializedFileObjectImportPlanner {
 
         let selected = selectedPathIDs ?? Set(sourceIDs)
         guard !selected.isEmpty else { throw AoVSerializedFileObjectImportPlanError.noObjects }
-        let sourceObjectsByID = Dictionary(uniqueKeysWithValues: sourceSummary.serializedObjects.map {
-            ($0.pathID, $0)
-        })
+        let sourceObjectsByID = sourceSummary.serializedObjectsByPathID
         for pathID in selected where sourceObjectsByID[pathID] == nil {
             throw AoVSerializedFileObjectImportPlanError.selectedObjectMissing(pathID)
         }
