@@ -33,6 +33,54 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
         XCTAssertEqual(plan.totalPayloadBytes, UInt64(payload.count))
     }
 
+    func testAppendsPlannedTypeTreeObjectsAndUpdatesSerializedFileHeader() throws {
+        let nodes = [
+            AoVUnityTypeTreeNode(type: "Texture2D", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_TestPathID", level: 1, byteSize: 8, metaFlags: 0)
+        ]
+        let value: AoVUnityTypeTreeValue = .object([
+            "m_TestPathID": .signed(1001)
+        ])
+        let payload = try AoVUnityTypeTreeWriter.write(nodes: nodes, value: value, littleEndian: true)
+        let file = makeSerializedFile(
+            pathIDs: [1234],
+            payloads: [payload],
+            typeTreeNodes: nodes
+        )
+        let plan = try AoVSerializedFileObjectImportPlanner.plan(
+            source: file,
+            destination: file
+        )
+        let appendInputs = plan.objects.map {
+            AoVSerializedObjectAppendInput(
+                pathID: $0.destinationPathID,
+                classID: $0.classID,
+                typeID: $0.destinationTypeID,
+                payload: $0.data
+            )
+        }
+
+        let report = try AoVSerializedFileObjectAppender.append(
+            to: file,
+            objects: appendInputs
+        )
+        let summary = try AoVSerializedFileParser.inspect(report.data)
+        XCTAssertTrue(report.roundTripVerified)
+        XCTAssertEqual(report.originalObjectCount, 1)
+        XCTAssertEqual(report.finalObjectCount, 2)
+        XCTAssertEqual(report.appendedPathIDs, [1235])
+        XCTAssertEqual(summary.serializedObjects.map(\\.pathID), [1234, 1235])
+        XCTAssertEqual(readUInt32BE(report.data, at: 4), UInt32(report.data.count))
+        XCTAssertEqual(readUInt32BE(report.data, at: 12), UInt32(summary.dataOffset))
+
+        let imported = try AoVSerializedFileParser.decodeObjectWithTypeTree(
+            pathID: 1235,
+            in: report.data,
+            summary: summary
+        )
+        XCTAssertEqual(imported, value)
+    }
+
     func testRemapsLocalPointersAcrossImportedObjects() throws {
         let nodes = pointerNodes()
         let first = try AoVUnityTypeTreeWriter.write(
@@ -378,6 +426,14 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
         while file.count < dataOffset { file.append(0) }
         file.append(dataSection)
         return file
+    }
+
+    private func readUInt32BE(_ data: Data, at offset: Int) -> UInt32 {
+        let b0 = UInt32(data[offset])
+        let b1 = UInt32(data[offset + 1]) << 8
+        let b2 = UInt32(data[offset + 2]) << 16
+        let b3 = UInt32(data[offset + 3]) << 24
+        return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
     }
 
     private func appendTypeTree(
