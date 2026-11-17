@@ -71,6 +71,22 @@ struct AoVSerializedFileObjectImportPlan: Sendable {
     let roundTripVerified: Bool
 }
 
+private struct AoVSerializedTypeSchemaKey: Hashable {
+    let classID: Int32
+    let scriptID: Data?
+    let oldTypeHash: Data
+    let typeTreeNodes: [AoVUnityTypeTreeNode]
+    let dependencies: [Int32]
+
+    init(_ type: AoVSerializedFileTypeInfo) {
+        classID = type.classID
+        scriptID = type.scriptID
+        oldTypeHash = type.oldTypeHash
+        typeTreeNodes = type.typeTreeNodes
+        dependencies = type.dependencies
+    }
+}
+
 /// Plans a conservative, TypeTree-driven import of complete object payloads.
 /// It does not write the destination object table yet. All selected source
 /// objects must have an exact destination SerializedType match and every
@@ -190,7 +206,10 @@ enum AoVSerializedFileObjectImportPlanner {
             availableTargetPathIDs: availableExternalTargetPathIDs
         )
 
-        let destinationTypes = destinationSummary.serializedTypes
+        let destinationTypesBySchema = Dictionary(
+            grouping: destinationSummary.serializedTypes,
+            by: AoVSerializedTypeSchemaKey.init
+        )
         var imports: [AoVSerializedObjectImportPayload] = []
         imports.reserveCapacity(selected.count)
         var totalBytes: UInt64 = 0
@@ -200,13 +219,7 @@ enum AoVSerializedFileObjectImportPlanner {
                   !sourceType.typeTreeNodes.isEmpty else {
                 throw AoVSerializedFileObjectImportPlanError.missingTypeTree(sourceObject.pathID)
             }
-            let compatibleTypes = destinationTypes.filter {
-                $0.classID == sourceType.classID &&
-                $0.scriptID == sourceType.scriptID &&
-                $0.oldTypeHash == sourceType.oldTypeHash &&
-                $0.typeTreeNodes == sourceType.typeTreeNodes &&
-                $0.dependencies == sourceType.dependencies
-            }
+            let compatibleTypes = destinationTypesBySchema[AoVSerializedTypeSchemaKey(sourceType)] ?? []
             guard compatibleTypes.count == 1, let destinationType = compatibleTypes.first else {
                 throw AoVSerializedFileObjectImportPlanError.incompatibleType(
                     sourceObject.pathID,
