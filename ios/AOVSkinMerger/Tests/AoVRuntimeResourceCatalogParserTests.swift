@@ -113,6 +113,31 @@ final class AoVRuntimeResourceCatalogParserTests: XCTestCase {
         ))
     }
 
+    func testParsesUnity2021CatalogUsing64BitPPtrsWithoutUnityVersionHardcoding() throws {
+        var writer = AoVCatalogTestWriter()
+        writer.appendBytes(Data(repeating: 0, count: 12))
+        writer.appendByte(1)
+        writer.align(4)
+        writer.appendBytes(Data(repeating: 0, count: 12))
+        writer.appendAlignedString("ResourceVerificationInfoSetXML")
+        writer.appendAlignedString("1.63.0.0")
+        writer.appendAlignedString("2021-revision")
+        writer.appendInt32(0)
+        writer.appendInt32(0)
+
+        let result = try AoVRuntimeResourceCatalogParser.inspectMonoBehaviour(
+            writer.data,
+            serializedFormatVersion: 21,
+            unityVersion: "2021.3.18f1",
+            littleEndian: true
+        )
+        guard case .verification(let catalog)? = result else {
+            return XCTFail("Expected Unity 2021 Verification catalog.")
+        }
+        XCTAssertEqual(catalog.version, "1.63.0.0")
+        XCTAssertEqual(catalog.svnRevision, "2021-revision")
+    }
+
     func testParsesAndRewritesLegacySerializedFileCatalogWith32BitPPtrs() throws {
         var writer = AoVCatalogTestWriter()
         writer.appendBytes(Data(repeating: 0, count: 8))
