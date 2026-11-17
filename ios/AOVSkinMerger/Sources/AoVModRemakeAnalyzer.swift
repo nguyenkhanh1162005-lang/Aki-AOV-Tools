@@ -9,6 +9,8 @@ enum AoVModRemakeError: LocalizedError {
     case multipleResourceArchives(String)
     case resourceArchiveTooLarge(String)
     case versionMarkerTooLarge(String)
+    case missingVersionMarker(String)
+    case versionMismatch(String, String, String)
 
     var errorDescription: String? {
         switch self {
@@ -26,6 +28,10 @@ enum AoVModRemakeError: LocalizedError {
             return "\(name): Resources.zip vượt giới hạn giải nén 512 MiB."
         case .versionMarkerTooLarge(let path):
             return "\(path): version.txt vượt giới hạn đọc an toàn."
+        case .missingVersionMarker(let name):
+            return "\(name): thiếu version.txt; không thể xác nhận tương thích build để xuất RES."
+        case .versionMismatch(let source, let candidate, let base):
+            return "\(source): version.txt \(candidate) khác RES nền \(base); không được xuất khi chưa có adapter chuyển build đã xác minh."
         }
     }
 }
@@ -592,6 +598,7 @@ enum AoVModRemakeAnalyzer {
     /// the export stage. It reads each source independently and never uses
     /// filenames or payload bytes as hard-coded merge fixtures.
     static func loadRuntimeCatalogInputs(
+        baseRESURL: URL,
         legacyMODURLs: [URL]
     ) throws -> AoVModRemakeCatalogInputs {
         guard !legacyMODURLs.isEmpty else { throw AoVModRemakeError.noLegacyMods }
@@ -602,10 +609,23 @@ enum AoVModRemakeAnalyzer {
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
+        let baseScanURL = try resolveResourceArchive(baseRESURL, tempRoot: tempRoot)
+        guard let baseVersion = try readVersionMarker(from: baseRESURL) ??
+            readVersionMarker(from: baseScanURL) else {
+            throw AoVModRemakeError.missingVersionMarker(baseRESURL.lastPathComponent)
+        }
+
         var packer: [(source: String, catalog: AoVRuntimeResourcePackerCatalog)] = []
         var verification: [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)] = []
         for url in legacyMODURLs {
             let scanURL = try resolveResourceArchive(url, tempRoot: tempRoot)
+            guard let version = try readVersionMarker(from: url) ??
+                readVersionMarker(from: scanURL) else {
+                throw AoVModRemakeError.missingVersionMarker(url.lastPathComponent)
+            }
+            guard version == baseVersion else {
+                throw AoVModRemakeError.versionMismatch(url.lastPathComponent, version, baseVersion)
+            }
             guard let inventory = try ArchiveScanner.analyze([scanURL]).archives.first else {
                 throw AoVModRemakeError.invalidArchive(url.lastPathComponent)
             }
