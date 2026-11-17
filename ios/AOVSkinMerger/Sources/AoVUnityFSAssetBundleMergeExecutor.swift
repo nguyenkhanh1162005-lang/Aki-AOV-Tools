@@ -629,7 +629,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                 changed.insert(legacyEntry.key)
                 continue
             }
-            if localObjectPayloadDiffers(
+            if try localObjectPayloadDiffers(
                 legacyEntry.asset,
                 sourceData: sourceData,
                 destinationData: destinationData,
@@ -639,7 +639,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                 changed.insert(legacyEntry.key)
                 continue
             }
-            for pointer in legacyPreloads where localObjectPayloadDiffers(
+            for pointer in legacyPreloads where try localObjectPayloadDiffers(
                 pointer,
                 sourceData: sourceData,
                 destinationData: destinationData,
@@ -675,16 +675,52 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         destinationData: Data,
         sourceSummary: AoVSerializedFileSummary,
         destinationSummary: AoVSerializedFileSummary
-    ) -> Bool {
-        guard pointer.fileID == 0, pointer.pathID != 0 else { return false }
+    ) throws -> Bool {
+        var visited = Set<Int64>()
+        return try localObjectGraphDiffers(
+            pointer,
+            sourceData: sourceData,
+            destinationData: destinationData,
+            sourceSummary: sourceSummary,
+            destinationSummary: destinationSummary,
+            visited: &visited
+        )
+    }
+
+    private static func localObjectGraphDiffers(
+        _ pointer: AoVSerializedAssetPointer,
+        sourceData: Data,
+        destinationData: Data,
+        sourceSummary: AoVSerializedFileSummary,
+        destinationSummary: AoVSerializedFileSummary,
+        visited: inout Set<Int64>
+    ) throws -> Bool {
+        guard pointer.fileID >= 0 else { return true }
+        if pointer.fileID > 0 {
+            let index = Int(pointer.fileID - 1)
+            guard sourceSummary.externalReferences.indices.contains(index),
+                  destinationSummary.externalReferences.indices.contains(index) else {
+                return true
+            }
+            let sourceReference = sourceSummary.externalReferences[index]
+            let destinationReference = destinationSummary.externalReferences[index]
+            return sourceReference.guidHex.lowercased() != destinationReference.guidHex.lowercased() ||
+                normalizedExternalPath(sourceReference.path) != normalizedExternalPath(destinationReference.path)
+        }
+        guard pointer.pathID != 0 else { return false }
+        guard visited.insert(pointer.pathID).inserted else { return false }
+
         let sourceMatches = sourceSummary.serializedObjects.filter { $0.pathID == pointer.pathID }
         let destinationMatches = destinationSummary.serializedObjects.filter { $0.pathID == pointer.pathID }
         guard sourceMatches.count == 1, destinationMatches.count == 1,
               let sourceObject = sourceMatches.first,
               let destinationObject = destinationMatches.first,
               sourceObject.classID == destinationObject.classID,
-              sourceObject.typeID == destinationObject.typeID,
               sourceObject.byteSize == destinationObject.byteSize,
+              let sourceType = sourceSummary.typeInfo(for: sourceObject),
+              let destinationType = destinationSummary.typeInfo(for: destinationObject),
+              !sourceType.typeTreeNodes.isEmpty,
+              sourceType.typeTreeNodes == destinationType.typeTreeNodes,
               let sourceStart = Int(exactly: sourceObject.byteOffset),
               let destinationStart = Int(exactly: destinationObject.byteOffset),
               let size = Int(exactly: sourceObject.byteSize),
@@ -693,9 +729,48 @@ enum AoVUnityFSAssetBundleMergeExecutor {
               destinationStart <= destinationData.count, size <= destinationData.count - destinationStart else {
             return true
         }
-        return !sourceData[sourceStart..<(sourceStart + size)].elementsEqual(
-            destinationData[destinationStart..<(destinationStart + size)]
+        let sourcePayload = sourceData[sourceStart..<(sourceStart + size)]
+        let destinationPayload = destinationData[destinationStart..<(destinationStart + size)]
+        guard sourcePayload.elementsEqual(destinationPayload) else { return true }
+
+        // Identical bytes still do not mean identical external PPtr meaning if
+        // the serialized file's external-reference table was reordered or edited.
+        if sourceSummary.externalReferences != destinationSummary.externalReferences {
+            return true
+        }
+
+        let sourceValue = try AoVSerializedFileParser.decodeObjectWithTypeTree(
+            pathID: pointer.pathID,
+            in: sourceData,
+            summary: sourceSummary
         )
+        let destinationValue = try AoVSerializedFileParser.decodeObjectWithTypeTree(
+            pathID: pointer.pathID,
+            in: destinationData,
+            summary: destinationSummary
+        )
+        let sourceTargets = try AoVUnityTypeTreePointerRemapper.collectLocalTargets(
+            nodes: sourceType.typeTreeNodes,
+            value: sourceValue
+        )
+        let destinationTargets = try AoVUnityTypeTreePointerRemapper.collectLocalTargets(
+            nodes: destinationType.typeTreeNodes,
+            value: destinationValue
+        )
+        guard sourceTargets == destinationTargets else { return true }
+        for target in sourceTargets {
+            if try localObjectGraphDiffers(
+                AoVSerializedAssetPointer(fileID: 0, pathID: target),
+                sourceData: sourceData,
+                destinationData: destinationData,
+                sourceSummary: sourceSummary,
+                destinationSummary: destinationSummary,
+                visited: &visited
+            ) {
+                return true
+            }
+        }
+        return false
     }
 
     private static func auditedExternalMappings(
