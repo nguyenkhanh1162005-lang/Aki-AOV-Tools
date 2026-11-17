@@ -14,6 +14,7 @@ enum AoVSerializedFileObjectImportPlanError: LocalizedError {
     case resourceLimit(String)
     case externalReferenceMismatch(Int32, Int32)
     case pointerAuditFailed(Int64, String)
+    case invalidPreservedPathIDMapping(Int64, Int64)
 
     var errorDescription: String? {
         switch self {
@@ -43,6 +44,8 @@ enum AoVSerializedFileObjectImportPlanError: LocalizedError {
             return "External fileID \(sourceFileID) không ánh xạ đúng GUID/path sang fileID đích \(destinationFileID)."
         case .pointerAuditFailed(let pathID, let reason):
             return "Không thể audit PPtr của object \(pathID): \(reason)"
+        case .invalidPreservedPathIDMapping(let sourcePathID, let destinationPathID):
+            return "Không thể giữ PPtr source pathID \(sourcePathID) thành destination pathID \(destinationPathID)."
         }
     }
 }
@@ -101,6 +104,7 @@ enum AoVSerializedFileObjectImportPlanner {
         source: Data,
         destination: Data,
         selectedPathIDs: Set<Int64>? = nil,
+        preservedLocalPathIDMap: [Int64: Int64] = [:],
         externalFileIDMap: [Int32: Int32] = [:],
         externalPathIDMaps: [Int32: [Int64: Int64]] = [:],
         availableExternalTargetPathIDs: [Int32: Set<Int64>] = [:]
@@ -159,6 +163,23 @@ enum AoVSerializedFileObjectImportPlanner {
         }
 
         let destinationIDSet = Set(destinationIDs)
+        for (sourcePathID, destinationPathID) in preservedLocalPathIDMap {
+            guard sourceObjectsByID[sourcePathID] != nil,
+                  destinationIDSet.contains(destinationPathID),
+                  !selected.contains(sourcePathID) else {
+                throw AoVSerializedFileObjectImportPlanError.invalidPreservedPathIDMapping(
+                    sourcePathID,
+                    destinationPathID
+                )
+            }
+        }
+        guard Set(preservedLocalPathIDMap.values).count == preservedLocalPathIDMap.count else {
+            let first = preservedLocalPathIDMap.first ?? (0, 0)
+            throw AoVSerializedFileObjectImportPlanError.invalidPreservedPathIDMapping(
+                first.key,
+                first.value
+            )
+        }
         let maximumKnownPathID = max(0, max(sourceIDs.max() ?? 0, destinationIDs.max() ?? 0))
         guard maximumKnownPathID < Int64.max else {
             throw AoVSerializedFileObjectImportPlanError.pathIDOverflow
@@ -192,12 +213,21 @@ enum AoVSerializedFileObjectImportPlanner {
         }
         var completeLocalPathIDMap: [Int64: Int64] = [:]
         for sourcePathID in sourceIDs {
-            completeLocalPathIDMap[sourcePathID] = pathIDMap[sourcePathID] ?? unavailableSentinel
+            completeLocalPathIDMap[sourcePathID] =
+                pathIDMap[sourcePathID] ??
+                preservedLocalPathIDMap[sourcePathID] ??
+                unavailableSentinel
         }
-        // fileID == 0 is local to the source SerializedFile. Only newly
-        // allocated imported IDs are valid destinations for those pointers.
-        // Existing destination IDs must be reached through audited external refs.
-        let availableLocalPathIDs = allocatedPathIDs
+        // Imported objects receive fresh IDs; explicitly preserved source roots
+        // (for example the AssetBundle class-142 object) map to an existing
+        // destination object. No other source-local PPtr may bind by coincidence.
+        let availableLocalPathIDs = allocatedPathIDs.union(
+            Set(preservedLocalPathIDMap.values)
+        )
+        var completeReportedPathIDMap = pathIDMap
+        for (sourcePathID, destinationPathID) in preservedLocalPathIDMap {
+            completeReportedPathIDMap[sourcePathID] = destinationPathID
+        }
 
         try validateExternalMappings(
             source: sourceSummary,
@@ -306,7 +336,7 @@ enum AoVSerializedFileObjectImportPlanner {
             sourceFormatVersion: sourceSummary.formatVersion,
             destinationFormatVersion: destinationSummary.formatVersion,
             targetPlatform: destinationSummary.targetPlatform,
-            pathIDMap: pathIDMap,
+            pathIDMap: completeReportedPathIDMap,
             objects: imports,
             totalPayloadBytes: totalBytes,
             roundTripVerified: true
