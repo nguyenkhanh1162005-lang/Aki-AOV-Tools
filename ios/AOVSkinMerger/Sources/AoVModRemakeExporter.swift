@@ -9,6 +9,14 @@ struct AoVModRemakeResourcePayload: Sendable {
     let data: Data
 }
 
+struct AoVModRemakeAssetBundleMergeResult: Sendable {
+    let resourcePath: String
+    let payload: Data
+    let importedObjectCount: Int
+    let importedPathIDs: [Int64]
+    let roundTripVerified: Bool
+}
+
 struct AoVModRemakeExportReport: Sendable {
     let outputURL: URL
     let baseRESName: String
@@ -110,6 +118,41 @@ enum AoVModRemakeExporter {
     /// Convenience entry point that extracts real runtime catalogs from the
     /// selected legacy MOD archives and enforces exact build-marker equality.
     /// Payload bytes and final metadata must still come from verified adapters.
+    /// Produces one merged AssetBundle resource payload for the RES export
+    /// pipeline. These bytes remain a candidate until final Packer/Verification
+    /// metadata is independently verified and passed to exportVerifiedRES.
+    static func mergeAssetBundleResource(
+        resourcePath: String,
+        baseAssetBundle: Data,
+        serializedFileNodePath: String,
+        legacyInputs: [AoVAssetBundleLegacyObjectImportInput],
+        availableCurrentBundleNames: Set<String>,
+        verifiedExternalTargetFiles: [String: Data] = [:]
+    ) throws -> AoVModRemakeAssetBundleMergeResult {
+        guard resourcePath.lowercased().hasSuffix(".assetbundle") else {
+            throw AoVModRemakeExporterError.invalidRuntimePath(resourcePath)
+        }
+        let report = try AoVUnityFSAssetBundleMergeExecutor.mergeImportingLegacyObjects(
+            in: baseAssetBundle,
+            serializedFileNodePath: serializedFileNodePath,
+            legacyInputs: legacyInputs,
+            availableCurrentBundleNames: availableCurrentBundleNames,
+            verifiedExternalTargetFiles: verifiedExternalTargetFiles
+        )
+        guard report.roundTripVerified else {
+            throw AoVModRemakeExporterError.integrityFailure(
+                "AssetBundle \(resourcePath) không qua round-trip."
+            )
+        }
+        return AoVModRemakeAssetBundleMergeResult(
+            resourcePath: resourcePath,
+            payload: report.data,
+            importedObjectCount: report.importedObjectCount,
+            importedPathIDs: report.importedPathIDs,
+            roundTripVerified: true
+        )
+    }
+
     static func exportVerifiedRES(
         baseRESURL: URL,
         legacyMODURLs: [URL],
