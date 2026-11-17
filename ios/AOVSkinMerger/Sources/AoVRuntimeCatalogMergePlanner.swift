@@ -113,7 +113,7 @@ enum AoVRuntimeCatalogMergePlanner {
 
         for path in legacyByPath.keys.sorted() {
             guard let rows = legacyByPath[path], let candidate = rows.first?.value else { continue }
-            let sourceNames = Array(Set(rows.map(\\.source))).sorted()
+            let sourceNames = Array(Set(rows.map(\.source))).sorted()
             guard !path.isEmpty else {
                 issues.append(
                     AoVRuntimeCatalogMergeIssue(
@@ -129,7 +129,7 @@ enum AoVRuntimeCatalogMergePlanner {
             if existingRows.count > 1 {
                 continue // Already reported as a duplicate RES path above.
             }
-            let distinctValues = Set(rows.map(\\.value))
+            let distinctValues = Set(rows.map(\.value))
             let verifiedFinal = verifiedFinalEntries[path]
 
             if let verifiedFinal {
