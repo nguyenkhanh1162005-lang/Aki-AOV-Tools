@@ -11,10 +11,14 @@ cp "$SCRIPT_DIR/Sources/AoVSerializedFileParser.swift" \
    "$SOURCE_DIR/AoVSerializedFileParser.swift"
 cp "$SCRIPT_DIR/Sources/AoVSerializedAssetBundleWriter.swift" \
    "$SOURCE_DIR/AoVSerializedAssetBundleWriter.swift"
+cp "$SCRIPT_DIR/Sources/AoVAssetBundleCatalogMerger.swift" \
+   "$SOURCE_DIR/AoVAssetBundleCatalogMerger.swift"
 test -s "$SOURCE_DIR/AoVSerializedAssetBundleWriter.swift"
 swift package describe --package-path "$PACKAGE_DIR"
 cp "$SCRIPT_DIR/Tests/AoVSerializedFileParserTests.swift" \
    "$TEST_DIR/AoVSerializedFileParserTests.swift"
+cp "$SCRIPT_DIR/Tests/AoVAssetBundleCatalogMergerTests.swift" \
+   "$TEST_DIR/AoVAssetBundleCatalogMergerTests.swift"
 cp "$SCRIPT_DIR/Sources/AoVUnityCommonStrings.swift" \
    "$SOURCE_DIR/AoVUnityCommonStrings.swift"
 cp "$SCRIPT_DIR/Sources/AoVUnityTypeTreeParser.swift" \
