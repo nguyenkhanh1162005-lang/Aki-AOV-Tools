@@ -286,21 +286,21 @@ enum AoVRuntimeResourceCatalogParser {
             try writer.appendAlignedString(catalog.setName, field: "Packer.SetName")
             try writer.appendCount(catalog.allResourcePackInfo.count, field: "Packer.AllResourcePackInfo")
             for (index, item) in catalog.allResourcePackInfo.enumerated() {
-                try writer.appendAlignedString(item.pathInIFS, field: "Packer[\\(index)].PathInIFS")
+                try writer.appendAlignedString(item.pathInIFS, field: "Packer[\(index)].PathInIFS")
                 writer.appendInt32(item.pkgType)
                 writer.appendInt64(item.crcXor)
-                try writer.appendAlignedString(item.tag, field: "Packer[\\(index)].Tag")
+                try writer.appendAlignedString(item.tag, field: "Packer[\(index)].Tag")
                 writer.appendUInt16(item.flags)
                 writer.align4()
                 try writer.appendCount(
                     item.resourceInfos.count,
-                    field: "Packer[\\(index)].ResourceInfos"
+                    field: "Packer[\(index)].ResourceInfos"
                 )
                 for (resourceIndex, resource) in item.resourceInfos.enumerated() {
                     writer.appendInt64(resource.hashCode)
                     try writer.appendAlignedString(
                         resource.extensionName,
-                        field: "Packer[\\(index)].ResourceInfos[\\(resourceIndex)].Extension"
+                        field: "Packer[\(index)].ResourceInfos[\(resourceIndex)].Extension"
                     )
                 }
             }
@@ -308,10 +308,9 @@ enum AoVRuntimeResourceCatalogParser {
                 catalog.allParentIndexToChild.count,
                 field: "Packer.AllParentIdexToChild"
             )
-            for (index, link) in catalog.allParentIndexToChild.enumerated() {
+            for link in catalog.allParentIndexToChild {
                 writer.appendInt32(link.parentIdx)
                 writer.appendInt32(link.childIdx)
-                _ = index
             }
             writer.data.append(catalog.trailingData)
         case .verification(let catalog):
@@ -324,7 +323,7 @@ enum AoVRuntimeResourceCatalogParser {
             for (index, entry) in catalog.allZipVerificationInfo.enumerated() {
                 try writer.appendAlignedString(
                     entry.pathInIFS,
-                    field: "Verification.ZIP[\\(index)].PathInIFS"
+                    field: "Verification.ZIP[\(index)].PathInIFS"
                 )
                 writer.appendInt64(entry.crcXor)
             }
@@ -335,7 +334,7 @@ enum AoVRuntimeResourceCatalogParser {
             for (index, entry) in catalog.allDatabinVerificationInfo.enumerated() {
                 try writer.appendAlignedString(
                     entry.pathInIFS,
-                    field: "Verification.Databin[\\(index)].PathInIFS"
+                    field: "Verification.Databin[\(index)].PathInIFS"
                 )
                 writer.appendInt64(entry.crcXor)
             }
@@ -367,12 +366,12 @@ enum AoVRuntimeResourceCatalogParser {
             guard !item.pathInIFS.isEmpty,
                   paths.insert(item.pathInIFS).inserted else {
                 throw AoVRuntimeResourceCatalogParseError.invalidPayload(
-                    "Packer path rỗng hoặc bị lặp tại mục \\(index)."
+                    "Packer path rỗng hoặc bị lặp tại mục \(index)."
                 )
             }
             guard item.resourceInfos.count <= maximumResourceInfoCount else {
                 throw AoVRuntimeResourceCatalogParseError.resourceLimit(
-                    "Packer ResourceInfos[\\(index)] vượt giới hạn."
+                    "Packer ResourceInfos[\(index)] vượt giới hạn."
                 )
             }
         }
@@ -382,7 +381,7 @@ enum AoVRuntimeResourceCatalogParser {
                   catalog.allResourcePackInfo.indices.contains(parent),
                   catalog.allResourcePackInfo.indices.contains(child) else {
                 throw AoVRuntimeResourceCatalogParseError.invalidPayload(
-                    "Packer parent-child index không hợp lệ tại mục \\(index)."
+                    "Packer parent-child index không hợp lệ tại mục \(index)."
                 )
             }
         }
@@ -402,7 +401,7 @@ enum AoVRuntimeResourceCatalogParser {
                 guard !entry.pathInIFS.isEmpty,
                       paths.insert(entry.pathInIFS).inserted else {
                     throw AoVRuntimeResourceCatalogParseError.invalidPayload(
-                        "Verification path \\(label) rỗng hoặc bị lặp tại mục \\(index)."
+                        "Verification path \(label) rỗng hoặc bị lặp tại mục \(index)."
                     )
                 }
             }
@@ -562,7 +561,7 @@ private struct AoVRuntimeResourceCatalogWriter {
 
     mutating func appendCount(_ value: Int, field: String) throws {
         guard let count = Int32(exactly: value), count >= 0 else {
-            throw AoVRuntimeResourceCatalogParseError.resourceLimit("\\(field) vượt giới hạn Int32.")
+            throw AoVRuntimeResourceCatalogParseError.resourceLimit("\(field) vượt giới hạn Int32.")
         }
         appendInt32(count)
     }
@@ -571,7 +570,7 @@ private struct AoVRuntimeResourceCatalogWriter {
         let bytes = Data(value.utf8)
         guard bytes.count <= 4 * 1024 * 1024,
               let length = Int32(exactly: bytes.count) else {
-            throw AoVRuntimeResourceCatalogParseError.resourceLimit("\\(field) quá dài.")
+            throw AoVRuntimeResourceCatalogParseError.resourceLimit("\(field) quá dài.")
         }
         appendInt32(length)
         data.append(bytes)
