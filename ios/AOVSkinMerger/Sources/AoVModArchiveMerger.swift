@@ -113,6 +113,9 @@ struct AoVModMergeReport: Sendable {
     let preservedWwiseBanks: [String]
     let structurallyValidated: Bool
     let gameCompatibilityTested: Bool
+    let inputBytes: UInt64
+    let outputBytes: UInt64
+    let elapsedSeconds: TimeInterval
     let pipelineEvents: [AoVModMergePipelineEvent]
 }
 
@@ -152,6 +155,7 @@ enum AoVModArchiveMerger {
     private static let resSkinPath = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
 
     static func merge(_ archiveURLs: [URL], baseURL: URL? = nil) throws -> AoVModMergeReport {
+        let startedAt = ProcessInfo.processInfo.systemUptime
         guard archiveURLs.count >= 2 else { throw AoVModArchiveMergeError.tooFewInputs }
         guard archiveURLs.count <= maximumInputs else { throw AoVModArchiveMergeError.tooManyInputs }
 
@@ -489,7 +493,7 @@ enum AoVModArchiveMerger {
             "MSES: \(mergedMSESTables.count)",
             "IFix: \(mergedIFixPatches.count)",
             "AssetRef giữ nguyên: \(assetRefUnique.count)",
-            "Wwise BNK append-only: \\(preservedWwiseBanks.count)"
+            "Wwise BNK append-only: \(preservedWwiseBanks.count)"
         ].joined(separator: " · ")
         pipelineEvents.append(
             AoVModMergePipelineEvent(
@@ -547,6 +551,9 @@ enum AoVModArchiveMerger {
             )
         )
         try FileManager.default.moveItem(at: stagedURL, to: finalURL)
+        let outputBytes = (try? FileManager.default.attributesOfItem(atPath: finalURL.path)[.size] as? NSNumber)?
+            .uint64Value ?? 0
+        let elapsedSeconds = max(0, ProcessInfo.processInfo.systemUptime - startedAt)
 
         var actorSummary: [String: [String]] = [:]
         for (index, source) in ordered.enumerated() {
@@ -566,6 +573,9 @@ enum AoVModArchiveMerger {
             preservedWwiseBanks: preservedWwiseBanks.sorted(),
             structurallyValidated: true,
             gameCompatibilityTested: false,
+            inputBytes: totalInput,
+            outputBytes: outputBytes,
+            elapsedSeconds: elapsedSeconds,
             pipelineEvents: pipelineEvents
         )
     }
@@ -804,24 +814,54 @@ enum AoVModArchiveMerger {
         try readEntry(reference.archive, reference.entry, maxBytes: maxBytes)
     }
 
+    /// AoV binary payloads are commonly encrypted or already compressed.
+    /// Storing those entries avoids spending CPU deflating high-entropy bytes
+    /// that cannot be made smaller. Text/config entries still use DEFLATE.
+    private static func storageMethod(for path: String) -> CompressionMethod {
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        let alreadyCompressedOrOpaque: Set<String> = [
+            "assetbundle", "bytes", "bnk", "wem", "zip", "png", "jpg",
+            "jpeg", "webp", "mp3", "ogg", "mp4", "zst", "zstd",
+            "lz4", "lzma", "pak", "bundle"
+        ]
+        return alreadyCompressedOrOpaque.contains(ext) ? .none : .deflate
+    }
+
     private static func copyEntry(
         _ entry: Entry,
         from source: Archive,
         to destination: Archive,
         path: String,
-        tempRoot: URL
+        tempRoot: URL,
+        compressionMethod: CompressionMethod = .deflate
     ) throws {
         let scratch = tempRoot.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: scratch) }
         _ = try source.extract(entry, to: scratch, bufferSize: 64 * 1024)
-        try destination.addEntry(with: path, fileURL: scratch, compressionMethod: .deflate, bufferSize: 64 * 1024)
+        try destination.addEntry(
+            with: path,
+            fileURL: scratch,
+            compressionMethod: compressionMethod,
+            bufferSize: 64 * 1024
+        )
     }
 
-    private static func addData(_ data: Data, to destination: Archive, path: String, tempRoot: URL) throws {
+    private static func addData(
+        _ data: Data,
+        to destination: Archive,
+        path: String,
+        tempRoot: URL,
+        compressionMethod: CompressionMethod = .deflate
+    ) throws {
         let scratch = tempRoot.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: scratch) }
         try data.write(to: scratch, options: .atomic)
-        try destination.addEntry(with: path, fileURL: scratch, compressionMethod: .deflate, bufferSize: 64 * 1024)
+        try destination.addEntry(
+            with: path,
+            fileURL: scratch,
+            compressionMethod: compressionMethod,
+            bufferSize: 64 * 1024
+        )
     }
 
     private static func writeMergedResources(
@@ -849,17 +889,35 @@ enum AoVModArchiveMerger {
             for entry in base.resourceArchive where entry.type == .file {
                 let relative = try normalizeResourcePath(entry.path)
                 if let payload = replacements[relative] {
-                    try addData(payload, to: output, path: entry.path, tempRoot: tempRoot)
+                    try addData(
+                        payload,
+                        to: output,
+                        path: entry.path,
+                        tempRoot: tempRoot,
+                        compressionMethod: storageMethod(for: relative)
+                    )
                 } else {
-                    try copyEntry(entry, from: base.resourceArchive, to: output,
-                                  path: entry.path, tempRoot: tempRoot)
+                    try copyEntry(
+                        entry,
+                        from: base.resourceArchive,
+                        to: output,
+                        path: entry.path,
+                        tempRoot: tempRoot,
+                        compressionMethod: storageMethod(for: relative)
+                    )
                 }
                 emitted.insert(relative)
             }
             for (relative, reference) in added where !emitted.contains(relative) {
                 let outputPath = prefix + relative
-                try copyEntry(reference.entry, from: reference.archive, to: output,
-                              path: outputPath, tempRoot: tempRoot)
+                try copyEntry(
+                    reference.entry,
+                    from: reference.archive,
+                    to: output,
+                    path: outputPath,
+                    tempRoot: tempRoot,
+                    compressionMethod: storageMethod(for: relative)
+                )
                 emitted.insert(relative)
             }
         }
@@ -883,16 +941,28 @@ enum AoVModArchiveMerger {
         for entry in base.outerArchive where entry.type == .file {
             if entry.path == resourcesEntry.path {
                 try output.addEntry(with: entry.path, fileURL: innerURL,
-                                    compressionMethod: .deflate, bufferSize: 64 * 1024)
+                                    compressionMethod: .none, bufferSize: 64 * 1024)
             } else if let skinEntry = base.outerSkinEntry, entry.path == skinEntry.path {
                 try addData(skinData, to: output, path: entry.path, tempRoot: tempRoot)
             } else if entry.path.replacingOccurrences(of: "\\", with: "/").hasPrefix("Resources/"),
                       let relative = try? normalizeResourcePath(entry.path),
                       let replacement = replacements[relative] {
-                try addData(replacement, to: output, path: entry.path, tempRoot: tempRoot)
+                try addData(
+                    replacement,
+                    to: output,
+                    path: entry.path,
+                    tempRoot: tempRoot,
+                    compressionMethod: storageMethod(for: relative)
+                )
             } else {
-                try copyEntry(entry, from: base.outerArchive, to: output,
-                              path: entry.path, tempRoot: tempRoot)
+                try copyEntry(
+                    entry,
+                    from: base.outerArchive,
+                    to: output,
+                    path: entry.path,
+                    tempRoot: tempRoot,
+                    compressionMethod: storageMethod(for: entry.path)
+                )
             }
         }
     }
