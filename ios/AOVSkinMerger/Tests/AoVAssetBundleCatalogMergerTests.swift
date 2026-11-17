@@ -79,6 +79,58 @@ final class AoVAssetBundleCatalogMergerTests: XCTestCase {
         XCTAssertEqual(plan.externalTargetAuditSamples.count, 2)
     }
 
+    func testExternalPointersAreWritableOnlyWhenTargetCABContainsPathID() throws {
+        let source = makeSummary(
+            localPathIDs: [],
+            externalReferences: [external("guid-shared", path: "CAB/shared")]
+        )
+        let destination = makeSummary(
+            localPathIDs: [],
+            externalReferences: [
+                external("guid-x", path: "CAB/x"),
+                external("guid-y", path: "CAB/y"),
+                external("guid-shared", path: "CAB/shared")
+            ]
+        )
+        let oldPointer = AoVSerializedAssetPointer(fileID: 1, pathID: 7007)
+        let current = record(bundle: "actor/2500", preloads: [], entries: [], dependencies: [])
+        let legacy = record(
+            bundle: "actor/2500",
+            preloads: [oldPointer],
+            entries: [entry("assets/new-external.prefab", index: 0, size: 1, pointer: oldPointer)],
+            dependencies: []
+        )
+        let key = AoVAssetBundleCatalogMerger.externalTargetKey(
+            guidHex: "GUID-SHARED",
+            path: "CAB\\shared"
+        )
+
+        let auditedPlan = try AoVAssetBundleCatalogMerger.plan(
+            current: current,
+            legacy: legacy,
+            currentSerializedFile: destination,
+            legacySerializedFile: source,
+            availableCurrentBundleNames: ["actor/2500"],
+            verifiedExternalTargetPathIDs: [key: [7007]]
+        )
+
+        XCTAssertFalse(auditedPlan.externalTargetAuditRequired)
+        XCTAssertEqual(auditedPlan.remappedExternalPointerCount, 2)
+        XCTAssertEqual(auditedPlan.mergedRecord.preloadReferences.first?.fileID, 3)
+        XCTAssertEqual(auditedPlan.mergedRecord.preloadReferences.first?.pathID, 7007)
+
+        let missingTargetPlan = try AoVAssetBundleCatalogMerger.plan(
+            current: current,
+            legacy: legacy,
+            currentSerializedFile: destination,
+            legacySerializedFile: source,
+            availableCurrentBundleNames: ["actor/2500"],
+            verifiedExternalTargetPathIDs: [key: [9999]]
+        )
+        XCTAssertTrue(missingTargetPlan.externalTargetAuditRequired)
+        XCTAssertFalse(missingTargetPlan.externalTargetAuditSamples.isEmpty)
+    }
+
     func testBlocksExternalPointerWhenGUIDAndPathDoNotMatch() {
         let source = makeSummary(
             localPathIDs: [],
