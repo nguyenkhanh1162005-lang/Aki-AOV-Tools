@@ -43,6 +43,8 @@ final class AoVModArchiveMergerTests: XCTestCase {
             payload.append($0)
         }
         XCTAssertEqual(payload, Data("opaque-skin-payload".utf8))
+        XCTAssertEqual(UInt64(entry.compressedSize), entry.uncompressedSize,
+                       "Opaque .bytes payload should be stored without wasteful DEFLATE compression.")
     }
 
     func testThirtyTwoMiBOpaquePayloadMergeStaysUnderTenSeconds() throws {
@@ -82,6 +84,7 @@ final class AoVModArchiveMergerTests: XCTestCase {
             $0.type == .file && $0.path == "Skins/Actor_999/large-opaque.bytes"
         }))
         XCTAssertEqual(entry.uncompressedSize, 32 * 1024 * 1024)
+        XCTAssertEqual(UInt64(entry.compressedSize), entry.uncompressedSize)
     }
 
     func testRejectsAnUnknownConflictingPayloadInsteadOfOverwritingIt() throws {
