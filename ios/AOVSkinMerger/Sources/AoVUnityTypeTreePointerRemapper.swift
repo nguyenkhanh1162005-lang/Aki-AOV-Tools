@@ -41,6 +41,28 @@ enum AoVUnityTypeTreePointerRemapper {
         "double", "bool", "string", "TypelessData"
     ]
 
+    /// Collects local PPtr targets without rewriting values. Used to build
+    /// the minimal transitive object closure before an import plan is allocated.
+    static func collectLocalTargets(
+        nodes: [AoVUnityTypeTreeNode],
+        value: AoVUnityTypeTreeValue
+    ) throws -> Set<Int64> {
+        guard !nodes.isEmpty, nodes[0].level == 0 else {
+            throw AoVUnityTypeTreePointerRemapError.invalidTree("root")
+        }
+        let subtreeEnds = try buildSubtreeEnds(nodes)
+        var targets = Set<Int64>()
+        try collectLocalTargets(
+            at: 0,
+            nodes: nodes,
+            subtreeEnds: subtreeEnds,
+            value: value,
+            path: nodes[0].name,
+            targets: &targets
+        )
+        return targets
+    }
+
     static func remap(
         nodes: [AoVUnityTypeTreeNode],
         value: AoVUnityTypeTreeValue,
@@ -104,6 +126,115 @@ enum AoVUnityTypeTreePointerRemapper {
         }
         while let index = stack.popLast() { ends[index] = nodes.count }
         return ends
+    }
+
+    private static func collectLocalTargets(
+        at index: Int,
+        nodes: [AoVUnityTypeTreeNode],
+        subtreeEnds: [Int],
+        value: AoVUnityTypeTreeValue,
+        path: String,
+        targets: inout Set<Int64>
+    ) throws {
+        guard nodes.indices.contains(index) else {
+            throw AoVUnityTypeTreePointerRemapError.invalidTree(path)
+        }
+        let node = nodes[index]
+        let firstChild = index + 1
+        let end = subtreeEnds[index]
+        let childCount = end - firstChild
+
+        if node.type.hasPrefix("PPtr<") {
+            guard childCount >= 2,
+                  case .object(let fields) = value,
+                  let fileIDValue = fields["m_FileID"],
+                  let pathIDValue = fields["m_PathID"],
+                  let fileID64 = fileIDValue.intValue,
+                  let fileID = Int32(exactly: fileID64),
+                  let pathID = pathIDValue.intValue else {
+                throw AoVUnityTypeTreePointerRemapError.invalidPointer(path)
+            }
+            guard fileID >= 0 else {
+                throw AoVUnityTypeTreePointerRemapError.invalidPointer(path)
+            }
+            if fileID == 0, pathID != 0 {
+                targets.insert(pathID)
+            } else if fileID > 0, pathID == 0 {
+                throw AoVUnityTypeTreePointerRemapError.invalidPointer(path)
+            }
+            return
+        }
+
+        if scalarAndOpaqueTypes.contains(node.type) { return }
+
+        if node.type == "map" {
+            guard childCount >= 5, firstChild < end,
+                  nodes[firstChild].type == "Array",
+                  case .map(let entries) = value else {
+                throw AoVUnityTypeTreePointerRemapError.invalidTree(path)
+            }
+            let keyIndex = index + 4
+            guard keyIndex < end else {
+                throw AoVUnityTypeTreePointerRemapError.invalidTree(path + ".key")
+            }
+            let valueIndex = subtreeEnds[keyIndex]
+            guard valueIndex < end else {
+                throw AoVUnityTypeTreePointerRemapError.invalidTree(path + ".value")
+            }
+            for (entryIndex, entry) in entries.enumerated() {
+                try collectLocalTargets(
+                    at: keyIndex, nodes: nodes, subtreeEnds: subtreeEnds,
+                    value: entry.key, path: "\(path).key[\(entryIndex)]",
+                    targets: &targets
+                )
+                try collectLocalTargets(
+                    at: valueIndex, nodes: nodes, subtreeEnds: subtreeEnds,
+                    value: entry.value, path: "\(path).value[\(entryIndex)]",
+                    targets: &targets
+                )
+            }
+            return
+        }
+
+        if childCount > 0 && nodes[firstChild].type == "Array" {
+            guard case .array(let values) = value else {
+                throw AoVUnityTypeTreePointerRemapError.invalidTree(path + ".array")
+            }
+            let dataIndex = index + 3
+            guard dataIndex < end else {
+                throw AoVUnityTypeTreePointerRemapError.invalidTree(path + ".data")
+            }
+            for (valueIndex, item) in values.enumerated() {
+                try collectLocalTargets(
+                    at: dataIndex, nodes: nodes, subtreeEnds: subtreeEnds,
+                    value: item, path: "\(path)[\(valueIndex)]",
+                    targets: &targets
+                )
+            }
+            return
+        }
+
+        if childCount > 0 {
+            guard case .object(let fields) = value else {
+                throw AoVUnityTypeTreePointerRemapError.invalidTree(path + ".object")
+            }
+            var childIndex = firstChild
+            while childIndex < end {
+                let child = nodes[childIndex]
+                guard let childValue = fields[child.name] else {
+                    throw AoVUnityTypeTreePointerRemapError.invalidTree(path + "." + child.name)
+                }
+                try collectLocalTargets(
+                    at: childIndex,
+                    nodes: nodes,
+                    subtreeEnds: subtreeEnds,
+                    value: childValue,
+                    path: path + "." + child.name,
+                    targets: &targets
+                )
+                childIndex = subtreeEnds[childIndex]
+            }
+        }
     }
 
     private static func remapNode(
