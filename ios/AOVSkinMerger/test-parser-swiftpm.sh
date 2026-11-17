@@ -27,7 +27,11 @@ cp "$SCRIPT_DIR/Sources/AoVUnityCommonStrings.swift" \
    "$SOURCE_DIR/AoVUnityCommonStrings.swift"
 cp "$SCRIPT_DIR/Sources/AoVUnityTypeTreeParser.swift" \
    "$SOURCE_DIR/AoVUnityTypeTreeParser.swift"
+cp "$SCRIPT_DIR/Sources/AoVRuntimeCatalogMergePlanner.swift" \
+   "$SOURCE_DIR/AoVRuntimeCatalogMergePlanner.swift"
 cp "$SCRIPT_DIR/Tests/AoVUnityTypeTreeParserTests.swift" \
    "$TEST_DIR/AoVUnityTypeTreeParserTests.swift"
+cp "$SCRIPT_DIR/Tests/AoVRuntimeCatalogMergePlannerTests.swift" \
+   "$TEST_DIR/AoVRuntimeCatalogMergePlannerTests.swift"
 
 swift test --package-path "$PACKAGE_DIR" --parallel
