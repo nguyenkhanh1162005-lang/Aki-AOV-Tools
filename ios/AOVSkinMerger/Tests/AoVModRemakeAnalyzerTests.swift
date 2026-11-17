@@ -138,6 +138,10 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
             ambiguousContainerKeyCount: 0,
             changedAssetPointerCount: 0,
             changedPreloadRangeCount: 0,
+            invalidLegacyPreloadRangeCount: 0,
+            invalidCurrentPreloadRangeCount: 0,
+            changedMainAssetPointerCount: 0,
+            changedClassCompatibilityCount: 0,
             dependenciesAddedInCurrentCount: 0,
             dependenciesRemovedInCurrentCount: 0,
             findings: []
@@ -161,6 +165,9 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
             name: bundle,
             assetBundleName: bundle,
             preloadCount: 8,
+            invalidPreloadRangeCount: 0,
+            invalidPreloadRangeSamples: [],
+            classCompatibilityIDs: [28],
             mainAssetFileID: 0,
             mainAssetPathID: 200,
             dependencies: dependencies,
@@ -179,7 +186,8 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
             preloadIndex: preloadIndex,
             preloadSize: preloadSize,
             assetFileID: 0,
-            assetPathID: pathID
+            assetPathID: pathID,
+            preloadRangeValid: preloadIndex >= 0 && preloadSize >= 0 && Int64(preloadIndex) + Int64(preloadSize) <= 8
         )
     }
 }
