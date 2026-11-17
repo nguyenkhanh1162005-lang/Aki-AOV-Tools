@@ -206,6 +206,90 @@ final class AoVUnityTypeTreeParserTests: XCTestCase {
         }
     }
 
+    func testTypeTreePointerRemapperAuditsAndRemapsLocalExternalAndArrayPointers() throws {
+        let nodes = [
+            AoVUnityTypeTreeNode(type: "Root", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "PPtr<GameObject>", name: "m_GameObject", level: 1, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "int", name: "m_FileID", level: 2, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_PathID", level: 2, byteSize: 8, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "PPtr<Material>", name: "m_Material", level: 1, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "int", name: "m_FileID", level: 2, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_PathID", level: 2, byteSize: 8, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "vector", name: "m_References", level: 1, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "Array", name: "Array", level: 2, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "int", name: "size", level: 3, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "PPtr<Object>", name: "data", level: 3, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "int", name: "m_FileID", level: 4, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_PathID", level: 4, byteSize: 8, metaFlags: 0)
+        ]
+        let original: AoVUnityTypeTreeValue = .object([
+            "m_GameObject": .object([
+                "m_FileID": .signed(0),
+                "m_PathID": .signed(1001)
+            ]),
+            "m_Material": .object([
+                "m_FileID": .signed(1),
+                "m_PathID": .signed(2002)
+            ]),
+            "m_References": .array([
+                .object(["m_FileID": .signed(0), "m_PathID": .signed(3003)]),
+                .object(["m_FileID": .signed(2), "m_PathID": .signed(4004)])
+            ])
+        ])
+
+        let report = try AoVUnityTypeTreePointerRemapper.remap(
+            nodes: nodes,
+            value: original,
+            localPathIDMap: [1001: 9001, 3003: 9003],
+            availableLocalPathIDs: [9001, 9003],
+            externalFileIDMap: [1: 3, 2: 4],
+            externalPathIDMaps: [
+                1: [2002: 8002],
+                2: [4004: 8004]
+            ],
+            availableExternalTargetPathIDs: [
+                3: [8002],
+                4: [8004]
+            ]
+        )
+
+        XCTAssertEqual(report.remappedLocalPointers, 2)
+        XCTAssertEqual(report.remappedExternalPointers, 2)
+        XCTAssertEqual(report.auditedExternalPointers, 2)
+        guard case .object(let fields) = report.value,
+              case .object(let gameObject)? = fields["m_GameObject"],
+              case .object(let material)? = fields["m_Material"],
+              case .array(let references)? = fields["m_References"],
+              case .object(let firstReference)? = references.first,
+              case .object(let secondReference)? = references.last else {
+            return XCTFail("Remapped TypeTree PPtr structure is invalid.")
+        }
+        XCTAssertEqual(gameObject["m_FileID"]?.intValue, 0)
+        XCTAssertEqual(gameObject["m_PathID"]?.intValue, 9001)
+        XCTAssertEqual(material["m_FileID"]?.intValue, 3)
+        XCTAssertEqual(material["m_PathID"]?.intValue, 8002)
+        XCTAssertEqual(firstReference["m_PathID"]?.intValue, 9003)
+        XCTAssertEqual(secondReference["m_FileID"]?.intValue, 4)
+        XCTAssertEqual(secondReference["m_PathID"]?.intValue, 8004)
+
+        XCTAssertThrowsError(
+            try AoVUnityTypeTreePointerRemapper.remap(
+                nodes: nodes,
+                value: original,
+                localPathIDMap: [1001: 9001, 3003: 9003],
+                availableLocalPathIDs: [9001, 9003],
+                externalFileIDMap: [1: 3, 2: 4],
+                externalPathIDMaps: [1: [2002: 8002], 2: [4004: 8004]],
+                availableExternalTargetPathIDs: [3: [8002], 4: [9999]]
+            )
+        ) { error in
+            guard let remapError = error as? AoVUnityTypeTreePointerRemapError,
+                  case .unresolvedExternalTarget = remapError else {
+                return XCTFail("Expected unresolved external pointer rejection, got \(error)")
+            }
+        }
+    }
+
     func testTypeTreeWriterRoundTripsBigEndianPrimitivesAndRejectsMissingFields() throws {
         let nodes = [
             AoVUnityTypeTreeNode(type: "Root", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
