@@ -42,6 +42,46 @@ final class AoVAssetBundleCatalogMergerTests: XCTestCase {
         XCTAssertFalse(plan.externalTargetAuditRequired)
     }
 
+    func testSamePreloadPointersAtDifferentIndicesAreNotReportedAsConflict() throws {
+        let assetPointer = AoVSerializedAssetPointer(fileID: 0, pathID: 100)
+        let preloadPointer = AoVSerializedAssetPointer(fileID: 0, pathID: 200)
+        let current = record(
+            bundle: "actor/preload-index-test",
+            preloads: [
+                AoVSerializedAssetPointer(fileID: 0, pathID: 300),
+                preloadPointer
+            ],
+            entries: [
+                entry("assets/hero.prefab", index: 1, size: 1, pointer: assetPointer)
+            ],
+            dependencies: []
+        )
+        let legacy = record(
+            bundle: "actor/preload-index-test",
+            preloads: [
+                preloadPointer,
+                AoVSerializedAssetPointer(fileID: 0, pathID: 400)
+            ],
+            entries: [
+                entry("assets/hero.prefab", index: 0, size: 1, pointer: assetPointer)
+            ],
+            dependencies: []
+        )
+        let summary = makeSummary(localPathIDs: [100, 200, 300, 400])
+
+        let plan = try AoVAssetBundleCatalogMerger.plan(
+            current: current,
+            legacy: legacy,
+            currentSerializedFile: summary,
+            legacySerializedFile: summary,
+            availableCurrentBundleNames: ["actor/preload-index-test"]
+        )
+
+        XCTAssertEqual(plan.alreadyPresentContainerKeys, ["assets/hero.prefab"])
+        XCTAssertTrue(plan.currentVersionRetainedPointerConflictKeys.isEmpty)
+        XCTAssertTrue(plan.replacedContainerKeys.isEmpty)
+    }
+
     func testMapsLegacyLocalPointersToImportedDestinationObjectIDs() throws {
         let currentRootID: Int64 = 5001
         let legacyRootID: Int64 = 1001
