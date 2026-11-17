@@ -13,6 +13,8 @@ cp "$SCRIPT_DIR/Sources/AoVRuntimeResourceCatalogParser.swift" \
    "$SOURCE_DIR/AoVRuntimeResourceCatalogParser.swift"
 cp "$SCRIPT_DIR/Sources/AoVSerializedAssetBundleWriter.swift" \
    "$SOURCE_DIR/AoVSerializedAssetBundleWriter.swift"
+cp "$SCRIPT_DIR/Sources/AoVSerializedFileRewriter.swift" \
+   "$SOURCE_DIR/AoVSerializedFileRewriter.swift"
 cp "$SCRIPT_DIR/Sources/AoVAssetBundleCatalogMerger.swift" \
    "$SOURCE_DIR/AoVAssetBundleCatalogMerger.swift"
 test -s "$SOURCE_DIR/AoVSerializedAssetBundleWriter.swift"
