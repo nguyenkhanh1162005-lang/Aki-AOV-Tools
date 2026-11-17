@@ -176,7 +176,8 @@ enum AoVModRemakeExporter {
             let runtimeComponents = ifsPath.split(separator: "/", omittingEmptySubsequences: false)
             guard !ifsPath.isEmpty, !ifsPath.hasPrefix("/"),
                   !runtimeComponents.contains(""), !runtimeComponents.contains(".."),
-                  !runtimeComponents.contains(".") else {
+                  !runtimeComponents.contains("."),
+                  !ifsPath.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
                 throw AoVModRemakeExporterError.invalidRuntimePath(payload.ifsPath)
             }
             guard UInt64(payload.data.count) <= maximumSingleEntry else {
@@ -391,7 +392,9 @@ enum AoVModRemakeExporter {
               !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw AoVModRemakeExporterError.invalidArchivePath(raw)
         }
-        if parts.first == "Resources", parts.count >= 3 {
+        let versionPattern = #"^\d+\.\d+(?:\.\d+)?$"#
+        if parts.count >= 3, parts[0] == "Resources",
+           parts[1].range(of: versionPattern, options: .regularExpression) != nil {
             return parts.dropFirst(2).joined(separator: "/")
         }
         return path
