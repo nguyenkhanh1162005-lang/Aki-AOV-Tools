@@ -159,7 +159,9 @@ final class AoVUnityFSParserTests: XCTestCase {
 
         XCTAssertEqual(extracted.count, 1)
         XCTAssertEqual(extracted.first?.path, "CAB-multi")
-        XCTAssertEqual(extracted.first?.data, first + second)
+        var expected = first
+        expected.append(second)
+        XCTAssertEqual(extracted.first?.data, expected)
     }
 
     func testExtractsLZ4HCBlockWithSameDecoder() throws {
