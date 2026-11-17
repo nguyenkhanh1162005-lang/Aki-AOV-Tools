@@ -295,11 +295,11 @@ final class AoVUnityFSAssetBundleMergeExecutorTests: XCTestCase {
             littleEndian: true
         )
         var dataSection = Data()
-        let bundleStart: Int64 = 0
-        dataSection.append(bundlePayload)
-        while dataSection.count % 16 != 0 { dataSection.append(0) }
-        let assetStart = Int64(dataSection.count)
+        let assetStart: Int64 = 0
         dataSection.append(assetPayload)
+        while dataSection.count % 16 != 0 { dataSection.append(0) }
+        let bundleStart = Int64(dataSection.count)
+        dataSection.append(bundlePayload)
 
         var metadata = Data()
         metadata.append(Data("2022.3.5f1\\0".utf8))
@@ -310,14 +310,14 @@ final class AoVUnityFSAssetBundleMergeExecutorTests: XCTestCase {
         appendSerializedType(classID: 28, nodes: assetNodes, to: &metadata)
         appendInt32(2, to: &metadata)
         align4(&metadata)
-        appendInt64(record.pathID, to: &metadata)
-        appendInt64(bundleStart, to: &metadata)
-        appendUInt32(UInt32(bundlePayload.count), to: &metadata)
-        appendInt32(0, to: &metadata)
         appendInt64(assetPathID, to: &metadata)
         appendInt64(assetStart, to: &metadata)
         appendUInt32(UInt32(assetPayload.count), to: &metadata)
         appendInt32(1, to: &metadata)
+        appendInt64(record.pathID, to: &metadata)
+        appendInt64(bundleStart, to: &metadata)
+        appendUInt32(UInt32(bundlePayload.count), to: &metadata)
+        appendInt32(0, to: &metadata)
         appendInt32(0, to: &metadata)
         appendInt32(0, to: &metadata)
         appendInt32(0, to: &metadata)
