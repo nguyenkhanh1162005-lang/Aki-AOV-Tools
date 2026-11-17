@@ -236,8 +236,6 @@ final class AoVSerializedRuntimeCatalogWriterTests: XCTestCase {
 
         let report = try AoVUnityFSRuntimeCatalogMergeExecutor.mergePacker(
             in: unityFS.data,
-            serializedFileNodePath: "CAB-packer",
-            objectPathID: object.pathID,
             legacy: [("legacy-mod.zip", legacyCatalog)],
             verifiedFinalEntries: [addedEntry.pathInIFS: addedEntry]
         )
@@ -286,8 +284,6 @@ final class AoVSerializedRuntimeCatalogWriterTests: XCTestCase {
 
         let report = try AoVUnityFSRuntimeCatalogMergeExecutor.mergeVerification(
             in: unityFS.data,
-            serializedFileNodePath: "CAB-verification",
-            objectPathID: object.pathID,
             legacy: [("legacy-mod.zip", legacyCatalog)],
             verifiedFinalDatabinChecksumValues: [databinPath: 333],
             verifiedFinalZIPChecksumValues: [zipPath: 444]
@@ -302,6 +298,39 @@ final class AoVSerializedRuntimeCatalogWriterTests: XCTestCase {
         let verified = try AoVSerializedFileParser.inspect(node.data)
         XCTAssertEqual(verified.resourceVerificationCatalog?.allZipVerificationInfo.first?.crcXor, 444)
         XCTAssertEqual(verified.resourceVerificationCatalog?.allDatabinVerificationInfo.first?.crcXor, 333)
+    }
+
+    func testLocatesPackerAndVerificationObjectsWithoutCallerSuppliedPathIDs() throws {
+        let packerSerialized = makeSerializedFile(with: .packer(makePackerCatalog()))
+        let verificationSerialized = makeSerializedFile(with: .verification(makeVerificationCatalog()))
+        let packerBundle = try AoVUnityFSRepacker.repack(
+            [AoVUnityFSRepackNode(path: "CAB-packer", data: packerSerialized)],
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2022.3.5f1",
+            blockInfoLayout: .arenaOfValor
+        )
+        let verificationBundle = try AoVUnityFSRepacker.repack(
+            [AoVUnityFSRepackNode(path: "CAB-verification", data: verificationSerialized)],
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2022.3.5f1",
+            blockInfoLayout: .arenaOfValor
+        )
+
+        let packerTarget = try AoVUnityFSRuntimeCatalogMergeExecutor.locatePackerCatalog(in: packerBundle.data)
+        let verificationTarget = try AoVUnityFSRuntimeCatalogMergeExecutor.locateVerificationCatalog(in: verificationBundle.data)
+
+        XCTAssertEqual(packerTarget.nodePath, "CAB-packer")
+        XCTAssertEqual(packerTarget.objectPathID, 4321)
+        XCTAssertEqual(verificationTarget.nodePath, "CAB-verification")
+        XCTAssertEqual(verificationTarget.objectPathID, 4321)
+        guard case .packer(let packer) = packerTarget.catalog,
+              case .verification(let verification) = verificationTarget.catalog else {
+            return XCTFail("Catalog detector returned the wrong catalog type.")
+        }
+        XCTAssertEqual(packer.name, "ResourcePackerInfoSetXML")
+        XCTAssertEqual(verification.name, "ResourceVerificationInfoSetXML")
     }
 
     private func makePackerCatalog() -> AoVRuntimeResourcePackerCatalog {
