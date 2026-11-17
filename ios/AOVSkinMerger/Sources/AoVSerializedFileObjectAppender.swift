@@ -31,21 +31,21 @@ enum AoVSerializedFileObjectAppenderError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unsupportedFormat(let version):
-            return "Object appender chỉ hỗ trợ SerializedFile format 22–30, nhận \\(version)."
+            return "Object appender chỉ hỗ trợ SerializedFile format 22–30, nhận \(version)."
         case .invalidSource(let reason):
-            return "SerializedFile nền không hợp lệ: \\(reason)"
+            return "SerializedFile nền không hợp lệ: \(reason)"
         case .noObjects:
             return "Không có object mới để thêm."
         case .duplicatePathID(let id):
-            return "Batch import có pathID bị trùng: \\(id)."
+            return "Batch import có pathID bị trùng: \(id)."
         case .objectAlreadyExists(let id):
-            return "SerializedFile nền đã có pathID \\(id)."
+            return "SerializedFile nền đã có pathID \(id)."
         case .invalidType(let id, let classID):
-            return "TypeID \\(id) không tồn tại hoặc không khớp classID \\(classID)."
+            return "TypeID \(id) không tồn tại hoặc không khớp classID \(classID)."
         case .emptyPayload(let id):
-            return "Object pathID \\(id) có payload rỗng."
+            return "Object pathID \(id) có payload rỗng."
         case .payloadTooLarge(let id):
-            return "Object pathID \\(id) vượt giới hạn 16 MiB."
+            return "Object pathID \(id) vượt giới hạn 16 MiB."
         case .resourceLimit:
             return "SerializedFile sau import vượt giới hạn 512 MiB hoặc tràn số."
         }
@@ -267,7 +267,7 @@ enum AoVSerializedFileObjectAppender {
             start >= 0, start <= output.count, size <= output.count - start,
             output.subdata(in: start..<(start + size)) == object.payload else {
                 throw AoVSerializedFileObjectAppenderError.invalidSource(
-                    "appended object \\(object.pathID) differs after parser round-trip."
+                    "appended object \(object.pathID) differs after parser round-trip."
                 )
             }
         }
