@@ -432,10 +432,13 @@ enum AoVModRemakeExporter {
               !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw AoVModRemakeExporterError.invalidArchivePath(raw)
         }
-        let versionPattern = #"^\d+\.\d+(?:\.\d+)?$"#
-        if parts.count >= 3, parts[0] == "Resources",
-           parts[1].range(of: versionPattern, options: .regularExpression) != nil {
-            return parts.dropFirst(2).joined(separator: "/")
+        let versionPattern = #"^\\d+\\.\\d+(?:\\.\\d+)?$"#
+        if parts.count >= 2, parts[0] == "Resources" {
+            if parts.count >= 3,
+               parts[1].range(of: versionPattern, options: .regularExpression) != nil {
+                return parts.dropFirst(2).joined(separator: "/")
+            }
+            return parts.dropFirst().joined(separator: "/")
         }
         return path
     }
