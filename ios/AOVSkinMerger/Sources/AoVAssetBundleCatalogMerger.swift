@@ -42,6 +42,7 @@ struct AoVAssetBundleCatalogMergePlan: Sendable {
     let mergedRecord: AoVSerializedAssetBundleRecord
     let addedContainerKeys: [String]
     let alreadyPresentContainerKeys: [String]
+    let currentVersionRetainedPointerConflictKeys: [String]
     let addedPreloadReferenceCount: Int
     let addedDependencies: [String]
     let remappedExternalPointerCount: Int
@@ -92,12 +93,18 @@ enum AoVAssetBundleCatalogMerger {
         var mergedEntries = current.containerEntries
         var addedKeys: [String] = []
         var alreadyPresent: [String] = []
+        var currentVersionRetainedPointerConflicts: [String] = []
         var externalRemaps = 0
         var externalSamples: [String] = []
 
         for legacyEntry in legacy.containerEntries {
-            if currentByKey[legacyEntry.key] != nil {
+            if let currentEntry = currentByKey[legacyEntry.key] {
                 alreadyPresent.append(legacyEntry.key)
+                if currentEntry.asset != legacyEntry.asset ||
+                    currentEntry.preloadIndex != legacyEntry.preloadIndex ||
+                    currentEntry.preloadSize != legacyEntry.preloadSize {
+                    currentVersionRetainedPointerConflicts.append(legacyEntry.key)
+                }
                 continue
             }
 
@@ -204,6 +211,7 @@ enum AoVAssetBundleCatalogMerger {
             mergedRecord: mergedRecord,
             addedContainerKeys: addedKeys,
             alreadyPresentContainerKeys: alreadyPresent,
+            currentVersionRetainedPointerConflictKeys: currentVersionRetainedPointerConflicts,
             addedPreloadReferenceCount: mergedPreloads.count - current.preloadReferences.count,
             addedDependencies: addedDependencies,
             remappedExternalPointerCount: externalRemaps,
