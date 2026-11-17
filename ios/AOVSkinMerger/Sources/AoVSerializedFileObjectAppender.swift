@@ -26,6 +26,7 @@ enum AoVSerializedFileObjectAppenderError: LocalizedError {
     case invalidType(Int32, Int32)
     case emptyPayload(Int64)
     case payloadTooLarge(Int64)
+    case invalidPayload(Int64)
     case resourceLimit
 
     var errorDescription: String? {
@@ -46,6 +47,8 @@ enum AoVSerializedFileObjectAppenderError: LocalizedError {
             return "Object pathID \(id) có payload rỗng."
         case .payloadTooLarge(let id):
             return "Object pathID \(id) vượt giới hạn 16 MiB."
+        case .invalidPayload(let id):
+            return "Payload object pathID \(id) không khớp TypeTree schema của RES đích."
         case .resourceLimit:
             return "SerializedFile sau import vượt giới hạn 512 MiB hoặc tràn số."
         }
@@ -166,11 +169,32 @@ enum AoVSerializedFileObjectAppender {
                   summary.serializedTypes[typeIndex].classID == object.classID else {
                 throw AoVSerializedFileObjectAppenderError.invalidType(object.typeID, object.classID)
             }
+            guard !summary.serializedTypes[typeIndex].typeTreeNodes.isEmpty else {
+                throw AoVSerializedFileObjectAppenderError.invalidPayload(object.pathID)
+            }
             guard !object.payload.isEmpty else {
                 throw AoVSerializedFileObjectAppenderError.emptyPayload(object.pathID)
             }
             guard object.payload.count <= maximumObjectBytes else {
                 throw AoVSerializedFileObjectAppenderError.payloadTooLarge(object.pathID)
+            }
+            do {
+                let nodes = summary.serializedTypes[typeIndex].typeTreeNodes
+                let decoded = try AoVUnityTypeTreeReader.read(
+                    nodes: nodes,
+                    data: object.payload,
+                    littleEndian: summary.littleEndian
+                )
+                let encoded = try AoVUnityTypeTreeWriter.write(
+                    nodes: nodes,
+                    value: decoded,
+                    littleEndian: summary.littleEndian
+                )
+                guard encoded == object.payload else {
+                    throw AoVSerializedFileObjectAppenderError.invalidPayload(object.pathID)
+                }
+            } catch {
+                throw AoVSerializedFileObjectAppenderError.invalidPayload(object.pathID)
             }
         }
 
@@ -226,8 +250,17 @@ enum AoVSerializedFileObjectAppender {
             throw AoVSerializedFileObjectAppenderError.resourceLimit
         }
 
+        guard let newFileSizeUInt32 = UInt32(exactly: newFileSize.partialValue),
+              let newDataOffsetUInt32 = UInt32(exactly: newDataOffset) else {
+            throw AoVSerializedFileObjectAppenderError.resourceLimit
+        }
         var header = AoVSerializedFileAppendWriter(littleEndian: false)
         header.data = Data(source.prefix(summary.metadataStartOffset))
+        // Keep the legacy 32-bit header mirrors consistent with the widened
+        // Unity 2022+ header fields. The appender's 512 MiB cap keeps them exact.
+        try header.patchUInt32BE(at: 0, value: metadataSizeUInt32)
+        try header.patchUInt32BE(at: 4, value: newFileSizeUInt32)
+        try header.patchUInt32BE(at: 12, value: newDataOffsetUInt32)
         try header.patchUInt32BE(
             at: summary.metadataSizeFieldOffset,
             value: metadataSizeUInt32
@@ -254,6 +287,37 @@ enum AoVSerializedFileObjectAppender {
             throw AoVSerializedFileObjectAppenderError.invalidSource(
                 "object table count did not survive parser round-trip."
             )
+        }
+        let dataOffsetDelta = UInt64(newDataOffset).subtractingReportingOverflow(summary.dataOffset)
+        guard !dataOffsetDelta.overflow else {
+            throw AoVSerializedFileObjectAppenderError.invalidSource("dataOffset unexpectedly moved backwards.")
+        }
+        for originalObject in summary.serializedObjects {
+            guard let verifiedObject = verified.serializedObjects.first(where: {
+                $0.pathID == originalObject.pathID
+            }),
+            verifiedObject.classID == originalObject.classID,
+            verifiedObject.typeID == originalObject.typeID,
+            verifiedObject.byteSize == originalObject.byteSize else {
+                throw AoVSerializedFileObjectAppenderError.invalidSource(
+                    "an existing object identity or size changed during append."
+                )
+            }
+            let expectedOffset = originalObject.byteOffset.addingReportingOverflow(dataOffsetDelta.partialValue)
+            guard !expectedOffset.overflow, verifiedObject.byteOffset == expectedOffset.partialValue,
+                  let oldStart = Int(exactly: originalObject.byteOffset),
+                  let newStart = Int(exactly: verifiedObject.byteOffset),
+                  let oldSize = Int(exactly: originalObject.byteSize),
+                  oldStart >= 0, newStart >= 0,
+                  oldStart <= source.count, oldSize <= source.count - oldStart,
+                  newStart <= output.count, oldSize <= output.count - newStart,
+                  source[oldStart..<(oldStart + oldSize)].elementsEqual(
+                    output[newStart..<(newStart + oldSize)]
+                  ) else {
+                throw AoVSerializedFileObjectAppenderError.invalidSource(
+                    "an existing object payload changed during append."
+                )
+            }
         }
         for object in orderedObjects {
             guard let verifiedObject = verified.serializedObjects.first(where: {
