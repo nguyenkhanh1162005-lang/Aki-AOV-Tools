@@ -154,7 +154,7 @@ enum AoVUnityFSError: LocalizedError {
         case .unsupportedInfoCompression(let method):
             return "Bảng metadata UnityFS dùng kiểu nén \(method), chưa có bộ giải nén an toàn."
         case .unsupportedBlockCompression(let method):
-            return "Dữ liệu block UnityFS dùng kiểu nén \(method), hiện chỉ hỗ trợ none/LZ4/LZ4HC."
+            return "Dữ liệu block UnityFS dùng kiểu nén \(method), chưa hỗ trợ (Aki hiện giải nén none/LZMA1/LZ4/LZ4HC).";
         case .invalidCompression(let method):
             return "UnityFS có mã nén không hợp lệ: \(method)."
         case .decompressionFailed(let reason):
