@@ -159,7 +159,7 @@ enum AoVSerializedFileObjectImportPlanner {
         }
 
         let destinationIDSet = Set(destinationIDs)
-        let maximumKnownPathID = max(sourceIDs.max() ?? 0, destinationIDs.max() ?? 0)
+        let maximumKnownPathID = max(0, max(sourceIDs.max() ?? 0, destinationIDs.max() ?? 0))
         guard maximumKnownPathID < Int64.max else {
             throw AoVSerializedFileObjectImportPlanError.pathIDOverflow
         }
@@ -239,6 +239,7 @@ enum AoVSerializedFileObjectImportPlanner {
                     value: decoded,
                     localPathIDMap: completeLocalPathIDMap,
                     availableLocalPathIDs: availableLocalPathIDs,
+                    sourceLocalPathIDs: Set(sourceIDs),
                     externalFileIDMap: externalFileIDMap,
                     externalPathIDMaps: externalPathIDMaps,
                     availableExternalTargetPathIDs: availableExternalTargetPathIDs
