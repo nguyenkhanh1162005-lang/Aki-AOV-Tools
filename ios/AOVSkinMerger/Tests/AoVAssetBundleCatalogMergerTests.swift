@@ -82,6 +82,42 @@ final class AoVAssetBundleCatalogMergerTests: XCTestCase {
         XCTAssertEqual(plan.mergedRecord.containerEntries.first?.asset.pathID, 5002)
     }
 
+    func testReplacesExistingContainerEntryWhenItsLegacyObjectWasImported() throws {
+        let currentPointer = AoVSerializedAssetPointer(fileID: 0, pathID: 100)
+        let legacyPointer = AoVSerializedAssetPointer(fileID: 0, pathID: 200)
+        let currentSummary = makeSummary(localPathIDs: [100])
+        let legacySummary = makeSummary(localPathIDs: [200])
+        let current = record(
+            bundle: "actor/replacement-test",
+            preloads: [currentPointer],
+            entries: [entry("assets/hero.prefab", index: 0, size: 1, pointer: currentPointer)],
+            dependencies: []
+        )
+        let legacy = record(
+            bundle: "actor/replacement-test",
+            preloads: [legacyPointer],
+            entries: [entry("assets/hero.prefab", index: 0, size: 1, pointer: legacyPointer)],
+            dependencies: []
+        )
+
+        let plan = try AoVAssetBundleCatalogMerger.plan(
+            current: current,
+            legacy: legacy,
+            currentSerializedFile: currentSummary,
+            legacySerializedFile: legacySummary,
+            availableCurrentBundleNames: ["actor/replacement-test"],
+            importedLocalPathIDMap: [200: 300],
+            availableImportedLocalPathIDs: [300],
+            replacingContainerKeys: ["assets/hero.prefab"]
+        )
+
+        XCTAssertTrue(plan.addedContainerKeys.isEmpty)
+        XCTAssertEqual(plan.replacedContainerKeys, ["assets/hero.prefab"])
+        XCTAssertTrue(plan.currentVersionRetainedPointerConflictKeys.isEmpty)
+        XCTAssertEqual(plan.mergedRecord.containerEntries.first?.asset.pathID, 300)
+        XCTAssertEqual(plan.mergedRecord.preloadReferences.last?.pathID, 300)
+    }
+
     func testRemapsExternalFileIDByExactGUIDAndPathMatch() throws {
         let sourceReferences = [
             external("guid-old", path: "CAB/unused"),
