@@ -32,7 +32,7 @@ enum AoVUnityFSRuntimeCatalogMergeExecutorError: LocalizedError {
             return "Loại runtime catalog không khớp yêu cầu ghi."
         case .planBlocked(let issues):
             let first = issues.first.map { "\($0.path): \($0.reason.rawValue)" } ?? "không rõ"
-            return "Runtime catalog merge plan bị chặn \(issues.count) vấn đề). Ví dụ: \(first)."
+            return "Runtime catalog merge plan bị chặn: \(issues.count) vấn đề. Ví dụ: \(first)."
         case .verificationFailed(let reason):
             return "Runtime catalog UnityFS không vượt qua round-trip: \(reason)"
         }
