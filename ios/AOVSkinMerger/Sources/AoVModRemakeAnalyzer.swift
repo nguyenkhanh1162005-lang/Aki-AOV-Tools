@@ -79,6 +79,7 @@ struct AoVRemakeCatalogEntrySnapshot: Codable, Sendable, Identifiable {
     let preloadSize: Int32
     let assetFileID: Int32
     let assetPathID: Int64
+    let preloadRangeValid: Bool
 
     var id: String { key }
 }
@@ -94,6 +95,8 @@ struct AoVRemakeCatalogRecordSnapshot: Codable, Sendable, Identifiable {
     let name: String
     let assetBundleName: String
     let preloadCount: Int
+    let invalidPreloadRangeCount: Int
+    let invalidPreloadRangeSamples: [String]
     let mainAssetFileID: Int32
     let mainAssetPathID: Int64
     let dependencies: [String]
@@ -122,6 +125,10 @@ struct AoVRemakeCatalogRecordFinding: Codable, Sendable, Identifiable {
     let ambiguousContainerKeyCount: Int
     let changedAssetPointerCount: Int
     let changedPreloadRangeCount: Int
+    let invalidLegacyPreloadRangeCount: Int
+    let invalidCurrentPreloadRangeCount: Int
+    let mainAssetPointerChanged: Bool
+    let classCompatibilityChanged: Bool
     let dependenciesAddedInCurrent: [String]
     let dependenciesRemovedInCurrent: [String]
     let legacyOnlyKeySamples: [String]
@@ -145,6 +152,10 @@ struct AoVRemakeCatalogKindReport: Codable, Sendable {
     let ambiguousContainerKeyCount: Int
     let changedAssetPointerCount: Int
     let changedPreloadRangeCount: Int
+    let invalidLegacyPreloadRangeCount: Int
+    let invalidCurrentPreloadRangeCount: Int
+    let changedMainAssetPointerCount: Int
+    let changedClassCompatibilityCount: Int
     let dependenciesAddedInCurrentCount: Int
     let dependenciesRemovedInCurrentCount: Int
     let findings: [AoVRemakeCatalogRecordFinding]
@@ -365,6 +376,20 @@ enum AoVModRemakeAnalyzer {
                             name: record.name,
                             assetBundleName: record.assetBundleName,
                             preloadCount: record.preloadReferences.count,
+                            invalidPreloadRangeCount: record.containerEntries.filter { entry in
+                                let start = Int64(entry.preloadIndex)
+                                let count = Int64(entry.preloadSize)
+                                let end = start.addingReportingOverflow(count)
+                                return entry.preloadIndex < 0 || entry.preloadSize < 0 ||
+                                    end.overflow || end.partialValue > Int64(record.preloadReferences.count)
+                            }.count,
+                            invalidPreloadRangeSamples: Array(record.containerEntries.filter { entry in
+                                let start = Int64(entry.preloadIndex)
+                                let count = Int64(entry.preloadSize)
+                                let end = start.addingReportingOverflow(count)
+                                return entry.preloadIndex < 0 || entry.preloadSize < 0 ||
+                                    end.overflow || end.partialValue > Int64(record.preloadReferences.count)
+                            }.prefix(8).map { $0.key }),
                             mainAssetFileID: record.mainAsset.fileID,
                             mainAssetPathID: record.mainAsset.pathID,
                             dependencies: record.dependencies,
@@ -374,7 +399,11 @@ enum AoVModRemakeAnalyzer {
                                     preloadIndex: $0.preloadIndex,
                                     preloadSize: $0.preloadSize,
                                     assetFileID: $0.asset.fileID,
-                                    assetPathID: $0.asset.pathID
+                                    assetPathID: $0.asset.pathID,
+                                    preloadRangeValid: $0.preloadIndex >= 0 &&
+                                        $0.preloadSize >= 0 &&
+                                        !Int64($0.preloadIndex).addingReportingOverflow(Int64($0.preloadSize)).overflow &&
+                                        Int64($0.preloadIndex).addingReportingOverflow(Int64($0.preloadSize)).partialValue <= Int64(record.preloadReferences.count)
                                 )
                             }
                         )
@@ -401,6 +430,10 @@ enum AoVModRemakeAnalyzer {
         var ambiguousKeys = 0
         var changedPointers = 0
         var changedPreloadRanges = 0
+        var invalidLegacyPreloadRanges = 0
+        var invalidCurrentPreloadRanges = 0
+        var changedMainAssetPointers = 0
+        var changedClassCompatibility = 0
         var dependenciesAdded = 0
         var dependenciesRemoved = 0
         var findings: [AoVRemakeCatalogRecordFinding] = []
@@ -428,6 +461,10 @@ enum AoVModRemakeAnalyzer {
                         ambiguousContainerKeyCount: 0,
                         changedAssetPointerCount: 0,
                         changedPreloadRangeCount: 0,
+                        invalidLegacyPreloadRangeCount: oldRecord.invalidPreloadRangeCount,
+                        invalidCurrentPreloadRangeCount: 0,
+                        mainAssetPointerChanged: false,
+                        classCompatibilityChanged: false,
                         dependenciesAddedInCurrent: [],
                         dependenciesRemovedInCurrent: [],
                         legacyOnlyKeySamples: Array(oldRecord.containerEntries.prefix(8).map(\.key)),
@@ -455,6 +492,10 @@ enum AoVModRemakeAnalyzer {
                         ambiguousContainerKeyCount: 0,
                         changedAssetPointerCount: 0,
                         changedPreloadRangeCount: 0,
+                        invalidLegacyPreloadRangeCount: oldRecord.invalidPreloadRangeCount,
+                        invalidCurrentPreloadRangeCount: candidates.reduce(0) { $0 + $1.invalidPreloadRangeCount },
+                        mainAssetPointerChanged: false,
+                        classCompatibilityChanged: false,
                         dependenciesAddedInCurrent: [],
                         dependenciesRemovedInCurrent: [],
                         legacyOnlyKeySamples: [],
@@ -476,6 +517,11 @@ enum AoVModRemakeAnalyzer {
             var recordAmbiguous = 0
             var recordChangedPointers = 0
             var recordChangedRanges = 0
+            let recordInvalidLegacyRanges = oldRecord.invalidPreloadRangeCount
+            let recordInvalidCurrentRanges = newRecord.invalidPreloadRangeCount
+            let recordMainAssetPointerChanged = oldRecord.mainAssetFileID != newRecord.mainAssetFileID ||
+                oldRecord.mainAssetPathID != newRecord.mainAssetPathID
+            let recordClassCompatibilityChanged = oldRecord.classCompatibilityIDs != newRecord.classCompatibilityIDs
             var legacyOnlySamples: [String] = []
             var currentOnlySamples: [String] = []
             var pointerChangedSamples: [String] = []
@@ -512,6 +558,10 @@ enum AoVModRemakeAnalyzer {
             let removed = oldDependencies.subtracting(newDependencies).sorted()
             dependenciesAdded += added.count
             dependenciesRemoved += removed.count
+            invalidLegacyPreloadRanges += recordInvalidLegacyRanges
+            invalidCurrentPreloadRanges += recordInvalidCurrentRanges
+            if recordMainAssetPointerChanged { changedMainAssetPointers += 1 }
+            if recordClassCompatibilityChanged { changedClassCompatibility += 1 }
             mappedKeys += recordMappedKeys
             legacyOnlyKeys += recordLegacyOnly
             currentOnlyKeys += recordCurrentOnly
@@ -533,6 +583,10 @@ enum AoVModRemakeAnalyzer {
                     ambiguousContainerKeyCount: recordAmbiguous,
                     changedAssetPointerCount: recordChangedPointers,
                     changedPreloadRangeCount: recordChangedRanges,
+                    invalidLegacyPreloadRangeCount: recordInvalidLegacyRanges,
+                    invalidCurrentPreloadRangeCount: recordInvalidCurrentRanges,
+                    mainAssetPointerChanged: recordMainAssetPointerChanged,
+                    classCompatibilityChanged: recordClassCompatibilityChanged,
                     dependenciesAddedInCurrent: Array(added.prefix(12)),
                     dependenciesRemovedInCurrent: Array(removed.prefix(12)),
                     legacyOnlyKeySamples: legacyOnlySamples,
@@ -567,6 +621,10 @@ enum AoVModRemakeAnalyzer {
             ambiguousContainerKeyCount: ambiguousKeys,
             changedAssetPointerCount: changedPointers,
             changedPreloadRangeCount: changedPreloadRanges,
+            invalidLegacyPreloadRangeCount: invalidLegacyPreloadRanges,
+            invalidCurrentPreloadRangeCount: invalidCurrentPreloadRanges,
+            changedMainAssetPointerCount: changedMainAssetPointers,
+            changedClassCompatibilityCount: changedClassCompatibility,
             dependenciesAddedInCurrentCount: dependenciesAdded,
             dependenciesRemovedInCurrentCount: dependenciesRemoved,
             findings: Array(findings.prefix(maximumCatalogFindings))
