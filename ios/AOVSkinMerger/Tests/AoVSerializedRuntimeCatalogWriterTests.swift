@@ -181,6 +181,9 @@ final class AoVSerializedRuntimeCatalogWriterTests: XCTestCase {
             with: .packer(replacement)
         )
         XCTAssertTrue(rewritten.roundTripVerified)
+        XCTAssertEqual(rewritten.runtimeCatalogRewrite?.objectPathID, object.pathID)
+        XCTAssertEqual(rewritten.runtimeCatalogRewrite?.catalogName, "ResourcePackerInfoSetXML")
+        XCTAssertTrue(rewritten.runtimeCatalogRewrite?.roundTripVerified == true)
 
         let bundleInfo = try AoVUnityFSParser.inspect(rewritten.data)
         let nodes = try AoVUnityFSParser.extractNodes(
