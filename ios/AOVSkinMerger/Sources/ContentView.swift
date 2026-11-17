@@ -328,9 +328,9 @@ struct ContentView: View {
                 safeToWrite: report.runtimePackerMergePlan?.safeToWrite ?? false,
                 details: report.runtimePackerMergePlan.map {
                     [
-                        "Mục Packer mới: \\(\$0.addedPaths.count)",
-                        "Bundle cùng path nhưng khác nội dung: \\(\$0.changedExistingPaths.count)",
-                        "Parent-child link mới: \\(\$0.addedParentChildLinkCount)"
+                        "Mục Packer mới: \(plan.addedPaths.count)",
+                        "Bundle cùng path nhưng khác nội dung: \(plan.changedExistingPaths.count)",
+                        "Parent-child link mới: \(plan.addedParentChildLinkCount)"
                     ]
                 } ?? [],
                 issues: report.runtimePackerMergePlan?.issues ?? []
@@ -341,9 +341,9 @@ struct ContentView: View {
                 safeToWrite: report.runtimeVerificationMergePlan?.safeToWrite ?? false,
                 details: report.runtimeVerificationMergePlan.map {
                     [
-                        "ZIP entry mới: \\(\$0.addedZIPPaths.count)",
-                        "Databin cần cập nhật CRC: \\(\$0.updatedDatabinPaths.count)",
-                        "Databin mới: \\(\$0.addedDatabinPaths.count)"
+                        "ZIP entry mới: \(plan.addedZIPPaths.count)",
+                        "Databin cần cập nhật CRC: \(plan.updatedDatabinPaths.count)",
+                        "Databin mới: \(plan.addedDatabinPaths.count)"
                     ]
                 } ?? [],
                 issues: report.runtimeVerificationMergePlan?.issues ?? []
