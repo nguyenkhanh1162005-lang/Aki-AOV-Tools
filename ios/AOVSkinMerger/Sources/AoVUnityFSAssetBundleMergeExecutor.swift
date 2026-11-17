@@ -51,6 +51,10 @@ struct AoVAssetBundleLegacyObjectImportInput: Sendable {
     let destinationObjectPathID: Int64
 }
 
+private final class AoVAssetBundleGraphDiffCache {
+    var values: [Int64: Bool] = [:]
+}
+
 struct AoVUnityFSAssetBundleObjectImportExecutionReport: Sendable {
     let data: Data
     let nodePath: String
@@ -617,7 +621,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
             currentByKey[entry.key] = entry
         }
         var changed = Set<String>()
-        var graphDiffCache: [Int64: Bool] = [:]
+        let graphDiffCache = AoVAssetBundleGraphDiffCache()
         for legacyEntry in legacyRecord.containerEntries {
             guard let currentEntry = currentByKey[legacyEntry.key] else {
                 // New keys are handled by the normal add path, not the
@@ -636,7 +640,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                 destinationData: destinationData,
                 sourceSummary: sourceSummary,
                 destinationSummary: destinationSummary,
-                graphDiffCache: &graphDiffCache
+                graphDiffCache: graphDiffCache
             ) {
                 changed.insert(legacyEntry.key)
                 continue
@@ -680,7 +684,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         destinationData: Data,
         sourceSummary: AoVSerializedFileSummary,
         destinationSummary: AoVSerializedFileSummary,
-        graphDiffCache: inout [Int64: Bool]
+        graphDiffCache: AoVAssetBundleGraphDiffCache
     ) throws -> Bool {
         var visited = Set<Int64>()
         return try localObjectGraphDiffers(
@@ -716,7 +720,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                 normalizedExternalPath(sourceReference.path) != normalizedExternalPath(destinationReference.path)
         }
         guard pointer.pathID != 0 else { return false }
-        if let cached = graphDiffCache[pointer.pathID] { return cached }
+        if let cached = graphDiffCache.values[pointer.pathID] { return cached }
         guard visited.insert(pointer.pathID).inserted else { return false }
 
         let sourceMatches = sourceSummary.serializedObjects.filter { $0.pathID == pointer.pathID }
@@ -736,7 +740,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
               sourceStart >= 0, destinationStart >= 0,
               sourceStart <= sourceData.count, size <= sourceData.count - sourceStart,
               destinationStart <= destinationData.count, size <= destinationData.count - destinationStart else {
-            graphDiffCache[pointer.pathID] = true
+            graphDiffCache.values[pointer.pathID] = true
             return true
         }
         let sourcePayload = sourceData[sourceStart..<(sourceStart + size)]
@@ -789,7 +793,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                 return true
             }
         }
-        graphDiffCache[pointer.pathID] = false
+        graphDiffCache.values[pointer.pathID] = false
         return false
     }
 
