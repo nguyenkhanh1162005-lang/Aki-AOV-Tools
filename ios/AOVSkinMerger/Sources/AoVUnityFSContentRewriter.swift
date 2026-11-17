@@ -64,7 +64,8 @@ enum AoVUnityFSContentRewriter {
             updatedNodes,
             formatVersion: info.formatVersion,
             playerVersion: info.playerVersion,
-            engineVersion: info.engineVersion
+            engineVersion: info.engineVersion,
+            blockInfoLayout: info.blockInfoLayout
         )
         let rechecked = try AoVUnityFSParser.inspect(report.data)
         let verifiedNodes = try AoVUnityFSParser.extractNodes(
