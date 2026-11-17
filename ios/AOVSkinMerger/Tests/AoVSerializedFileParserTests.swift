@@ -93,6 +93,51 @@ final class AoVSerializedFileParserTests: XCTestCase {
         XCTAssertEqual(decoded.objectValue?["m_TestPathID"]?.intValue, 1001)
     }
 
+    func testRewritesTypeTreeBackedObjectValueAndPreservesItsIdentity() throws {
+        let nodes = [
+            AoVUnityTypeTreeNode(type: "Texture2D", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_TestPathID", level: 1, byteSize: 8, metaFlags: 0)
+        ]
+        let source = makeSerializedFile(
+            formatVersion: 22,
+            objectPayload: Data([0xE9, 0x03, 0, 0, 0, 0, 0, 0]),
+            objectClassID: 28,
+            typeTreeNodes: nodes
+        )
+        let summary = try AoVSerializedFileParser.inspect(source)
+        let object = try XCTUnwrap(summary.serializedObjects.first)
+        let decoded = try AoVSerializedFileParser.decodeObjectWithTypeTree(
+            pathID: object.pathID,
+            in: source,
+            summary: summary
+        )
+        guard case .object(var fields) = decoded else {
+            return XCTFail("Expected a TypeTree object value.")
+        }
+        fields["m_TestPathID"] = .signed(900_001)
+
+        let report = try AoVSerializedFileRewriter.replaceObjectValue(
+            in: source,
+            pathID: object.pathID,
+            with: .object(fields)
+        )
+
+        XCTAssertTrue(report.roundTripVerified)
+        XCTAssertEqual(report.pathID, object.pathID)
+        XCTAssertEqual(report.classID, 28)
+        XCTAssertGreaterThan(report.rewrittenObjectSize, report.originalObjectSize)
+        let verifiedSummary = try AoVSerializedFileParser.inspect(report.data)
+        XCTAssertEqual(verifiedSummary.serializedObjects.count, summary.serializedObjects.count)
+        XCTAssertEqual(verifiedSummary.serializedObjects.first?.classID, object.classID)
+        XCTAssertEqual(verifiedSummary.serializedObjects.first?.typeID, object.typeID)
+        let verifiedValue = try AoVSerializedFileParser.decodeObjectWithTypeTree(
+            pathID: object.pathID,
+            in: report.data,
+            summary: verifiedSummary
+        )
+        XCTAssertEqual(verifiedValue.objectValue?["m_TestPathID"]?.intValue, 900_001)
+    }
+
     func testParsesUnity2020ExtendedSerializedFileHeader() throws {
         let data = makeSerializedFile(formatVersion: 22, littleEndian: false)
         let summary = try AoVSerializedFileParser.inspect(data)
