@@ -429,7 +429,15 @@ enum AoVModRemakeExporter {
     }
 
     private static func storageMethod(for entry: Entry) -> CompressionMethod {
-        entry.isCompressed ? .deflate : .none
+        switch entry.compressionMethod {
+        case .none:
+            return .none
+        default:
+            // ZIPFoundation's writer supports the two storage methods used by
+            // this exporter. Preserve stored entries and use DEFLATE for
+            // compressed source entries instead of copying an unknown codec.
+            return .deflate
+        }
     }
 
     private static func storageMethod(forNewPath path: String) -> CompressionMethod {
