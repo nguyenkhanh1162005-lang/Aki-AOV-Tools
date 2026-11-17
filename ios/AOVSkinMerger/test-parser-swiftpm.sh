@@ -11,6 +11,8 @@ cp "$SCRIPT_DIR/Sources/AoVSerializedFileParser.swift" \
    "$SOURCE_DIR/AoVSerializedFileParser.swift"
 cp "$SCRIPT_DIR/Sources/AoVSerializedAssetBundleWriter.swift" \
    "$SOURCE_DIR/AoVSerializedAssetBundleWriter.swift"
+test -s "$SOURCE_DIR/AoVSerializedAssetBundleWriter.swift"
+swift package describe --package-path "$PACKAGE_DIR"
 cp "$SCRIPT_DIR/Tests/AoVSerializedFileParserTests.swift" \
    "$TEST_DIR/AoVSerializedFileParserTests.swift"
 cp "$SCRIPT_DIR/Sources/AoVUnityCommonStrings.swift" \
