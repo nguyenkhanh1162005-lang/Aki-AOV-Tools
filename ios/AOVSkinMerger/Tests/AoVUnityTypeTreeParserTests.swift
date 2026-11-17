@@ -296,6 +296,35 @@ final class AoVUnityTypeTreeParserTests: XCTestCase {
         }
     }
 
+    func testCollectsLocalPPtrTargetsFromNestedArraysAndIgnoresExternalTargets() throws {
+        let nodes = [
+            AoVUnityTypeTreeNode(type: "Root", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "PPtr<GameObject>", name: "m_Root", level: 1, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "int", name: "m_FileID", level: 2, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_PathID", level: 2, byteSize: 8, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "vector", name: "m_Children", level: 1, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "Array", name: "Array", level: 2, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "int", name: "size", level: 3, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "PPtr<Object>", name: "data", level: 3, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "int", name: "m_FileID", level: 4, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_PathID", level: 4, byteSize: 8, metaFlags: 0)
+        ]
+        let value: AoVUnityTypeTreeValue = .object([
+            "m_Root": .object(["m_FileID": .signed(0), "m_PathID": .signed(1001)]),
+            "m_Children": .array([
+                .object(["m_FileID": .signed(0), "m_PathID": .signed(1002)]),
+                .object(["m_FileID": .signed(2), "m_PathID": .signed(2002)]),
+                .object(["m_FileID": .signed(0), "m_PathID": .signed(1003)])
+            ])
+        ])
+
+        let targets = try AoVUnityTypeTreePointerRemapper.collectLocalTargets(
+            nodes: nodes,
+            value: value
+        )
+        XCTAssertEqual(targets, [1001, 1002, 1003])
+    }
+
     func testTypeTreeWriterRoundTripsBigEndianPrimitivesAndRejectsMissingFields() throws {
         let nodes = [
             AoVUnityTypeTreeNode(type: "Root", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
