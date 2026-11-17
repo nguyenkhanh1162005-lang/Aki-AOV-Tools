@@ -88,7 +88,17 @@ enum AoVRuntimeCatalogMergePlanner {
                 AoVRuntimeMergeSourceValue(source: source.source, value: $0)
             }
         }
-        let legacyByPath = Dictionary(grouping: legacyRows, by: { $0.value.pathInIFS })
+        var legacyByPath = Dictionary(grouping: legacyRows, by: { $0.value.pathInIFS })
+        // Verified final AssetBundle metadata is sufficient to add a new Packer
+        // row even when the legacy package omitted or damaged its Packer record.
+        for (path, entry) in verifiedFinalEntries where legacyByPath[path] == nil {
+            legacyByPath[path] = [
+                AoVRuntimeMergeSourceValue(
+                    source: "verified-final-payload",
+                    value: entry
+                )
+            ]
+        }
         var mergedEntries = current.allResourcePackInfo
         var mergedIndexByPath: [String: Int32] = [:]
         for (index, item) in mergedEntries.enumerated() {
