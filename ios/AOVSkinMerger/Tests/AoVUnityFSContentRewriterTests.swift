@@ -156,6 +156,76 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
         }
     }
 
+    func testAssetBundleObjectClosureFollowsTransitiveLocalPointersWithoutImportingRoot() throws {
+        let nodes = [
+            AoVUnityTypeTreeNode(type: "MonoBehaviour", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "PPtr<GameObject>", name: "m_GameObject", level: 1, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "int", name: "m_FileID", level: 2, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_PathID", level: 2, byteSize: 8, metaFlags: 0)
+        ]
+        let nullPointer = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: .object([
+                "m_GameObject": .object([
+                    "m_FileID": .signed(0),
+                    "m_PathID": .signed(0)
+                ])
+            ]),
+            littleEndian: true
+        )
+        let firstDependency = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: .object([
+                "m_GameObject": .object([
+                    "m_FileID": .signed(0),
+                    "m_PathID": .signed(1003)
+                ])
+            ]),
+            littleEndian: true
+        )
+        let source = makePointerSerializedFile(
+            pathIDs: [1001, 1002, 1003],
+            payloads: [nullPointer, firstDependency, nullPointer],
+            typeTreeNodes: nodes
+        )
+        let assetPointer = AoVSerializedAssetPointer(fileID: 0, pathID: 1002)
+        let legacyRecord = AoVSerializedAssetBundleRecord(
+            pathID: 1001,
+            name: "legacy-root",
+            preloadReferences: [assetPointer],
+            containerEntries: [
+                AoVSerializedAssetBundleEntry(
+                    key: "assets/new-skin.prefab",
+                    preloadIndex: 0,
+                    preloadSize: 1,
+                    asset: assetPointer
+                )
+            ],
+            mainAsset: AoVSerializedAssetPointer(fileID: 0, pathID: 0),
+            mainAssetPreloadIndex: 0,
+            mainAssetPreloadSize: 0,
+            scriptCompatibilityEntries: [],
+            classCompatibilityIDs: [],
+            classCompatibilityEntries: [],
+            runtimeCompatibility: nil,
+            assetBundleName: "actor/legacy",
+            dependencies: [],
+            isStreamedSceneAssetBundle: false,
+            trailingBytes: 0,
+            trailingData: Data()
+        )
+        let sourceSummary = try AoVSerializedFileParser.inspect(source)
+        let closure = try AoVUnityFSAssetBundleMergeExecutor.requiredLocalObjectClosure(
+            legacyRecord: legacyRecord,
+            selectedContainerKeys: ["assets/new-skin.prefab"],
+            sourceData: source,
+            sourceSummary: sourceSummary
+        )
+
+        XCTAssertEqual(closure, [1002, 1003])
+        XCTAssertFalse(closure.contains(1001))
+    }
+
     func testRejectsMissingNodeWithoutProducingOutput() throws {
         let original = try AoVUnityFSRepacker.repack(
             [AoVUnityFSRepackNode(path: "CAB-catalog", data: Data([1]))],
@@ -167,5 +237,123 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
             nodePath: "CAB-missing",
             with: Data([2])
         ))
+    }
+    private func makePointerSerializedFile(
+        pathIDs: [Int64],
+        payloads: [Data],
+        typeTreeNodes: [AoVUnityTypeTreeNode]
+    ) -> Data {
+        precondition(pathIDs.count == payloads.count)
+        var byteStarts: [Int64] = []
+        var dataSection = Data()
+        for payload in payloads {
+            while dataSection.count % 16 != 0 { dataSection.append(0) }
+            byteStarts.append(Int64(dataSection.count))
+            dataSection.append(payload)
+        }
+
+        var metadata = Data()
+        metadata.append(Data("2022.3.5f1\0".utf8))
+        appendLittleEndianInt32(13, to: &metadata)
+        metadata.append(1)
+        appendLittleEndianInt32(1, to: &metadata)
+        appendLittleEndianInt32(28, to: &metadata)
+        metadata.append(0)
+        appendLittleEndianInt16(-1, to: &metadata)
+        metadata.append(Data(repeating: 0, count: 16))
+        appendPointerTypeTree(typeTreeNodes, to: &metadata)
+        appendLittleEndianInt32(0, to: &metadata)
+        appendLittleEndianInt32(Int32(pathIDs.count), to: &metadata)
+        while metadata.count % 4 != 0 { metadata.append(0) }
+        for index in pathIDs.indices {
+            appendLittleEndianInt64(pathIDs[index], to: &metadata)
+            appendLittleEndianInt64(byteStarts[index], to: &metadata)
+            appendLittleEndianUInt32(UInt32(payloads[index].count), to: &metadata)
+            appendLittleEndianInt32(0, to: &metadata)
+        }
+        appendLittleEndianInt32(0, to: &metadata)
+        appendLittleEndianInt32(0, to: &metadata)
+        appendLittleEndianInt32(0, to: &metadata)
+        metadata.append(0)
+
+        let dataOffset = ((48 + metadata.count + 15) / 16) * 16
+        let fileSize = dataOffset + dataSection.count
+        var file = Data()
+        appendBigEndianUInt32(UInt32(metadata.count), to: &file)
+        appendBigEndianUInt32(UInt32(fileSize), to: &file)
+        appendBigEndianUInt32(22, to: &file)
+        appendBigEndianUInt32(UInt32(dataOffset), to: &file)
+        file.append(0)
+        file.append(contentsOf: [0, 0, 0])
+        appendBigEndianUInt32(UInt32(metadata.count), to: &file)
+        appendBigEndianUInt64(UInt64(fileSize), to: &file)
+        appendBigEndianUInt64(UInt64(dataOffset), to: &file)
+        appendBigEndianUInt64(0, to: &file)
+        file.append(metadata)
+        while file.count < dataOffset { file.append(0) }
+        file.append(dataSection)
+        return file
+    }
+
+    private func appendPointerTypeTree(_ nodes: [AoVUnityTypeTreeNode], to data: inout Data) {
+        var strings = Data()
+        var offsets: [String: UInt32] = [:]
+        func intern(_ value: String) -> UInt32 {
+            if let offset = offsets[value] { return offset }
+            let offset = UInt32(strings.count)
+            strings.append(Data(value.utf8))
+            strings.append(0)
+            offsets[value] = offset
+            return offset
+        }
+        let pairs = nodes.map { (intern($0.type), intern($0.name)) }
+        appendLittleEndianInt32(Int32(nodes.count), to: &data)
+        appendLittleEndianInt32(Int32(strings.count), to: &data)
+        for (index, node) in nodes.enumerated() {
+            appendLittleEndianInt16(1, to: &data)
+            data.append(node.level)
+            data.append(0)
+            appendLittleEndianUInt32(pairs[index].0, to: &data)
+            appendLittleEndianUInt32(pairs[index].1, to: &data)
+            appendLittleEndianInt32(node.byteSize, to: &data)
+            appendLittleEndianInt32(Int32(index), to: &data)
+            appendLittleEndianUInt32(node.metaFlags, to: &data)
+            appendLittleEndianUInt64(0, to: &data)
+        }
+        data.append(strings)
+    }
+
+    private func appendLittleEndianInt16(_ value: Int16, to data: inout Data) {
+        appendLittleEndianUInt16(UInt16(bitPattern: value), to: &data)
+    }
+    private func appendLittleEndianUInt16(_ value: UInt16, to data: inout Data) {
+        data.append(UInt8(truncatingIfNeeded: value))
+        data.append(UInt8(truncatingIfNeeded: value >> 8))
+    }
+    private func appendLittleEndianInt32(_ value: Int32, to data: inout Data) {
+        appendLittleEndianUInt32(UInt32(bitPattern: value), to: &data)
+    }
+    private func appendLittleEndianUInt32(_ value: UInt32, to data: inout Data) {
+        for shift in stride(from: 0, through: 24, by: 8) {
+            data.append(UInt8(truncatingIfNeeded: value >> shift))
+        }
+    }
+    private func appendLittleEndianInt64(_ value: Int64, to data: inout Data) {
+        appendLittleEndianUInt64(UInt64(bitPattern: value), to: &data)
+    }
+    private func appendLittleEndianUInt64(_ value: UInt64, to data: inout Data) {
+        for shift in stride(from: 0, through: 56, by: 8) {
+            data.append(UInt8(truncatingIfNeeded: value >> shift))
+        }
+    }
+    private func appendBigEndianUInt32(_ value: UInt32, to data: inout Data) {
+        for shift in stride(from: 24, through: 0, by: -8) {
+            data.append(UInt8(truncatingIfNeeded: value >> shift))
+        }
+    }
+    private func appendBigEndianUInt64(_ value: UInt64, to data: inout Data) {
+        for shift in stride(from: 56, through: 0, by: -8) {
+            data.append(UInt8(truncatingIfNeeded: value >> shift))
+        }
     }
 }
