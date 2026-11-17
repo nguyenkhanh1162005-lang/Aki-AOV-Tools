@@ -70,6 +70,29 @@ final class AoVSerializedFileParserTests: XCTestCase {
         XCTAssertEqual(summary.assetBundleObjects.first?.classID, summary.serializedTypes.first?.classID)
     }
 
+    func testDecodesSerializedObjectUsingItsRetainedTypeTree() throws {
+        let nodes = [
+            AoVUnityTypeTreeNode(type: "Texture2D", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_TestPathID", level: 1, byteSize: 8, metaFlags: 0)
+        ]
+        let payload = Data([0xE9, 0x03, 0, 0, 0, 0, 0, 0])
+        let data = makeSerializedFile(
+            formatVersion: 22,
+            objectPayload: payload,
+            objectClassID: 28,
+            typeTreeNodes: nodes
+        )
+        let summary = try AoVSerializedFileParser.inspect(data)
+        let object = try XCTUnwrap(summary.serializedObjects.first)
+
+        let decoded = try AoVSerializedFileParser.decodeObjectWithTypeTree(
+            pathID: object.pathID,
+            in: data,
+            summary: summary
+        )
+        XCTAssertEqual(decoded.objectValue?["m_TestPathID"]?.intValue, 1001)
+    }
+
     func testParsesUnity2020ExtendedSerializedFileHeader() throws {
         let data = makeSerializedFile(formatVersion: 22, littleEndian: false)
         let summary = try AoVSerializedFileParser.inspect(data)
@@ -510,7 +533,8 @@ final class AoVSerializedFileParserTests: XCTestCase {
         littleEndian: Bool = true,
         unityVersion: String = "2020.3.34f1",
         useResolvedPointers: Bool = false,
-        typeTreeNodes: [AoVUnityTypeTreeNode]? = nil
+        typeTreeNodes: [AoVUnityTypeTreeNode]? = nil,
+        objectClassID: Int32 = 142
     ) -> Data {
         let payload = objectPayload ?? makeAssetBundleObject(
             littleEndian: littleEndian,
@@ -522,7 +546,7 @@ final class AoVSerializedFileParserTests: XCTestCase {
         appendSerialized(targetPlatform, to: &metadata, littleEndian: littleEndian)
         metadata.append(typeTreeNodes == nil ? 0 : 1)
         appendSerialized(Int32(1), to: &metadata, littleEndian: littleEndian)
-        appendSerialized(Int32(142), to: &metadata, littleEndian: littleEndian)
+        appendSerialized(objectClassID, to: &metadata, littleEndian: littleEndian)
         metadata.append(0)
         appendSerialized(Int16(-1), to: &metadata, littleEndian: littleEndian)
         metadata.append(Data(repeating: 0, count: 16))
