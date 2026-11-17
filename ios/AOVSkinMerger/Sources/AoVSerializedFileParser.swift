@@ -6,6 +6,8 @@ struct AoVSerializedFileObject: Codable, Hashable, Sendable, Identifiable {
     let typeID: Int32
     let byteOffset: UInt64
     let byteSize: UInt32
+    let byteStartFieldOffset: Int
+    let byteSizeFieldOffset: Int
     var id: String { "\(classID):\(pathID)" }
 }
 
@@ -49,7 +51,7 @@ struct AoVSerializedScriptCompatibility: Codable, Hashable, Sendable, Identifiab
     var id: String { "\(first):\(second)" }
 }
 
-struct AoVSerializedAssetBundleRecord: Codable, Sendable, Identifiable {
+struct AoVSerializedAssetBundleRecord: Codable, Equatable, Hashable, Sendable, Identifiable {
     let pathID: Int64
     let name: String
     let preloadReferences: [AoVSerializedAssetPointer]
@@ -74,6 +76,9 @@ struct AoVSerializedFileSummary: Codable, Sendable {
     let targetPlatform: Int32
     let fileSize: UInt64
     let dataOffset: UInt64
+    let littleEndian: Bool
+    let fileSizeFieldOffset: Int
+    let dataOffsetFieldOffset: Int
     let typeCount: Int
     let objectCount: Int
     let serializedObjects: [AoVSerializedFileObject]
@@ -279,6 +284,8 @@ enum AoVSerializedFileParser {
         let metadataSize: UInt64
         let fileSize: UInt64
         let dataOffset: UInt64
+        let fileSizeFieldOffset: Int
+        let dataOffsetFieldOffset: Int
 
         if formatVersion >= 9 {
             let endianFlag = try reader.readByte("endianness")
@@ -291,7 +298,9 @@ enum AoVSerializedFileParser {
             if formatVersion >= 22 {
                 // Unity 2020+ extended header replaces the legacy size/offset fields.
                 metadataSize = UInt64(try reader.readUInt32("extended metadata size"))
+                fileSizeFieldOffset = reader.offset
                 let extendedFileSize = try reader.readInt64("extended file size")
+                dataOffsetFieldOffset = reader.offset
                 let extendedDataOffset = try reader.readInt64("extended data offset")
                 _ = try reader.readInt64("extended unknown header field")
                 guard extendedFileSize >= 0, extendedDataOffset >= 0 else {
@@ -303,6 +312,9 @@ enum AoVSerializedFileParser {
                 metadataSize = initialMetadataSize
                 fileSize = initialFileSize
                 dataOffset = initialDataOffset
+                // The legacy 16-byte SerializedFile header is always big-endian.
+                fileSizeFieldOffset = 4
+                dataOffsetFieldOffset = 12
             }
         } else {
             guard initialFileSize <= UInt64(data.count),
@@ -313,6 +325,8 @@ enum AoVSerializedFileParser {
             fileSize = initialFileSize
             metadataSize = initialMetadataSize
             dataOffset = initialDataOffset
+            fileSizeFieldOffset = -1
+            dataOffsetFieldOffset = -1
             guard let metadataStart = Int(exactly: fileSize - metadataSize),
                   metadataStart <= data.count else {
                 throw AoVSerializedFileError.invalidHeader("metadata start vượt file.")
@@ -423,6 +437,7 @@ enum AoVSerializedFileParser {
                 pathID = try reader.readInt64("object \(index) path ID")
             }
 
+            let byteStartFieldOffset = reader.offset
             let rawByteStart: UInt64
             if formatVersion >= 22 {
                 let value = try reader.readInt64("object \(index) byte start")
@@ -434,6 +449,7 @@ enum AoVSerializedFileParser {
                 rawByteStart = UInt64(try reader.readUInt32("object \(index) byte start"))
             }
 
+            let byteSizeFieldOffset = reader.offset
             let byteSize = try reader.readUInt32("object \(index) byte size")
             let typeID = try reader.readInt32("object \(index) type ID")
 
@@ -471,7 +487,9 @@ enum AoVSerializedFileParser {
                 classID: classID,
                 typeID: typeID,
                 byteOffset: absoluteOffset.partialValue,
-                byteSize: byteSize
+                byteSize: byteSize,
+                byteStartFieldOffset: byteStartFieldOffset,
+                byteSizeFieldOffset: byteSizeFieldOffset
             )
             serializedObjects.append(object)
             if classID == assetBundleClassID {
@@ -563,6 +581,9 @@ enum AoVSerializedFileParser {
             targetPlatform: targetPlatform,
             fileSize: fileSize,
             dataOffset: dataOffset,
+            littleEndian: reader.littleEndian,
+            fileSizeFieldOffset: fileSizeFieldOffset,
+            dataOffsetFieldOffset: dataOffsetFieldOffset,
             typeCount: typeCount,
             objectCount: objectCount,
             serializedObjects: serializedObjects,
