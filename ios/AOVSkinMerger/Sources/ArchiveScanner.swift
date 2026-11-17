@@ -513,8 +513,10 @@ enum ArchiveScanner {
                                 )
                                 catalogSamples = extracted.map { node in
                                     let serializedSummary: String?
+                                    let serializedFile: AoVSerializedFileSummary?
                                     do {
                                         let serialized = try AoVSerializedFileParser.inspect(node.data)
+                                        serializedFile = serialized
                                         let bundleObjects = serialized.assetBundleObjects
                                             .map { "pathID \($0.pathID) · offset \($0.byteOffset) · \($0.byteSize) byte" }
                                             .joined(separator: "; ")
@@ -532,6 +534,7 @@ enum ArchiveScanner {
                                             (bundleObjects.isEmpty ? "" : " · \(bundleObjects)") +
                                             (catalogRecords.isEmpty ? "" : " · \(catalogRecords)")
                                     } catch {
+                                        serializedFile = nil
                                         serializedSummary = "Không nhận diện SerializedFile: \(error.localizedDescription)"
                                     }
                                     return AoVUnityFSCatalogNodeSample(
@@ -541,7 +544,8 @@ enum ArchiveScanner {
                                             .map { String(format: "%02X", $0) }
                                             .joined(separator: " "),
                                         stringHints: AoVUnityFSParser.asciiStringHints(node.data),
-                                        serializedFileSummary: serializedSummary
+                                        serializedFileSummary: serializedSummary,
+                                        serializedFile: serializedFile
                                     )
                                 }
                                 catalogStatus = "Đã trích xuất read-only \(extracted.count) node."
