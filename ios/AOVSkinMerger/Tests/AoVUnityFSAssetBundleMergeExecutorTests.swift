@@ -355,37 +355,6 @@ final class AoVUnityFSAssetBundleMergeExecutorTests: XCTestCase {
         appendInt32(0, to: &data)
     }
 
-    private func appendTypeTree(
-        _ nodes: [AoVUnityTypeTreeNode],
-        to data: inout Data
-    ) {
-        var strings = Data()
-        var offsets: [String: UInt32] = [:]
-        func intern(_ value: String) -> UInt32 {
-            if let offset = offsets[value] { return offset }
-            let offset = UInt32(strings.count)
-            strings.append(Data(value.utf8))
-            strings.append(0)
-            offsets[value] = offset
-            return offset
-        }
-        let pairs = nodes.map { (intern($0.type), intern($0.name)) }
-        appendInt32(Int32(nodes.count), to: &data)
-        appendInt32(Int32(strings.count), to: &data)
-        for (index, node) in nodes.enumerated() {
-            appendInt16(1, to: &data)
-            data.append(node.level)
-            data.append(0)
-            appendUInt32(pairs[index].0, to: &data)
-            appendUInt32(pairs[index].1, to: &data)
-            appendInt32(node.byteSize, to: &data)
-            appendInt32(Int32(index), to: &data)
-            appendUInt32(node.metaFlags, to: &data)
-            appendUInt64(0, to: &data)
-        }
-        data.append(strings)
-    }
-
     private func makeUnityFS(serializedFile: Data, nodePath: String) throws -> Data {
         try AoVUnityFSRepacker.repack(
             [AoVUnityFSRepackNode(path: nodePath, data: serializedFile, flags: 7)],
