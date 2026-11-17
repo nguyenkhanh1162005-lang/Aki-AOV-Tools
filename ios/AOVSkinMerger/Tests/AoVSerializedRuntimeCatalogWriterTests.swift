@@ -4,7 +4,7 @@ import Foundation
 
 final class AoVSerializedRuntimeCatalogWriterTests: XCTestCase {
     func testRewritesPackerMonoBehaviourAndSerializedFileRoundTrips() throws {
-        let original = makeSerializedFile(with: makePackerCatalog())
+        let original = makeSerializedFile(with: .packer(makePackerCatalog()))
         let summary = try AoVSerializedFileParser.inspect(original)
         let object = try XCTUnwrap(summary.serializedObjects.first(where: { $0.classID == 114 }))
         let oldCatalog = try XCTUnwrap(summary.resourcePackerCatalog)
@@ -65,7 +65,7 @@ final class AoVSerializedRuntimeCatalogWriterTests: XCTestCase {
 
     func testRewritesVerificationMonoBehaviourAndKeepsTrailingBytes() throws {
         let oldCatalog = makeVerificationCatalog()
-        let original = makeSerializedFile(with: oldCatalog)
+        let original = makeSerializedFile(with: .verification(oldCatalog))
         let summary = try AoVSerializedFileParser.inspect(original)
         let object = try XCTUnwrap(summary.serializedObjects.first(where: { $0.classID == 114 }))
 
@@ -106,7 +106,7 @@ final class AoVSerializedRuntimeCatalogWriterTests: XCTestCase {
     }
 
     func testRuntimeCatalogWriterRejectsWrongObjectAndInvalidIndexes() throws {
-        let original = makeSerializedFile(with: makePackerCatalog())
+        let original = makeSerializedFile(with: .packer(makePackerCatalog()))
         XCTAssertThrowsError(
             try AoVSerializedRuntimeCatalogWriter.rewrite(
                 serializedFile: original,
