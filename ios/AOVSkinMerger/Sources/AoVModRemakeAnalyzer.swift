@@ -256,6 +256,8 @@ struct AoVModRemakeReport: Codable, Sendable {
     let packerCatalogComparison: AoVRemakeCatalogKindReport
     let verificationCatalogComparison: AoVRemakeCatalogKindReport
     let runtimeCatalogComparison: AoVRuntimeCatalogComparisonReport
+    let runtimePackerMergePlan: AoVRuntimePackerMergePlan?
+    let runtimeVerificationMergePlan: AoVRuntimeVerificationMergePlan?
     let catalogMergePlanFindings: [AoVRemakeCatalogPlanFinding]
     let warnings: [String]
 
@@ -437,6 +439,33 @@ enum AoVModRemakeAnalyzer {
             current: baseInventory,
             legacy: legacyInventories
         )
+        let currentRuntimePackerCatalogs = runtimePackerCatalogs(in: baseInventory)
+        let currentRuntimeVerificationCatalogs = runtimeVerificationCatalogs(in: baseInventory)
+        let legacyRuntimePackerCatalogs = legacyInventories.flatMap { runtimePackerCatalogs(in: $0) }
+        let legacyRuntimeVerificationCatalogs = legacyInventories.flatMap { runtimeVerificationCatalogs(in: $0) }
+
+        let runtimePackerMergePlan: AoVRuntimePackerMergePlan?
+        if currentRuntimePackerCatalogs.count == 1,
+           let currentCatalog = currentRuntimePackerCatalogs.first?.catalog {
+            runtimePackerMergePlan = AoVRuntimeCatalogMergePlanner.planPacker(
+                current: currentCatalog,
+                legacy: legacyRuntimePackerCatalogs
+            )
+        } else {
+            runtimePackerMergePlan = nil
+        }
+
+        let runtimeVerificationMergePlan: AoVRuntimeVerificationMergePlan?
+        if currentRuntimeVerificationCatalogs.count == 1,
+           let currentCatalog = currentRuntimeVerificationCatalogs.first?.catalog {
+            runtimeVerificationMergePlan = AoVRuntimeCatalogMergePlanner.planVerification(
+                current: currentCatalog,
+                legacy: legacyRuntimeVerificationCatalogs
+            )
+        } else {
+            runtimeVerificationMergePlan = nil
+        }
+
         let currentPackerContexts = catalogRecordContexts(in: baseInventory, kind: .packer)
         let currentVerificationContexts = catalogRecordContexts(in: baseInventory, kind: .verification)
         let legacyPackerContexts = legacyInventories.flatMap { catalogRecordContexts(in: $0, kind: .packer) }
@@ -510,6 +539,18 @@ enum AoVModRemakeAnalyzer {
         if !runtimeVersionSummary.isEmpty {
             warnings.append("Các đời runtime catalog đã phát hiện trong MOD nguồn: \(runtimeVersionSummary.joined(separator: "; ")).")
         }
+        if currentRuntimePackerCatalogs.count != 1 {
+            warnings.append("RES nền phải có đúng một Packer runtime catalog được đọc để lập kế hoạch ghi. Hiện phát hiện \(currentRuntimePackerCatalogs.count).")
+        } else if let plan = runtimePackerMergePlan, !plan.safeToWrite {
+            let firstIssue = plan.issues.first.map { "\($0.path): \($0.reason.rawValue)" } ?? "không rõ"
+            warnings.append("Packer merge plan bị khóa: \(plan.issues.count) vấn đề; ví dụ \(firstIssue). Không thay thế AssetBundle cùng path khi chưa ghép nội dung thật.")
+        }
+        if currentRuntimeVerificationCatalogs.count != 1 {
+            warnings.append("RES nền phải có đúng một Verification runtime catalog được đọc để lập kế hoạch ghi. Hiện phát hiện \(currentRuntimeVerificationCatalogs.count).")
+        } else if let plan = runtimeVerificationMergePlan, !plan.safeToWrite {
+            let firstIssue = plan.issues.first.map { "\($0.path): \($0.reason.rawValue)" } ?? "không rõ"
+            warnings.append("Verification merge plan bị khóa: \(plan.issues.count) vấn đề; ví dụ \(firstIssue). ZIP checksum 64-bit chưa được đoán; Databin cần bytes đầu ra để tính CRC32.")
+        }
         if !catalogMergePlanFindings.isEmpty {
             warnings.append("Đã lập kế hoạch ghép thử cho \(catalogMergePlanFindings.filter { $0.status == .candidate || $0.status == .requiresExternalTargetAudit }.count) AssetBundle; \(catalogMergePlanFindings.filter { $0.status == .blocked || $0.status == .missingCurrentBundle || $0.status == .ambiguousCurrentBundle }.count) trường hợp bị chặn hoặc chưa khớp.")
         }
@@ -535,9 +576,35 @@ enum AoVModRemakeAnalyzer {
             packerCatalogComparison: packerCatalogComparison,
             verificationCatalogComparison: verificationCatalogComparison,
             runtimeCatalogComparison: runtimeCatalogComparison,
+            runtimePackerMergePlan: runtimePackerMergePlan,
+            runtimeVerificationMergePlan: runtimeVerificationMergePlan,
             catalogMergePlanFindings: catalogMergePlanFindings,
             warnings: warnings
         )
+    }
+
+    private static func runtimePackerCatalogs(
+        in inventory: ArchiveInventory
+    ) -> [(source: String, catalog: AoVRuntimeResourcePackerCatalog)] {
+        inventory.unityFSBundles
+            .filter { ($0.path as NSString).lastPathComponent.lowercased() == AoVRemakeCatalogKind.packer.fileName }
+            .flatMap(\\.catalogNodeSamples)
+            .compactMap { sample in
+                guard let catalog = sample.serializedFile?.resourcePackerCatalog else { return nil }
+                return (inventory.fileName, catalog)
+            }
+    }
+
+    private static func runtimeVerificationCatalogs(
+        in inventory: ArchiveInventory
+    ) -> [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)] {
+        inventory.unityFSBundles
+            .filter { ($0.path as NSString).lastPathComponent.lowercased() == AoVRemakeCatalogKind.verification.fileName }
+            .flatMap(\\.catalogNodeSamples)
+            .compactMap { sample in
+                guard let catalog = sample.serializedFile?.resourceVerificationCatalog else { return nil }
+                return (inventory.fileName, catalog)
+            }
     }
 
     private static func catalogRecordContexts(
