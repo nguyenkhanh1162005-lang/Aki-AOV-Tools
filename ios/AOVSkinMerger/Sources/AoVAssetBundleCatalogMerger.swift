@@ -5,6 +5,7 @@ enum AoVAssetBundleCatalogMergeError: LocalizedError {
     case duplicateCurrentKey(String)
     case duplicateLegacyKey(String)
     case invalidLegacyPreloadRange(String)
+    case invalidCurrentPreloadRange(String)
     case unresolvedLocalPointer(String)
     case unresolvedExternalReference(String)
     case ambiguousExternalReference(String)
@@ -23,6 +24,8 @@ enum AoVAssetBundleCatalogMergeError: LocalizedError {
             return "MOD cũ có container key bị lặp: \(key)."
         case .invalidLegacyPreloadRange(let key):
             return "Preload range của MOD cũ không hợp lệ tại key \(key)."
+        case .invalidCurrentPreloadRange(let key):
+            return "Preload range của RES nền không hợp lệ tại key \(key)."
         case .unresolvedLocalPointer(let field):
             return "Không tìm thấy local PPtr trong RES mới: \(field)."
         case .unresolvedExternalReference(let field):
@@ -183,9 +186,17 @@ enum AoVAssetBundleCatalogMerger {
                     continue
                 }
                 alreadyPresent.append(legacyEntry.key)
-                if currentEntry.asset != legacyEntry.asset ||
-                    currentEntry.preloadIndex != legacyEntry.preloadIndex ||
-                    currentEntry.preloadSize != legacyEntry.preloadSize {
+                let currentPreloads = try preloadSlice(
+                    currentEntry,
+                    in: current,
+                    isCurrent: true
+                )
+                let legacyPreloads = try preloadSlice(
+                    legacyEntry,
+                    in: legacy,
+                    isCurrent: false
+                )
+                if currentEntry.asset != legacyEntry.asset || currentPreloads != legacyPreloads {
                     currentVersionRetainedPointerConflicts.append(legacyEntry.key)
                 }
                 continue
@@ -332,6 +343,24 @@ enum AoVAssetBundleCatalogMerger {
               end.partialValue <= Int64(preloadCount) else {
             throw AoVAssetBundleCatalogMergeError.invalidLegacyPreloadRange(entry.key)
         }
+    }
+
+    private static func preloadSlice(
+        _ entry: AoVSerializedAssetBundleEntry,
+        in record: AoVSerializedAssetBundleRecord,
+        isCurrent: Bool
+    ) throws -> [AoVSerializedAssetPointer] {
+        let start = Int(entry.preloadIndex)
+        let count = Int(entry.preloadSize)
+        let valid = start >= 0 && count >= 0 &&
+            start <= record.preloadReferences.count &&
+            count <= record.preloadReferences.count - start
+        guard valid else {
+            throw isCurrent
+                ? AoVAssetBundleCatalogMergeError.invalidCurrentPreloadRange(entry.key)
+                : AoVAssetBundleCatalogMergeError.invalidLegacyPreloadRange(entry.key)
+        }
+        return Array(record.preloadReferences[start..<(start + count)])
     }
 
     private static func remapPointer(
