@@ -202,8 +202,8 @@ struct ContentView: View {
                 Button("Đóng", role: .cancel) { showAlert = false }
             } message: { Text(alertText) }
             .confirmationDialog("Chọn ZIP làm gói nền", isPresented: $showBasePicker, titleVisibility: .visible) {
-                ForEach(Array(selectedURLs.enumerated()), id: \.offset) { _, url in
-                    Button(url.lastPathComponent) { selectedBaseURL = url }
+                ForEach(Array(selectedURLs.enumerated()), id: \.offset) { item in
+                    Button(item.element.lastPathComponent) { selectedBaseURL = item.element }
                 }
                 Button("Hủy", role: .cancel) { }
             } message: {
