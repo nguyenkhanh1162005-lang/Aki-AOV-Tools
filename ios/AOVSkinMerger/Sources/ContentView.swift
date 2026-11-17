@@ -191,7 +191,7 @@ struct ContentView: View {
             .toolbar(.hidden, for: .navigationBar)
             .tint(.white)
             .preferredColorScheme(.dark)
-            .background {
+            .overlay {
                 ZIPDocumentPickerPresenter(
                     isPresented: $isImporting,
                     onPick: { urls in
@@ -200,7 +200,7 @@ struct ContentView: View {
                     },
                     onCancel: { isImporting = false }
                 )
-                .frame(width: 1, height: 1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(false)
             }
             .onOpenURL { url in
@@ -1580,7 +1580,7 @@ private struct ZIPDocumentPickerPresenter: UIViewControllerRepresentable {
         var onPick: ([URL]) -> Void
         var onCancel: () -> Void
         var isPresented = false
-        weak var activePicker: UIDocumentPickerViewController?
+        var activePicker: UIDocumentPickerViewController?
 
         init(onPick: @escaping ([URL]) -> Void, onCancel: @escaping () -> Void) {
             self.onPick = onPick
@@ -1589,12 +1589,11 @@ private struct ZIPDocumentPickerPresenter: UIViewControllerRepresentable {
 
         func presentIfNeeded(from host: UIViewController) {
             guard isPresented, activePicker == nil,
-                  let window = host.viewIfLoaded?.window,
-                  let root = window.rootViewController else {
+                  host.viewIfLoaded?.window != nil else {
                 return
             }
 
-            let presenter = topMostController(from: root)
+            let presenter = topMostController(from: host)
             guard presenter.presentedViewController == nil else { return }
 
             let zipType = UTType(filenameExtension: "zip") ?? .zip
