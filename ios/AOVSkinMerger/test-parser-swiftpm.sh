@@ -9,6 +9,8 @@ TEST_DIR="$PACKAGE_DIR/Tests/AOVSkinMergerTests"
 mkdir -p "$SOURCE_DIR" "$TEST_DIR"
 cp "$SCRIPT_DIR/Sources/AoVSerializedFileParser.swift" \
    "$SOURCE_DIR/AoVSerializedFileParser.swift"
+cp "$SCRIPT_DIR/Sources/AoVRuntimeResourceCatalogParser.swift" \
+   "$SOURCE_DIR/AoVRuntimeResourceCatalogParser.swift"
 cp "$SCRIPT_DIR/Sources/AoVSerializedAssetBundleWriter.swift" \
    "$SOURCE_DIR/AoVSerializedAssetBundleWriter.swift"
 cp "$SCRIPT_DIR/Sources/AoVAssetBundleCatalogMerger.swift" \
@@ -17,6 +19,8 @@ test -s "$SOURCE_DIR/AoVSerializedAssetBundleWriter.swift"
 swift package describe --package-path "$PACKAGE_DIR"
 cp "$SCRIPT_DIR/Tests/AoVSerializedFileParserTests.swift" \
    "$TEST_DIR/AoVSerializedFileParserTests.swift"
+cp "$SCRIPT_DIR/Tests/AoVRuntimeResourceCatalogParserTests.swift" \
+   "$TEST_DIR/AoVRuntimeResourceCatalogParserTests.swift"
 cp "$SCRIPT_DIR/Tests/AoVAssetBundleCatalogMergerTests.swift" \
    "$TEST_DIR/AoVAssetBundleCatalogMergerTests.swift"
 cp "$SCRIPT_DIR/Sources/AoVUnityCommonStrings.swift" \
