@@ -132,8 +132,7 @@ enum AoVSerializedFileRewriter {
             throw AoVSerializedFileRewriteError.verificationFailed("pathID replacement không trùng target.")
         }
 
-        let matchingObjects = summary.serializedObjects.filter { $0.pathID == pathID }
-        guard matchingObjects.count == 1, let object = matchingObjects.first else {
+        guard let object = summary.serializedObjectsByPathID[pathID] else {
             throw AoVSerializedFileRewriteError.missingObject(pathID)
         }
         guard object.classID == 142,
