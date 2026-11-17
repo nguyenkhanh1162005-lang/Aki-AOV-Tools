@@ -54,6 +54,7 @@ struct AoVUnityFSRepackReport: Sendable {
     let formatVersion: UInt32
     let playerVersion: String
     let engineVersion: String
+    let blockInfoLayout: AoVUnityFSBlockInfoLayout
     let blockCount: Int
     let roundTripVerified: Bool
 }
@@ -123,7 +124,8 @@ enum AoVUnityFSRepacker {
         _ nodes: [AoVUnityFSRepackNode],
         formatVersion: UInt32 = 6,
         playerVersion: String = "5.0.0",
-        engineVersion: String
+        engineVersion: String,
+        blockInfoLayout: AoVUnityFSBlockInfoLayout = .standard
     ) throws -> AoVUnityFSRepackReport {
         guard !nodes.isEmpty else { throw AoVUnityFSRepackError.noNodes }
         guard nodes.count <= maximumNodes else { throw AoVUnityFSRepackError.tooManyNodes(nodes.count) }
@@ -164,14 +166,28 @@ enum AoVUnityFSRepacker {
         var blockInfo = AoVUnityFSBinaryWriter()
         blockInfo.data.append(Data(repeating: 0, count: 16)) // Unity bundle hash field
         blockInfo.appendUInt32BE(1) // block count
-        blockInfo.appendUInt32BE(blockExpandedSize)
-        blockInfo.appendUInt32BE(blockExpandedSize) // uncompressed block
-        blockInfo.appendUInt16BE(0) // block compression = none
+        switch blockInfoLayout {
+        case .standard:
+            blockInfo.appendUInt32BE(blockExpandedSize) // uncompressed block
+            blockInfo.appendUInt32BE(blockExpandedSize) // compressed block
+            blockInfo.appendUInt16BE(0) // block compression = none
+        case .arenaOfValor:
+            blockInfo.appendUInt16BE(0) // block flags = uncompressed
+            blockInfo.appendUInt16BE(0) // AOV reserved field
+            blockInfo.appendUInt32BE(blockExpandedSize) // compressed block
+            blockInfo.appendUInt32BE(blockExpandedSize) // uncompressed block
+        }
         blockInfo.appendUInt32BE(UInt32(directory.count))
 
         for item in directory {
-            blockInfo.appendUInt64BE(item.offset)
-            blockInfo.appendUInt64BE(item.size)
+            switch blockInfoLayout {
+            case .standard:
+                blockInfo.appendUInt64BE(item.offset)
+                blockInfo.appendUInt64BE(item.size)
+            case .arenaOfValor:
+                blockInfo.appendUInt64BE(item.size)
+                blockInfo.appendUInt64BE(item.offset)
+            }
             blockInfo.appendUInt32BE(item.flags)
             blockInfo.appendCString(item.path)
         }
@@ -217,6 +233,7 @@ enum AoVUnityFSRepacker {
             guard inspected.formatVersion == formatVersion,
                   inspected.playerVersion == playerVersion,
                   inspected.engineVersion == engineVersion,
+                  inspected.blockInfoLayout == blockInfoLayout,
                   inspected.nodes.count == nodes.count,
                   inspected.blocks.count == 1,
                   inspected.totalUncompressedBytes == UInt64(expanded.count) else {
@@ -244,6 +261,7 @@ enum AoVUnityFSRepacker {
                 formatVersion: formatVersion,
                 playerVersion: playerVersion,
                 engineVersion: engineVersion,
+                blockInfoLayout: blockInfoLayout,
                 blockCount: inspected.blocks.count,
                 roundTripVerified: true
             )
