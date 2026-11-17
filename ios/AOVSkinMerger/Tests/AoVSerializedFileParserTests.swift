@@ -138,6 +138,70 @@ final class AoVSerializedFileParserTests: XCTestCase {
         XCTAssertEqual(verifiedValue.objectValue?["m_TestPathID"]?.intValue, 900_001)
     }
 
+    func testSerializedFileObjectAppenderAddsNewTypedObjectAndPreservesExistingPayload() throws {
+        let nodes = [
+            AoVUnityTypeTreeNode(type: "Texture2D", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_TestPathID", level: 1, byteSize: 8, metaFlags: 0)
+        ]
+        let originalPayload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: .object(["m_TestPathID": .signed(1001)]),
+            littleEndian: true
+        )
+        let newPayload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: .object(["m_TestPathID": .signed(9001)]),
+            littleEndian: true
+        )
+        let source = makeSerializedFile(
+            formatVersion: 22,
+            objectPayload: originalPayload,
+            objectClassID: 28,
+            typeTreeNodes: nodes
+        )
+        let before = try AoVSerializedFileParser.inspect(source)
+        let oldObject = try XCTUnwrap(before.serializedObjects.first)
+
+        let report = try AoVSerializedFileObjectAppender.append(
+            to: source,
+            objects: [
+                AoVSerializedObjectAppendInput(
+                    pathID: 9876,
+                    classID: 28,
+                    typeID: 0,
+                    payload: newPayload
+                )
+            ]
+        )
+
+        XCTAssertTrue(report.roundTripVerified)
+        XCTAssertEqual(report.originalObjectCount, 1)
+        XCTAssertEqual(report.finalObjectCount, 2)
+        XCTAssertEqual(report.appendedPathIDs, [9876])
+        let after = try AoVSerializedFileParser.inspect(report.data)
+        XCTAssertEqual(after.objectCount, 2)
+        let preservedOld = try XCTUnwrap(after.serializedObjects.first(where: { $0.pathID == oldObject.pathID }))
+        let appended = try XCTUnwrap(after.serializedObjects.first(where: { $0.pathID == 9876 }))
+        XCTAssertEqual(preservedOld.byteOffset, oldObject.byteOffset + (after.dataOffset - before.dataOffset))
+        XCTAssertEqual(preservedOld.byteSize, oldObject.byteSize)
+        XCTAssertEqual(appended.classID, 28)
+        XCTAssertEqual(appended.typeID, 0)
+        XCTAssertEqual(appended.byteOffset % 16, 0)
+
+        let decodedOld = try AoVSerializedFileParser.decodeObjectWithTypeTree(
+            pathID: oldObject.pathID,
+            in: report.data,
+            summary: after
+        )
+        let decodedNew = try AoVSerializedFileParser.decodeObjectWithTypeTree(
+            pathID: 9876,
+            in: report.data,
+            summary: after
+        )
+        XCTAssertEqual(decodedOld.objectValue?["m_TestPathID"]?.intValue, 1001)
+        XCTAssertEqual(decodedNew.objectValue?["m_TestPathID"]?.intValue, 9001)
+    }
+
     func testParsesUnity2020ExtendedSerializedFileHeader() throws {
         let data = makeSerializedFile(formatVersion: 22, littleEndian: false)
         let summary = try AoVSerializedFileParser.inspect(data)
