@@ -167,7 +167,6 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
     func testVerificationPlannerUsesOnlyExplicitlyVerifiedFinalChecksums() {
         let zipPath = "Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes"
         let databinPath = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
-        let payload = Data("new final databin payload".utf8)
         let current = verification(
             zip: [verify(zipPath, crc: 123)],
             databin: [verify(databinPath, crc: 456)]
