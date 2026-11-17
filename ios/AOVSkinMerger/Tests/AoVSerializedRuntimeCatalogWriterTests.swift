@@ -195,7 +195,7 @@ final class AoVSerializedRuntimeCatalogWriterTests: XCTestCase {
         let verifiedSerialized = try AoVSerializedFileParser.inspect(node.data)
 
         XCTAssertEqual(bundleInfo.engineVersion, "2022.3.5f1")
-        XCTAssertEqual(bundleInfo.nodes.map(\\.path), ["CAB-packer"])
+        XCTAssertEqual(bundleInfo.nodes.map(\.path), ["CAB-packer"])
         XCTAssertEqual(verifiedSerialized.resourcePackerCatalog, replacement)
         XCTAssertEqual(verifiedSerialized.resourceVerificationCatalog, nil)
     }
