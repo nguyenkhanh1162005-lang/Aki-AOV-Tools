@@ -267,6 +267,46 @@ final class AoVModRemakeExporterTests: XCTestCase {
         }
     }
 
+    func testExporterRejectsCatalogVersionMismatchBeforeWriting() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-RES-Catalog-Version-Test-\\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        try makeArchive(baseURL, entries: [
+            ("1.64.1/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(makePackerCatalog()))),
+            ("1.64.1/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(makeVerificationCatalog())))
+        ], root: root)
+
+        XCTAssertThrowsError(
+            try AoVModRemakeExporter.exportVerifiedRES(
+                baseRESURL: baseURL,
+                resourcePayloads: [
+                    AoVModRemakeResourcePayload(
+                        archivePath: "1.64.1/Ages/Legacy.pkg.bytes",
+                        ifsPath: "Ages/Legacy.pkg.bytes",
+                        data: Data("legacy-package".utf8)
+                    )
+                ],
+                legacyPackerCatalogs: [
+                    ("older-build.zip", makePackerCatalog(version: "1.64.1.11"))
+                ],
+                verifiedFinalPackerEntries: [:],
+                legacyVerificationCatalogs: [],
+                verifiedFinalDatabinChecksumValues: [:],
+                verifiedFinalZIPChecksumValues: ["Ages/Legacy.pkg.bytes": 777]
+            )
+        ) { error in
+            guard let exporterError = error as? AoVModRemakeExporterError,
+                  case .catalogVersionMismatch("Packer", "1.64.1.11", "1.64.1.12") = exporterError else {
+                return XCTFail("Expected catalog version mismatch, got \\(error)")
+            }
+        }
+    }
+
     func testExporterRefusesNewDatabinWithoutVerifiedChecksum() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-RES-Exporter-Guard-Test-\(UUID().uuidString)", isDirectory: true)
@@ -302,10 +342,10 @@ final class AoVModRemakeExporterTests: XCTestCase {
         }
     }
 
-    private func makePackerCatalog() -> AoVRuntimeResourcePackerCatalog {
+    private func makePackerCatalog(version: String = "1.64.1.12") -> AoVRuntimeResourcePackerCatalog {
         AoVRuntimeResourcePackerCatalog(
             name: "ResourcePackerInfoSetXML",
-            version: "1.64.1.12",
+            version: version,
             svnRevision: "1793129",
             setName: "ResourcePackerInfoSetXML",
             allResourcePackInfo: [
