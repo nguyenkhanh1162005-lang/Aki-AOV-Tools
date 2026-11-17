@@ -309,6 +309,10 @@ struct ContentView: View {
             metric("Packer Catalog RES", report.baseHasPackerCatalog ? "Có" : "Thiếu")
             metric("Verification Catalog RES", report.baseHasVerificationCatalog ? "Có" : "Thiếu")
 
+            Divider().overlay(.white.opacity(0.12))
+            catalogComparisonView("Packer Catalog", report.packerCatalogComparison)
+            catalogComparisonView("Verification Catalog", report.verificationCatalogComparison)
+
             if !report.legacyVersions.isEmpty {
                 Divider().overlay(.white.opacity(0.12))
                 Text("Phiên bản MOD nguồn").font(.subheadline.weight(.semibold))
@@ -343,6 +347,76 @@ struct ContentView: View {
                 .font(.footnote.weight(.semibold)).foregroundColor(.orange)
         }
         .panel()
+    }
+
+    private func catalogComparisonView(
+        _ title: String,
+        _ report: AoVRemakeCatalogKindReport
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.subheadline.weight(.semibold))
+            metric("AssetBundle records RES mới", "\(report.currentRecordCount)")
+            metric("AssetBundle records MOD cũ", "\(report.legacyRecordCount)")
+            metric("Ánh xạ bundle duy nhất", "\(report.mappedRecordCount)")
+            metric("Bundle cũ không còn trong RES", "\(report.missingCurrentRecordCount)")
+            metric("Bundle trùng tên, chưa phân biệt được", "\(report.ambiguousRecordCount)")
+            metric("Container key khớp", "\(report.mappedContainerKeyCount)")
+            metric("Key chỉ có ở MOD cũ", "\(report.legacyOnlyContainerKeyCount)")
+            metric("Key chỉ có ở RES mới", "\(report.currentOnlyContainerKeyCount)")
+            metric("Key trùng không an toàn", "\(report.ambiguousContainerKeyCount)")
+            metric("Asset pointer thay đổi", "\(report.changedAssetPointerCount)")
+            metric("Preload range thay đổi", "\(report.changedPreloadRangeCount)")
+            metric("Dependency mới ở RES", "\(report.dependenciesAddedInCurrentCount)")
+            metric("Dependency cũ không còn", "\(report.dependenciesRemovedInCurrentCount)")
+
+            ForEach(Array(report.findings.prefix(8).enumerated()), id: \.offset) { _, finding in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text(finding.assetBundleName)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                        Spacer()
+                        Text(catalogStatusText(finding.status))
+                            .font(.caption2)
+                            .foregroundColor(finding.status == .mappedCandidate ? .green : .orange)
+                    }
+                    Text("MOD: \(finding.sourceArchive) · key khớp \(finding.mappedContainerKeyCount) · pointer đổi \(finding.changedAssetPointerCount)")
+                        .font(.caption2).foregroundColor(.secondary)
+                    if !finding.legacyOnlyKeySamples.isEmpty {
+                        Text("MOD-only: " + finding.legacyOnlyKeySamples.joined(separator: ", "))
+                            .font(.caption2.monospaced()).foregroundColor(.orange)
+                    }
+                    if !finding.currentOnlyKeySamples.isEmpty {
+                        Text("RES-only: " + finding.currentOnlyKeySamples.joined(separator: ", "))
+                            .font(.caption2.monospaced()).foregroundColor(.secondary)
+                    }
+                    if !finding.changedPointerKeySamples.isEmpty {
+                        Text("Pointer cần remap: " + finding.changedPointerKeySamples.joined(separator: ", "))
+                            .font(.caption2.monospaced()).foregroundColor(.orange)
+                    }
+                    if !finding.dependenciesAddedInCurrent.isEmpty {
+                        Text("Dependency mới: " + finding.dependenciesAddedInCurrent.joined(separator: ", "))
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+                Divider().overlay(.white.opacity(0.08))
+            }
+            if report.findings.count > 8 {
+                Text("Hiển thị 8 / \(report.findings.count) bản ghi cần xem xét.")
+                    .font(.caption2).foregroundColor(.secondary)
+            }
+            Text("Các ánh xạ này là ứng viên phân tích, không phải lệnh ghi pointer cũ sang catalog mới.")
+                .font(.caption2).foregroundColor(.orange)
+        }
+    }
+
+    private func catalogStatusText(_ status: AoVRemakeCatalogRecordStatus) -> String {
+        switch status {
+        case .mappedCandidate: return "Có ứng viên"
+        case .missingFromCurrent: return "Thiếu ở RES"
+        case .ambiguousCurrentMatch: return "Trùng tên"
+        }
     }
 
     private var homeDashboard: some View {
