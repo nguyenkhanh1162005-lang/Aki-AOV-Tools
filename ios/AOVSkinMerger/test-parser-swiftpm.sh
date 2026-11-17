@@ -26,6 +26,8 @@ cp "$SCRIPT_DIR/Sources/AoVUnityCommonStrings.swift" \
    "$SOURCE_DIR/AoVUnityCommonStrings.swift"
 cp "$SCRIPT_DIR/Sources/AoVUnityTypeTreeParser.swift" \
    "$SOURCE_DIR/AoVUnityTypeTreeParser.swift"
+cp "$SCRIPT_DIR/Sources/AoVUnityTypeTreeWriter.swift" \
+   "$SOURCE_DIR/AoVUnityTypeTreeWriter.swift"
 cp "$SCRIPT_DIR/Sources/AoVRuntimeCatalogMergePlanner.swift" \
    "$SOURCE_DIR/AoVRuntimeCatalogMergePlanner.swift"
 cp "$SCRIPT_DIR/Sources/AoVSerializedRuntimeCatalogWriter.swift" \
