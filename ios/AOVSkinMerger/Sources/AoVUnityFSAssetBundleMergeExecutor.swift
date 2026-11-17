@@ -599,7 +599,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         return selected
     }
 
-    private static func changedContainerKeys(
+    static func changedContainerKeys(
         legacyRecord: AoVSerializedAssetBundleRecord,
         currentRecord: AoVSerializedAssetBundleRecord,
         sourceData: Data,
