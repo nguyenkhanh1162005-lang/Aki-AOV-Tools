@@ -1,0 +1,56 @@
+name: iOS Simulator tests
+
+on:
+  push:
+    branches:
+      - feat/ios-offline-app-prototype
+  pull_request:
+    branches:
+      - feat/multi-actor-aov-archive-merge
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aki-aov-ios-tests-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  ios-simulator-tests:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Select Xcode 26.6 and verify iOS 26.5 SDK
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+          xcodebuild -showsdks | grep -F "iOS 26.5"
+          xcodebuild -showsdks | grep -F "Simulator - iOS 26.5"
+
+      - name: Generate Xcode project
+        working-directory: ios/AOVSkinMerger
+        run: xcodegen generate
+
+      - name: Resolve Swift packages
+        working-directory: ios/AOVSkinMerger
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project AOVSkinMerger.xcodeproj \
+            -scheme AOVSkinMerger
+
+      - name: Run iOS Simulator unit tests
+        working-directory: ios/AOVSkinMerger
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project AOVSkinMerger.xcodeproj \
+            -scheme AOVSkinMerger \
+            -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+            -derivedDataPath "$RUNNER_TEMP/AOVSimulatorTests" \
+            CODE_SIGNING_ALLOWED=NO
