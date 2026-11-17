@@ -424,6 +424,8 @@ final class AoVAssetBundleCatalogMergerTests: XCTestCase {
             serializedTypes: [],
             objectCount: localPathIDs.count,
             serializedObjects: objects,
+            serializedObjectsByPathID: Dictionary(uniqueKeysWithValues: objects.map { ($0.pathID, $0) }),
+            serializedObjectPathIDs: Set(localPathIDs),
             assetBundleObjects: [],
             externalReferences: externalReferences,
             assetBundleRecords: [],
