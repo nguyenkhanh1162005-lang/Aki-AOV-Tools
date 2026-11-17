@@ -652,7 +652,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                     destinationData: destinationData,
                     sourceSummary: sourceSummary,
                     destinationSummary: destinationSummary,
-                    graphDiffCache: &graphDiffCache
+                    graphDiffCache: graphDiffCache
                 ) {
                     changed.insert(legacyEntry.key)
                     break
@@ -694,7 +694,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
             sourceSummary: sourceSummary,
             destinationSummary: destinationSummary,
             visited: &visited,
-            graphDiffCache: &graphDiffCache
+            graphDiffCache: graphDiffCache
         )
     }
 
@@ -705,7 +705,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         sourceSummary: AoVSerializedFileSummary,
         destinationSummary: AoVSerializedFileSummary,
         visited: inout Set<Int64>,
-        graphDiffCache: inout [Int64: Bool]
+        graphDiffCache: AoVAssetBundleGraphDiffCache
     ) throws -> Bool {
         guard pointer.fileID >= 0 else { return true }
         if pointer.fileID > 0 {
@@ -746,14 +746,14 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         let sourcePayload = sourceData[sourceStart..<(sourceStart + size)]
         let destinationPayload = destinationData[destinationStart..<(destinationStart + size)]
         guard sourcePayload.elementsEqual(destinationPayload) else {
-            graphDiffCache[pointer.pathID] = true
+            graphDiffCache.values[pointer.pathID] = true
             return true
         }
 
         // Identical bytes still do not mean identical external PPtr meaning if
         // the serialized file's external-reference table was reordered or edited.
         if sourceSummary.externalReferences != destinationSummary.externalReferences {
-            graphDiffCache[pointer.pathID] = true
+            graphDiffCache.values[pointer.pathID] = true
             return true
         }
 
@@ -776,7 +776,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
             value: destinationValue
         )
         guard sourceTargets == destinationTargets else {
-            graphDiffCache[pointer.pathID] = true
+            graphDiffCache.values[pointer.pathID] = true
             return true
         }
         for target in sourceTargets {
@@ -787,9 +787,9 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                 sourceSummary: sourceSummary,
                 destinationSummary: destinationSummary,
                 visited: &visited,
-                graphDiffCache: &graphDiffCache
+                graphDiffCache: graphDiffCache
             ) {
-                graphDiffCache[pointer.pathID] = true
+                graphDiffCache.values[pointer.pathID] = true
                 return true
             }
         }
