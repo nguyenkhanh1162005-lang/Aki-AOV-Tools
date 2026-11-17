@@ -97,15 +97,14 @@ enum AoVModRemakeAnalyzer {
 
         let baseScanURL = try resolveResourceArchive(baseRESURL, tempRoot: tempRoot)
         var legacyScanURLs: [URL] = []
-        for (index, url) in legacyMODURLs.enumerated() {
+        for url in legacyMODURLs {
             let scanURL = try resolveResourceArchive(url, tempRoot: tempRoot)
             legacyScanURLs.append(scanURL)
-            _ = index
         }
 
         // Each side is scanned independently so the RES baseline and legacy MOD
         // collection each retain the scanner's 500 MiB input safety ceiling.
-        guard let baseInventory = try ArchiveScanner.analyze([baseScanURL]).archives.first else {
+        guard let scannedBase = try ArchiveScanner.analyze([baseScanURL]).archives.first else {
             throw AoVModRemakeError.invalidArchive(baseRESURL.lastPathComponent)
         }
         let scannedLegacy = try ArchiveScanner.analyze(legacyScanURLs).archives
@@ -113,10 +112,10 @@ enum AoVModRemakeAnalyzer {
         let legacyInventories = scannedLegacy.enumerated().map { index, inventory in
             relabel(inventory, as: legacyMODURLs[index].lastPathComponent)
         }
-        let baseVersion = try readVersionMarker(from: baseScanURL)
+        let baseVersion = try readVersionMarker(from: baseRESURL) ?? readVersionMarker(from: baseScanURL)
         var legacyVersions: [String: String] = [:]
         for index in legacyScanURLs.indices {
-            if let version = try readVersionMarker(from: legacyScanURLs[index]) {
+            if let version = try readVersionMarker(from: legacyMODURLs[index]) ?? readVersionMarker(from: legacyScanURLs[index]) {
                 legacyVersions[legacyMODURLs[index].lastPathComponent] = version
             }
         }
@@ -299,11 +298,5 @@ enum AoVModRemakeAnalyzer {
             .first { !$0.isEmpty }
         guard let line, line.count <= 128 else { return nil }
         return line
-    }
-}
-
-private extension Collection {
-    subscript(safe index: Index) -> Element? {
-        indices.contains(index) ? self[index] : nil
     }
 }
