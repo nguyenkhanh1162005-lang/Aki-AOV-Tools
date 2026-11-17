@@ -252,12 +252,25 @@ enum AoVModArchiveMerger {
                 return (source, ref)
             }
             guard let baseProvider = providers.first else { continue }
-            let baseDigest = try sha256(baseProvider.1)
             var distinct: [(AoVModSource, AoVResourceReference, Data)] = []
-            var seenDigests: Set<String> = [baseDigest]
-            for (source, reference) in providers.dropFirst() {
+            // Avoid decompressing and hashing every resource just to discover that
+            // it has a single provider. Uncompressed size is a safe negative
+            // filter: different sizes cannot be identical. SHA-256 is computed
+            // only for same-size groups where byte identity is still possible.
+            let sizeCounts = Dictionary(grouping: providers, by: { $0.1.entry.uncompressedSize })
+                .mapValues(\.count)
+            var seenDigestsBySize: [UInt64: Set<String>] = [:]
+            for (source, reference) in providers {
+                let size = reference.entry.uncompressedSize
+                if sizeCounts[size, default: 0] == 1 {
+                    if source.id != baseProvider.0.id {
+                        distinct.append((source, reference, Data()))
+                    }
+                    continue
+                }
                 let digest = try sha256(reference)
-                if seenDigests.insert(digest).inserted {
+                if seenDigestsBySize[size, default: []].insert(digest).inserted,
+                   source.id != baseProvider.0.id {
                     distinct.append((source, reference, Data()))
                 }
             }
