@@ -125,7 +125,7 @@ final class AoVSerializedFileParserTests: XCTestCase {
         XCTAssertTrue(report.roundTripVerified)
         XCTAssertEqual(report.pathID, object.pathID)
         XCTAssertEqual(report.classID, 28)
-        XCTAssertGreaterThan(report.rewrittenObjectSize, report.originalObjectSize)
+        XCTAssertEqual(report.rewrittenObjectSize, report.originalObjectSize)
         let verifiedSummary = try AoVSerializedFileParser.inspect(report.data)
         XCTAssertEqual(verifiedSummary.serializedObjects.count, summary.serializedObjects.count)
         XCTAssertEqual(verifiedSummary.serializedObjects.first?.classID, object.classID)
