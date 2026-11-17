@@ -243,21 +243,32 @@ enum AoVModRemakeExporter {
             throw AoVModRemakeExporterError.unusedFinalPackerEntry(path)
         }
 
-        let databinIFSPaths = Set(payloadByIFSPath.keys.filter {
-            $0.lowercased().hasPrefix("databin/")
-        })
-        let zipIFSPaths = Set(payloadByIFSPath.keys).subtracting(databinIFSPaths)
-        for path in databinIFSPaths where verifiedFinalDatabinChecksumValues[path] == nil {
+        // The caller's verified checksum maps are the authoritative
+        // classification. Do not guess ZIP vs Databin from a path prefix:
+        // resource naming is not a checksum-format contract.
+        let payloadIFSPaths = Set(payloadByIFSPath.keys)
+        let databinIFSPaths = Set(verifiedFinalDatabinChecksumValues.keys)
+        let zipIFSPaths = Set(verifiedFinalZIPChecksumValues.keys)
+        let checksumTypeCollisions = databinIFSPaths.intersection(zipIFSPaths)
+        guard checksumTypeCollisions.isEmpty else {
+            throw AoVModRemakeExporterError.catalogMergeFailed(
+                "Một IFS path có cả Databin và ZIP checksum: \\(checksumTypeCollisions.sorted().prefix(4).joined(separator: ", "))."
+            )
+        }
+        for path in payloadIFSPaths where
+            !databinIFSPaths.contains(path) && !zipIFSPaths.contains(path) {
             throw AoVModRemakeExporterError.missingFinalChecksum(path)
         }
-        for path in zipIFSPaths where verifiedFinalZIPChecksumValues[path] == nil {
-            throw AoVModRemakeExporterError.missingFinalChecksum(path)
-        }
-        for path in verifiedFinalDatabinChecksumValues.keys where !databinIFSPaths.contains(path) {
+        for path in databinIFSPaths where !payloadIFSPaths.contains(path) {
             throw AoVModRemakeExporterError.unusedFinalChecksum(path)
         }
-        for path in verifiedFinalZIPChecksumValues.keys where !zipIFSPaths.contains(path) {
+        for path in zipIFSPaths where !payloadIFSPaths.contains(path) {
             throw AoVModRemakeExporterError.unusedFinalChecksum(path)
+        }
+        for path in assetBundleIFSPaths where !zipIFSPaths.contains(path) {
+            throw AoVModRemakeExporterError.catalogMergeFailed(
+                "AssetBundle \\(path) phải dùng ZIP Verification checksum."
+            )
         }
 
         let packerMatches = resourceEntries.filter {
