@@ -85,7 +85,8 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
         let plan = AoVRuntimeCatalogMergePlanner.planVerification(
             current: current,
             legacy: [("legacy.zip", legacy)],
-            finalDatabinPayloads: [databinPath: payload]
+            finalDatabinPayloads: [databinPath: payload],
+            finalZIPChecksumValues: ["New/Legacy.pkg.bytes": 789]
         )
 
         XCTAssertTrue(plan.safeToWrite)
@@ -96,6 +97,23 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
             plan.candidateCatalog?.allDatabinVerificationInfo.first?.crcXor,
             AoVRuntimeCatalogChecksum.verificationDatabinCRC32(payload)
         )
+    }
+
+    func testVerificationPlannerRequiresVerifiedChecksumForNewZIPEntries() {
+        let path = "New/Legacy.pkg.bytes"
+        let current = verification(zip: [], databin: [])
+        let legacy = verification(zip: [verify(path, crc: 123)], databin: [])
+
+        let plan = AoVRuntimeCatalogMergePlanner.planVerification(
+            current: current,
+            legacy: [("legacy.zip", legacy)]
+        )
+
+        XCTAssertFalse(plan.safeToWrite)
+        XCTAssertNil(plan.candidateCatalog)
+        XCTAssertTrue(plan.issues.contains {
+            $0.reason == .zipChecksumAlgorithmUnknown && $0.path == path
+        })
     }
 
     func testVerificationPlannerBlocksUnknownZIPChecksumChange() {
