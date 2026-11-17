@@ -97,6 +97,7 @@ struct AoVRemakeCatalogRecordSnapshot: Codable, Sendable, Identifiable {
     let preloadCount: Int
     let invalidPreloadRangeCount: Int
     let invalidPreloadRangeSamples: [String]
+    let classCompatibilityIDs: [Int32]
     let mainAssetFileID: Int32
     let mainAssetPathID: Int64
     let dependencies: [String]
@@ -390,6 +391,7 @@ enum AoVModRemakeAnalyzer {
                                 return entry.preloadIndex < 0 || entry.preloadSize < 0 ||
                                     end.overflow || end.partialValue > Int64(record.preloadReferences.count)
                             }.prefix(8).map { $0.key }),
+                            classCompatibilityIDs: record.classCompatibilityIDs,
                             mainAssetFileID: record.mainAsset.fileID,
                             mainAssetPathID: record.mainAsset.pathID,
                             dependencies: record.dependencies,
@@ -447,6 +449,7 @@ enum AoVModRemakeAnalyzer {
             if candidates.isEmpty {
                 status = .missingFromCurrent
                 missingRecordCount += 1
+                invalidLegacyPreloadRanges += oldRecord.invalidPreloadRangeCount
                 findings.append(
                     AoVRemakeCatalogRecordFinding(
                         sourceArchive: oldRecord.sourceArchive,
@@ -478,6 +481,8 @@ enum AoVModRemakeAnalyzer {
             guard candidates.count == 1, let newRecord = candidates.first else {
                 status = .ambiguousCurrentMatch
                 ambiguousRecordCount += 1
+                invalidLegacyPreloadRanges += oldRecord.invalidPreloadRangeCount
+                invalidCurrentPreloadRanges += candidates.reduce(0) { $0 + $1.invalidPreloadRangeCount }
                 findings.append(
                     AoVRemakeCatalogRecordFinding(
                         sourceArchive: oldRecord.sourceArchive,
