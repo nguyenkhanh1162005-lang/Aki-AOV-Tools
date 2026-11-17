@@ -226,6 +226,91 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
         XCTAssertFalse(closure.contains(1001))
     }
 
+    func testChangedContainerDetectionFollowsNestedPPtrGraph() throws {
+        let nodes = [
+            AoVUnityTypeTreeNode(type: "MonoBehaviour", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "PPtr<GameObject>", name: "m_GameObject", level: 1, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "int", name: "m_FileID", level: 2, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_PathID", level: 2, byteSize: 8, metaFlags: 0)
+        ]
+        func payload(_ target: Int64) throws -> Data {
+            try AoVUnityTypeTreeWriter.write(
+                nodes: nodes,
+                value: .object([
+                    "m_GameObject": .object([
+                        "m_FileID": .signed(0),
+                        "m_PathID": .signed(target)
+                    ])
+                ]),
+                littleEndian: true
+            )
+        }
+        let source = makePointerSerializedFile(
+            pathIDs: [1001, 1002, 1003],
+            payloads: [try payload(1002), try payload(1003), try payload(0)],
+            typeTreeNodes: nodes
+        )
+        let destination = makePointerSerializedFile(
+            pathIDs: [1001, 1002, 1003],
+            payloads: [try payload(1002), try payload(1003), try payload(1002)],
+            typeTreeNodes: nodes
+        )
+        let pointer = AoVSerializedAssetPointer(fileID: 0, pathID: 1001)
+        let legacy = AoVSerializedAssetBundleRecord(
+            pathID: 9001,
+            name: "legacy",
+            preloadReferences: [pointer],
+            containerEntries: [
+                AoVSerializedAssetBundleEntry(
+                    key: "assets/graph.prefab",
+                    preloadIndex: 0,
+                    preloadSize: 1,
+                    asset: pointer
+                )
+            ],
+            mainAsset: AoVSerializedAssetPointer(fileID: 0, pathID: 0),
+            mainAssetPreloadIndex: 0,
+            mainAssetPreloadSize: 0,
+            scriptCompatibilityEntries: [],
+            classCompatibilityIDs: [],
+            classCompatibilityEntries: [],
+            runtimeCompatibility: nil,
+            assetBundleName: "actor/graph",
+            dependencies: [],
+            isStreamedSceneAssetBundle: false,
+            trailingBytes: 0,
+            trailingData: Data()
+        )
+        let current = AoVSerializedAssetBundleRecord(
+            pathID: 9001,
+            name: "current",
+            preloadReferences: [pointer],
+            containerEntries: legacy.containerEntries,
+            mainAsset: AoVSerializedAssetPointer(fileID: 0, pathID: 0),
+            mainAssetPreloadIndex: 0,
+            mainAssetPreloadSize: 0,
+            scriptCompatibilityEntries: [],
+            classCompatibilityIDs: [],
+            classCompatibilityEntries: [],
+            runtimeCompatibility: nil,
+            assetBundleName: "actor/graph",
+            dependencies: [],
+            isStreamedSceneAssetBundle: false,
+            trailingBytes: 0,
+            trailingData: Data()
+        )
+
+        let changed = try AoVUnityFSAssetBundleMergeExecutor.changedContainerKeys(
+            legacyRecord: legacy,
+            currentRecord: current,
+            sourceData: source,
+            destinationData: destination,
+            sourceSummary: AoVSerializedFileParser.inspect(source),
+            destinationSummary: AoVSerializedFileParser.inspect(destination)
+        )
+        XCTAssertEqual(changed, ["assets/graph.prefab"])
+    }
+
     func testRejectsMissingNodeWithoutProducingOutput() throws {
         let original = try AoVUnityFSRepacker.repack(
             [AoVUnityFSRepackNode(path: "CAB-catalog", data: Data([1]))],
