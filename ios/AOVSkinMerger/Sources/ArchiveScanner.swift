@@ -18,6 +18,10 @@ struct ArchiveInventory: Codable, Identifiable, Sendable {
     let uncompressedBytes: UInt64
     let paths: [String]
     let pathDigests: [ArchivePathDigest]
+    let unityFSBundles: [AoVUnityFSScanResult]
+    let unityFSUnrecognizedCount: Int
+    let unityFSTooLargeCount: Int
+    let unityFSInspectionFailures: [String]
 }
 
 struct ArchiveOverlap: Codable, Identifiable, Sendable {
@@ -36,6 +40,19 @@ struct ArchiveAnalysis: Codable, Sendable {
     let crcValidatedFiles: Int
     let identicalDuplicatePaths: Int
     let conflictingPaths: Int
+
+    var unityFSBundles: [AoVUnityFSScanResult] {
+        archives.flatMap(\\.unityFSBundles)
+    }
+    var unityFSUnrecognizedCount: Int {
+        archives.reduce(0) { $0 + $1.unityFSUnrecognizedCount }
+    }
+    var unityFSTooLargeCount: Int {
+        archives.reduce(0) { $0 + $1.unityFSTooLargeCount }
+    }
+    var unityFSInspectionFailures: [String] {
+        archives.flatMap(\\.unityFSInspectionFailures)
+    }
 }
 
 struct DecodedAESResource: Codable, Identifiable, Sendable {
@@ -111,6 +128,8 @@ enum ArchiveScanner {
     private static let maximumArchiveExpandedBytes: UInt64 = 1024 * 1024 * 1024
     private static let maximumTotalInputBytes: UInt64 = 500 * 1024 * 1024
     private static let maximumAESInspectInputBytes: UInt64 = 32 * 1024 * 1024
+    private static let maximumUnityFSInspectEntryBytes: UInt64 = 64 * 1024 * 1024
+    private static let maximumUnityFSInspectTotalBytes: UInt64 = 256 * 1024 * 1024
 
     static func analyze(_ urls: [URL]) throws -> ArchiveAnalysis {
         var inventories: [ArchiveInventory] = []
@@ -405,6 +424,11 @@ enum ArchiveScanner {
         var seenPaths = Set<String>()
         var expandedBytes: UInt64 = 0
         var entryCount = 0
+        var unityFSInspectBytes: UInt64 = 0
+        var unityFSBundles: [AoVUnityFSScanResult] = []
+        var unityFSUnrecognizedCount = 0
+        var unityFSTooLargeCount = 0
+        var unityFSInspectionFailures: [String] = []
 
         for entry in archive {
             if entry.type == .directory { continue }
@@ -440,15 +464,57 @@ enum ArchiveScanner {
             }
             expandedBytes = sum.partialValue
 
+            let isAssetBundle = path.lowercased().hasSuffix(".assetbundle")
+            let nextUnityFSBudget = unityFSInspectBytes.addingReportingOverflow(entryBytes)
+            let shouldInspectUnityFS = isAssetBundle &&
+                entryBytes <= maximumUnityFSInspectEntryBytes &&
+                !nextUnityFSBudget.overflow &&
+                nextUnityFSBudget.partialValue <= maximumUnityFSInspectTotalBytes
+            if isAssetBundle && !shouldInspectUnityFS {
+                unityFSTooLargeCount += 1
+            }
+
+            var bundlePayload = Data()
+            if shouldInspectUnityFS {
+                bundlePayload.reserveCapacity(Int(entryBytes))
+                unityFSInspectBytes = nextUnityFSBudget.partialValue
+            }
+
             var hasher = SHA256()
             do {
                 _ = try archive.extract(entry, bufferSize: 64 * 1024, consumer: { chunk in
                     hasher.update(data: chunk)
+                    if shouldInspectUnityFS { bundlePayload.append(chunk) }
                 })
             } catch {
                 throw ArchiveScanError.crcFailure(url.lastPathComponent, entry.path)
             }
             let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+
+            if shouldInspectUnityFS {
+                let unitySignature = Data("UnityFS\\0".utf8)
+                if bundlePayload.count >= unitySignature.count &&
+                    bundlePayload.prefix(unitySignature.count) == unitySignature {
+                    do {
+                        let info = try AoVUnityFSParser.inspect(bundlePayload)
+                        unityFSBundles.append(
+                            AoVUnityFSScanResult(
+                                archiveName: url.lastPathComponent,
+                                path: path,
+                                info: info
+                            )
+                        )
+                    } catch {
+                        if unityFSInspectionFailures.count < 30 {
+                            unityFSInspectionFailures.append(
+                                "\\(path): \\(error.localizedDescription)"
+                            )
+                        }
+                    }
+                } else {
+                    unityFSUnrecognizedCount += 1
+                }
+            }
             paths.append(path)
             pathDigests.append(
                 ArchivePathDigest(
@@ -469,7 +535,11 @@ enum ArchiveScanner {
             fileCount: entryCount,
             uncompressedBytes: expandedBytes,
             paths: paths.sorted(),
-            pathDigests: pathDigests
+            pathDigests: pathDigests,
+            unityFSBundles: unityFSBundles,
+            unityFSUnrecognizedCount: unityFSUnrecognizedCount,
+            unityFSTooLargeCount: unityFSTooLargeCount,
+            unityFSInspectionFailures: unityFSInspectionFailures
         )
     }
 }
