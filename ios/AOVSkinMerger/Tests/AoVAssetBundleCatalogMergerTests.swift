@@ -42,6 +42,46 @@ final class AoVAssetBundleCatalogMergerTests: XCTestCase {
         XCTAssertFalse(plan.externalTargetAuditRequired)
     }
 
+    func testMapsLegacyLocalPointersToImportedDestinationObjectIDs() throws {
+        let currentRootID: Int64 = 5001
+        let legacyRootID: Int64 = 1001
+        let legacyAssetID: Int64 = 2002
+        let currentSummary = makeSummary(localPathIDs: [currentRootID])
+        let legacySummary = makeSummary(localPathIDs: [legacyRootID, legacyAssetID])
+        let legacyPointer = AoVSerializedAssetPointer(fileID: 0, pathID: legacyAssetID)
+        let current = record(
+            bundle: "actor/import-test",
+            preloads: [],
+            entries: [],
+            dependencies: []
+        )
+        let legacy = record(
+            bundle: "actor/import-test",
+            preloads: [legacyPointer],
+            entries: [
+                entry("assets/imported.prefab", index: 0, size: 1, pointer: legacyPointer)
+            ],
+            dependencies: []
+        )
+
+        let plan = try AoVAssetBundleCatalogMerger.plan(
+            current: current,
+            legacy: legacy,
+            currentSerializedFile: currentSummary,
+            legacySerializedFile: legacySummary,
+            availableCurrentBundleNames: ["actor/import-test"],
+            importedLocalPathIDMap: [
+                legacyRootID: currentRootID,
+                legacyAssetID: 5002
+            ],
+            availableImportedLocalPathIDs: [5002]
+        )
+
+        XCTAssertEqual(plan.mergedRecord.preloadReferences.first?.fileID, 0)
+        XCTAssertEqual(plan.mergedRecord.preloadReferences.first?.pathID, 5002)
+        XCTAssertEqual(plan.mergedRecord.containerEntries.first?.asset.pathID, 5002)
+    }
+
     func testRemapsExternalFileIDByExactGUIDAndPathMatch() throws {
         let sourceReferences = [
             external("guid-old", path: "CAB/unused"),
