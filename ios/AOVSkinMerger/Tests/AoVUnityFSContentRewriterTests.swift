@@ -28,9 +28,9 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
         XCTAssertEqual(report.originalNodeBytes, UInt64("catalog-old".utf8.count))
         XCTAssertEqual(report.rewrittenNodeBytes, UInt64(replacement.count))
 
-        let info = try AoVUnityFSParser.inspect(report.payload)
+        let info = try AoVUnityFSParser.inspect(report.data)
         XCTAssertEqual(info.nodes.map(\.path), originalNodes.map(\.path))
-        let nodes = try AoVUnityFSParser.extractNodes(report.payload)
+        let nodes = try AoVUnityFSParser.extractNodes(report.data)
         XCTAssertEqual(nodes.map(\.flags), originalNodes.map(\.flags))
         let byPath = Dictionary(uniqueKeysWithValues: nodes.map { ($0.path, $0.data) })
         XCTAssertEqual(byPath["CAB-catalog"], replacement)
@@ -55,8 +55,8 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
             aovEncryption: true
         )
 
-        let info = try AoVUnityFSParser.inspect(report.payload)
-        let extracted = try AoVUnityFSParser.extractNodes(report.payload)
+        let info = try AoVUnityFSParser.inspect(report.data)
+        let extracted = try AoVUnityFSParser.extractNodes(report.data)
 
         XCTAssertTrue(info.usesAoVEncryption)
         XCTAssertNotEqual(info.flags & 0x200, 0)
@@ -83,8 +83,8 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
             aovEncryption: true
         )
 
-        let info = try AoVUnityFSParser.inspect(report.payload)
-        let extracted = try AoVUnityFSParser.extractNodes(report.payload)
+        let info = try AoVUnityFSParser.inspect(report.data)
+        let extracted = try AoVUnityFSParser.extractNodes(report.data)
 
         XCTAssertTrue(info.usesAoVEncryption)
         XCTAssertNotEqual(info.flags & 0x400, 0)
@@ -115,8 +115,8 @@ final class AoVUnityFSContentRewriterTests: XCTestCase {
             with: replacement
         )
 
-        let info = try AoVUnityFSParser.inspect(report.payload)
-        let nodes = try AoVUnityFSParser.extractNodes(report.payload)
+        let info = try AoVUnityFSParser.inspect(report.data)
+        let nodes = try AoVUnityFSParser.extractNodes(report.data)
         XCTAssertTrue(report.roundTripVerified)
         XCTAssertTrue(info.usesAoVEncryption)
         XCTAssertNotEqual(info.flags & 0x400, 0)
