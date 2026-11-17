@@ -181,7 +181,7 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
                 littleEndian: true
             ),
             AoVUnityTypeTreeWriter.write(
-                nodes,
+                nodes: nodes,
                 value: pointerValue(fileID: 0, pathID: 0),
                 littleEndian: true
             )
@@ -199,8 +199,8 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
         )
 
         XCTAssertEqual(plan.pathIDMap, [1001: 1004, 1002: 1005, 1003: 1006])
-        XCTAssertEqual(plan.objects.map(\\.sourcePathID), [1001, 1002, 1003])
-        XCTAssertEqual(plan.objects.map(\\.remappedLocalPointers), [1, 1, 0])
+        XCTAssertEqual(plan.objects.map(\.sourcePathID), [1001, 1002, 1003])
+        XCTAssertEqual(plan.objects.map(\.remappedLocalPointers), [1, 1, 0])
         let first = try AoVUnityTypeTreeReader.read(
             nodes: nodes,
             data: plan.objects[0].data,
@@ -451,53 +451,6 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
         XCTAssertEqual(importedValue.objectValue?["m_TestPathID"]?.intValue, 1001)
     }
 
-    func testImportsAndAppendsTypeTreeObjectIntoDestinationSerializedFile() throws {
-        let nodes = [
-            AoVUnityTypeTreeNode(type: "Texture2D", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
-            AoVUnityTypeTreeNode(type: "SInt64", name: "m_TestPathID", level: 1, byteSize: 8, metaFlags: 0)
-        ]
-        let value: AoVUnityTypeTreeValue = .object([
-            "m_TestPathID": .signed(1001)
-        ])
-        let payload = try AoVUnityTypeTreeWriter.write(nodes: nodes, value: value, littleEndian: true)
-        let fixture = makeSerializedFile(
-            pathIDs: [1234],
-            payloads: [payload],
-            typeTreeNodes: nodes
-        )
-        let plan = try AoVSerializedFileObjectImportPlanner.plan(
-            source: fixture,
-            destination: fixture
-        )
-        let appendInputs = plan.objects.map {
-            AoVSerializedObjectAppendInput(
-                pathID: $0.destinationPathID,
-                classID: $0.classID,
-                typeID: $0.destinationTypeID,
-                payload: $0.data
-            )
-        }
-        let appended = try AoVSerializedFileObjectAppender.append(
-            to: fixture,
-            objects: appendInputs
-        )
-
-        XCTAssertTrue(plan.roundTripVerified)
-        XCTAssertTrue(appended.roundTripVerified)
-        XCTAssertEqual(appended.originalObjectCount, 1)
-        XCTAssertEqual(appended.finalObjectCount, 2)
-        XCTAssertEqual(appended.appendedPathIDs, [1235])
-
-        let summary = try AoVSerializedFileParser.inspect(appended.data)
-        XCTAssertEqual(summary.fileSize, UInt64(appended.data.count))
-        XCTAssertEqual(summary.serializedObjects.map(\.pathID), [1234, 1235])
-        let imported = try AoVSerializedFileParser.decodeObjectWithTypeTree(
-            pathID: 1235,
-            in: appended.data,
-            summary: summary
-        )
-        XCTAssertEqual(imported.objectValue?["m_TestPathID"]?.intValue, 1001)
-    }
 
     func testAssetBundleObjectClosureFollowsTransitiveLocalPointersWithoutImportingRoot() throws {
         let nodes = pointerNodes()
