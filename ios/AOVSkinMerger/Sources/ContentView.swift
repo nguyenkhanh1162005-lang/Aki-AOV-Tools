@@ -155,7 +155,7 @@ struct ContentView: View {
                             statusRow("MSES / IFix: adapter theo schema đã nhận diện", true)
                             statusRow("Wwise BNK: append-only nếu ID không xung đột", true)
                             statusRow("UnityFS read-only: none / LZMA1 / LZ4 / LZ4HC + AoV encryption", true)
-                            statusRow("Packer / Verification: phân tích catalog; chưa ghi lại catalog", false)
+                            statusRow("Packer / Verification: writer + UnityFS round-trip đã có; chưa nối RES end-to-end", false)
                             statusRow("AssetRef subset merge khi cùng path khác payload", false)
                             statusRow("Xuất ZIP với kiểm CRC khi không còn blocker", true)
                         }.panel()
@@ -291,7 +291,7 @@ struct ContentView: View {
             .buttonStyle(AKIPrimaryButtonStyle())
             .disabled(remakeBaseURL == nil || remakeMODURLs.isEmpty || isAnalyzingRemake || isCopyingFiles || isMerging)
 
-            Text("Giai đoạn hiện tại là phân tích và lập danh sách tài nguyên cần remake. Chưa xuất ZIP chuyển phiên bản cho đến khi có bộ remap catalog/dependency và UnityFS rebuild đã kiểm chứng.")
+            Text("Đã có parser, planner và writer riêng cho catalog Packer/Verification, cùng bộ ghi AssetBundle class 142 trong UnityFS. Chưa xuất ZIP remake cho đến khi payload thật, dependency và checksum của RES được kiểm chứng xuyên suốt.")
                 .font(.caption2).foregroundColor(.orange)
         }
         .panel()
@@ -383,7 +383,7 @@ struct ContentView: View {
                 Label(warning, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundColor(.orange)
             }
-            Text("Trạng thái: chưa tạo file remake. Báo cáo này không thay thế bước chuyển catalog, dependency, checksum và đóng gói UnityFS.")
+            Text("Trạng thái: chưa tạo file remake. Các writer đã qua test cấu trúc tổng hợp; chưa chứng minh tương thích với RES thật hoặc Liên Quân.")
                 .font(.footnote.weight(.semibold)).foregroundColor(.orange)
         }
         .panel()
