@@ -20,7 +20,16 @@ final class AoVSerializedFileParserTests: XCTestCase {
         XCTAssertEqual(summary.assetBundleRecords.first?.name, "catalog")
         XCTAssertEqual(summary.assetBundleRecords.first?.assetBundleName, "resource-packer")
         XCTAssertEqual(summary.assetBundleRecords.first?.dependencies, ["common", "actor/1"])
-        XCTAssertEqual(summary.assetBundleRecords.first?.containerEntries.count, 0)
+        XCTAssertEqual(summary.assetBundleRecords.first?.preloadReferences.first?.fileID, 0)
+        XCTAssertEqual(summary.assetBundleRecords.first?.preloadReferences.first?.pathID, 7001)
+        XCTAssertEqual(summary.assetBundleRecords.first?.containerEntries.count, 1)
+        XCTAssertEqual(summary.assetBundleRecords.first?.containerEntries.first?.key, "assets/hero.prefab")
+        XCTAssertEqual(summary.assetBundleRecords.first?.containerEntries.first?.preloadIndex, 0)
+        XCTAssertEqual(summary.assetBundleRecords.first?.containerEntries.first?.preloadSize, 1)
+        XCTAssertEqual(summary.assetBundleRecords.first?.containerEntries.first?.asset.pathID, 7002)
+        XCTAssertEqual(summary.assetBundleRecords.first?.mainAsset.pathID, 7003)
+        XCTAssertEqual(summary.assetBundleRecords.first?.classCompatibilityIDs, [28])
+        XCTAssertEqual(summary.assetBundleRecords.first?.trailingBytes, 0)
     }
 
 
@@ -33,6 +42,9 @@ final class AoVSerializedFileParserTests: XCTestCase {
         XCTAssertEqual(summary.fileSize, UInt64(data.count))
         XCTAssertEqual(summary.assetBundleRecords.first?.assetBundleName, "resource-packer")
         XCTAssertEqual(summary.assetBundleRecords.first?.dependencies, ["common", "actor/1"])
+        XCTAssertEqual(summary.assetBundleRecords.first?.containerEntries.first?.key, "assets/hero.prefab")
+        XCTAssertEqual(summary.assetBundleRecords.first?.containerEntries.first?.asset.pathID, 7002)
+        XCTAssertEqual(summary.assetBundleRecords.first?.mainAsset.pathID, 7003)
     }
 
     func testParsesBigEndianSerializedFileAndAssetBundleObject() throws {
@@ -44,6 +56,9 @@ final class AoVSerializedFileParserTests: XCTestCase {
         XCTAssertEqual(summary.assetBundleRecords.first?.name, "catalog")
         XCTAssertEqual(summary.assetBundleRecords.first?.assetBundleName, "resource-packer")
         XCTAssertEqual(summary.assetBundleRecords.first?.dependencies, ["common", "actor/1"])
+        XCTAssertEqual(summary.assetBundleRecords.first?.containerEntries.first?.key, "assets/hero.prefab")
+        XCTAssertEqual(summary.assetBundleRecords.first?.containerEntries.first?.asset.pathID, 7002)
+        XCTAssertEqual(summary.assetBundleRecords.first?.mainAsset.pathID, 7003)
     }
 
     func testRejectsTruncatedAssetBundleObject() {
@@ -146,13 +161,25 @@ final class AoVSerializedFileParserTests: XCTestCase {
     private func makeAssetBundleObject(littleEndian: Bool) -> Data {
         var object = Data()
         appendAlignedString("catalog", to: &object, littleEndian: littleEndian)
+        appendSerialized(Int32(1), to: &object, littleEndian: littleEndian) // preload count
         appendSerialized(Int32(0), to: &object, littleEndian: littleEndian)
+        appendSerialized(Int64(7001), to: &object, littleEndian: littleEndian)
+        appendSerialized(Int32(1), to: &object, littleEndian: littleEndian) // container count
+        appendAlignedString("assets/hero.prefab", to: &object, littleEndian: littleEndian)
+        appendSerialized(Int32(0), to: &object, littleEndian: littleEndian) // preload index
+        appendSerialized(Int32(1), to: &object, littleEndian: littleEndian) // preload size
         appendSerialized(Int32(0), to: &object, littleEndian: littleEndian)
+        appendSerialized(Int64(7002), to: &object, littleEndian: littleEndian)
+        appendSerialized(Int32(0), to: &object, littleEndian: littleEndian) // main preload index
+        appendSerialized(Int32(1), to: &object, littleEndian: littleEndian) // main preload size
         appendSerialized(Int32(0), to: &object, littleEndian: littleEndian)
+        appendSerialized(Int64(7003), to: &object, littleEndian: littleEndian)
+        appendSerialized(Int32(1), to: &object, littleEndian: littleEndian) // class compatibility count
+        appendSerialized(Int32(28), to: &object, littleEndian: littleEndian)
         appendSerialized(Int32(0), to: &object, littleEndian: littleEndian)
+        appendSerialized(Int32(1), to: &object, littleEndian: littleEndian)
         appendSerialized(Int32(0), to: &object, littleEndian: littleEndian)
-        appendSerialized(Int64(0), to: &object, littleEndian: littleEndian)
-        appendSerialized(Int32(0), to: &object, littleEndian: littleEndian)
+        appendSerialized(Int64(7004), to: &object, littleEndian: littleEndian)
         appendSerialized(UInt32(0), to: &object, littleEndian: littleEndian)
         appendAlignedString("resource-packer", to: &object, littleEndian: littleEndian)
         appendSerialized(Int32(2), to: &object, littleEndian: littleEndian)
