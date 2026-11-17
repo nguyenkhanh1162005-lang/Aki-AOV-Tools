@@ -273,7 +273,8 @@ enum AoVUnityFSParser {
             throw AoVUnityFSError.invalidHeader("thiếu cờ directory info kết hợp (0x40).")
         }
 
-        let engine = AoVUnityEngineVersion(engineVersion)
+        let parsedEngine = AoVUnityEngineVersion(engineVersion)
+        let engine = parsedEngine.flatMap { $0.major == 0 ? nil : $0 }
         let headerNeedsAlignment = formatVersion >= 7 || (engine?.needsHeaderAlignment ?? false)
         if headerNeedsAlignment {
             try header.align(16)
