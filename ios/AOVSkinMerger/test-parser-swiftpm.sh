@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_DIR="$SCRIPT_DIR/ParserPackage"
 SOURCE_DIR="$PACKAGE_DIR/Sources/AOVSkinMerger"
 TEST_DIR="$PACKAGE_DIR/Tests/AOVSkinMergerTests"
