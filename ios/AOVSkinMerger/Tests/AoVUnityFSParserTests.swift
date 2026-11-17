@@ -256,7 +256,8 @@ final class AoVUnityFSParserTests: XCTestCase {
         ]
 
         XCTAssertThrowsError(try AoVUnityFSRebuilder.rebuild(template: makeBundle(), nodes: nodes)) { error in
-            guard case AoVUnityFSRebuildError.duplicateNodePath("CAB-same") = error else {
+            guard let rebuildError = error as? AoVUnityFSRebuildError,
+                  case .duplicateNodePath("CAB-same") = rebuildError else {
                 return XCTFail("Expected duplicate path rejection, got \(error)")
             }
         }
@@ -265,7 +266,8 @@ final class AoVUnityFSParserTests: XCTestCase {
     func testRebuilderRejectsUnsafeNodePaths() {
         let nodes = [AoVUnityFSExtractedNode(path: "../escape", data: Data([1]))]
         XCTAssertThrowsError(try AoVUnityFSRebuilder.rebuild(template: makeBundle(), nodes: nodes)) { error in
-            guard case AoVUnityFSRebuildError.unsafeNodePath("../escape") = error else {
+            guard let rebuildError = error as? AoVUnityFSRebuildError,
+                  case .unsafeNodePath("../escape") = rebuildError else {
                 return XCTFail("Expected unsafe path rejection, got \(error)")
             }
         }
