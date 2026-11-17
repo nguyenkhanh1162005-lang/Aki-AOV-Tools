@@ -549,7 +549,7 @@ enum AoVModRemakeAnalyzer {
             warnings.append("RES nền phải có đúng một Verification runtime catalog được đọc để lập kế hoạch ghi. Hiện phát hiện \(currentRuntimeVerificationCatalogs.count).")
         } else if let plan = runtimeVerificationMergePlan, !plan.safeToWrite {
             let firstIssue = plan.issues.first.map { "\($0.path): \($0.reason.rawValue)" } ?? "không rõ"
-            warnings.append("Verification merge plan bị khóa: \(plan.issues.count) vấn đề; ví dụ \(firstIssue). ZIP checksum 64-bit chưa được đoán; Databin cần bytes đầu ra để tính CRC32.")
+            warnings.append("Verification merge plan bị khóa: \(plan.issues.count) vấn đề; ví dụ \(firstIssue). Thuật toán checksum ZIP/Databin chưa được xác minh; chỉ nhận giá trị từ adapter đã kiểm chứng theo build.")
         }
         if !catalogMergePlanFindings.isEmpty {
             warnings.append("Đã lập kế hoạch ghép thử cho \(catalogMergePlanFindings.filter { $0.status == .candidate || $0.status == .requiresExternalTargetAudit }.count) AssetBundle; \(catalogMergePlanFindings.filter { $0.status == .blocked || $0.status == .missingCurrentBundle || $0.status == .ambiguousCurrentBundle }.count) trường hợp bị chặn hoặc chưa khớp.")
