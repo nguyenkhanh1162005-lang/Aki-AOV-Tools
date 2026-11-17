@@ -1,12 +1,7 @@
 name: Build iOS unsigned IPA
 
 on:
-  push:
-    branches:
-      - feat/ios-offline-app-prototype
-    paths:
-      - 'ios/AOVSkinMerger/**'
-      - '.github/workflows/ios-unsigned-ipa.yml'
+  # Release packaging is manual-only while RMK/RES/VTK is under development.
   workflow_dispatch:
 
 permissions:
