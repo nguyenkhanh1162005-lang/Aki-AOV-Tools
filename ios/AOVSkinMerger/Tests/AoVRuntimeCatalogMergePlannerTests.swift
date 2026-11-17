@@ -108,7 +108,7 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
         })
     }
 
-    func testVerificationPlannerPreservesEqualZIPChecksumsAndRecalculatesDatabin() {
+    func testVerificationPlannerUsesOnlyExplicitlyVerifiedFinalChecksums() {
         let zipPath = "Ages/Prefab_Characters/Prefab_Hero/CommonActions.pkg.bytes"
         let databinPath = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
         let payload = Data("new final databin payload".utf8)
@@ -172,7 +172,7 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
         })
     }
 
-    func testVerificationPlannerRequiresFinalDatabinBytesForNewEntries() {
+    func testVerificationPlannerRequiresVerifiedChecksumForNewDatabinEntries() {
         let path = "Databin/Client/Actor/NewSkin.bytes"
         let current = verification(zip: [], databin: [])
         let legacy = verification(zip: [], databin: [verify(path, crc: 123)])
@@ -185,7 +185,24 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
         XCTAssertFalse(plan.safeToWrite)
         XCTAssertNil(plan.candidateCatalog)
         XCTAssertTrue(plan.issues.contains {
-            $0.reason == .databinPayloadRequired && $0.path == path
+            $0.reason == .databinChecksumAlgorithmUnknown && $0.path == path
+        })
+    }
+
+    func testVerificationPlannerBlocksChangedDatabinWithoutVerifiedChecksum() {
+        let path = "Databin/Client/Actor/ResSkinSeniorLabelCfg.bytes"
+        let current = verification(zip: [], databin: [verify(path, crc: 100)])
+        let legacy = verification(zip: [], databin: [verify(path, crc: 200)])
+
+        let plan = AoVRuntimeCatalogMergePlanner.planVerification(
+            current: current,
+            legacy: [("legacy.zip", legacy)]
+        )
+
+        XCTAssertFalse(plan.safeToWrite)
+        XCTAssertNil(plan.candidateCatalog)
+        XCTAssertTrue(plan.issues.contains {
+            $0.reason == .databinChecksumAlgorithmUnknown && $0.path == path
         })
     }
 
