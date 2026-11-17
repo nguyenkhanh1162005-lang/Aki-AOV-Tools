@@ -313,6 +313,87 @@ final class AoVSerializedFileParserTests: XCTestCase {
         ])
     }
 
+    func testAssetBundleBatchExecutorMergesMultipleLegacyRecordsWithOneUnityFSRebuild() throws {
+        let currentSerialized = makeSerializedFile(useResolvedPointers: true)
+        let currentSummary = try AoVSerializedFileParser.inspect(currentSerialized)
+        let currentRecord = try XCTUnwrap(currentSummary.assetBundleRecords.first)
+        let pointer = AoVSerializedAssetPointer(fileID: 0, pathID: 1234)
+
+        func legacyRecord(with key: String) -> AoVSerializedAssetBundleRecord {
+            AoVSerializedAssetBundleRecord(
+                pathID: currentRecord.pathID,
+                name: currentRecord.name,
+                preloadReferences: currentRecord.preloadReferences + [pointer],
+                containerEntries: currentRecord.containerEntries + [
+                    AoVSerializedAssetBundleEntry(
+                        key: key,
+                        preloadIndex: Int32(currentRecord.preloadReferences.count),
+                        preloadSize: 1,
+                        asset: pointer
+                    )
+                ],
+                mainAsset: currentRecord.mainAsset,
+                mainAssetPreloadIndex: currentRecord.mainAssetPreloadIndex,
+                mainAssetPreloadSize: currentRecord.mainAssetPreloadSize,
+                scriptCompatibilityEntries: currentRecord.scriptCompatibilityEntries,
+                classCompatibilityIDs: currentRecord.classCompatibilityIDs,
+                classCompatibilityEntries: currentRecord.classCompatibilityEntries,
+                runtimeCompatibility: currentRecord.runtimeCompatibility,
+                assetBundleName: currentRecord.assetBundleName,
+                dependencies: currentRecord.dependencies,
+                isStreamedSceneAssetBundle: currentRecord.isStreamedSceneAssetBundle,
+                trailingBytes: currentRecord.trailingBytes,
+                trailingData: currentRecord.trailingData
+            )
+        }
+
+        let legacySummary = currentSummary
+        let firstLegacy = legacyRecord(with: "assets/aki-batch-a.prefab")
+        let secondLegacy = legacyRecord(with: "assets/aki-batch-b.prefab")
+        let unityFS = try AoVUnityFSRepacker.repack(
+            [AoVUnityFSRepackNode(path: "CAB-catalog", data: currentSerialized, flags: 7)],
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2020.3.34f1",
+            blockInfoLayout: .arenaOfValor
+        )
+
+        let report = try AoVUnityFSAssetBundleMergeExecutor.mergeBatch(
+            in: unityFS.data,
+            serializedFileNodePath: "CAB-catalog",
+            legacyRecords: [
+                AoVAssetBundleLegacyRecordInput(
+                    source: "creator-a.zip",
+                    record: firstLegacy,
+                    serializedFile: legacySummary
+                ),
+                AoVAssetBundleLegacyRecordInput(
+                    source: "creator-b.zip",
+                    record: secondLegacy,
+                    serializedFile: legacySummary
+                )
+            ],
+            availableCurrentBundleNames: Set(currentRecord.dependencies)
+        )
+
+        XCTAssertTrue(report.roundTripVerified)
+        XCTAssertTrue(report.rewrite.roundTripVerified)
+        XCTAssertEqual(report.rewrittenObjectPathIDs, [currentRecord.pathID])
+        XCTAssertEqual(report.plans.count, 2)
+        XCTAssertEqual(report.rewrite.repack.blockCount, 1)
+
+        let nodes = try AoVUnityFSParser.extractNodes(report.data)
+        let node = try XCTUnwrap(nodes.first(where: { $0.path == "CAB-catalog" }))
+        let verified = try AoVSerializedFileParser.inspect(node.data)
+        let record = try XCTUnwrap(verified.assetBundleRecords.first)
+        XCTAssertEqual(record.containerEntries.map(\.key), [
+            "assets/hero.prefab",
+            "assets/aki-batch-a.prefab",
+            "assets/aki-batch-b.prefab"
+        ])
+        XCTAssertEqual(record.preloadReferences.count, 3)
+    }
+
     private func safeRecordWithNullPointers(
         from record: AoVSerializedAssetBundleRecord
     ) -> AoVSerializedAssetBundleRecord {
