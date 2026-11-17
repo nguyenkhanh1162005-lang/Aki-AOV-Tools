@@ -4,6 +4,7 @@ enum AoVRuntimeCatalogMergeBlock: String, Codable, Hashable, Sendable {
     case duplicateCurrentPath
     case conflictingLegacyPath
     case changedExistingAssetBundle
+    case assetBundlePayloadRequired
     case invalidParentChildIndex
     case duplicateCurrentVerificationPath
     case conflictingLegacyVerification
@@ -23,6 +24,7 @@ struct AoVRuntimeCatalogMergeIssue: Codable, Hashable, Sendable, Identifiable {
 struct AoVRuntimePackerMergePlan: Codable, Sendable {
     let candidateCatalog: AoVRuntimeResourcePackerCatalog?
     let addedPaths: [String]
+    let updatedPaths: [String]
     let unchangedPaths: [String]
     let changedExistingPaths: [String]
     let addedParentChildLinkCount: Int
@@ -56,9 +58,13 @@ private struct AoVRuntimeMergeSourceValue<Value: Hashable> {
 }
 
 enum AoVRuntimeCatalogMergePlanner {
+    /// A Packer entry may be added or replaced only when a downstream asset
+    /// bundle adapter has already produced the final bundle and verified its
+    /// Packer metadata/checksum. Catalog-only copying is not enough.
     static func planPacker(
         current: AoVRuntimeResourcePackerCatalog,
-        legacy: [(source: String, catalog: AoVRuntimeResourcePackerCatalog)]
+        legacy: [(source: String, catalog: AoVRuntimeResourcePackerCatalog)],
+        verifiedFinalEntries: [String: AoVRuntimeResourcePackInfo] = [:]
     ) -> AoVRuntimePackerMergePlan {
         var issues: [AoVRuntimeCatalogMergeIssue] = []
         let currentByPath = Dictionary(grouping: current.allResourcePackInfo, by: \.pathInIFS)
@@ -81,85 +87,118 @@ enum AoVRuntimeCatalogMergePlanner {
             }
         }
         let legacyByPath = Dictionary(grouping: legacyRows, by: { $0.value.pathInIFS })
-        let changedExisting = legacyByPath.compactMap { path, rows -> String? in
+        var mergedEntries = current.allResourcePackInfo
+        var mergedIndexByPath = Dictionary(uniqueKeysWithValues: mergedEntries.enumerated().compactMap { index, item in
+            Int32(exactly: index).map { (item.pathInIFS, $0) }
+        })
+        var additions: [String] = []
+        var updates: [String] = []
+        var unchanged: [String] = []
+        var changedExisting: [String] = []
+
+        for path in legacyByPath.keys.sorted() {
+            guard let rows = legacyByPath[path], let candidate = rows.first?.value else { continue }
+            let sourceNames = Array(Set(rows.map(\\.source))).sorted()
             guard !path.isEmpty else {
                 issues.append(
                     AoVRuntimeCatalogMergeIssue(
                         path: path,
                         reason: .emptyPath,
-                        sourceArchives: Array(Set(rows.map(\.source))).sorted()
+                        sourceArchives: sourceNames
                     )
                 )
-                return nil
+                continue
             }
-            let distinctValues = Set(rows.map(\.value))
-            guard distinctValues.count <= 1 else {
+
+            let existingRows = currentByPath[path] ?? []
+            if existingRows.count > 1 {
+                continue // Already reported as a duplicate RES path above.
+            }
+            let distinctValues = Set(rows.map(\\.value))
+            let verifiedFinal = verifiedFinalEntries[path]
+
+            if let verifiedFinal {
+                guard verifiedFinal.pathInIFS == path else {
+                    issues.append(
+                        AoVRuntimeCatalogMergeIssue(
+                            path: path,
+                            reason: .assetBundlePayloadRequired,
+                            sourceArchives: sourceNames
+                        )
+                    )
+                    continue
+                }
+                if let existingIndex = mergedIndexByPath[path].flatMap(Int.init(exactly:)) {
+                    guard mergedEntries.indices.contains(existingIndex) else {
+                        issues.append(
+                            AoVRuntimeCatalogMergeIssue(
+                                path: path,
+                                reason: .invalidParentChildIndex,
+                                sourceArchives: sourceNames
+                            )
+                        )
+                        continue
+                    }
+                    if mergedEntries[existingIndex] != verifiedFinal {
+                        mergedEntries[existingIndex] = verifiedFinal
+                        updates.append(path)
+                    } else {
+                        unchanged.append(path)
+                    }
+                } else {
+                    guard let newIndex = Int32(exactly: mergedEntries.count) else {
+                        issues.append(
+                            AoVRuntimeCatalogMergeIssue(
+                                path: path,
+                                reason: .invalidParentChildIndex,
+                                sourceArchives: sourceNames
+                            )
+                        )
+                        continue
+                    }
+                    mergedIndexByPath[path] = newIndex
+                    mergedEntries.append(verifiedFinal)
+                    additions.append(path)
+                }
+                continue
+            }
+
+            if distinctValues.count > 1 {
                 issues.append(
                     AoVRuntimeCatalogMergeIssue(
                         path: path,
                         reason: .conflictingLegacyPath,
-                        sourceArchives: Array(Set(rows.map(\.source))).sorted()
+                        sourceArchives: sourceNames
                     )
                 )
-                return nil
+                continue
             }
-            guard let base = currentByPath[path]?.first else { return nil }
-            guard base != distinctValues.first else { return nil }
-            issues.append(
-                AoVRuntimeCatalogMergeIssue(
-                    path: path,
-                    reason: .changedExistingAssetBundle,
-                    sourceArchives: Array(Set(rows.map(\.source))).sorted()
-                )
-            )
-            return path
-        }.sorted()
 
-        var additions: [AoVRuntimeResourcePackInfo] = []
-        var unchanged: [String] = []
-        for path in legacyByPath.keys.sorted() {
-            guard let rows = legacyByPath[path],
-                  let candidate = rows.first?.value else { continue }
-            if currentByPath[path] != nil {
-                if currentByPath[path]?.first == candidate {
+            if let existing = existingRows.first {
+                if existing == candidate {
                     unchanged.append(path)
+                } else {
+                    changedExisting.append(path)
+                    issues.append(
+                        AoVRuntimeCatalogMergeIssue(
+                            path: path,
+                            reason: .changedExistingAssetBundle,
+                            sourceArchives: sourceNames
+                        )
+                    )
                 }
-                continue
-            }
-            if Set(rows.map(\.value)).count == 1 {
-                additions.append(candidate)
+            } else {
+                issues.append(
+                    AoVRuntimeCatalogMergeIssue(
+                        path: path,
+                        reason: .assetBundlePayloadRequired,
+                        sourceArchives: sourceNames
+                    )
+                )
             }
         }
 
-        var indexesByPath: [String: Int32] = [:]
-        var mergedEntries = current.allResourcePackInfo
-        for (index, item) in mergedEntries.enumerated() {
-            guard let intIndex = Int32(exactly: index) else {
-                issues.append(
-                    AoVRuntimeCatalogMergeIssue(
-                        path: item.pathInIFS,
-                        reason: .invalidParentChildIndex,
-                        sourceArchives: []
-                    )
-                )
-                continue
-            }
-            indexesByPath[item.pathInIFS] = intIndex
-        }
-        for item in additions {
-            guard let index = Int32(exactly: mergedEntries.count) else {
-                issues.append(
-                    AoVRuntimeCatalogMergeIssue(
-                        path: item.pathInIFS,
-                        reason: .invalidParentChildIndex,
-                        sourceArchives: []
-                    )
-                )
-                continue
-            }
-            indexesByPath[item.pathInIFS] = index
-            mergedEntries.append(item)
-        }
+        let indexesByPath = mergedIndexByPath
 
         var mergedLinks = current.allParentIndexToChild
         var linkSet = Set(mergedLinks)
