@@ -281,7 +281,9 @@ final class AoVSerializedRuntimeCatalogWriterTests: XCTestCase {
             [AoVUnityFSRepackNode(path: "CAB-verification", data: serialized, flags: 3)],
             formatVersion: 8,
             playerVersion: "5.0.0",
-            engineVersion: "2022.3.5f1"
+            engineVersion: "2022.3.5f1",
+            blockInfoLayout: .arenaOfValor,
+            aovEncryption: true
         )
 
         let report = try AoVUnityFSRuntimeCatalogMergeExecutor.mergeVerification(
