@@ -215,6 +215,10 @@ final class AoVUnityTypeTreeParserTests: XCTestCase {
             AoVUnityTypeTreeNode(type: "PPtr<Material>", name: "m_Material", level: 1, byteSize: -1, metaFlags: 0),
             AoVUnityTypeTreeNode(type: "int", name: "m_FileID", level: 2, byteSize: 4, metaFlags: 0),
             AoVUnityTypeTreeNode(type: "SInt64", name: "m_PathID", level: 2, byteSize: 8, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "string", name: "m_Name", level: 1, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "Array", name: "Array", level: 2, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "int", name: "size", level: 3, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "char", name: "data", level: 3, byteSize: 1, metaFlags: 0),
             AoVUnityTypeTreeNode(type: "vector", name: "m_References", level: 1, byteSize: -1, metaFlags: 0),
             AoVUnityTypeTreeNode(type: "Array", name: "Array", level: 2, byteSize: -1, metaFlags: 0),
             AoVUnityTypeTreeNode(type: "int", name: "size", level: 3, byteSize: 4, metaFlags: 0),
@@ -231,6 +235,7 @@ final class AoVUnityTypeTreeParserTests: XCTestCase {
                 "m_FileID": .signed(1),
                 "m_PathID": .signed(2002)
             ]),
+            "m_Name": .string("material-name"),
             "m_References": .array([
                 .object(["m_FileID": .signed(0), "m_PathID": .signed(3003)]),
                 .object(["m_FileID": .signed(2), "m_PathID": .signed(4004)])
@@ -268,6 +273,7 @@ final class AoVUnityTypeTreeParserTests: XCTestCase {
         XCTAssertEqual(gameObject["m_PathID"]?.intValue, 9001)
         XCTAssertEqual(material["m_FileID"]?.intValue, 3)
         XCTAssertEqual(material["m_PathID"]?.intValue, 8002)
+        XCTAssertEqual(fields["m_Name"]?.stringValue, "material-name")
         XCTAssertEqual(firstReference["m_PathID"]?.intValue, 9003)
         XCTAssertEqual(secondReference["m_FileID"]?.intValue, 4)
         XCTAssertEqual(secondReference["m_PathID"]?.intValue, 8004)
