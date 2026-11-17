@@ -124,7 +124,7 @@ jobs:
           test -s "$APP_INFO"
           test -x "$APP_PATH/AOVSkinMerger"
           test "$(plutil -extract CFBundleIdentifier raw "$APP_INFO")" = "com.aki.aovskinmerger"
-          test "$(plutil -extract CFBundleShortVersionString raw "$APP_INFO")" = "0.5.0"
+          test "$(plutil -extract CFBundleShortVersionString raw "$APP_INFO")" = "0.5.1"
           test "$(plutil -extract MinimumOSVersion raw "$APP_INFO")" = "26.5"
           lipo -archs "$APP_PATH/AOVSkinMerger" | grep -qw arm64
           shasum -a 256 "$IPA_PATH"
@@ -132,7 +132,7 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AKI-AOV-SKIN-0.5.0-iOS-26.5-IPA
+          name: AKI-AOV-SKIN-0.5.1-iOS-26.5-IPA
           path: AKI AOV SKIN.ipa
           if-no-files-found: error
           retention-days: 14
