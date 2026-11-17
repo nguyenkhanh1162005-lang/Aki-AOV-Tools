@@ -321,6 +321,34 @@ struct ContentView: View {
             runtimeCatalogSectionView(report.runtimeCatalogComparison.verificationZIP)
             runtimeCatalogSectionView(report.runtimeCatalogComparison.verificationDatabin)
 
+            Text("Kế hoạch ghi catalog").font(.subheadline.weight(.bold))
+            runtimeCatalogWritePlanView(
+                title: "Packer",
+                planExists: report.runtimePackerMergePlan != nil,
+                safeToWrite: report.runtimePackerMergePlan?.safeToWrite ?? false,
+                details: report.runtimePackerMergePlan.map {
+                    [
+                        "Mục Packer mới: \\(\$0.addedPaths.count)",
+                        "Bundle cùng path nhưng khác nội dung: \\(\$0.changedExistingPaths.count)",
+                        "Parent-child link mới: \\(\$0.addedParentChildLinkCount)"
+                    ]
+                } ?? [],
+                issues: report.runtimePackerMergePlan?.issues ?? []
+            )
+            runtimeCatalogWritePlanView(
+                title: "Verification",
+                planExists: report.runtimeVerificationMergePlan != nil,
+                safeToWrite: report.runtimeVerificationMergePlan?.safeToWrite ?? false,
+                details: report.runtimeVerificationMergePlan.map {
+                    [
+                        "ZIP entry mới: \\(\$0.addedZIPPaths.count)",
+                        "Databin cần cập nhật CRC: \\(\$0.updatedDatabinPaths.count)",
+                        "Databin mới: \\(\$0.addedDatabinPaths.count)"
+                    ]
+                } ?? [],
+                issues: report.runtimeVerificationMergePlan?.issues ?? []
+            )
+
             catalogMergePlanView(report.catalogMergePlanFindings)
 
             if !report.legacyVersions.isEmpty {
@@ -408,6 +436,44 @@ struct ContentView: View {
             }
             if report.findings.count > 6 {
                 Text("Còn \(report.findings.count - 6) khác biệt hiển thị trong báo cáo dữ liệu.")
+                    .font(.caption2).foregroundColor(.secondary)
+            }
+        }
+        .padding(11)
+        .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
+
+    private func runtimeCatalogWritePlanView(
+        title: String,
+        planExists: Bool,
+        safeToWrite: Bool,
+        details: [String],
+        issues: [AoVRuntimeCatalogMergeIssue]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title).font(.caption.weight(.bold))
+                Spacer()
+                Text(!planExists ? "CHƯA ĐỦ DỮ LIỆU" : (safeToWrite ? "ĐÃ QUA KIỂM TRA CATALOG" : "ĐANG BỊ CHẶN"))
+                    .font(.caption2.weight(.bold))
+                    .foregroundColor(!planExists ? .secondary : (safeToWrite ? .green : .orange))
+            }
+            if planExists {
+                ForEach(Array(details.enumerated()), id: \.offset) { _, detail in
+                    Text(detail).font(.caption2).foregroundColor(.secondary)
+                }
+                ForEach(Array(issues.prefix(6))) { issue in
+                    Text("\(issue.path.isEmpty ? "(đường dẫn rỗng)" : issue.path) · \(issue.reason.rawValue)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.orange)
+                        .textSelection(.enabled)
+                }
+                if issues.count > 6 {
+                    Text("Còn \(issues.count - 6) vấn đề khác.")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            } else {
+                Text("Cần đọc được đúng một catalog từ RES nền trước khi lập kế hoạch ghi.")
                     .font(.caption2).foregroundColor(.secondary)
             }
         }
