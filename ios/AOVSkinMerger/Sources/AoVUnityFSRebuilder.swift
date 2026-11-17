@@ -66,7 +66,8 @@ enum AoVUnityFSRebuilder {
         } catch {
             throw AoVUnityFSRebuildError.unsupportedTemplate
         }
-        guard (6...10).contains(templateInfo.formatVersion) else {
+        guard (6...10).contains(templateInfo.formatVersion),
+              !templateInfo.usesAoVEncryption else {
             throw AoVUnityFSRebuildError.unsupportedTemplate
         }
         guard blockSize > 0, blockSize <= maximumBlockBytes else {
