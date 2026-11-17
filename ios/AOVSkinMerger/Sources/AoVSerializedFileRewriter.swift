@@ -60,8 +60,7 @@ enum AoVSerializedFileRewriter {
         guard summary.fileSize == UInt64(source.count) else {
             throw AoVSerializedFileRewriteError.fileSizeMismatch
         }
-        let matches = summary.serializedObjects.filter { $0.pathID == pathID }
-        guard matches.count == 1, let object = matches.first else {
+        guard let object = summary.serializedObjectsByPathID[pathID] else {
             throw AoVSerializedFileRewriteError.missingObject(pathID)
         }
         guard let typeInfo = summary.typeInfo(for: object),
@@ -80,7 +79,7 @@ enum AoVSerializedFileRewriter {
             with: replacementPayload
         )
         let verified = try AoVSerializedFileParser.inspect(rewritten)
-        guard let verifiedObject = verified.serializedObjects.first(where: { $0.pathID == pathID }),
+        guard let verifiedObject = verified.serializedObjectsByPathID[pathID],
               verifiedObject.classID == object.classID,
               verifiedObject.typeID == object.typeID,
               verified.serializedObjects.count == summary.serializedObjects.count else {
@@ -151,7 +150,7 @@ enum AoVSerializedFileRewriter {
         let verified = try AoVSerializedFileParser.inspect(rewritten)
         guard verified.fileSize == UInt64(rewritten.count),
               verified.serializedObjects.count == summary.serializedObjects.count,
-              let updatedObject = verified.serializedObjects.first(where: { $0.pathID == pathID }),
+              let updatedObject = verified.serializedObjectsByPathID[pathID],
               let updatedRecord = verified.assetBundleRecords.first(where: { $0.pathID == pathID }),
               updatedRecord == replacement else {
             throw AoVSerializedFileRewriteError.verificationFailed("Object table hoặc AssetBundle record sau khi parse lại không khớp.")
