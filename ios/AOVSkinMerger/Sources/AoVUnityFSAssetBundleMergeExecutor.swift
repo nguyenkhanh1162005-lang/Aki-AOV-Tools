@@ -617,6 +617,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
             currentByKey[entry.key] = entry
         }
         var changed = Set<String>()
+        var graphDiffCache: [Int64: Bool] = [:]
         for legacyEntry in legacyRecord.containerEntries {
             guard let currentEntry = currentByKey[legacyEntry.key] else {
                 // New keys are handled by the normal add path, not the
@@ -634,7 +635,8 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                 sourceData: sourceData,
                 destinationData: destinationData,
                 sourceSummary: sourceSummary,
-                destinationSummary: destinationSummary
+                destinationSummary: destinationSummary,
+                graphDiffCache: &graphDiffCache
             ) {
                 changed.insert(legacyEntry.key)
                 continue
@@ -645,7 +647,8 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                     sourceData: sourceData,
                     destinationData: destinationData,
                     sourceSummary: sourceSummary,
-                    destinationSummary: destinationSummary
+                    destinationSummary: destinationSummary,
+                    graphDiffCache: &graphDiffCache
                 ) {
                     changed.insert(legacyEntry.key)
                     break
@@ -676,7 +679,8 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         sourceData: Data,
         destinationData: Data,
         sourceSummary: AoVSerializedFileSummary,
-        destinationSummary: AoVSerializedFileSummary
+        destinationSummary: AoVSerializedFileSummary,
+        graphDiffCache: inout [Int64: Bool]
     ) throws -> Bool {
         var visited = Set<Int64>()
         return try localObjectGraphDiffers(
@@ -685,7 +689,8 @@ enum AoVUnityFSAssetBundleMergeExecutor {
             destinationData: destinationData,
             sourceSummary: sourceSummary,
             destinationSummary: destinationSummary,
-            visited: &visited
+            visited: &visited,
+            graphDiffCache: &graphDiffCache
         )
     }
 
@@ -695,7 +700,8 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         destinationData: Data,
         sourceSummary: AoVSerializedFileSummary,
         destinationSummary: AoVSerializedFileSummary,
-        visited: inout Set<Int64>
+        visited: inout Set<Int64>,
+        graphDiffCache: inout [Int64: Bool]
     ) throws -> Bool {
         guard pointer.fileID >= 0 else { return true }
         if pointer.fileID > 0 {
@@ -710,6 +716,7 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                 normalizedExternalPath(sourceReference.path) != normalizedExternalPath(destinationReference.path)
         }
         guard pointer.pathID != 0 else { return false }
+        if let cached = graphDiffCache[pointer.pathID] { return cached }
         guard visited.insert(pointer.pathID).inserted else { return false }
 
         let sourceMatches = sourceSummary.serializedObjects.filter { $0.pathID == pointer.pathID }
@@ -729,15 +736,20 @@ enum AoVUnityFSAssetBundleMergeExecutor {
               sourceStart >= 0, destinationStart >= 0,
               sourceStart <= sourceData.count, size <= sourceData.count - sourceStart,
               destinationStart <= destinationData.count, size <= destinationData.count - destinationStart else {
+            graphDiffCache[pointer.pathID] = true
             return true
         }
         let sourcePayload = sourceData[sourceStart..<(sourceStart + size)]
         let destinationPayload = destinationData[destinationStart..<(destinationStart + size)]
-        guard sourcePayload.elementsEqual(destinationPayload) else { return true }
+        guard sourcePayload.elementsEqual(destinationPayload) else {
+            graphDiffCache[pointer.pathID] = true
+            return true
+        }
 
         // Identical bytes still do not mean identical external PPtr meaning if
         // the serialized file's external-reference table was reordered or edited.
         if sourceSummary.externalReferences != destinationSummary.externalReferences {
+            graphDiffCache[pointer.pathID] = true
             return true
         }
 
@@ -759,7 +771,10 @@ enum AoVUnityFSAssetBundleMergeExecutor {
             nodes: destinationType.typeTreeNodes,
             value: destinationValue
         )
-        guard sourceTargets == destinationTargets else { return true }
+        guard sourceTargets == destinationTargets else {
+            graphDiffCache[pointer.pathID] = true
+            return true
+        }
         for target in sourceTargets {
             if try localObjectGraphDiffers(
                 AoVSerializedAssetPointer(fileID: 0, pathID: target),
@@ -767,11 +782,14 @@ enum AoVUnityFSAssetBundleMergeExecutor {
                 destinationData: destinationData,
                 sourceSummary: sourceSummary,
                 destinationSummary: destinationSummary,
-                visited: &visited
+                visited: &visited,
+                graphDiffCache: &graphDiffCache
             ) {
+                graphDiffCache[pointer.pathID] = true
                 return true
             }
         }
+        graphDiffCache[pointer.pathID] = false
         return false
     }
 
