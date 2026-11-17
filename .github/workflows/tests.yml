@@ -19,12 +19,6 @@ jobs:
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest discover -s tests -v
       - run: python -m compileall -q app bot.py tools
-      - name: Set up Swift for portable parser tests
-        uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.0"
-      - name: Run Unity SerializedFile parser unit tests
-        run: bash ios/AOVSkinMerger/test-parser-swiftpm.sh
       - name: Check web JavaScript syntax
         run: python -c "import re,pathlib; h=pathlib.Path('web/index.html').read_text(); pathlib.Path('/tmp/aki-web.js').write_text('\\n'.join(re.findall(r'<script>(.*?)</script>',h,re.S)))" && node --check /tmp/aki-web.js
       - name: Build deployment Docker image
@@ -60,3 +54,14 @@ jobs:
         with:
           name: aki-aov-app-source
           path: /tmp/aki-aov-app-source.zip
+
+  swift-parser-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Swift for portable parser tests
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0"
+      - name: Run Unity SerializedFile parser unit tests
+        run: bash ios/AOVSkinMerger/test-parser-swiftpm.sh
