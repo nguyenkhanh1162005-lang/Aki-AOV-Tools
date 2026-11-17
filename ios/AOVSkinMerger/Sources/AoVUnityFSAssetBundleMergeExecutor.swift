@@ -50,7 +50,8 @@ enum AoVUnityFSAssetBundleMergeExecutor {
         objectPathID: Int64,
         legacyRecord: AoVSerializedAssetBundleRecord,
         legacySerializedFile: AoVSerializedFileSummary,
-        availableCurrentBundleNames: Set<String>
+        availableCurrentBundleNames: Set<String>,
+        verifiedExternalTargetPathIDs: [String: Set<Int64>] = [:]
     ) throws -> AoVUnityFSAssetBundleMergeExecutionReport {
         let info = try AoVUnityFSParser.inspect(source)
         guard info.totalUncompressedBytes <= maximumExpandedBytes else {
@@ -86,7 +87,8 @@ enum AoVUnityFSAssetBundleMergeExecutor {
             legacy: legacyRecord,
             currentSerializedFile: currentSerializedFile,
             legacySerializedFile: legacySerializedFile,
-            availableCurrentBundleNames: availableCurrentBundleNames
+            availableCurrentBundleNames: availableCurrentBundleNames,
+            verifiedExternalTargetPathIDs: verifiedExternalTargetPathIDs
         )
         guard !plan.externalTargetAuditRequired else {
             throw AoVUnityFSAssetBundleMergeExecutorError.externalTargetAuditRequired(
