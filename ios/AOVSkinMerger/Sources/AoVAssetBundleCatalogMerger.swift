@@ -306,6 +306,26 @@ enum AoVAssetBundleCatalogMerger {
         "\(guidHex.lowercased())|\(normalizedReferencePath(path))"
     }
 
+    /// Parses the supplied destination CAB/SerializedFile payloads and returns
+    /// the exact object pathIDs available in each external target. Keys must be
+    /// built from the same external-reference GUID/path pair.
+    static func auditExternalTargetPathIDs(
+        serializedFilesByExternalTargetKey: [String: Data]
+    ) throws -> [String: Set<Int64>] {
+        var audited: [String: Set<Int64>] = [:]
+        for (rawKey, payload) in serializedFilesByExternalTargetKey {
+            let key = rawKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !key.isEmpty, !payload.isEmpty else { continue }
+            let summary = try AoVSerializedFileParser.inspect(payload)
+            guard summary.fileSize == UInt64(payload.count),
+                  !summary.serializedObjectPathIDs.isEmpty else {
+                continue
+            }
+            audited[key] = summary.serializedObjectPathIDs
+        }
+        return audited
+    }
+
     private static func normalizedReferencePath(_ value: String) -> String {
         value.replacingOccurrences(of: "\\", with: "/")
             .trimmingCharacters(in: .whitespacesAndNewlines)
