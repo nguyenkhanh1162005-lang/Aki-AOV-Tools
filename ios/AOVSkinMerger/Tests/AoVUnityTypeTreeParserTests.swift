@@ -84,10 +84,20 @@ final class AoVUnityTypeTreeParserTests: XCTestCase {
             littleEndian: true
         )
         XCTAssertEqual(rewritten, data)
-        XCTAssertEqual(
-            try AoVUnityTypeTreeReader.read(nodes: nodes, data: rewritten, littleEndian: true).objectValue?["Lookup"]?.arrayValue,
-            nil
+        let roundTripValue = try AoVUnityTypeTreeReader.read(
+            nodes: nodes,
+            data: rewritten,
+            littleEndian: true
         )
+        guard case .map(let roundTripEntries)? = roundTripValue.objectValue?["Lookup"] else {
+            return XCTFail("Lookup map did not survive TypeTree writer round-trip.")
+        }
+        XCTAssertEqual(roundTripEntries.count, 1)
+        if case .bytes(let roundTripBytes)? = roundTripValue.objectValue?["Payload"] {
+            XCTAssertEqual(roundTripBytes, Data([0x10, 0x20, 0x30]))
+        } else {
+            XCTFail("TypelessData did not survive TypeTree writer round-trip.")
+        }
     }
 
     func testReadsBigEndianValuesAndAlignedString() throws {
