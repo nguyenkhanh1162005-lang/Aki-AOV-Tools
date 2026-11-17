@@ -44,6 +44,7 @@ struct AoVUnityFSCatalogNodeSample: Codable, Hashable, Sendable, Identifiable {
     let size: UInt64
     let prefixHex: String
     let stringHints: [String]
+    let serializedFileSummary: String?
     var id: String { path }
 }
 
