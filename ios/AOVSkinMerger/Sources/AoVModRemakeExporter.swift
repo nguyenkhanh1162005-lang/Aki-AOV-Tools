@@ -203,7 +203,8 @@ enum AoVModRemakeExporter {
             let archivePath = try normalizeArchivePath(payload.archivePath)
             let ifsPath = normalizeRuntimePath(payload.ifsPath)
             let runtimeComponents = ifsPath.split(separator: "/", omittingEmptySubsequences: false)
-            guard !ifsPath.isEmpty, !ifsPath.hasPrefix("/"),
+            guard payload.ifsPath == payload.ifsPath.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !ifsPath.isEmpty, !ifsPath.hasPrefix("/"),
                   !runtimeComponents.contains(""), !runtimeComponents.contains(".."),
                   !runtimeComponents.contains("."),
                   !ifsPath.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
@@ -495,7 +496,6 @@ enum AoVModRemakeExporter {
 
     private static func normalizeRuntimePath(_ raw: String) -> String {
         raw.replacingOccurrences(of: "\\", with: "/")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func readEntry(_ archive: Archive, _ entry: Entry, maxBytes: UInt64) throws -> Data {
