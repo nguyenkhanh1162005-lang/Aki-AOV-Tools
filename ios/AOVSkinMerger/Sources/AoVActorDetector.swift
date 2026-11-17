@@ -18,11 +18,14 @@ struct AoVActorEvidence: Sendable {
 
 enum AoVActorDetector {
     private static let patterns: [(keyPath: WritableKeyPath<MutableEvidence, Set<String>>, pattern: String)] = [
-        (\.actorActionIDs, #"(?i)(?:^|/)Actor[_-](\d{3})[_-]Actions\.pkg\.bytes$"#),
-        (\.assetReferenceIDs, #"(?i)(?:^|/)AssetRefs/Hero/(\d{3})_AssetRef\.bytes$"#),
-        (\.assetBundleIDs, #"(?i)(?:^|/)assetbundle/(?:[^/]+/)*(\d{3})_[^/]+\.assetbundle$"#),
-        (\.prefabPathIDs, #"(?i)(?:^|/)Prefab_Hero/(\d{3})_[^/]+(?:\.bytes|\.pkg\.bytes)$"#),
-        (\.actorDirectoryIDs, #"(?i)(?:^|/)(?:actor|hero)[_-](\d{3})(?:/|$)"#)
+        (\.actorActionIDs, #"(?i)(?:^|/)Actor[_-](\d{3,4})[_-]Actions\.pkg\.bytes$"#),
+        (\.assetReferenceIDs, #"(?i)(?:^|/)AssetRefs/Hero/(\d{3,4})_AssetRef\.bytes$"#),
+        (\.assetBundleIDs, #"(?i)(?:^|/)assetbundle/(?:[^/]+/)*(\d{3,4})_[^/]+\.assetbundle$"#),
+        (\.prefabPathIDs, #"(?i)(?:^|/)Prefab_Hero/(\d{3,4})_[^/]+(?:\.bytes|\.pkg\.bytes)$"#),
+        (\.actorDirectoryIDs, #"(?i)(?:^|/)(?:actor|hero)[_-](\d{3,4})(?:/|$)"#),
+        // Totorox 2.0's embedded detector also recognizes Resources/hero/<id>/...
+        (\.actorDirectoryIDs, #"(?i)(?:^|/)hero/(\d{3,4})(?:_|/|\.|$)"#),
+        (\.actorDirectoryIDs, #"(?i)(?:^|/)commercializenotify_(?:blue|red)_(\d{3,4})(?:_|\.|$)"#)
     ]
 
     private struct MutableEvidence {
@@ -61,10 +64,18 @@ enum AoVActorDetector {
             return []
         }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return Set(regex.matches(in: text, range: range).compactMap { match in
+        let candidates = regex.matches(in: text, range: range).compactMap { match -> String? in
             guard let r = Range(match.range(at: 1), in: text) else { return nil }
-            let value = String(text[r])
-            return actorIDs.contains(String(value.prefix(3))) ? value : nil
+            return String(text[r])
+        }
+        // AoV paths can expose either 3-digit or 4-digit hero IDs. Match the
+        // complete detected ID rather than blindly taking the first 3 digits.
+        let orderedActorIDs = actorIDs.sorted {
+            if $0.count != $1.count { return $0.count > $1.count }
+            return $0 < $1
+        }
+        return Set(candidates.filter { value in
+            orderedActorIDs.contains { value.hasPrefix($0) }
         })
     }
 
