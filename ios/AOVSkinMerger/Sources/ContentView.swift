@@ -2,10 +2,21 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
 
+private enum ZIPImportPurpose: Equatable {
+    case merger
+    case remakeBase
+    case legacyMods
+}
+
 struct ContentView: View {
     @Environment(\.openURL) private var openURL
     @State private var isImporting = false
+    @State private var importPurpose: ZIPImportPurpose = .merger
     @State private var isCopyingFiles = false
+    @State private var remakeBaseURL: URL?
+    @State private var remakeMODURLs: [URL] = []
+    @State private var isAnalyzingRemake = false
+    @State private var remakeReport: AoVModRemakeReport?
     @State private var isAnalyzing = false
     @State private var selectedURLs: [URL] = []
     @State private var selectedBaseURL: URL?
@@ -131,6 +142,8 @@ struct ContentView: View {
                         if let analysis { analysisView(analysis) }
                         if let aesReport { aesReportView(aesReport) }
                         if let mergeReport { mergeResultView(mergeReport) }
+                        remakePanel
+                        if let remakeReport { remakeResultView(remakeReport) }
     
                         VStack(alignment: .leading, spacing: 9) {
                             Label("Tiến độ phát triển", systemImage: "hammer.fill").font(.headline)
@@ -182,7 +195,7 @@ struct ContentView: View {
                 ZIPDocumentPicker(
                     onPick: { urls in
                         isImporting = false
-                        importFiles(.success(urls))
+                        importFiles(.success(urls), purpose: importPurpose)
                     },
                     onCancel: { isImporting = false }
                 )
@@ -213,6 +226,124 @@ struct ContentView: View {
         }
     }
 
+
+    private var remakePanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("RMK + RES phiên bản mới", systemImage: "arrow.triangle.2.circlepath")
+                .font(.headline)
+            Text("Chế độ riêng để phân tích MOD cũ theo bộ RES mới. Không thay đổi danh sách ghép skin và không ghi đè tài nguyên.")
+                .font(.footnote).foregroundColor(.secondary)
+
+            Button {
+                importPurpose = .remakeBase
+                isImporting = true
+            } label: {
+                Label(remakeBaseURL.map { "RES mới: \($0.lastPathComponent)" } ?? "Chọn RES mới (1 ZIP)", systemImage: "square.stack.3d.up.fill")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(AKISecondaryButtonStyle())
+            .disabled(isCopyingFiles || isAnalyzingRemake)
+
+            Button {
+                importPurpose = .legacyMods
+                isImporting = true
+            } label: {
+                Label("Thêm MOD cũ (tối đa 10 ZIP)", systemImage: "doc.zipper")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(AKISecondaryButtonStyle())
+            .disabled(isCopyingFiles || isAnalyzingRemake)
+
+            if !remakeMODURLs.isEmpty {
+                HStack {
+                    Text("MOD cũ đã chọn").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("\(remakeMODURLs.count) ZIP").font(.caption).foregroundColor(.secondary)
+                }
+                ForEach(Array(remakeMODURLs.enumerated()), id: \.offset) { index, url in
+                    HStack {
+                        Image(systemName: "archivebox").foregroundColor(.accentColor)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(url.lastPathComponent).font(.caption).lineLimit(1)
+                            Text(fileSize(url)).font(.caption2).foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button(role: .destructive) {
+                            remakeMODURLs.remove(at: index)
+                            remakeReport = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            Button(action: runRemakeAnalysis) {
+                HStack {
+                    if isAnalyzingRemake { ProgressView().tint(.white) }
+                    Label(isAnalyzingRemake ? "Đang đối chiếu RES và MOD…" : "Phân tích RMK / RES", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(AKIPrimaryButtonStyle())
+            .disabled(remakeBaseURL == nil || remakeMODURLs.isEmpty || isAnalyzingRemake || isCopyingFiles || isMerging)
+
+            Text("Giai đoạn hiện tại là phân tích và lập danh sách tài nguyên cần remake. Chưa xuất ZIP chuyển phiên bản cho đến khi có bộ remap catalog/dependency và UnityFS rebuild đã kiểm chứng.")
+                .font(.caption2).foregroundColor(.orange)
+        }
+        .panel()
+    }
+
+    private func remakeResultView(_ report: AoVModRemakeReport) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Báo cáo đối chiếu RMK + RES", systemImage: "doc.text.magnifyingglass")
+                .font(.headline)
+            metric("RES nền", report.base.fileName)
+            metric("Version RES", report.baseVersion ?? "Không tìm thấy version.txt")
+            metric("MOD cũ", "\(report.legacy.count)")
+            metric("Path giống payload", "\(report.identicalCount)")
+            metric("Path cùng tên, payload khác", "\(report.changedCount)")
+            metric("Path chỉ có ở MOD cũ", "\(report.legacyOnlyCount)")
+            metric("Path chỉ có ở RES mới", "\(report.baseOnlyPathCount)")
+            metric("Packer Catalog RES", report.baseHasPackerCatalog ? "Có" : "Thiếu")
+            metric("Verification Catalog RES", report.baseHasVerificationCatalog ? "Có" : "Thiếu")
+
+            if !report.legacyVersions.isEmpty {
+                Divider().overlay(.white.opacity(0.12))
+                Text("Phiên bản MOD nguồn").font(.subheadline.weight(.semibold))
+                ForEach(report.legacyVersions.keys.sorted(), id: \.self) { name in
+                    metric(name, report.legacyVersions[name] ?? "Không rõ")
+                }
+            }
+            if !report.changedPaths.isEmpty {
+                Divider().overlay(.white.opacity(0.12))
+                Text("Payload khác cần remap").font(.subheadline.weight(.semibold))
+                ForEach(Array(report.changedPaths.prefix(12)), id: \.id) { finding in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(finding.path).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        Text("Nguồn: \(finding.legacySources.joined(separator: ", "))")
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                }
+            }
+            if !report.legacyOnlyPaths.isEmpty {
+                Divider().overlay(.white.opacity(0.12))
+                Text("Tài nguyên chưa có path tương ứng trong RES").font(.subheadline.weight(.semibold))
+                ForEach(Array(report.legacyOnlyPaths.prefix(12)), id: \.id) { finding in
+                    Text(finding.path).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                }
+            }
+            Divider().overlay(.white.opacity(0.12))
+            ForEach(Array(report.warnings.enumerated()), id: \.offset) { _, warning in
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundColor(.orange)
+            }
+            Text("Trạng thái: chưa tạo file remake. Báo cáo này không thay thế bước chuyển catalog, dependency, checksum và đóng gói UnityFS.")
+                .font(.footnote.weight(.semibold)).foregroundColor(.orange)
+        }
+        .panel()
+    }
 
     private var homeDashboard: some View {
         GeometryReader { geometry in
@@ -811,28 +942,50 @@ struct ContentView: View {
         return formatByteCount((attrs?[.size] as? NSNumber)?.uint64Value ?? 0)
     }
 
-    private func importFiles(_ result: Result<[URL], Error>) {
+    private func importFiles(_ result: Result<[URL], Error>, purpose: ZIPImportPurpose = .merger) {
         switch result {
         case .success(let urls):
             guard !urls.isEmpty else { return }
-            let existingCount = selectedURLs.count
-            let existingBytes = selectedURLs.reduce(UInt64(0)) { partial, url in
-                let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-                let sum = partial.addingReportingOverflow(UInt64(max(size, 0)))
-                return sum.overflow ? UInt64.max : sum.partialValue
-            }
-            guard existingCount + urls.count <= AoVSourceFileImporter.maximumFiles else {
-                alertText = "App nhận tối đa 10 ZIP. Hãy xóa bớt file trong danh sách rồi chọn lại."
+            if purpose == .remakeBase && urls.count != 1 {
+                alertText = "Chế độ RMK chỉ nhận đúng một ZIP làm RES nền."
                 showAlert = true
                 return
             }
 
-            // Open provider access inside the picker callback, before its grant can expire.
+            let existingURLs: [URL]
+            let subfolder: String?
+            switch purpose {
+            case .merger:
+                existingURLs = selectedURLs
+                subfolder = nil
+            case .remakeBase:
+                existingURLs = []
+                subfolder = "RemakeRES"
+            case .legacyMods:
+                existingURLs = remakeMODURLs
+                subfolder = "LegacyMODs"
+            }
+            let existingCount = existingURLs.count
+            let existingBytes = existingURLs.reduce(UInt64(0)) { partial, url in
+                let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                let sum = partial.addingReportingOverflow(UInt64(max(size, 0)))
+                return sum.overflow ? UInt64.max : sum.partialValue
+            }
+            let limit = purpose == .remakeBase ? 1 : AoVSourceFileImporter.maximumFiles
+            guard existingCount + urls.count <= limit else {
+                alertText = purpose == .remakeBase
+                    ? "Chỉ chọn một ZIP RES nền."
+                    : "App nhận tối đa 10 ZIP trong danh sách này. Hãy xóa bớt file rồi chọn lại."
+                showAlert = true
+                return
+            }
+
+            // Acquire provider access before dispatching file copies off the main actor.
             let securityScopeLease = AoVSecurityScopedAccess(urls: urls)
             isCopyingFiles = true
             Task {
                 do {
-                    let folder = try sourceFolder()
+                    let folder = try sourceFolder(subfolder: subfolder)
                     let report = try await Task.detached(priority: .userInitiated) {
                         try AoVSourceFileImporter.copy(
                             urls,
@@ -842,10 +995,22 @@ struct ContentView: View {
                             securityScopeLease: securityScopeLease
                         )
                     }.value
-                    selectedURLs.append(contentsOf: report.importedURLs)
-                    analysis = nil
-                    aesReport = nil
-                    mergeReport = nil
+
+                    switch purpose {
+                    case .merger:
+                        selectedURLs.append(contentsOf: report.importedURLs)
+                        analysis = nil
+                        aesReport = nil
+                        mergeReport = nil
+                    case .remakeBase:
+                        if let imported = report.importedURLs.first {
+                            remakeBaseURL = imported
+                            remakeReport = nil
+                        }
+                    case .legacyMods:
+                        remakeMODURLs.append(contentsOf: report.importedURLs)
+                        remakeReport = nil
+                    }
 
                     if !report.errors.isEmpty {
                         alertText = "Đã nhập \(report.importedURLs.count)/\(urls.count) file. File lỗi:\n" +
@@ -855,7 +1020,8 @@ struct ContentView: View {
                         alertText = "Chưa có ZIP nào được thêm vào danh sách."
                         showAlert = true
                     } else {
-                        alertText = "Đã nhập thành công \(report.importedURLs.count) ZIP. Bản sao nằm trong Tệp → Trên iPhone → AKI AOV SKIN → SourceArchives."
+                        let destination = subfolder.map { "SourceArchives/\($0)" } ?? "SourceArchives"
+                        alertText = "Đã nhập thành công \(report.importedURLs.count) ZIP. Bản sao nằm trong Tệp → Trên iPhone → AKI AOV SKIN → \(destination)."
                         showAlert = true
                     }
                 } catch {
@@ -870,10 +1036,13 @@ struct ContentView: View {
         }
     }
 
-    private func sourceFolder() throws -> URL {
+    private func sourceFolder(subfolder: String? = nil) throws -> URL {
         let docs = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask,
                                                appropriateFor: nil, create: true)
-        let folder = docs.appendingPathComponent("SourceArchives", isDirectory: true)
+        var folder = docs.appendingPathComponent("SourceArchives", isDirectory: true)
+        if let subfolder {
+            folder.appendPathComponent(subfolder, isDirectory: true)
+        }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder
     }
@@ -950,6 +1119,34 @@ struct ContentView: View {
                 showAlert = true
             }
             isMerging = false
+        }
+    }
+
+    private func runRemakeAnalysis() {
+        guard let baseURL = remakeBaseURL else {
+            alertText = "Hãy chọn một ZIP RES mới làm nền."
+            showAlert = true
+            return
+        }
+        guard !remakeMODURLs.isEmpty else {
+            alertText = "Hãy thêm ít nhất một MOD cũ để đối chiếu."
+            showAlert = true
+            return
+        }
+        isAnalyzingRemake = true
+        remakeReport = nil
+        let legacyURLs = remakeMODURLs
+        Task {
+            do {
+                let report = try await Task.detached(priority: .userInitiated) {
+                    try AoVModRemakeAnalyzer.analyze(baseRESURL: baseURL, legacyMODURLs: legacyURLs)
+                }.value
+                remakeReport = report
+            } catch {
+                alertText = error.localizedDescription
+                showAlert = true
+            }
+            isAnalyzingRemake = false
         }
     }
 
