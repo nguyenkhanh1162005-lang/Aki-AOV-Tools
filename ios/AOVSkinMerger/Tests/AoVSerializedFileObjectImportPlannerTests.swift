@@ -69,7 +69,7 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
         XCTAssertEqual(report.originalObjectCount, 1)
         XCTAssertEqual(report.finalObjectCount, 2)
         XCTAssertEqual(report.appendedPathIDs, [1235])
-        XCTAssertEqual(summary.serializedObjects.map(\\.pathID), [1234, 1235])
+        XCTAssertEqual(summary.serializedObjects.map(\.pathID), [1234, 1235])
         XCTAssertEqual(readUInt32BE(report.data, at: 4), UInt32(report.data.count))
         XCTAssertEqual(readUInt32BE(report.data, at: 12), UInt32(summary.dataOffset))
 
@@ -429,11 +429,11 @@ final class AoVSerializedFileObjectImportPlannerTests: XCTestCase {
     }
 
     private func readUInt32BE(_ data: Data, at offset: Int) -> UInt32 {
-        let b0 = UInt32(data[offset])
-        let b1 = UInt32(data[offset + 1]) << 8
-        let b2 = UInt32(data[offset + 2]) << 16
-        let b3 = UInt32(data[offset + 3]) << 24
-        return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+        let b0 = UInt32(data[offset]) << 24
+        let b1 = UInt32(data[offset + 1]) << 16
+        let b2 = UInt32(data[offset + 2]) << 8
+        let b3 = UInt32(data[offset + 3])
+        return b0 | b1 | b2 | b3
     }
 
     private func appendTypeTree(
