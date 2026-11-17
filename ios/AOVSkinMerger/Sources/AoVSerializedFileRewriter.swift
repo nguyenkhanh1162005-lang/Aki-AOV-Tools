@@ -227,6 +227,9 @@ enum AoVSerializedFileRewriter {
         }
 
         let objects = summary.serializedObjects.sorted { $0.byteOffset < $1.byteOffset }
+        guard Set(objects.map(\.pathID)).count == objects.count else {
+            throw AoVSerializedFileRewriteError.verificationFailed("Object table có pathID trùng lặp.")
+        }
         let objectsByID = Dictionary(uniqueKeysWithValues: objects.map { ($0.pathID, $0) })
         for (pathID, payload) in replacements {
             guard objectsByID[pathID] != nil else {
@@ -304,8 +307,7 @@ enum AoVSerializedFileRewriter {
             throw AoVSerializedFileRewriteError.fileTooLarge
         }
 
-        var output = source.prefix(dataOffset)
-        var result = Data(output)
+        var result = Data(source.prefix(dataOffset))
         result.append(rebuiltData)
         guard result.count == newFileSizeInt else {
             throw AoVSerializedFileRewriteError.verificationFailed("Kích thước file sau nối data section không khớp.")
@@ -406,7 +408,12 @@ enum AoVSerializedFileRewriter {
 
         var writer = AoVSerializedAssetBundleWriter(littleEndian: littleEndian)
         try writer.appendAlignedString(record.name, field: "m_Name")
-        guard let preloadCount = Int32(exactly: record.preloadReferences.count),
+        guard record.preloadReferences.count <= 1_000_000,
+              record.containerEntries.count <= 1_000_000,
+              record.classCompatibilityEntries.count <= 100_000,
+              record.dependencies.count <= 100_000,
+              record.classCompatibilityIDs == record.classCompatibilityEntries.map(\.classID),
+              let preloadCount = Int32(exactly: record.preloadReferences.count),
               let containerCount = Int32(exactly: record.containerEntries.count),
               let classCount = Int32(exactly: record.classCompatibilityEntries.count),
               let dependencyCount = Int32(exactly: record.dependencies.count) else {
