@@ -209,6 +209,64 @@ final class AoVModRemakeExporterTests: XCTestCase {
         }))
     }
 
+    func testLoadsLegacyRuntimeCatalogsFromVersionMatchedArchives() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Catalog-Loader-Test-\\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("legacy-mod.zip")
+        let version = Data("1.64.1.12\\n".utf8)
+        let packer = try makeUnityFS(with: .packer(makePackerCatalog()))
+        let verification = try makeUnityFS(with: .verification(makeVerificationCatalog()))
+        let entries = [
+            ("version.txt", version),
+            ("1.64.1/assetbundle/resourcepackerinfosetall.assetbundle", packer),
+            ("1.64.1/assetbundle/resourceverificationinfosetall.assetbundle", verification)
+        ]
+        try makeArchive(baseURL, entries: entries, root: root)
+        try makeArchive(legacyURL, entries: entries, root: root)
+
+        let inputs = try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+            baseRESURL: baseURL,
+            legacyMODURLs: [legacyURL]
+        )
+        XCTAssertEqual(inputs.packer.count, 1)
+        XCTAssertEqual(inputs.verification.count, 1)
+        XCTAssertEqual(inputs.packer[0].source, "legacy-mod.zip")
+        XCTAssertEqual(inputs.packer[0].catalog.name, "ResourcePackerInfoSetXML")
+        XCTAssertEqual(inputs.verification[0].catalog.name, "ResourceVerificationInfoSetXML")
+    }
+
+    func testLegacyCatalogLoaderRejectsDifferentBuildVersion() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Catalog-Version-Guard-Test-\\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("old-build-mod.zip")
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.1.12\\n".utf8))
+        ], root: root)
+        try makeArchive(legacyURL, entries: [
+            ("version.txt", Data("1.64.1.11\\n".utf8))
+        ], root: root)
+
+        XCTAssertThrowsError(
+            try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+                baseRESURL: baseURL,
+                legacyMODURLs: [legacyURL]
+            )
+        ) { error in
+            guard let remakeError = error as? AoVModRemakeError,
+                  case .versionMismatch("old-build-mod.zip", "1.64.1.11", "1.64.1.12") = remakeError else {
+                return XCTFail("Expected a strict build-version mismatch, got \\(error)")
+            }
+        }
+    }
+
     func testExporterRefusesNewDatabinWithoutVerifiedChecksum() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-RES-Exporter-Guard-Test-\(UUID().uuidString)", isDirectory: true)
