@@ -560,6 +560,7 @@ enum AoVModRemakeAnalyzer {
                         status: status,
                         addedContainerKeys: [],
                         alreadyPresentContainerKeys: [],
+                        currentVersionRetainedPointerConflictKeys: [],
                         addedPreloadReferenceCount: 0,
                         addedDependencies: [],
                         remappedExternalPointerCount: 0,
