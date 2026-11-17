@@ -89,8 +89,8 @@ final class AoVUnityFSParserTests: XCTestCase {
 
     func testRejectsDeclaredFileSizeMismatch() {
         var bundle = makeBundle()
-        let sizeOffset = Data("UnityFS\\0".utf8).count +
-            4 + Data("5.0.0\\0".utf8).count + Data("2020.3.34f1\\0".utf8).count
+        let sizeOffset = Data("UnityFS\0".utf8).count +
+            4 + Data("5.0.0\0".utf8).count + Data("2020.3.34f1\0".utf8).count
         bundle[sizeOffset + 7] ^= 0x01
         XCTAssertThrowsError(try AoVUnityFSParser.inspect(bundle))
     }
