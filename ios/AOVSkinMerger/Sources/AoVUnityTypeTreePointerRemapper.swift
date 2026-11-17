@@ -34,6 +34,13 @@ struct AoVUnityTypeTreePointerRemapReport: Sendable {
 /// bytes. Every non-null destination pointer must resolve against supplied
 /// destination object inventories before the rewritten value is returned.
 enum AoVUnityTypeTreePointerRemapper {
+    private static let scalarAndOpaqueTypes: Set<String> = [
+        "SInt8", "UInt8", "char", "short", "SInt16", "UInt16", "unsigned short",
+        "int", "SInt32", "UInt32", "unsigned int", "Type*", "long long",
+        "SInt64", "UInt64", "unsigned long long", "FileSize", "float",
+        "double", "bool", "string", "TypelessData"
+    ]
+
     static func remap(
         nodes: [AoVUnityTypeTreeNode],
         value: AoVUnityTypeTreeValue,
@@ -121,7 +128,8 @@ enum AoVUnityTypeTreePointerRemapper {
         let childCount = end - firstChild
 
         if node.type.hasPrefix("PPtr<") {
-            guard case .object(var fields) = value,
+            guard childCount >= 2,
+                  case .object(var fields) = value,
                   let fileIDValue = fields["m_FileID"],
                   let pathIDValue = fields["m_PathID"],
                   let rawFileID64 = fileIDValue.intValue,
@@ -170,6 +178,13 @@ enum AoVUnityTypeTreePointerRemapper {
                 if pointerChanged { externalCount += 1 }
             }
             return .object(fields)
+        }
+
+        // Unity strings and several opaque leaf types contain pseudo-child
+        // descriptors in TypeTree metadata, but their value is already decoded
+        // as a scalar/byte blob and must not be traversed as an object.
+        if scalarAndOpaqueTypes.contains(node.type) {
+            return value
         }
 
         if node.type == "map" {
