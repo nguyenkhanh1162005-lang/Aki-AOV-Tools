@@ -12,6 +12,9 @@ final class AoVSerializedFileParserTests: XCTestCase {
         XCTAssertEqual(summary.targetPlatform, 13)
         XCTAssertEqual(summary.typeCount, 1)
         XCTAssertEqual(summary.objectCount, 1)
+        XCTAssertEqual(summary.serializedObjects.count, 1)
+        XCTAssertEqual(summary.serializedObjects.first?.pathID, 1234)
+        XCTAssertEqual(summary.externalReferences.count, 0)
         XCTAssertEqual(summary.assetBundleObjectCount, 1)
         XCTAssertEqual(summary.assetBundleObjects.first?.pathID, 1234)
         XCTAssertEqual(summary.assetBundleObjects.first?.classID, 142)
@@ -57,6 +60,8 @@ final class AoVSerializedFileParserTests: XCTestCase {
 
         XCTAssertEqual(summary.formatVersion, 17)
         XCTAssertEqual(summary.targetPlatform, 13)
+        XCTAssertEqual(summary.serializedObjects.count, 1)
+        XCTAssertEqual(summary.externalReferences.count, 0)
         XCTAssertEqual(summary.assetBundleRecords.first?.name, "catalog")
         XCTAssertEqual(summary.assetBundleRecords.first?.assetBundleName, "resource-packer")
         XCTAssertEqual(summary.assetBundleRecords.first?.dependencies, ["common", "actor/1"])
