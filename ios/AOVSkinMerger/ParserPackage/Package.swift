@@ -12,6 +12,8 @@ let package = Package(
             path: "Sources/AOVSkinMerger",
             sources: [
                 "AoVSerializedFileParser.swift",
+                "AoVSerializedFileObjectAppender.swift",
+                "AoVSerializedFileObjectImportPlanner.swift",
                 "AoVRuntimeResourceCatalogParser.swift",
                 "AoVSerializedAssetBundleWriter.swift",
                 "AoVSerializedFileRewriter.swift",
