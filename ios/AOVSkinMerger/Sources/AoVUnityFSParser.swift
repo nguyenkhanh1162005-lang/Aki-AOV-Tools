@@ -794,6 +794,15 @@ enum AoVUnityFSParser {
         )
     }
 
+    static func aovEncryptionFlag(for engineVersion: String) throws -> UInt32 {
+        guard let engine = AoVUnityEngineVersion(engineVersion) else {
+            throw AoVUnityFSError.invalidHeader(
+                "Không xác định được Unity version để chọn cờ mã hóa AOV."
+            )
+        }
+        return engine.usesLegacyEncryptionFlag ? 0x200 : 0x400
+    }
+
     private static func decryptAoVHeader(_ encrypted: Data) throws -> Data {
         guard encrypted.count == 16 else {
             throw AoVUnityFSError.decryptionFailed("Header AES phải có đúng 16 byte.")
