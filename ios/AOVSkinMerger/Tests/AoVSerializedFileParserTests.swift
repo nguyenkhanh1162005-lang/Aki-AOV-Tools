@@ -24,6 +24,17 @@ final class AoVSerializedFileParserTests: XCTestCase {
     }
 
 
+
+    func testParsesUnity2020ExtendedSerializedFileHeader() throws {
+        let data = makeSerializedFile(formatVersion: 22, littleEndian: false)
+        let summary = try AoVSerializedFileParser.inspect(data)
+
+        XCTAssertEqual(summary.formatVersion, 22)
+        XCTAssertEqual(summary.fileSize, UInt64(data.count))
+        XCTAssertEqual(summary.assetBundleRecords.first?.assetBundleName, "resource-packer")
+        XCTAssertEqual(summary.assetBundleRecords.first?.dependencies, ["common", "actor/1"])
+    }
+
     func testParsesBigEndianSerializedFileAndAssetBundleObject() throws {
         let data = makeSerializedFile(littleEndian: false)
         let summary = try AoVSerializedFileParser.inspect(data)
@@ -90,12 +101,23 @@ final class AoVSerializedFileParserTests: XCTestCase {
         appendSerialized(Int32(1), to: &metadata, littleEndian: littleEndian)
         align4(&metadata)
         appendSerialized(Int64(1234), to: &metadata, littleEndian: littleEndian)
-        appendSerialized(objectByteStart, to: &metadata, littleEndian: littleEndian)
+        if formatVersion >= 22 {
+            appendSerialized(Int64(Int64(objectByteStart)), to: &metadata, littleEndian: littleEndian)
+        } else {
+            appendSerialized(objectByteStart, to: &metadata, littleEndian: littleEndian)
+        }
         appendSerialized(UInt32(payload.count), to: &metadata, littleEndian: littleEndian)
         appendSerialized(objectTypeIndex, to: &metadata, littleEndian: littleEndian)
         appendSerialized(Int32(0), to: &metadata, littleEndian: littleEndian)
         appendSerialized(Int32(0), to: &metadata, littleEndian: littleEndian)
-        metadata.append(0)
+        if formatVersion >= 21 {
+            appendSerialized(Int32(0), to: &metadata, littleEndian: littleEndian) // type dependencies
+        }
+        metadata.append(0) // script count has already been written above
+        if formatVersion >= 20 {
+            appendSerialized(Int32(0), to: &metadata, littleEndian: littleEndian) // reference types
+        }
+        metadata.append(0) // user information
 
         let headerSize = formatVersion >= 22 ? 48 : 20
         let dataOffset = ((headerSize + metadata.count + 15) / 16) * 16
