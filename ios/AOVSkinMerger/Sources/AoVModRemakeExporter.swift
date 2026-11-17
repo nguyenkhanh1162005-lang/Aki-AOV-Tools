@@ -324,6 +324,20 @@ enum AoVModRemakeExporter {
         }
 
         try verifyArchive(stagedOutputURL, label: "RES ZIP")
+        guard let expectedPackerCatalog = packerOutput.plan.candidateCatalog,
+              let expectedVerificationCatalog = verificationOutput.plan.candidateCatalog else {
+            throw AoVModRemakeExporterError.catalogMergeFailed(
+                "Thiếu catalog candidate sau bước lập kế hoạch."
+            )
+        }
+        try verifyFinalOutput(
+            stagedOutputURL,
+            hasNestedResourcesArchive: innerURL != nil,
+            expectedPayloads: finalPayloads,
+            expectedPackerCatalog: expectedPackerCatalog,
+            expectedVerificationCatalog: expectedVerificationCatalog,
+            tempRoot: tempRoot
+        )
         let exportDirectory = try FileManager.default.url(
             for: .documentDirectory,
             in: .userDomainMask,
@@ -558,6 +572,98 @@ enum AoVModRemakeExporter {
             } else {
                 try copyEntry(entry, from: baseArchive, to: output, path: entry.path)
             }
+        }
+    }
+
+    private static func verifyFinalOutput(
+        _ outputURL: URL,
+        hasNestedResourcesArchive: Bool,
+        expectedPayloads: [String: Data],
+        expectedPackerCatalog: AoVRuntimeResourcePackerCatalog,
+        expectedVerificationCatalog: AoVRuntimeResourceVerificationCatalog,
+        tempRoot: URL
+    ) throws {
+        let outerArchive: Archive
+        do {
+            outerArchive = try Archive(url: outputURL, accessMode: .read)
+        } catch {
+            throw AoVModRemakeExporterError.integrityFailure(
+                "Không mở lại được ZIP đầu ra: \\(error.localizedDescription)"
+            )
+        }
+        let outerEntries = try validatedEntries(outerArchive, label: "ZIP đầu ra")
+        let resourceArchive: Archive
+        if hasNestedResourcesArchive {
+            let matches = outerEntries.filter {
+                ($0.path as NSString).lastPathComponent.caseInsensitiveCompare("Resources.zip") == .orderedSame
+            }
+            guard matches.count == 1, let resourceEntry = matches.first else {
+                throw AoVModRemakeExporterError.integrityFailure(
+                    "ZIP đầu ra không giữ đúng một Resources.zip."
+                )
+            }
+            let nestedURL = tempRoot.appendingPathComponent("RES-final-validation.zip")
+            do {
+                _ = try outerArchive.extract(resourceEntry, to: nestedURL, bufferSize: 64 * 1024)
+                resourceArchive = try Archive(url: nestedURL, accessMode: .read)
+            } catch {
+                throw AoVModRemakeExporterError.integrityFailure(
+                    "Resources.zip đầu ra không mở lại được: \\(error.localizedDescription)"
+                )
+            }
+        } else {
+            resourceArchive = outerArchive
+        }
+
+        let entries = try validatedEntries(resourceArchive, label: "Resources.zip đầu ra")
+        for (expectedPath, expectedData) in expectedPayloads {
+            let matches = entries.filter {
+                (try? normalizeArchivePath($0.path)) == expectedPath
+            }
+            guard matches.count == 1, let entry = matches.first else {
+                throw AoVModRemakeExporterError.integrityFailure(
+                    "Không tìm thấy duy nhất tài nguyên đầu ra \\(expectedPath)."
+                )
+            }
+            let actual = try readEntry(resourceArchive, entry, maxBytes: maximumSingleEntry)
+            guard actual == expectedData else {
+                throw AoVModRemakeExporterError.integrityFailure(
+                    "Payload \\(expectedPath) thay đổi sau khi đóng gói."
+                )
+            }
+        }
+
+        let packerMatches = entries.filter {
+            ($0.path as NSString).lastPathComponent.caseInsensitiveCompare(packerFileName) == .orderedSame
+        }
+        let verificationMatches = entries.filter {
+            ($0.path as NSString).lastPathComponent.caseInsensitiveCompare(verificationFileName) == .orderedSame
+        }
+        guard packerMatches.count == 1, verificationMatches.count == 1,
+              let packerEntry = packerMatches.first,
+              let verificationEntry = verificationMatches.first else {
+            throw AoVModRemakeExporterError.integrityFailure(
+                "Packer/Verification catalog bị thiếu hoặc trùng sau khi đóng gói."
+            )
+        }
+
+        let packerData = try readEntry(resourceArchive, packerEntry, maxBytes: maximumSingleEntry)
+        let verificationData = try readEntry(resourceArchive, verificationEntry, maxBytes: maximumSingleEntry)
+        let parsedPacker = try AoVUnityFSRuntimeCatalogMergeExecutor.locatePackerCatalog(in: packerData)
+        let parsedVerification = try AoVUnityFSRuntimeCatalogMergeExecutor.locateVerificationCatalog(
+            in: verificationData
+        )
+        guard case .packer(let actualPacker) = parsedPacker.catalog,
+              actualPacker == expectedPackerCatalog else {
+            throw AoVModRemakeExporterError.integrityFailure(
+                "Packer runtime catalog không khớp candidate sau khi mở lại ZIP."
+            )
+        }
+        guard case .verification(let actualVerification) = parsedVerification.catalog,
+              actualVerification == expectedVerificationCatalog else {
+            throw AoVModRemakeExporterError.integrityFailure(
+                "Verification runtime catalog không khớp candidate sau khi mở lại ZIP."
+            )
         }
     }
 
