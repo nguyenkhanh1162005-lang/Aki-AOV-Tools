@@ -466,6 +466,10 @@ struct ContentView: View {
                         Text("Giữ theo RES: " + finding.alreadyPresentContainerKeys.prefix(6).joined(separator: ", "))
                             .font(.caption2.monospaced()).foregroundColor(.secondary)
                     }
+                    if !finding.currentVersionRetainedPointerConflictKeys.isEmpty {
+                        Text("Key trùng nhưng pointer MOD khác, vẫn giữ RES: " + finding.currentVersionRetainedPointerConflictKeys.prefix(6).joined(separator: ", "))
+                            .font(.caption2.monospaced()).foregroundColor(.orange)
+                    }
                     if !finding.addedDependencies.isEmpty {
                         Text("Dependency cần thêm: " + finding.addedDependencies.joined(separator: ", "))
                             .font(.caption2).foregroundColor(.secondary)
