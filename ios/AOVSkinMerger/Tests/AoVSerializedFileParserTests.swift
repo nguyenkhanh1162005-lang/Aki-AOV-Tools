@@ -220,6 +220,20 @@ final class AoVSerializedFileParserTests: XCTestCase {
         }
     }
 
+    func testExternalCABAuditReadsObjectPathIDsFromSerializedFileBytes() throws {
+        let targetSerializedFile = makeSerializedFile()
+        let key = AoVAssetBundleCatalogMerger.externalTargetKey(
+            guidHex: "ABCDEF0123456789",
+            path: "CAB\\shared"
+        )
+
+        let audited = try AoVAssetBundleCatalogMerger.auditExternalTargetPathIDs(
+            serializedFilesByExternalTargetKey: [key: targetSerializedFile]
+        )
+
+        XCTAssertEqual(audited[key], [1234])
+    }
+
     func testUnityFSAssetBundleMergeExecutorWritesMergedClass142AndRoundTrips() throws {
         let currentSerializedBytes = makeSerializedFile(useResolvedPointers: true)
         let legacySerializedBytes = makeSerializedFile(useResolvedPointers: true)
