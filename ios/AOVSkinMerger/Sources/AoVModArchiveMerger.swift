@@ -814,17 +814,11 @@ enum AoVModArchiveMerger {
         try readEntry(reference.archive, reference.entry, maxBytes: maxBytes)
     }
 
-    /// AoV binary payloads are commonly encrypted or already compressed.
-    /// Storing those entries avoids spending CPU deflating high-entropy bytes
-    /// that cannot be made smaller. Text/config entries still use DEFLATE.
-    private static func storageMethod(for path: String) -> CompressionMethod {
-        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
-        let alreadyCompressedOrOpaque: Set<String> = [
-            "assetbundle", "bytes", "bnk", "wem", "zip", "png", "jpg",
-            "jpeg", "webp", "mp3", "ogg", "mp4", "zst", "zstd",
-            "lz4", "lzma", "pak", "bundle"
-        ]
-        return alreadyCompressedOrOpaque.contains(ext) ? .none : .deflate
+    /// Preserve each source ZIP member's compression mode. Some game loaders
+    /// are stricter than desktop ZIP tools, so the merger must not silently
+    /// switch stored entries to DEFLATE or vice versa.
+    private static func storageMethod(for sourceEntry: Entry) -> CompressionMethod {
+        sourceEntry.isCompressed ? .deflate : .none
     }
 
     private static func copyEntry(
@@ -894,7 +888,7 @@ enum AoVModArchiveMerger {
                         to: output,
                         path: entry.path,
                         tempRoot: tempRoot,
-                        compressionMethod: storageMethod(for: relative)
+                        compressionMethod: storageMethod(for: entry)
                     )
                 } else {
                     try copyEntry(
@@ -961,7 +955,7 @@ enum AoVModArchiveMerger {
                     to: output,
                     path: entry.path,
                     tempRoot: tempRoot,
-                    compressionMethod: storageMethod(for: entry.path)
+                    compressionMethod: storageMethod(for: entry)
                 )
             }
         }
