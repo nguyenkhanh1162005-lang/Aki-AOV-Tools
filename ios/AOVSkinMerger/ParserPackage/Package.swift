@@ -7,7 +7,16 @@ let package = Package(
         .library(name: "AOVSkinMerger", targets: ["AOVSkinMerger"])
     ],
     targets: [
-        .target(name: "AOVSkinMerger"),
+        .target(
+            name: "AOVSkinMerger",
+            path: "Sources/AOVSkinMerger",
+            sources: [
+                "AoVSerializedFileParser.swift",
+                "AoVSerializedAssetBundleWriter.swift",
+                "AoVUnityCommonStrings.swift",
+                "AoVUnityTypeTreeParser.swift"
+            ]
+        ),
         .testTarget(
             name: "AOVSkinMergerTests",
             dependencies: ["AOVSkinMerger"]
