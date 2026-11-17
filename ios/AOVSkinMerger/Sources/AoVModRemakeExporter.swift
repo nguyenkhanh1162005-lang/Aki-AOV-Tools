@@ -104,6 +104,32 @@ enum AoVModRemakeExporter {
     private static let verificationFileName = "resourceverificationinfosetall.assetbundle"
     private static let outputFolderName = "AKI AOV SKIN Exports"
 
+    /// Convenience entry point that extracts real runtime catalogs from the
+    /// selected legacy MOD archives and enforces exact build-marker equality.
+    /// Payload bytes and final metadata must still come from verified adapters.
+    static func exportVerifiedRES(
+        baseRESURL: URL,
+        legacyMODURLs: [URL],
+        resourcePayloads: [AoVModRemakeResourcePayload],
+        verifiedFinalPackerEntries: [String: AoVRuntimeResourcePackInfo],
+        verifiedFinalDatabinChecksumValues: [String: Int64],
+        verifiedFinalZIPChecksumValues: [String: Int64]
+    ) throws -> AoVModRemakeExportReport {
+        let catalogInputs = try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+            baseRESURL: baseRESURL,
+            legacyMODURLs: legacyMODURLs
+        )
+        return try exportVerifiedRES(
+            baseRESURL: baseRESURL,
+            resourcePayloads: resourcePayloads,
+            legacyPackerCatalogs: catalogInputs.packer,
+            verifiedFinalPackerEntries: verifiedFinalPackerEntries,
+            legacyVerificationCatalogs: catalogInputs.verification,
+            verifiedFinalDatabinChecksumValues: verifiedFinalDatabinChecksumValues,
+            verifiedFinalZIPChecksumValues: verifiedFinalZIPChecksumValues
+        )
+    }
+
     static func exportVerifiedRES(
         baseRESURL: URL,
         resourcePayloads: [AoVModRemakeResourcePayload],
