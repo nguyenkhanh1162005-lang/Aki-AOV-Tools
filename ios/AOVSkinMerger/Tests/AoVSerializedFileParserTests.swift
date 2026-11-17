@@ -15,7 +15,27 @@ final class AoVSerializedFileParserTests: XCTestCase {
         XCTAssertEqual(summary.assetBundleObjectCount, 1)
         XCTAssertEqual(summary.assetBundleObjects.first?.pathID, 1234)
         XCTAssertEqual(summary.assetBundleObjects.first?.classID, 142)
-        XCTAssertEqual(summary.assetBundleObjects.first?.byteSize, 4)
+        XCTAssertGreaterThan(summary.assetBundleObjects.first?.byteSize ?? 0, 4)
+        XCTAssertEqual(summary.assetBundleRecords.count, 1)
+        XCTAssertEqual(summary.assetBundleRecords.first?.name, "catalog")
+        XCTAssertEqual(summary.assetBundleRecords.first?.assetBundleName, "resource-packer")
+        XCTAssertEqual(summary.assetBundleRecords.first?.dependencies, ["common", "actor/1"])
+        XCTAssertEqual(summary.assetBundleRecords.first?.containerEntries.count, 0)
+    }
+
+    func testRejectsTruncatedAssetBundleObject() {
+        let data = makeSerializedFile(objectPayload: Data([0x01, 0x02]))
+        XCTAssertThrowsError(try AoVSerializedFileParser.inspect(data))
+    }
+
+    func testRefusesUnverifiedNoTargetBaseLayout() {
+        let data = makeSerializedFile(targetPlatform: -2)
+        XCTAssertThrowsError(try AoVSerializedFileParser.inspect(data)) { error in
+            guard let parserError = error as? AoVSerializedFileError,
+                  case .unsupportedTargetPlatform(-2) = parserError else {
+                return XCTFail("Expected unsupported target platform, got \(error)")
+            }
+        }
     }
 
     func testRejectsInvalidObjectRange() {
@@ -40,11 +60,14 @@ final class AoVSerializedFileParserTests: XCTestCase {
     private func makeSerializedFile(
         formatVersion: UInt32 = 17,
         objectByteStart: UInt32 = 0,
-        objectTypeIndex: Int32 = 0
+        objectTypeIndex: Int32 = 0,
+        targetPlatform: Int32 = 13,
+        objectPayload: Data? = nil
     ) -> Data {
+        let payload = objectPayload ?? makeAssetBundleObject()
         var metadata = Data()
         metadata.append(Data("2020.3.34f1\0".utf8))
-        appendLE(Int32(13), to: &metadata) // Android
+        appendLE(targetPlatform, to: &metadata)
         metadata.append(0) // no embedded type tree
         appendLE(Int32(1), to: &metadata) // type count
         appendLE(Int32(142), to: &metadata) // AssetBundle class ID
@@ -55,7 +78,7 @@ final class AoVSerializedFileParserTests: XCTestCase {
         align4(&metadata)
         appendLE(Int64(1234), to: &metadata) // path ID
         appendLE(objectByteStart, to: &metadata)
-        appendLE(UInt32(4), to: &metadata) // object size
+        appendLE(UInt32(payload.count), to: &metadata) // object size
         appendLE(objectTypeIndex, to: &metadata)
         appendLE(Int32(0), to: &metadata) // script count
         appendLE(Int32(0), to: &metadata) // external count
@@ -63,14 +86,14 @@ final class AoVSerializedFileParserTests: XCTestCase {
 
         let headerSize = formatVersion >= 22 ? 48 : 20
         let dataOffset = ((headerSize + metadata.count + 15) / 16) * 16
-        let fileSize = dataOffset + 4
+        let fileSize = dataOffset + payload.count
 
         var file = Data()
-        appendBE(UInt32(metadata.count), to: &file) // metadata size
-        appendBE(UInt32(fileSize), to: &file) // file size
+        appendBE(UInt32(metadata.count), to: &file)
+        appendBE(UInt32(fileSize), to: &file)
         appendBE(formatVersion, to: &file)
-        appendBE(UInt32(dataOffset), to: &file) // data offset
-        file.append(0) // little endian metadata
+        appendBE(UInt32(dataOffset), to: &file)
+        file.append(0)
         file.append(contentsOf: [0, 0, 0])
 
         if formatVersion >= 22 {
@@ -82,8 +105,34 @@ final class AoVSerializedFileParserTests: XCTestCase {
 
         file.append(metadata)
         while file.count < dataOffset { file.append(0) }
-        file.append(contentsOf: [0x11, 0x22, 0x33, 0x44])
+        file.append(payload)
         return file
+    }
+
+    private func makeAssetBundleObject() -> Data {
+        var object = Data()
+        appendAlignedString("catalog", to: &object)
+        appendLE(Int32(0), to: &object) // preload count
+        appendLE(Int32(0), to: &object) // container count
+        appendLE(Int32(0), to: &object) // main asset preload index
+        appendLE(Int32(0), to: &object) // main asset preload size
+        appendLE(Int32(0), to: &object) // main asset file ID
+        appendLE(Int64(0), to: &object) // main asset path ID
+        appendLE(Int32(0), to: &object) // class compatibility count
+        appendLE(UInt32(0), to: &object) // runtime compatibility
+        appendAlignedString("resource-packer", to: &object)
+        appendLE(Int32(2), to: &object) // dependencies count
+        appendAlignedString("common", to: &object)
+        appendAlignedString("actor/1", to: &object)
+        object.append(0) // streamed scene bundle false
+        return object
+    }
+
+    private func appendAlignedString(_ value: String, to data: inout Data) {
+        let bytes = Data(value.utf8)
+        appendLE(Int32(bytes.count), to: &data)
+        data.append(bytes)
+        align4(&data)
     }
 
     private func align4(_ data: inout Data) {
