@@ -22,7 +22,7 @@ struct AoVPackInfoMapItem: Codable, Hashable, Sendable, Identifiable {
     var id: String { "\(parentIdx):\(childIdx)" }
 }
 
-struct AoVRuntimeResourcePackerCatalog: Codable, Sendable {
+struct AoVRuntimeResourcePackerCatalog: Codable, Hashable, Sendable {
     let name: String
     let version: String
     let svnRevision: String
@@ -38,7 +38,7 @@ struct AoVRuntimeVerificationEntry: Codable, Hashable, Sendable, Identifiable {
     var id: String { pathInIFS }
 }
 
-struct AoVRuntimeResourceVerificationCatalog: Codable, Sendable {
+struct AoVRuntimeResourceVerificationCatalog: Codable, Hashable, Sendable {
     let name: String
     let version: String
     let svnRevision: String
@@ -47,7 +47,7 @@ struct AoVRuntimeResourceVerificationCatalog: Codable, Sendable {
     let trailingData: Data
 }
 
-enum AoVRuntimeResourceCatalog: Sendable {
+enum AoVRuntimeResourceCatalog: Equatable, Sendable {
     case packer(AoVRuntimeResourcePackerCatalog)
     case verification(AoVRuntimeResourceVerificationCatalog)
 }
@@ -218,6 +218,197 @@ enum AoVRuntimeResourceCatalogParser {
         }
     }
 
+    /// Rebuilds one observed AoV catalog MonoBehaviour while retaining its
+    /// GameObject/script/name header and any version-specific trailing bytes.
+    /// Only the two parsed 2022.3 / SerializedFile v22 catalog layouts are writable.
+    static func rewriteMonoBehaviour(
+        _ payload: Data,
+        with replacement: AoVRuntimeResourceCatalog,
+        serializedFormatVersion: UInt32,
+        unityVersion: String,
+        littleEndian: Bool
+    ) throws -> Data {
+        guard let original = try inspectMonoBehaviour(
+            payload,
+            serializedFormatVersion: serializedFormatVersion,
+            unityVersion: unityVersion,
+            littleEndian: littleEndian
+        ) else {
+            throw AoVRuntimeResourceCatalogParseError.invalidPayload(
+                "Object nguồn không phải Packer hoặc Verification catalog được hỗ trợ."
+            )
+        }
+
+        let expectedName: String
+        switch (original, replacement) {
+        case (.packer(let old), .packer(let new)):
+            expectedName = old.name
+            guard new.name == old.name else {
+                throw AoVRuntimeResourceCatalogParseError.invalidPayload(
+                    "Không được thay tên MonoBehaviour Packer catalog."
+                )
+            }
+            try validate(new)
+        case (.verification(let old), .verification(let new)):
+            expectedName = old.name
+            guard new.name == old.name else {
+                throw AoVRuntimeResourceCatalogParseError.invalidPayload(
+                    "Không được thay tên MonoBehaviour Verification catalog."
+                )
+            }
+            try validate(new)
+        default:
+            throw AoVRuntimeResourceCatalogParseError.invalidPayload(
+                "Không thể thay Packer bằng Verification hoặc ngược lại."
+            )
+        }
+
+        var reader = AoVRuntimeResourceCatalogReader(data: payload, littleEndian: littleEndian)
+        try reader.skip(12, "m_GameObject PPtr")
+        let enabled = try reader.readByte("m_Enabled")
+        guard enabled <= 1 else {
+            throw AoVRuntimeResourceCatalogParseError.invalidPayload("m_Enabled không hợp lệ.")
+        }
+        try reader.align(4, "m_Script alignment")
+        try reader.skip(12, "m_Script PPtr")
+        let objectName = try reader.readAlignedString("m_Name", maximumBytes: 4_096)
+        guard objectName == expectedName else {
+            throw AoVRuntimeResourceCatalogParseError.invalidPayload(
+                "Tên m_Name của object không khớp catalog cần thay."
+            )
+        }
+
+        var writer = AoVRuntimeResourceCatalogWriter(littleEndian: littleEndian)
+        switch replacement {
+        case .packer(let catalog):
+            try writer.appendAlignedString(catalog.version, field: "Packer.Version")
+            try writer.appendAlignedString(catalog.svnRevision, field: "Packer.SVNRevision")
+            try writer.appendAlignedString(catalog.setName, field: "Packer.SetName")
+            try writer.appendCount(catalog.allResourcePackInfo.count, field: "Packer.AllResourcePackInfo")
+            for (index, item) in catalog.allResourcePackInfo.enumerated() {
+                try writer.appendAlignedString(item.pathInIFS, field: "Packer[\\(index)].PathInIFS")
+                writer.appendInt32(item.pkgType)
+                writer.appendInt64(item.crcXor)
+                try writer.appendAlignedString(item.tag, field: "Packer[\\(index)].Tag")
+                writer.appendUInt16(item.flags)
+                writer.align4()
+                try writer.appendCount(
+                    item.resourceInfos.count,
+                    field: "Packer[\\(index)].ResourceInfos"
+                )
+                for (resourceIndex, resource) in item.resourceInfos.enumerated() {
+                    writer.appendInt64(resource.hashCode)
+                    try writer.appendAlignedString(
+                        resource.extensionName,
+                        field: "Packer[\\(index)].ResourceInfos[\\(resourceIndex)].Extension"
+                    )
+                }
+            }
+            try writer.appendCount(
+                catalog.allParentIndexToChild.count,
+                field: "Packer.AllParentIdexToChild"
+            )
+            for (index, link) in catalog.allParentIndexToChild.enumerated() {
+                writer.appendInt32(link.parentIdx)
+                writer.appendInt32(link.childIdx)
+                _ = index
+            }
+            writer.data.append(catalog.trailingData)
+        case .verification(let catalog):
+            try writer.appendAlignedString(catalog.version, field: "Verification.Version")
+            try writer.appendAlignedString(catalog.svnRevision, field: "Verification.SVNRevision")
+            try writer.appendCount(
+                catalog.allZipVerificationInfo.count,
+                field: "Verification.AllZipVerificationInfo"
+            )
+            for (index, entry) in catalog.allZipVerificationInfo.enumerated() {
+                try writer.appendAlignedString(
+                    entry.pathInIFS,
+                    field: "Verification.ZIP[\\(index)].PathInIFS"
+                )
+                writer.appendInt64(entry.crcXor)
+            }
+            try writer.appendCount(
+                catalog.allDatabinVerificationInfo.count,
+                field: "Verification.AllDatabinVerificationInfo"
+            )
+            for (index, entry) in catalog.allDatabinVerificationInfo.enumerated() {
+                try writer.appendAlignedString(
+                    entry.pathInIFS,
+                    field: "Verification.Databin[\\(index)].PathInIFS"
+                )
+                writer.appendInt64(entry.crcXor)
+            }
+            writer.data.append(catalog.trailingData)
+        }
+
+        var output = payload.prefix(reader.offset)
+        output.append(writer.data)
+        guard let verified = try inspectMonoBehaviour(
+            output,
+            serializedFormatVersion: serializedFormatVersion,
+            unityVersion: unityVersion,
+            littleEndian: littleEndian
+        ), verified == replacement else {
+            throw AoVRuntimeResourceCatalogParseError.invalidPayload(
+                "Catalog MonoBehaviour không khớp sau khi serialize và parse lại."
+            )
+        }
+        return output
+    }
+
+    private static func validate(_ catalog: AoVRuntimeResourcePackerCatalog) throws {
+        guard catalog.allResourcePackInfo.count <= maximumPackInfoCount,
+              catalog.allParentIndexToChild.count <= maximumMapItemCount else {
+            throw AoVRuntimeResourceCatalogParseError.resourceLimit("Packer catalog có quá nhiều mục.")
+        }
+        var paths = Set<String>()
+        for (index, item) in catalog.allResourcePackInfo.enumerated() {
+            guard !item.pathInIFS.isEmpty,
+                  paths.insert(item.pathInIFS).inserted else {
+                throw AoVRuntimeResourceCatalogParseError.invalidPayload(
+                    "Packer path rỗng hoặc bị lặp tại mục \\(index)."
+                )
+            }
+            guard item.resourceInfos.count <= maximumResourceInfoCount else {
+                throw AoVRuntimeResourceCatalogParseError.resourceLimit(
+                    "Packer ResourceInfos[\\(index)] vượt giới hạn."
+                )
+            }
+        }
+        for (index, link) in catalog.allParentIndexToChild.enumerated() {
+            guard let parent = Int(exactly: link.parentIdx),
+                  let child = Int(exactly: link.childIdx),
+                  catalog.allResourcePackInfo.indices.contains(parent),
+                  catalog.allResourcePackInfo.indices.contains(child) else {
+                throw AoVRuntimeResourceCatalogParseError.invalidPayload(
+                    "Packer parent-child index không hợp lệ tại mục \\(index)."
+                )
+            }
+        }
+    }
+
+    private static func validate(_ catalog: AoVRuntimeResourceVerificationCatalog) throws {
+        guard catalog.allZipVerificationInfo.count <= maximumVerificationCount,
+              catalog.allDatabinVerificationInfo.count <= maximumVerificationCount else {
+            throw AoVRuntimeResourceCatalogParseError.resourceLimit("Verification catalog có quá nhiều mục.")
+        }
+        for (label, entries) in [
+            ("ZIP", catalog.allZipVerificationInfo),
+            ("Databin", catalog.allDatabinVerificationInfo)
+        ] {
+            var paths = Set<String>()
+            for (index, entry) in entries.enumerated() {
+                guard !entry.pathInIFS.isEmpty,
+                      paths.insert(entry.pathInIFS).inserted else {
+                    throw AoVRuntimeResourceCatalogParseError.invalidPayload(
+                        "Verification path \\(label) rỗng hoặc bị lặp tại mục \\(index)."
+                    )
+                }
+            }
+        }
+    }
+
     private static func parsePacker(
         afterName reader: inout AoVRuntimeResourceCatalogReader,
         name: String
@@ -325,5 +516,69 @@ enum AoVRuntimeResourceCatalogParser {
             allDatabinVerificationInfo: databinEntries,
             trailingData: reader.trailingData()
         )
+    }
+}
+
+
+private struct AoVRuntimeResourceCatalogWriter {
+    var data = Data()
+    let littleEndian: Bool
+
+    mutating func appendInt32(_ value: Int32) {
+        let bits = UInt32(bitPattern: value)
+        if littleEndian {
+            for shift in stride(from: 0, through: 24, by: 8) {
+                data.append(UInt8(truncatingIfNeeded: bits >> shift))
+            }
+        } else {
+            for shift in stride(from: 24, through: 0, by: -8) {
+                data.append(UInt8(truncatingIfNeeded: bits >> shift))
+            }
+        }
+    }
+
+    mutating func appendInt64(_ value: Int64) {
+        let bits = UInt64(bitPattern: value)
+        if littleEndian {
+            for shift in stride(from: 0, through: 56, by: 8) {
+                data.append(UInt8(truncatingIfNeeded: bits >> shift))
+            }
+        } else {
+            for shift in stride(from: 56, through: 0, by: -8) {
+                data.append(UInt8(truncatingIfNeeded: bits >> shift))
+            }
+        }
+    }
+
+    mutating func appendUInt16(_ value: UInt16) {
+        if littleEndian {
+            data.append(UInt8(truncatingIfNeeded: value))
+            data.append(UInt8(truncatingIfNeeded: value >> 8))
+        } else {
+            data.append(UInt8(truncatingIfNeeded: value >> 8))
+            data.append(UInt8(truncatingIfNeeded: value))
+        }
+    }
+
+    mutating func appendCount(_ value: Int, field: String) throws {
+        guard let count = Int32(exactly: value), count >= 0 else {
+            throw AoVRuntimeResourceCatalogParseError.resourceLimit("\\(field) vượt giới hạn Int32.")
+        }
+        appendInt32(count)
+    }
+
+    mutating func appendAlignedString(_ value: String, field: String) throws {
+        let bytes = Data(value.utf8)
+        guard bytes.count <= 4 * 1024 * 1024,
+              let length = Int32(exactly: bytes.count) else {
+            throw AoVRuntimeResourceCatalogParseError.resourceLimit("\\(field) quá dài.")
+        }
+        appendInt32(length)
+        data.append(bytes)
+        align4()
+    }
+
+    mutating func align4() {
+        while data.count % 4 != 0 { data.append(0) }
     }
 }
