@@ -158,6 +158,38 @@ final class AoVAssetBundleCatalogMergerTests: XCTestCase {
         XCTAssertEqual(plan.mergedRecord.preloadReferences.last?.pathID, 300)
     }
 
+    func testRejectsUnsupportedMainAssetMetadataChanges() throws {
+        let current = record(
+            bundle: "actor/main-asset-change",
+            preloads: [],
+            entries: [],
+            dependencies: []
+        )
+        let legacy = record(
+            bundle: "actor/main-asset-change",
+            preloads: [],
+            entries: [],
+            dependencies: [],
+            mainAsset: AoVSerializedAssetPointer(fileID: 0, pathID: 200)
+        )
+        let summary = makeSummary(localPathIDs: [200])
+
+        XCTAssertThrowsError(
+            try AoVAssetBundleCatalogMerger.plan(
+                current: current,
+                legacy: legacy,
+                currentSerializedFile: summary,
+                legacySerializedFile: summary,
+                availableCurrentBundleNames: ["actor/main-asset-change"]
+            )
+        ) { error in
+            guard let mergeError = error as? AoVAssetBundleCatalogMergeError,
+                  case .unsupportedMetadataChange("mainAsset") = mergeError else {
+                return XCTFail("Expected unsupported mainAsset metadata rejection, got \\(error)")
+            }
+        }
+    }
+
     func testRemapsExternalFileIDByExactGUIDAndPathMatch() throws {
         let sourceReferences = [
             external("guid-old", path: "CAB/unused"),
@@ -404,15 +436,15 @@ final class AoVAssetBundleCatalogMergerTests: XCTestCase {
         bundle: String,
         preloads: [AoVSerializedAssetPointer],
         entries: [AoVSerializedAssetBundleEntry],
-        dependencies: [String]
+        dependencies: [String],
+        mainAsset: AoVSerializedAssetPointer = AoVSerializedAssetPointer(fileID: 0, pathID: 0)
     ) -> AoVSerializedAssetBundleRecord {
-        let nullPointer = AoVSerializedAssetPointer(fileID: 0, pathID: 0)
         return AoVSerializedAssetBundleRecord(
             pathID: 999,
             name: bundle,
             preloadReferences: preloads,
             containerEntries: entries,
-            mainAsset: nullPointer,
+            mainAsset: mainAsset,
             mainAssetPreloadIndex: 0,
             mainAssetPreloadSize: 0,
             scriptCompatibilityEntries: [],
