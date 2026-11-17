@@ -1,5 +1,6 @@
 import Foundation
 import CommonCrypto
+import SWCompression
 
 enum AoVUnityFSBlockInfoLayout: String, Codable, Hashable, Sendable {
     case standard
@@ -299,6 +300,7 @@ private struct AoVUnityEngineVersion {
 enum AoVUnityFSParser {
     private static let maximumBundleBytes = 512 * 1024 * 1024
     private static let maximumBlockInfoBytes = 64 * 1024 * 1024
+    private static let maximumLZMADictionaryBytes = 128 * 1024 * 1024
     private static let maximumBlocks = 4_096
     private static let maximumNodes = 100_000
     // AOV's public UnityPy fork documents these UnityFS header AES and block-info
@@ -645,6 +647,13 @@ enum AoVUnityFSParser {
                     )
                 }
                 decoded = compressed
+            case 1:
+                decoded = try decompressLZMA(
+                    compressed,
+                    expectedSize: expectedBlockSize,
+                    maximumOutputSize: Int(maximumExpandedBytes),
+                    context: "block \(block.index)"
+                )
             case 2, 3:
                 do {
                     decoded = try AoVLZ4Block.decompress(
@@ -657,7 +666,7 @@ enum AoVUnityFSParser {
                         "block \(block.index): \(error.localizedDescription)"
                     )
                 }
-            case 1, 4:
+            case 4:
                 throw AoVUnityFSError.unsupportedBlockCompression(method)
             default:
                 throw AoVUnityFSError.invalidCompression(method)
@@ -808,6 +817,13 @@ enum AoVUnityFSParser {
                 )
             }
             return compressed
+        case 1:
+            return try decompressLZMA(
+                compressed,
+                expectedSize: expectedSize,
+                maximumOutputSize: maximumBlockInfoBytes,
+                context: "block-info"
+            )
         case 2, 3:
             do {
                 return try AoVLZ4Block.decompress(
@@ -818,10 +834,82 @@ enum AoVUnityFSParser {
             } catch {
                 throw AoVUnityFSError.decompressionFailed(error.localizedDescription)
             }
-        case 1, 4:
+        case 4:
             throw AoVUnityFSError.unsupportedInfoCompression(method)
         default:
             throw AoVUnityFSError.invalidCompression(method)
+        }
+    }
+
+
+    /// UnityFS LZMA entries use a five-byte property prefix followed by a raw
+    /// LZMA1 stream. Apple's Compression framework exposes LZMA2/XZ, not this
+    /// UnityFS variant, so decode it with the bounded SWCompression LZMA1 API.
+    static func decompressLZMA(
+        _ compressed: Data,
+        expectedSize: Int,
+        maximumOutputSize: Int,
+        context: String = "LZMA"
+    ) throws -> Data {
+        guard expectedSize >= 0, maximumOutputSize > 0,
+              expectedSize <= maximumOutputSize else {
+            throw AoVUnityFSError.resourceLimit(
+                "\(context): kích thước giải nén yêu cầu vượt giới hạn \(maximumOutputSize) byte."
+            )
+        }
+        guard compressed.count >= 5 else {
+            throw AoVUnityFSError.truncated("\(context): LZMA properties")
+        }
+
+        let propertyByte = Int(compressed[compressed.startIndex])
+        guard propertyByte < 9 * 5 * 5 else {
+            throw AoVUnityFSError.decompressionFailed(
+                "\(context): byte thuộc tính LZMA không hợp lệ."
+            )
+        }
+
+        let lc = propertyByte % 9
+        let quotient = propertyByte / 9
+        let lp = quotient % 5
+        let pb = quotient / 5
+        let dictionarySizeValue = UInt32(compressed[compressed.startIndex + 1]) |
+            (UInt32(compressed[compressed.startIndex + 2]) << 8) |
+            (UInt32(compressed[compressed.startIndex + 3]) << 16) |
+            (UInt32(compressed[compressed.startIndex + 4]) << 24)
+
+        guard dictionarySizeValue >= 4_096,
+              dictionarySizeValue <= UInt32(maximumLZMADictionaryBytes),
+              let dictionarySize = Int(exactly: dictionarySizeValue) else {
+            throw AoVUnityFSError.resourceLimit(
+                "\(context): dictionary LZMA \(dictionarySizeValue) byte nằm ngoài giới hạn an toàn."
+            )
+        }
+
+        let rawPayload = Data(compressed.dropFirst(5))
+        do {
+            let properties = LZMAProperties(
+                lc: lc,
+                lp: lp,
+                pb: pb,
+                dictionarySize: dictionarySize
+            )
+            let decoded = try LZMA.decompress(
+                data: rawPayload,
+                properties: properties,
+                uncompressedSize: expectedSize
+            )
+            guard decoded.count == expectedSize else {
+                throw AoVUnityFSError.decompressionFailed(
+                    "\(context): LZMA trả về \(decoded.count) byte, cần \(expectedSize)."
+                )
+            }
+            return decoded
+        } catch let error as AoVUnityFSError {
+            throw error
+        } catch {
+            throw AoVUnityFSError.decompressionFailed(
+                "\(context): LZMA1 thất bại: \(error.localizedDescription)"
+            )
         }
     }
 
