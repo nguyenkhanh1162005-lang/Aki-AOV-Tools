@@ -158,14 +158,16 @@ enum AoVUnityTypeTreePointerRemapper {
                     )
                 }
                 auditedExternalCount += 1
+                var pointerChanged = false
                 if destinationFileID != rawFileID {
                     fields["m_FileID"] = try replacingInteger(fileIDValue, with: Int64(destinationFileID), field: path)
-                    externalCount += 1
+                    pointerChanged = true
                 }
                 if destinationPathID != rawPathID {
                     fields["m_PathID"] = try replacingInteger(pathIDValue, with: destinationPathID, field: path)
-                    externalCount += 1
+                    pointerChanged = true
                 }
+                if pointerChanged { externalCount += 1 }
             }
             return .object(fields)
         }
