@@ -48,6 +48,108 @@ struct AoVRemakePathFinding: Codable, Identifiable, Sendable {
     var id: String { path }
 }
 
+enum AoVRemakeCatalogKind: String, Codable, Sendable, CaseIterable {
+    case packer
+    case verification
+
+    var fileName: String {
+        switch self {
+        case .packer: return "resourcepackerinfosetall.assetbundle"
+        case .verification: return "resourceverificationinfosetall.assetbundle"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .packer: return "Packer"
+        case .verification: return "Verification"
+        }
+    }
+}
+
+enum AoVRemakeCatalogRecordStatus: String, Codable, Sendable {
+    case mappedCandidate
+    case missingFromCurrent
+    case ambiguousCurrentMatch
+}
+
+struct AoVRemakeCatalogEntrySnapshot: Codable, Sendable, Identifiable {
+    let key: String
+    let preloadIndex: Int32
+    let preloadSize: Int32
+    let assetFileID: Int32
+    let assetPathID: Int64
+
+    var id: String { key }
+}
+
+struct AoVRemakeCatalogRecordSnapshot: Codable, Sendable, Identifiable {
+    let sourceArchive: String
+    let catalogPath: String
+    let nodePath: String
+    let serializedFormatVersion: UInt32
+    let unityVersion: String
+    let targetPlatform: Int32
+    let objectPathID: Int64
+    let name: String
+    let assetBundleName: String
+    let preloadCount: Int
+    let mainAssetFileID: Int32
+    let mainAssetPathID: Int64
+    let dependencies: [String]
+    let containerEntries: [AoVRemakeCatalogEntrySnapshot]
+
+    var matchingName: String {
+        let bundle = assetBundleName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (bundle.isEmpty ? name : bundle).lowercased()
+    }
+
+    var id: String {
+        "\(sourceArchive)|\(catalogPath)|\(nodePath)|\(objectPathID)"
+    }
+}
+
+struct AoVRemakeCatalogRecordFinding: Codable, Sendable, Identifiable {
+    let sourceArchive: String
+    let kind: AoVRemakeCatalogKind
+    let assetBundleName: String
+    let status: AoVRemakeCatalogRecordStatus
+    let legacyContainerEntryCount: Int
+    let currentContainerEntryCount: Int
+    let mappedContainerKeyCount: Int
+    let legacyOnlyContainerKeyCount: Int
+    let currentOnlyContainerKeyCount: Int
+    let ambiguousContainerKeyCount: Int
+    let changedAssetPointerCount: Int
+    let changedPreloadRangeCount: Int
+    let dependenciesAddedInCurrent: [String]
+    let dependenciesRemovedInCurrent: [String]
+    let legacyOnlyKeySamples: [String]
+    let currentOnlyKeySamples: [String]
+    let changedPointerKeySamples: [String]
+
+    var id: String { "\(sourceArchive)|\(kind.rawValue)|\(assetBundleName)" }
+}
+
+struct AoVRemakeCatalogKindReport: Codable, Sendable {
+    let kind: AoVRemakeCatalogKind
+    let currentRecordCount: Int
+    let legacyRecordCount: Int
+    let mappedRecordCount: Int
+    let missingCurrentRecordCount: Int
+    let ambiguousRecordCount: Int
+    let currentOnlyRecordCount: Int
+    let mappedContainerKeyCount: Int
+    let legacyOnlyContainerKeyCount: Int
+    let currentOnlyContainerKeyCount: Int
+    let ambiguousContainerKeyCount: Int
+    let changedAssetPointerCount: Int
+    let changedPreloadRangeCount: Int
+    let dependenciesAddedInCurrentCount: Int
+    let dependenciesRemovedInCurrentCount: Int
+    let findings: [AoVRemakeCatalogRecordFinding]
+}
+
 struct AoVModRemakeReport: Codable, Sendable {
     let base: ArchiveInventory
     let legacy: [ArchiveInventory]
@@ -61,6 +163,8 @@ struct AoVModRemakeReport: Codable, Sendable {
     let baseHasVerificationCatalog: Bool
     let legacyHasPackerCatalog: [String]
     let legacyHasVerificationCatalog: [String]
+    let packerCatalogComparison: AoVRemakeCatalogKindReport
+    let verificationCatalogComparison: AoVRemakeCatalogKindReport
     let warnings: [String]
 
     var totalLegacyFiles: Int { legacy.reduce(0) { $0 + $1.fileCount } }
@@ -80,6 +184,7 @@ enum AoVModRemakeAnalyzer {
     private static let maximumVersionMarkerBytes: UInt64 = 64 * 1024
     private static let packerFileName = "resourcepackerinfosetall.assetbundle"
     private static let verificationFileName = "resourceverificationinfosetall.assetbundle"
+    private static let maximumCatalogFindings = 500
 
     static func analyze(baseRESURL: URL, legacyMODURLs: [URL]) throws -> AoVModRemakeReport {
         guard !legacyMODURLs.isEmpty else { throw AoVModRemakeError.noLegacyMods }
@@ -203,7 +308,22 @@ enum AoVModRemakeAnalyzer {
         } else {
             warnings.append("Các path khác payload hoặc chỉ có ở MOD cũ mới là ứng viên cần phân tích; chưa thể tự kết luận tương thích.")
         }
-        warnings.append("Bản phân tích này không tạo ZIP remake. Cần bộ quy tắc catalog/dependency, checksum và UnityFS rebuild đã xác minh trước khi xuất.")
+        let packerCatalogComparison = compareCatalogRecords(
+            current: catalogRecords(in: baseInventory, kind: .packer),
+            legacy: legacyInventories.flatMap { catalogRecords(in: $0, kind: .packer) },
+            kind: .packer
+        )
+        let verificationCatalogComparison = compareCatalogRecords(
+            current: catalogRecords(in: baseInventory, kind: .verification),
+            legacy: legacyInventories.flatMap { catalogRecords(in: $0, kind: .verification) },
+            kind: .verification
+        )
+        if packerCatalogComparison.currentRecordCount == 0 ||
+            verificationCatalogComparison.currentRecordCount == 0 {
+            warnings.append("Một hoặc cả hai catalog chưa có AssetBundle record class 142 đọc được; cần kiểm tra lại RES đầu vào hoặc layout SerializedFile.")
+        }
+        warnings.append("Catalog đã được phân tích sâu ở mức AssetBundle class 142, container key, preload range và dependency. Các pointer chỉ là ứng viên ánh xạ, chưa được ghi ngược vào file.")
+        warnings.append("Bản phân tích này không tạo ZIP remake. Cần xác minh remap pointer, checksum và UnityFS rebuild trên bộ RES/MOD thật trước khi xuất.")
         
         return AoVModRemakeReport(
             base: baseInventory,
@@ -218,7 +338,238 @@ enum AoVModRemakeAnalyzer {
             baseHasVerificationCatalog: baseHasVerification,
             legacyHasPackerCatalog: legacyPacker,
             legacyHasVerificationCatalog: legacyVerification,
+            packerCatalogComparison: packerCatalogComparison,
+            verificationCatalogComparison: verificationCatalogComparison,
             warnings: warnings
+        )
+    }
+
+    private static func catalogRecords(
+        in inventory: ArchiveInventory,
+        kind: AoVRemakeCatalogKind
+    ) -> [AoVRemakeCatalogRecordSnapshot] {
+        inventory.unityFSBundles
+            .filter { ($0.path as NSString).lastPathComponent.lowercased() == kind.fileName }
+            .flatMap { bundle in
+                bundle.catalogNodeSamples.flatMap { sample in
+                    guard let serialized = sample.serializedFile else { return [] }
+                    return serialized.assetBundleRecords.map { record in
+                        AoVRemakeCatalogRecordSnapshot(
+                            sourceArchive: inventory.fileName,
+                            catalogPath: bundle.path,
+                            nodePath: sample.path,
+                            serializedFormatVersion: serialized.formatVersion,
+                            unityVersion: serialized.unityVersion,
+                            targetPlatform: serialized.targetPlatform,
+                            objectPathID: record.pathID,
+                            name: record.name,
+                            assetBundleName: record.assetBundleName,
+                            preloadCount: record.preloadReferences.count,
+                            mainAssetFileID: record.mainAsset.fileID,
+                            mainAssetPathID: record.mainAsset.pathID,
+                            dependencies: record.dependencies,
+                            containerEntries: record.containerEntries.map {
+                                AoVRemakeCatalogEntrySnapshot(
+                                    key: $0.key,
+                                    preloadIndex: $0.preloadIndex,
+                                    preloadSize: $0.preloadSize,
+                                    assetFileID: $0.asset.fileID,
+                                    assetPathID: $0.asset.pathID
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+    }
+
+    /// Compare logical AssetBundle names and container keys. Pointers are reported
+    /// as mapping candidates only: path IDs are scoped to their own SerializedFile
+    /// and must never be copied from an old catalog into a current catalog blindly.
+    static func compareCatalogRecords(
+        current: [AoVRemakeCatalogRecordSnapshot],
+        legacy: [AoVRemakeCatalogRecordSnapshot],
+        kind: AoVRemakeCatalogKind
+    ) -> AoVRemakeCatalogKindReport {
+        let currentByName = Dictionary(grouping: current, by: \.matchingName)
+        var matchedRecordCount = 0
+        var missingRecordCount = 0
+        var ambiguousRecordCount = 0
+        var mappedKeys = 0
+        var legacyOnlyKeys = 0
+        var currentOnlyKeys = 0
+        var ambiguousKeys = 0
+        var changedPointers = 0
+        var changedPreloadRanges = 0
+        var dependenciesAdded = 0
+        var dependenciesRemoved = 0
+        var findings: [AoVRemakeCatalogRecordFinding] = []
+        var seenLegacyNames = Set<String>()
+
+        for oldRecord in legacy {
+            let identity = oldRecord.matchingName
+            seenLegacyNames.insert(identity)
+            let candidates = currentByName[identity] ?? []
+            let status: AoVRemakeCatalogRecordStatus
+            if candidates.isEmpty {
+                status = .missingFromCurrent
+                missingRecordCount += 1
+                findings.append(
+                    AoVRemakeCatalogRecordFinding(
+                        sourceArchive: oldRecord.sourceArchive,
+                        kind: kind,
+                        assetBundleName: oldRecord.assetBundleName.isEmpty ? oldRecord.name : oldRecord.assetBundleName,
+                        status: status,
+                        legacyContainerEntryCount: oldRecord.containerEntries.count,
+                        currentContainerEntryCount: 0,
+                        mappedContainerKeyCount: 0,
+                        legacyOnlyContainerKeyCount: oldRecord.containerEntries.count,
+                        currentOnlyContainerKeyCount: 0,
+                        ambiguousContainerKeyCount: 0,
+                        changedAssetPointerCount: 0,
+                        changedPreloadRangeCount: 0,
+                        dependenciesAddedInCurrent: [],
+                        dependenciesRemovedInCurrent: [],
+                        legacyOnlyKeySamples: Array(oldRecord.containerEntries.prefix(8).map(\.key)),
+                        currentOnlyKeySamples: [],
+                        changedPointerKeySamples: []
+                    )
+                )
+                legacyOnlyKeys += oldRecord.containerEntries.count
+                continue
+            }
+            guard candidates.count == 1, let newRecord = candidates.first else {
+                status = .ambiguousCurrentMatch
+                ambiguousRecordCount += 1
+                findings.append(
+                    AoVRemakeCatalogRecordFinding(
+                        sourceArchive: oldRecord.sourceArchive,
+                        kind: kind,
+                        assetBundleName: oldRecord.assetBundleName.isEmpty ? oldRecord.name : oldRecord.assetBundleName,
+                        status: status,
+                        legacyContainerEntryCount: oldRecord.containerEntries.count,
+                        currentContainerEntryCount: candidates.reduce(0) { $0 + $1.containerEntries.count },
+                        mappedContainerKeyCount: 0,
+                        legacyOnlyContainerKeyCount: 0,
+                        currentOnlyContainerKeyCount: 0,
+                        ambiguousContainerKeyCount: 0,
+                        changedAssetPointerCount: 0,
+                        changedPreloadRangeCount: 0,
+                        dependenciesAddedInCurrent: [],
+                        dependenciesRemovedInCurrent: [],
+                        legacyOnlyKeySamples: [],
+                        currentOnlyKeySamples: [],
+                        changedPointerKeySamples: []
+                    )
+                )
+                continue
+            }
+
+            status = .mappedCandidate
+            matchedRecordCount += 1
+            let oldByKey = Dictionary(grouping: oldRecord.containerEntries, by: \.key)
+            let newByKey = Dictionary(grouping: newRecord.containerEntries, by: \.key)
+            let allKeys = Set(oldByKey.keys).union(newByKey.keys).sorted()
+            var recordMappedKeys = 0
+            var recordLegacyOnly = 0
+            var recordCurrentOnly = 0
+            var recordAmbiguous = 0
+            var recordChangedPointers = 0
+            var recordChangedRanges = 0
+            var legacyOnlySamples: [String] = []
+            var currentOnlySamples: [String] = []
+            var pointerChangedSamples: [String] = []
+
+            for key in allKeys {
+                let oldEntries = oldByKey[key] ?? []
+                let newEntries = newByKey[key] ?? []
+                if oldEntries.count == 1 && newEntries.count == 1,
+                   let oldEntry = oldEntries.first, let newEntry = newEntries.first {
+                    recordMappedKeys += 1
+                    if oldEntry.assetFileID != newEntry.assetFileID ||
+                        oldEntry.assetPathID != newEntry.assetPathID {
+                        recordChangedPointers += 1
+                        if pointerChangedSamples.count < 8 { pointerChangedSamples.append(key) }
+                    }
+                    if oldEntry.preloadIndex != newEntry.preloadIndex ||
+                        oldEntry.preloadSize != newEntry.preloadSize {
+                        recordChangedRanges += 1
+                    }
+                } else if oldEntries.isEmpty && newEntries.count == 1 {
+                    recordCurrentOnly += 1
+                    if currentOnlySamples.count < 8 { currentOnlySamples.append(key) }
+                } else if newEntries.isEmpty && oldEntries.count == 1 {
+                    recordLegacyOnly += 1
+                    if legacyOnlySamples.count < 8 { legacyOnlySamples.append(key) }
+                } else {
+                    recordAmbiguous += 1
+                }
+            }
+
+            let oldDependencies = Set(oldRecord.dependencies)
+            let newDependencies = Set(newRecord.dependencies)
+            let added = newDependencies.subtracting(oldDependencies).sorted()
+            let removed = oldDependencies.subtracting(newDependencies).sorted()
+            dependenciesAdded += added.count
+            dependenciesRemoved += removed.count
+            mappedKeys += recordMappedKeys
+            legacyOnlyKeys += recordLegacyOnly
+            currentOnlyKeys += recordCurrentOnly
+            ambiguousKeys += recordAmbiguous
+            changedPointers += recordChangedPointers
+            changedPreloadRanges += recordChangedRanges
+
+            findings.append(
+                AoVRemakeCatalogRecordFinding(
+                    sourceArchive: oldRecord.sourceArchive,
+                    kind: kind,
+                    assetBundleName: oldRecord.assetBundleName.isEmpty ? oldRecord.name : oldRecord.assetBundleName,
+                    status: status,
+                    legacyContainerEntryCount: oldRecord.containerEntries.count,
+                    currentContainerEntryCount: newRecord.containerEntries.count,
+                    mappedContainerKeyCount: recordMappedKeys,
+                    legacyOnlyContainerKeyCount: recordLegacyOnly,
+                    currentOnlyContainerKeyCount: recordCurrentOnly,
+                    ambiguousContainerKeyCount: recordAmbiguous,
+                    changedAssetPointerCount: recordChangedPointers,
+                    changedPreloadRangeCount: recordChangedRanges,
+                    dependenciesAddedInCurrent: Array(added.prefix(12)),
+                    dependenciesRemovedInCurrent: Array(removed.prefix(12)),
+                    legacyOnlyKeySamples: legacyOnlySamples,
+                    currentOnlyKeySamples: currentOnlySamples,
+                    changedPointerKeySamples: pointerChangedSamples
+                )
+            )
+        }
+
+        let currentOnlyRecordCount = current.filter { !seenLegacyNames.contains($0.matchingName) }.count
+        findings.sort {
+            if $0.status.rawValue != $1.status.rawValue {
+                return $0.status.rawValue < $1.status.rawValue
+            }
+            if $0.sourceArchive != $1.sourceArchive {
+                return $0.sourceArchive < $1.sourceArchive
+            }
+            return $0.assetBundleName < $1.assetBundleName
+        }
+
+        return AoVRemakeCatalogKindReport(
+            kind: kind,
+            currentRecordCount: current.count,
+            legacyRecordCount: legacy.count,
+            mappedRecordCount: matchedRecordCount,
+            missingCurrentRecordCount: missingRecordCount,
+            ambiguousRecordCount: ambiguousRecordCount,
+            currentOnlyRecordCount: currentOnlyRecordCount,
+            mappedContainerKeyCount: mappedKeys,
+            legacyOnlyContainerKeyCount: legacyOnlyKeys,
+            currentOnlyContainerKeyCount: currentOnlyKeys,
+            ambiguousContainerKeyCount: ambiguousKeys,
+            changedAssetPointerCount: changedPointers,
+            changedPreloadRangeCount: changedPreloadRanges,
+            dependenciesAddedInCurrentCount: dependenciesAdded,
+            dependenciesRemovedInCurrentCount: dependenciesRemoved,
+            findings: Array(findings.prefix(maximumCatalogFindings))
         )
     }
 
