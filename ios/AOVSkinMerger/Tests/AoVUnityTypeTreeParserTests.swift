@@ -101,6 +101,122 @@ final class AoVUnityTypeTreeParserTests: XCTestCase {
         XCTAssertEqual(checksum, 0xA1B2C3D4)
     }
 
+    func testTypeTreeWriterRoundTripsNestedPPtrsArraysAndAlignedStrings() throws {
+        let nodes = [
+            AoVUnityTypeTreeNode(type: "MonoBehaviour", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "PPtr<GameObject>", name: "m_GameObject", level: 1, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "int", name: "m_FileID", level: 2, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_PathID", level: 2, byteSize: 8, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "bool", name: "m_Enabled", level: 1, byteSize: 1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "PPtr<MonoScript>", name: "m_Script", level: 1, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "int", name: "m_FileID", level: 2, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_PathID", level: 2, byteSize: 8, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "string", name: "m_Name", level: 1, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "Array", name: "Array", level: 2, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "int", name: "size", level: 3, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "PPtr<Object>", name: "data", level: 3, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "int", name: "m_FileID", level: 4, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "SInt64", name: "m_PathID", level: 4, byteSize: 8, metaFlags: 0)
+        ]
+        let original: AoVUnityTypeTreeValue = .object([
+            "m_GameObject": .object([
+                "m_FileID": .signed(0),
+                "m_PathID": .signed(1001)
+            ]),
+            "m_Enabled": .boolean(true),
+            "m_Script": .object([
+                "m_FileID": .signed(1),
+                "m_PathID": .signed(2002)
+            ]),
+            "m_Name": .string("AKI creator skin"),
+            "Array": .array([
+                .object(["m_FileID": .signed(0), "m_PathID": .signed(3003)]),
+                .object(["m_FileID": .signed(2), "m_PathID": .signed(4004)])
+            ])
+        ])
+
+        let encoded = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: original,
+            littleEndian: true
+        )
+        let decoded = try AoVUnityTypeTreeReader.read(
+            nodes: nodes,
+            data: encoded,
+            littleEndian: true
+        )
+        XCTAssertEqual(encoded, try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: decoded,
+            littleEndian: true
+        ))
+
+        guard case .object(var fields) = decoded,
+              case .object(var gameObject) = fields["m_GameObject"],
+              case .array(var pointers) = fields["Array"],
+              case .object(var firstPointer) = pointers.first else {
+            return XCTFail("Decoded TypeTree object does not match the expected structured PPtr layout.")
+        }
+        gameObject["m_PathID"] = .signed(9001)
+        fields["m_GameObject"] = .object(gameObject)
+        firstPointer["m_PathID"] = .signed(9002)
+        pointers[0] = .object(firstPointer)
+        fields["Array"] = .array(pointers)
+        let changed: AoVUnityTypeTreeValue = .object(fields)
+
+        let rewritten = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: changed,
+            littleEndian: true
+        )
+        let verified = try AoVUnityTypeTreeReader.read(
+            nodes: nodes,
+            data: rewritten,
+            littleEndian: true
+        )
+        guard case .object(let verifiedFields) = verified,
+              case .object(let verifiedGameObject)? = verifiedFields["m_GameObject"],
+              case .signed(9001)? = verifiedGameObject["m_PathID"],
+              case .array(let verifiedPointers)? = verifiedFields["Array"],
+              case .object(let verifiedFirstPointer)? = verifiedPointers.first,
+              case .signed(9002)? = verifiedFirstPointer["m_PathID"] else {
+            return XCTFail("Updated PPtr pathIDs were not preserved by TypeTree round-trip.")
+        }
+    }
+
+    func testTypeTreeWriterRoundTripsBigEndianPrimitivesAndRejectsMissingFields() throws {
+        let nodes = [
+            AoVUnityTypeTreeNode(type: "Root", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "string", name: "m_Name", level: 1, byteSize: -1, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "UInt32", name: "Checksum", level: 1, byteSize: 4, metaFlags: 0),
+            AoVUnityTypeTreeNode(type: "float", name: "Weight", level: 1, byteSize: 4, metaFlags: 0)
+        ]
+        let value: AoVUnityTypeTreeValue = .object([
+            "m_Name": .string("big endian tree"),
+            "Checksum": .unsigned(0xA1B2C3D4),
+            "Weight": .floating(0.75)
+        ])
+        let encoded = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: value,
+            littleEndian: false
+        )
+        let decoded = try AoVUnityTypeTreeReader.read(
+            nodes: nodes,
+            data: encoded,
+            littleEndian: false
+        )
+        XCTAssertEqual(decoded.objectValue?["m_Name"]?.stringValue, "big endian tree")
+        XCTAssertEqual(decoded.objectValue?["Checksum"]?.intValue, Int64(0xA1B2C3D4))
+        XCTAssertThrowsError(
+            try AoVUnityTypeTreeWriter.write(
+                nodes: nodes,
+                value: .object(["m_Name": .string("missing fields")]),
+                littleEndian: false
+            )
+        )
+    }
+
     func testRejectsTruncatedArrayAndInvalidTreeLevels() {
         let nodes = [
             AoVUnityTypeTreeNode(type: "Root", name: "Base", level: 0, byteSize: -1, metaFlags: 0),
