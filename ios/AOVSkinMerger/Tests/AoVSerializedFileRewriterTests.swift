@@ -77,17 +77,37 @@ final class AoVSerializedFileRewriterTests: XCTestCase {
         name: String,
         dependencies: [String]
     ) -> AoVSerializedAssetBundleRecord {
-        AoVSerializedAssetBundleRecord(
+        // The minimal fixture contains only the AssetBundle object itself.
+        // Null PPtrs are valid and keep this writer test focused on serialization,
+        // size/offset patching and round-trip preservation rather than graph import.
+        let nullPointer = AoVSerializedAssetPointer(fileID: 0, pathID: 0)
+        return AoVSerializedAssetBundleRecord(
             pathID: record.pathID,
             name: name,
-            preloadReferences: record.preloadReferences,
-            containerEntries: record.containerEntries,
-            mainAsset: record.mainAsset,
+            preloadReferences: record.preloadReferences.map { _ in nullPointer },
+            containerEntries: record.containerEntries.map {
+                AoVSerializedAssetBundleEntry(
+                    key: $0.key,
+                    preloadIndex: $0.preloadIndex,
+                    preloadSize: $0.preloadSize,
+                    asset: nullPointer
+                )
+            },
+            mainAsset: nullPointer,
             mainAssetPreloadIndex: record.mainAssetPreloadIndex,
             mainAssetPreloadSize: record.mainAssetPreloadSize,
             scriptCompatibilityEntries: record.scriptCompatibilityEntries,
             classCompatibilityIDs: record.classCompatibilityIDs,
-            classCompatibilityEntries: record.classCompatibilityEntries,
+            classCompatibilityEntries: record.classCompatibilityEntries.map {
+                AoVSerializedClassCompatibilityEntry(
+                    classID: $0.classID,
+                    info: AoVSerializedAssetInfo(
+                        preloadIndex: $0.info.preloadIndex,
+                        preloadSize: $0.info.preloadSize,
+                        asset: nullPointer
+                    )
+                )
+            },
             runtimeCompatibility: record.runtimeCompatibility,
             assetBundleName: record.assetBundleName + "-updated",
             dependencies: dependencies,
