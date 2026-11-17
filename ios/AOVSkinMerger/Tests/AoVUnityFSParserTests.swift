@@ -55,7 +55,8 @@ final class AoVUnityFSParserTests: XCTestCase {
             flags: 0x240
         )
         XCTAssertThrowsError(try AoVUnityFSParser.inspect(bundle)) { error in
-            guard case AoVUnityFSError.unsupportedEncryption = error else {
+            guard let parserError = error as? AoVUnityFSError,
+                  case .unsupportedEncryption(_) = parserError else {
                 return XCTFail("Expected unsupported encryption, got \(error)")
             }
         }
@@ -64,7 +65,8 @@ final class AoVUnityFSParserTests: XCTestCase {
     func testRejectsAmbiguousPaddingEncryptionFlagForUnknownRevision() {
         let bundle = makeBundle(engineVersion: "0.0.0", flags: 0x240)
         XCTAssertThrowsError(try AoVUnityFSParser.inspect(bundle)) { error in
-            guard case AoVUnityFSError.ambiguousLegacyFlag = error else {
+            guard let parserError = error as? AoVUnityFSError,
+                  case .ambiguousLegacyFlag = parserError else {
                 return XCTFail("Expected ambiguous flag rejection, got \(error)")
             }
         }
@@ -78,7 +80,8 @@ final class AoVUnityFSParserTests: XCTestCase {
     func testRejectsCompressedMetadataModesNotYetImplemented() {
         let bundle = makeBundle(flags: 0x41)
         XCTAssertThrowsError(try AoVUnityFSParser.inspect(bundle)) { error in
-            guard case AoVUnityFSError.unsupportedInfoCompression(1) = error else {
+            guard let parserError = error as? AoVUnityFSError,
+                  case .unsupportedInfoCompression(1) = parserError else {
                 return XCTFail("Expected unsupported LZMA metadata, got \(error)")
             }
         }
@@ -86,7 +89,9 @@ final class AoVUnityFSParserTests: XCTestCase {
 
     func testRejectsDeclaredFileSizeMismatch() {
         var bundle = makeBundle()
-        bundle[bundle.count - 1] ^= 0x01
+        let sizeOffset = Data("UnityFS\\0".utf8).count +
+            4 + Data("5.0.0\\0".utf8).count + Data("2020.3.34f1\\0".utf8).count
+        bundle[sizeOffset + 7] ^= 0x01
         XCTAssertThrowsError(try AoVUnityFSParser.inspect(bundle))
     }
 
