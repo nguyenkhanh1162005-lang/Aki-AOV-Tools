@@ -77,6 +77,17 @@ final class AoVUnityTypeTreeParserTests: XCTestCase {
         } else {
             XCTFail("Payload should decode as TypelessData")
         }
+
+        let rewritten = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: value,
+            littleEndian: true
+        )
+        XCTAssertEqual(rewritten, data)
+        XCTAssertEqual(
+            try AoVUnityTypeTreeReader.read(nodes: nodes, data: rewritten, littleEndian: true).objectValue?["Lookup"]?.arrayValue,
+            nil
+        )
     }
 
     func testReadsBigEndianValuesAndAlignedString() throws {
@@ -178,7 +189,7 @@ final class AoVUnityTypeTreeParserTests: XCTestCase {
         guard case .object(let verifiedFields) = verified,
               case .object(let verifiedGameObject)? = verifiedFields["m_GameObject"],
               case .signed(9001)? = verifiedGameObject["m_PathID"],
-              case .array(let verifiedPointers)? = verifiedFields["Array"],
+              case .array(let verifiedPointers)? = verifiedFields["m_Pointers"],
               case .object(let verifiedFirstPointer)? = verifiedPointers.first,
               case .signed(9002)? = verifiedFirstPointer["m_PathID"] else {
             return XCTFail("Updated PPtr pathIDs were not preserved by TypeTree round-trip.")
