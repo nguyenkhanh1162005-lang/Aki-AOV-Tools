@@ -31,17 +31,17 @@ enum AoVSerializedFileObjectAppenderError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unsupportedFormat(let version):
-            return "Object appender chỉ hỗ trợ SerializedFile format 22–30, nhận (version)."
+            return "Object appender chỉ hỗ trợ SerializedFile format 22–30, nhận \\(version)."
         case .invalidSource(let reason):
-            return "SerializedFile nền không hợp lệ: (reason)"
+            return "SerializedFile nền không hợp lệ: \\(reason)"
         case .noObjects:
             return "Không có object mới để thêm."
         case .duplicatePathID(let id):
-            return "Batch import có pathID bị trùng: (id)."
+            return "Batch import có pathID bị trùng: \\(id)."
         case .objectAlreadyExists(let id):
-            return "SerializedFile nền đã có pathID (id)."
+            return "SerializedFile nền đã có pathID \\(id)."
         case .invalidType(let id, let classID):
-            return "TypeID (id) không tồn tại hoặc không khớp classID (classID)."
+            return "TypeID (id) không tồn tại hoặc không khớp classID \\(classID)."
         case .emptyPayload(let id):
             return "Object pathID (id) có payload rỗng."
         case .payloadTooLarge(let id):
@@ -195,7 +195,6 @@ enum AoVSerializedFileObjectAppender {
 
         // Object records use 4-byte alignment for pathID in SerializedFile v22+.
         metadata.align(4)
-        let objectRecordsStart = metadata.data.count
         var dataRegion = source.subdata(
             in: Int(summary.dataOffset)..<Int(summary.fileSize)
         )
@@ -226,19 +225,21 @@ enum AoVSerializedFileObjectAppender {
             throw AoVSerializedFileObjectAppenderError.resourceLimit
         }
 
-        var output = Data(source.prefix(summary.metadataStartOffset))
-        try metadata.patchUInt32BE(
-            at: summary.metadataSizeFieldOffset - summary.metadataStartOffset,
+        var header = AoVSerializedFileAppendWriter(littleEndian: false)
+        header.data = Data(source.prefix(summary.metadataStartOffset))
+        try header.patchUInt32BE(
+            at: summary.metadataSizeFieldOffset,
             value: metadataSizeUInt32
         )
-        try metadata.patchInt64BE(
-            at: summary.fileSizeFieldOffset - summary.metadataStartOffset,
+        try header.patchInt64BE(
+            at: summary.fileSizeFieldOffset,
             value: newFileSizeInt64
         )
-        try metadata.patchInt64BE(
-            at: summary.dataOffsetFieldOffset - summary.metadataStartOffset,
+        try header.patchInt64BE(
+            at: summary.dataOffsetFieldOffset,
             value: newDataOffsetInt64
         )
+        var output = header.data
         output.append(metadata.data)
         if output.count < newDataOffset {
             output.append(Data(repeating: 0, count: newDataOffset - output.count))
