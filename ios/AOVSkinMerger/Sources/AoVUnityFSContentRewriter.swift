@@ -26,6 +26,7 @@ struct AoVUnityFSContentRewriteReport: Sendable {
     let rewrittenBundleBytes: UInt64
     let repack: AoVUnityFSRepackReport
     let serializedFileRewrite: AoVSerializedFileRewriteReport?
+    let runtimeCatalogRewrite: AoVSerializedRuntimeCatalogWriteReport?
     let roundTripVerified: Bool
 }
 
@@ -89,6 +90,7 @@ enum AoVUnityFSContentRewriter {
             rewrittenBundleBytes: UInt64(report.data.count),
             repack: report,
             serializedFileRewrite: nil,
+            runtimeCatalogRewrite: nil,
             roundTripVerified: true
         )
     }
@@ -134,6 +136,7 @@ enum AoVUnityFSContentRewriter {
             rewrittenBundleBytes: UInt64(contentReport.data.count),
             repack: contentReport.repack,
             serializedFileRewrite: nil,
+            runtimeCatalogRewrite: serializedReport,
             roundTripVerified: contentReport.roundTripVerified && serializedReport.roundTripVerified
         )
     }
@@ -174,6 +177,7 @@ enum AoVUnityFSContentRewriter {
             rewrittenBundleBytes: UInt64(contentReport.data.count),
             repack: contentReport.repack,
             serializedFileRewrite: serializedReport,
+            runtimeCatalogRewrite: nil,
             roundTripVerified: contentReport.roundTripVerified && serializedReport.roundTripVerified
         )
     }
