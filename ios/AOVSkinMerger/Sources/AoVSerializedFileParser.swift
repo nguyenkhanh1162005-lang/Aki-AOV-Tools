@@ -71,6 +71,18 @@ struct AoVSerializedAssetBundleRecord: Codable, Equatable, Hashable, Sendable, I
     var id: Int64 { pathID }
 }
 
+struct AoVSerializedFileTypeInfo: Codable, Hashable, Sendable, Identifiable {
+    let typeID: Int
+    let classID: Int32
+    let stripped: Bool
+    let scriptTypeIndex: Int16
+    let scriptID: Data?
+    let oldTypeHash: Data
+    let typeTreeNodes: [AoVUnityTypeTreeNode]
+    let dependencies: [Int32]
+    var id: Int { typeID }
+}
+
 struct AoVSerializedFileSummary: Codable, Sendable {
     let formatVersion: UInt32
     let unityVersion: String
@@ -81,6 +93,7 @@ struct AoVSerializedFileSummary: Codable, Sendable {
     let fileSizeFieldOffset: Int
     let dataOffsetFieldOffset: Int
     let typeCount: Int
+    let serializedTypes: [AoVSerializedFileTypeInfo]
     let objectCount: Int
     let serializedObjects: [AoVSerializedFileObject]
     let assetBundleObjects: [AoVSerializedFileObject]
@@ -382,46 +395,66 @@ enum AoVSerializedFileParser {
 
         let typeCount = try reader.readCount("type count", maximum: maximumTypes)
         var classIDs: [Int32] = []
+        var serializedTypes: [AoVSerializedFileTypeInfo] = []
         classIDs.reserveCapacity(typeCount)
+        serializedTypes.reserveCapacity(typeCount)
 
         for index in 0..<typeCount {
             let classID = try reader.readInt32("type \(index) class ID")
+            let stripped = formatVersion >= 16
+                ? try reader.readByte("type \(index) stripped flag") != 0
+                : false
 
-            if formatVersion >= 16 {
-                _ = try reader.readByte("type \(index) stripped flag")
-            }
+            let scriptTypeIndex: Int16 = formatVersion >= 17
+                ? try reader.readInt16("type \(index) script type index")
+                : -1
 
-            var scriptTypeIndex: Int16 = -1
-            if formatVersion >= 17 {
-                scriptTypeIndex = try reader.readInt16("type \(index) script type index")
-            }
-
+            var scriptID: Data?
+            var oldTypeHash = Data()
             if formatVersion >= 13 {
                 let hasScriptID = (formatVersion < 16 && classID < 0) ||
                     (formatVersion >= 16 && classID == 114)
                 if hasScriptID {
-                    try reader.skip(16, "type \(index) script ID")
+                    scriptID = try reader.readBytes(16, "type \(index) script ID")
                 }
-                try reader.skip(16, "type \(index) old type hash")
+                oldTypeHash = try reader.readBytes(16, "type \(index) old type hash")
             }
 
-            if enableTypeTree {
-                try skipTypeTree(
+            let typeTreeNodes = enableTypeTree
+                ? try readTypeTree(
                     &reader,
                     formatVersion: formatVersion,
                     label: "type \(index)"
                 )
-            }
+                : []
 
+            var dependencies: [Int32] = []
             if formatVersion >= 21 {
-                // SerializedType dependencies; reference types instead carry three names.
-                // The normal type table uses the dependency array.
-                let dependencyCount = try reader.readCount("type \(index) dependency count", maximum: 1_000_000)
-                try reader.skip(dependencyCount * 4, "type \(index) dependencies")
+                let dependencyCount = try reader.readCount(
+                    "type \(index) dependency count",
+                    maximum: 1_000_000
+                )
+                dependencies.reserveCapacity(dependencyCount)
+                for dependencyIndex in 0..<dependencyCount {
+                    dependencies.append(
+                        try reader.readInt32("type \(index) dependency \(dependencyIndex)")
+                    )
+                }
             }
 
-            _ = scriptTypeIndex
             classIDs.append(classID)
+            serializedTypes.append(
+                AoVSerializedFileTypeInfo(
+                    typeID: index,
+                    classID: classID,
+                    stripped: stripped,
+                    scriptTypeIndex: scriptTypeIndex,
+                    scriptID: scriptID,
+                    oldTypeHash: oldTypeHash,
+                    typeTreeNodes: typeTreeNodes,
+                    dependencies: dependencies
+                )
+            )
         }
 
         var bigIDEnabled = false
@@ -625,6 +658,7 @@ enum AoVSerializedFileParser {
             fileSizeFieldOffset: fileSizeFieldOffset,
             dataOffsetFieldOffset: dataOffsetFieldOffset,
             typeCount: typeCount,
+            serializedTypes: serializedTypes,
             objectCount: objectCount,
             serializedObjects: serializedObjects,
             assetBundleObjects: assetBundleObjects,
@@ -793,42 +827,101 @@ enum AoVSerializedFileParser {
         return AoVSerializedAssetPointer(fileID: fileID, pathID: pathID)
     }
 
-    private static func skipTypeTree(
+    private static func readTypeTree(
         _ reader: inout AoVSerializedReader,
         formatVersion: UInt32,
         label: String
-    ) throws {
+    ) throws -> [AoVUnityTypeTreeNode] {
         if formatVersion >= 12 || formatVersion == 10 {
-            let nodeCount = try reader.readCount("\(label) type tree node count", maximum: maximumTypeTreeNodes)
+            let nodeCount = try reader.readCount(
+                "\(label) type tree node count",
+                maximum: maximumTypeTreeNodes
+            )
             let stringSize = try reader.readCount(
                 "\(label) type tree string buffer size",
                 maximum: maximumStringBufferBytes
             )
-            let nodeStride = formatVersion >= 19 ? 32 : 24
-            let nodeBytes = nodeCount.multipliedReportingOverflow(by: nodeStride)
-            guard !nodeBytes.overflow else {
-                throw AoVSerializedFileError.resourceLimit("\(label) type tree kích thước bị tràn.")
+
+            var rawNodes: [(version: UInt16, level: UInt8, typeFlags: UInt8,
+                            typeOffset: UInt32, nameOffset: UInt32, byteSize: Int32,
+                            index: Int32, metaFlags: UInt32)] = []
+            rawNodes.reserveCapacity(nodeCount)
+            for nodeIndex in 0..<nodeCount {
+                let version = try reader.readUInt16("\(label) node \(nodeIndex) version")
+                let level = try reader.readByte("\(label) node \(nodeIndex) level")
+                let typeFlags = try reader.readByte("\(label) node \(nodeIndex) type flags")
+                let typeOffset = try reader.readUInt32("\(label) node \(nodeIndex) type string offset")
+                let nameOffset = try reader.readUInt32("\(label) node \(nodeIndex) name string offset")
+                let byteSize = try reader.readInt32("\(label) node \(nodeIndex) byte size")
+                let index = try reader.readInt32("\(label) node \(nodeIndex) index")
+                let metaFlags = try reader.readUInt32("\(label) node \(nodeIndex) meta flags")
+                if formatVersion >= 19 {
+                    _ = try reader.readUInt64("\(label) node \(nodeIndex) reference type hash")
+                }
+                rawNodes.append((
+                    version, level, typeFlags, typeOffset, nameOffset,
+                    byteSize, index, metaFlags
+                ))
             }
-            try reader.skip(nodeBytes.partialValue, "\(label) type tree nodes")
-            try reader.skip(stringSize, "\(label) type tree strings")
-            return
+            let stringBuffer = try reader.readBytes(stringSize, "\(label) type tree string buffer")
+
+            func resolveString(_ rawOffset: UInt32, field: String) throws -> String {
+                if (rawOffset & 0x8000_0000) != 0 {
+                    let commonOffset = rawOffset & 0x7FFF_FFFF
+                    guard let common = AoVUnityCommonStrings.values[commonOffset] else {
+                        throw AoVSerializedFileError.invalidHeader(
+                            "\(label) references unknown common TypeTree string offset \(commonOffset) at \(field)."
+                        )
+                    }
+                    return common
+                }
+                guard let start = Int(exactly: rawOffset), start >= 0, start < stringBuffer.count else {
+                    throw AoVSerializedFileError.invalidHeader(
+                        "\(label) TypeTree string offset outside buffer at \(field)."
+                    )
+                }
+                let end = stringBuffer[start...].firstIndex(of: 0) ?? stringBuffer.endIndex
+                guard end > start,
+                      let value = String(data: stringBuffer.subdata(in: start..<end), encoding: .utf8) else {
+                    throw AoVSerializedFileError.invalidHeader(
+                        "\(label) TypeTree string is empty or invalid UTF-8 at \(field)."
+                    )
+                }
+                return value
+            }
+
+            return try rawNodes.enumerated().map { index, node in
+                AoVUnityTypeTreeNode(
+                    type: try resolveString(node.typeOffset, field: "node \(index) type"),
+                    name: try resolveString(node.nameOffset, field: "node \(index) name"),
+                    level: node.level,
+                    byteSize: node.byteSize,
+                    metaFlags: node.metaFlags
+                )
+            }
         }
 
         guard formatVersion < 12 else {
             throw AoVSerializedFileError.unsupportedTypeTreeVersion(formatVersion)
         }
 
-        var remainingNodes = 1
-        var parsed = 0
-        while remainingNodes > 0 {
-            parsed += 1
-            guard parsed <= maximumTypeTreeNodes else {
+        var remainingChildren = [1]
+        var nodes: [AoVUnityTypeTreeNode] = []
+        nodes.reserveCapacity(64)
+        while !remainingChildren.isEmpty {
+            while remainingChildren.last == 0 {
+                remainingChildren.removeLast()
+            }
+            guard !remainingChildren.isEmpty else { break }
+            guard nodes.count < maximumTypeTreeNodes else {
                 throw AoVSerializedFileError.resourceLimit("\(label) legacy type tree có quá nhiều node.")
             }
-            remainingNodes -= 1
-            _ = try reader.readCString("\(label) legacy node type")
-            _ = try reader.readCString("\(label) legacy node name")
-            _ = try reader.readInt32("\(label) legacy node byte size")
+
+            let level = UInt8(remainingChildren.count - 1)
+            remainingChildren[remainingChildren.count - 1] -= 1
+            let type = try reader.readCString("\(label) legacy node type")
+            let name = try reader.readCString("\(label) legacy node name")
+            let byteSize = try reader.readInt32("\(label) legacy node byte size")
             if formatVersion == 2 {
                 _ = try reader.readInt32("\(label) legacy variable count")
             }
@@ -836,17 +929,32 @@ enum AoVSerializedFileParser {
                 _ = try reader.readInt32("\(label) legacy node index")
             }
             _ = try reader.readInt32("\(label) legacy type flags")
-            _ = try reader.readInt32("\(label) legacy node version")
-            if formatVersion != 3 {
-                _ = try reader.readInt32("\(label) legacy meta flags")
+            let nodeVersion = try reader.readInt32("\(label) legacy node version")
+            let metaFlags = formatVersion != 3
+                ? UInt32(bitPattern: try reader.readInt32("\(label) legacy meta flags"))
+                : 0
+            let children = try reader.readCount(
+                "\(label) legacy child count",
+                maximum: maximumTypeTreeNodes
+            )
+            let pending = remainingChildren.reduce(0, +)
+            guard pending <= maximumTypeTreeNodes - nodes.count,
+                  children <= maximumTypeTreeNodes - nodes.count - pending else {
+                throw AoVSerializedFileError.resourceLimit("\(label) legacy type tree node count overflow.")
             }
-            let children = try reader.readCount("\(label) legacy child count", maximum: maximumTypeTreeNodes)
-            let next = remainingNodes.addingReportingOverflow(children)
-            guard !next.overflow else {
-                throw AoVSerializedFileError.resourceLimit("\(label) legacy node count overflow.")
-            }
-            remainingNodes = next.partialValue
+            nodes.append(
+                AoVUnityTypeTreeNode(
+                    type: type,
+                    name: name,
+                    level: level,
+                    byteSize: byteSize,
+                    metaFlags: metaFlags
+                )
+            )
+            if children > 0 { remainingChildren.append(children) }
+            _ = nodeVersion
         }
+        return nodes
     }
 
     private static func skipReferenceType(
