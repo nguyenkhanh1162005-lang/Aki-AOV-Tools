@@ -150,6 +150,26 @@ final class AoVUnityFSParserTests: XCTestCase {
         )
     }
 
+
+    func testExtractsNodeAcrossMultipleUnityFSBlocks() throws {
+        let first = Data([0x10, 0x20, 0x30, 0x40])
+        let second = Data([0x50, 0x60, 0x70, 0x80])
+        let bundle = makeMultiBlockBundle([first, second])
+        let extracted = try AoVUnityFSParser.extractNodes(bundle)
+
+        XCTAssertEqual(extracted.count, 1)
+        XCTAssertEqual(extracted.first?.path, "CAB-multi")
+        XCTAssertEqual(extracted.first?.data, first + second)
+    }
+
+    func testExtractsLZ4HCBlockWithSameDecoder() throws {
+        let payload = Data("unity-lz4hc".utf8)
+        let bundle = makeBundle(blockCompression: 3, blockPayload: payload)
+        let extracted = try AoVUnityFSParser.extractNodes(bundle)
+
+        XCTAssertEqual(extracted.first?.data, payload)
+    }
+
     private func makeBundle(
         formatVersion: UInt32 = 6,
         engineVersion: String = "2020.3.34f1",
@@ -222,6 +242,39 @@ final class AoVUnityFSParserTests: XCTestCase {
         let totalSize = UInt64(bundle.count)
         var encodedSize = Data()
         appendBE(totalSize, to: &encodedSize)
+        bundle.replaceSubrange(sizeOffset..<(sizeOffset + 8), with: encodedSize)
+        return bundle
+    }
+
+
+    private func makeMultiBlockBundle(_ blocks: [Data]) -> Data {
+        var blockInfo = Data(repeating: 0, count: 16)
+        appendBE(UInt32(blocks.count), to: &blockInfo)
+        for block in blocks {
+            appendBE(UInt32(block.count), to: &blockInfo)
+            appendBE(UInt32(block.count), to: &blockInfo)
+            appendBE(UInt16(0), to: &blockInfo)
+        }
+        appendBE(UInt32(1), to: &blockInfo)
+        appendBE(UInt64(0), to: &blockInfo)
+        appendBE(UInt64(blocks.reduce(0) { $0 + $1.count }), to: &blockInfo)
+        appendBE(UInt32(0), to: &blockInfo)
+        blockInfo.append(Data("CAB-multi\0".utf8))
+
+        var bundle = Data("UnityFS\0".utf8)
+        appendBE(UInt32(6), to: &bundle)
+        bundle.append(Data("5.0.0\0".utf8))
+        bundle.append(Data("2020.3.34f1\0".utf8))
+        let sizeOffset = bundle.count
+        appendBE(UInt64(0), to: &bundle)
+        appendBE(UInt32(blockInfo.count), to: &bundle)
+        appendBE(UInt32(blockInfo.count), to: &bundle)
+        appendBE(UInt32(0x40), to: &bundle)
+        bundle.append(blockInfo)
+        for block in blocks { bundle.append(block) }
+
+        var encodedSize = Data()
+        appendBE(UInt64(bundle.count), to: &encodedSize)
         bundle.replaceSubrange(sizeOffset..<(sizeOffset + 8), with: encodedSize)
         return bundle
     }
