@@ -10,6 +10,9 @@ packages:
   zstd:
     url: https://github.com/meta/zstd.git
     revision: a599a71c4cf5d142ffce772c0d16a5a7b755d83c
+  SWCompression:
+    url: https://github.com/tsolomko/SWCompression.git
+    from: 4.9.1
 targets:
   AOVSkinMerger:
     type: application
@@ -20,6 +23,8 @@ targets:
       - package: ZIPFoundation
       - package: zstd
         product: libzstd
+      - package: SWCompression
+        product: SWCompression
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aki.aovskinmerger
