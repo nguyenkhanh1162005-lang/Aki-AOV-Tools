@@ -357,7 +357,8 @@ final class AoVSerializedFileParserTests: XCTestCase {
             formatVersion: 8,
             playerVersion: "5.0.0",
             engineVersion: "2020.3.34f1",
-            blockInfoLayout: .arenaOfValor
+            blockInfoLayout: .arenaOfValor,
+            aovEncryption: true
         )
 
         let report = try AoVUnityFSAssetBundleMergeExecutor.mergeBatch(
