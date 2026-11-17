@@ -86,6 +86,8 @@ struct AoVSerializedFileSummary: Codable, Sendable {
     let assetBundleObjects: [AoVSerializedFileObject]
     let externalReferences: [AoVSerializedFileExternalReference]
     let assetBundleRecords: [AoVSerializedAssetBundleRecord]
+    let resourcePackerCatalog: AoVRuntimeResourcePackerCatalog?
+    let resourceVerificationCatalog: AoVRuntimeResourceVerificationCatalog?
 
     var serializedObjectPathIDs: Set<Int64> {
         Set(serializedObjects.map(\.pathID))
@@ -581,6 +583,38 @@ enum AoVSerializedFileParser {
             )
         }
 
+        var resourcePackerCatalog: AoVRuntimeResourcePackerCatalog?
+        var resourceVerificationCatalog: AoVRuntimeResourceVerificationCatalog?
+        for object in serializedObjects where object.classID == 114 {
+            guard object.byteSize > 0, object.byteSize <= 64 * 1024 * 1024,
+                  let start = Int(exactly: object.byteOffset),
+                  let size = Int(exactly: object.byteSize),
+                  start <= data.count, size <= data.count - start else {
+                throw AoVSerializedFileError.invalidObjectRange(object.pathID)
+            }
+            let payload = data.subdata(in: start..<(start + size))
+            guard let catalog = try AoVRuntimeResourceCatalogParser.inspectMonoBehaviour(
+                payload,
+                serializedFormatVersion: formatVersion,
+                unityVersion: unityVersion,
+                littleEndian: reader.littleEndian
+            ) else {
+                continue
+            }
+            switch catalog {
+            case .packer(let parsed):
+                guard resourcePackerCatalog == nil else {
+                    throw AoVSerializedFileError.invalidHeader("Có nhiều ResourcePackerInfoSetXML catalog trong cùng SerializedFile.")
+                }
+                resourcePackerCatalog = parsed
+            case .verification(let parsed):
+                guard resourceVerificationCatalog == nil else {
+                    throw AoVSerializedFileError.invalidHeader("Có nhiều ResourceVerificationInfoSetXML catalog trong cùng SerializedFile.")
+                }
+                resourceVerificationCatalog = parsed
+            }
+        }
+
         return AoVSerializedFileSummary(
             formatVersion: formatVersion,
             unityVersion: unityVersion,
@@ -595,7 +629,9 @@ enum AoVSerializedFileParser {
             serializedObjects: serializedObjects,
             assetBundleObjects: assetBundleObjects,
             externalReferences: externalReferences,
-            assetBundleRecords: assetBundleRecords
+            assetBundleRecords: assetBundleRecords,
+            resourcePackerCatalog: resourcePackerCatalog,
+            resourceVerificationCatalog: resourceVerificationCatalog
         )
     }
 
