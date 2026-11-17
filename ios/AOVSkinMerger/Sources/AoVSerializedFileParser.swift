@@ -67,6 +67,7 @@ struct AoVSerializedAssetBundleRecord: Codable, Equatable, Hashable, Sendable, I
     let dependencies: [String]
     let isStreamedSceneAssetBundle: Bool
     let trailingBytes: Int
+    let trailingData: Data
     var id: Int64 { pathID }
 }
 
@@ -731,7 +732,8 @@ enum AoVSerializedFileParser {
             assetBundleName: assetBundleName,
             dependencies: dependencies,
             isStreamedSceneAssetBundle: isStreamedSceneAssetBundle,
-            trailingBytes: data.count - reader.offset
+            trailingBytes: data.count - reader.offset,
+            trailingData: data.subdata(in: reader.offset..<data.count)
         )
     }
 
