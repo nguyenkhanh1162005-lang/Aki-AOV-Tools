@@ -256,11 +256,14 @@ enum AoVRuntimeCatalogComparator {
             } else if legacyRows.isEmpty {
                 currentOnly += 1
                 difference = .currentOnly
+            } else if distinctLegacy.count > 1 {
+                // Even when the path is absent from RES, multiple MODs that
+                // provide different catalog values are a conflict, not a
+                // clean legacy-only addition.
+                difference = .conflictingLegacy
             } else if currentRows.isEmpty {
                 legacyOnly += 1
                 difference = .legacyOnly
-            } else if distinctLegacy.count > 1 {
-                difference = .conflictingLegacy
             } else if currentRows.first == distinctLegacy.first {
                 identical += 1
                 difference = .identical
