@@ -47,6 +47,52 @@ final class AoVModArchiveMergerTests: XCTestCase {
                        "Opaque .bytes payload should be stored without wasteful DEFLATE compression.")
     }
 
+    func testMergePreservesStoredAndDeflatedSourceEntryMethods() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Compression-Preservation-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("base.zip")
+        let overlayURL = root.appendingPathComponent("overlay.zip")
+        let repetitive = Data(repeating: 0x41, count: 64 * 1024)
+        let raw = Data((0..<4096).map { UInt8(($0 * 37) & 0xFF) })
+
+        try makeArchive(
+            baseURL,
+            entries: [
+                ("version.txt", Data("1.64.3.2\n".utf8)),
+                ("Data/repetitive-config.bin", repetitive)
+            ],
+            root: root,
+            compressionMethod: .deflate
+        )
+        try makeArchive(
+            overlayURL,
+            entries: [
+                ("version.txt", Data("1.64.3.2\n".utf8)),
+                ("Skins/Actor_731/opaque.bytes", raw)
+            ],
+            root: root,
+            compressionMethod: .none
+        )
+
+        let report = try AoVModArchiveMerger.merge(
+            [baseURL, overlayURL],
+            baseURL: baseURL
+        )
+        let output = try Archive(url: report.outputURL, accessMode: .read)
+        let compressedEntry = try XCTUnwrap(output.first(where: {
+            $0.type == .file && $0.path == "Data/repetitive-config.bin"
+        }))
+        let storedEntry = try XCTUnwrap(output.first(where: {
+            $0.type == .file && $0.path == "Skins/Actor_731/opaque.bytes"
+        }))
+
+        XCTAssertLessThan(compressedEntry.compressedSize, compressedEntry.uncompressedSize)
+        XCTAssertEqual(storedEntry.compressedSize, storedEntry.uncompressedSize)
+    }
+
     func testMergesSkinResourcesFromSeveralUnlistedActorPackages() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-Multi-Actor-Test-\(UUID().uuidString)", isDirectory: true)
