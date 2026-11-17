@@ -168,6 +168,7 @@ enum AoVModRemakeExporter {
 
         var payloadByArchivePath: [String: AoVModRemakeResourcePayload] = [:]
         var payloadByIFSPath: [String: AoVModRemakeResourcePayload] = [:]
+        var payloadArchivePathByNormalizedPath: [String: String] = [:]
         var totalPayloadBytes: UInt64 = 0
         for payload in resourcePayloads {
             let archivePath = try normalizeArchivePath(payload.archivePath)
@@ -177,7 +178,7 @@ enum AoVModRemakeExporter {
                   !ifsPath.split(separator: "/").contains(".") else {
                 throw AoVModRemakeExporterError.invalidRuntimePath(payload.ifsPath)
             }
-            guard payload.data.count <= Int(maximumSingleEntry) else {
+            guard UInt64(payload.data.count) <= maximumSingleEntry else {
                 throw AoVModRemakeExporterError.resourceTooLarge(archivePath)
             }
             guard payloadByArchivePath[archivePath] == nil else {
@@ -197,6 +198,7 @@ enum AoVModRemakeExporter {
             totalPayloadBytes = next.partialValue
             payloadByArchivePath[archivePath] = payload
             payloadByIFSPath[ifsPath] = payload
+            payloadArchivePathByNormalizedPath[archivePath] = payload.archivePath
         }
 
         let assetBundleIFSPaths = Set(payloadByIFSPath.keys.filter {
@@ -282,6 +284,7 @@ enum AoVModRemakeExporter {
                 baseArchive: resourceArchive,
                 baseEntries: resourceEntries,
                 replacements: finalPayloads,
+                additionArchivePaths: payloadArchivePathByNormalizedPath,
                 outputURL: stagedInnerURL,
                 tempRoot: tempRoot
             )
@@ -303,6 +306,7 @@ enum AoVModRemakeExporter {
                 baseArchive: resourceArchive,
                 baseEntries: resourceEntries,
                 replacements: finalPayloads,
+                additionArchivePaths: payloadArchivePathByNormalizedPath,
                 outputURL: stagedOutputURL,
                 tempRoot: tempRoot
             )
@@ -326,8 +330,8 @@ enum AoVModRemakeExporter {
         return AoVModRemakeExportReport(
             outputURL: finalURL,
             baseRESName: baseRESURL.lastPathComponent,
-            replacedResources: resourcePayloads.filter { resourceEntryByPath[try! normalizeArchivePath($0.archivePath)] != nil }.count + 2,
-            addedResources: resourcePayloads.filter { resourceEntryByPath[try! normalizeArchivePath($0.archivePath)] == nil }.count,
+            replacedResources: payloadByArchivePath.keys.filter { resourceEntryByPath[$0] != nil }.count + 2,
+            addedResources: payloadByArchivePath.keys.filter { resourceEntryByPath[$0] == nil }.count,
             packerAddedPaths: packerOutput.plan.addedPaths,
             packerUpdatedPaths: packerOutput.plan.updatedPaths,
             verificationAddedZIPPaths: verificationOutput.plan.addedZIPPaths,
@@ -454,6 +458,7 @@ enum AoVModRemakeExporter {
         baseArchive: Archive,
         baseEntries: [Entry],
         replacements: [String: Data],
+        additionArchivePaths: [String: String],
         outputURL: URL,
         tempRoot: URL
     ) throws {
@@ -475,12 +480,13 @@ enum AoVModRemakeExporter {
             emitted.insert(path)
         }
         for (path, payload) in replacements where !emitted.contains(path) {
+            let archivePath = additionArchivePaths[path] ?? path
             try addData(
                 payload,
                 to: output,
-                path: path,
+                path: archivePath,
                 tempRoot: tempRoot,
-                compressionMethod: storageMethod(forNewPath: path)
+                compressionMethod: storageMethod(forNewPath: archivePath)
             )
             emitted.insert(path)
         }
@@ -502,7 +508,7 @@ enum AoVModRemakeExporter {
                 try output.addEntry(
                     with: entry.path,
                     fileURL: innerArchiveURL,
-                    compressionMethod: .none,
+                    compressionMethod: storageMethod(for: entry),
                     bufferSize: 64 * 1024
                 )
                 continue
