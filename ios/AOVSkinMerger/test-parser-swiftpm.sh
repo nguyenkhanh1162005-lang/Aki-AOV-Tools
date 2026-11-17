@@ -16,7 +16,6 @@ cp "$SCRIPT_DIR/Sources/AoVSerializedAssetBundleWriter.swift" \
 cp "$SCRIPT_DIR/Sources/AoVAssetBundleCatalogMerger.swift" \
    "$SOURCE_DIR/AoVAssetBundleCatalogMerger.swift"
 test -s "$SOURCE_DIR/AoVSerializedAssetBundleWriter.swift"
-swift package describe --package-path "$PACKAGE_DIR"
 cp "$SCRIPT_DIR/Tests/AoVSerializedFileParserTests.swift" \
    "$TEST_DIR/AoVSerializedFileParserTests.swift"
 cp "$SCRIPT_DIR/Tests/AoVRuntimeResourceCatalogParserTests.swift" \
@@ -38,4 +37,5 @@ cp "$SCRIPT_DIR/Tests/AoVRuntimeCatalogMergePlannerTests.swift" \
 cp "$SCRIPT_DIR/ParserPackageTests/AoVSerializedRuntimeCatalogWriterPortableTests.swift" \
    "$TEST_DIR/AoVSerializedRuntimeCatalogWriterPortableTests.swift"
 
+swift package describe --package-path "$PACKAGE_DIR"
 swift test --package-path "$PACKAGE_DIR" --parallel
