@@ -46,6 +46,7 @@ enum AoVModRemakeExporterError: LocalizedError {
     case unusedFinalPackerEntry(String)
     case unusedFinalChecksum(String)
     case catalogMergeFailed(String)
+    case catalogVersionMismatch(String, String, String)
     case integrityFailure(String)
 
     var errorDescription: String? {
@@ -86,6 +87,8 @@ enum AoVModRemakeExporterError: LocalizedError {
             return "Checksum cuối \(path) không có payload tài nguyên tương ứng trong batch."
         case .catalogMergeFailed(let reason):
             return "Không thể cập nhật Packer/Verification runtime catalog: \(reason)"
+        case .catalogVersionMismatch(let kind, let sourceVersion, let baseVersion):
+            return "\(kind) catalog nguồn có version \(sourceVersion), khác catalog RES nền \(baseVersion)."
         case .integrityFailure(let reason):
             return "RES sau khi xuất không vượt qua kiểm tra toàn vẹn: \(reason)"
         }
@@ -275,16 +278,44 @@ enum AoVModRemakeExporter {
 
         let packerData = try readEntry(resourceArchive, packerMatches[0], maxBytes: maximumSingleEntry)
         let verificationData = try readEntry(resourceArchive, verificationMatches[0], maxBytes: maximumSingleEntry)
+        let packerTarget: AoVUnityFSRuntimeCatalogTarget
+        let verificationTarget: AoVUnityFSRuntimeCatalogTarget
+        do {
+            packerTarget = try AoVUnityFSRuntimeCatalogMergeExecutor.locatePackerCatalog(in: packerData)
+            verificationTarget = try AoVUnityFSRuntimeCatalogMergeExecutor.locateVerificationCatalog(
+                in: verificationData
+            )
+        } catch {
+            throw AoVModRemakeExporterError.catalogMergeFailed(error.localizedDescription)
+        }
+        guard case .packer(let currentPackerCatalog) = packerTarget.catalog,
+              case .verification(let currentVerificationCatalog) = verificationTarget.catalog else {
+            throw AoVModRemakeExporterError.catalogMergeFailed("Catalog RES không đúng loại.")
+        }
+        for source in legacyPackerCatalogs where source.catalog.version != currentPackerCatalog.version {
+            throw AoVModRemakeExporterError.catalogVersionMismatch(
+                "Packer", source.catalog.version, currentPackerCatalog.version
+            )
+        }
+        for source in legacyVerificationCatalogs where source.catalog.version != currentVerificationCatalog.version {
+            throw AoVModRemakeExporterError.catalogVersionMismatch(
+                "Verification", source.catalog.version, currentVerificationCatalog.version
+            )
+        }
         let packerOutput: AoVUnityFSRuntimePackerMergeExecutionReport
         let verificationOutput: AoVUnityFSRuntimeVerificationMergeExecutionReport
         do {
             packerOutput = try AoVUnityFSRuntimeCatalogMergeExecutor.mergePacker(
                 in: packerData,
+                serializedFileNodePath: packerTarget.nodePath,
+                objectPathID: packerTarget.objectPathID,
                 legacy: legacyPackerCatalogs,
                 verifiedFinalEntries: verifiedFinalPackerEntries
             )
             verificationOutput = try AoVUnityFSRuntimeCatalogMergeExecutor.mergeVerification(
                 in: verificationData,
+                serializedFileNodePath: verificationTarget.nodePath,
+                objectPathID: verificationTarget.objectPathID,
                 legacy: legacyVerificationCatalogs,
                 verifiedFinalDatabinChecksumValues: verifiedFinalDatabinChecksumValues,
                 verifiedFinalZIPChecksumValues: verifiedFinalZIPChecksumValues
