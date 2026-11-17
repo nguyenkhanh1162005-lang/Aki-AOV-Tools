@@ -62,7 +62,9 @@ enum AoVAssetBundleCatalogMerger {
         currentSerializedFile: AoVSerializedFileSummary,
         legacySerializedFile: AoVSerializedFileSummary,
         availableCurrentBundleNames: Set<String>,
-        verifiedExternalTargetPathIDs: [String: Set<Int64>] = [:]
+        verifiedExternalTargetPathIDs: [String: Set<Int64>] = [:],
+        importedLocalPathIDMap: [Int64: Int64] = [:],
+        availableImportedLocalPathIDs: Set<Int64> = []
     ) throws -> AoVAssetBundleCatalogMergePlan {
         guard identity(for: current) == identity(for: legacy) else {
             throw AoVAssetBundleCatalogMergeError.bundleIdentityMismatch
@@ -135,7 +137,9 @@ enum AoVAssetBundleCatalogMerger {
                     field: "\(legacyEntry.key).preload[\(index)]",
                     from: legacySerializedFile,
                     to: currentSerializedFile,
-                    verifiedExternalTargetPathIDs: verifiedExternalTargetPathIDs
+                    verifiedExternalTargetPathIDs: verifiedExternalTargetPathIDs,
+                    importedLocalPathIDMap: importedLocalPathIDMap,
+                    availableImportedLocalPathIDs: availableImportedLocalPathIDs
                 )
                 remappedPreloads.append(result.pointer)
                 if result.wasExternal {
@@ -153,7 +157,9 @@ enum AoVAssetBundleCatalogMerger {
                 field: "\(legacyEntry.key).asset",
                 from: legacySerializedFile,
                 to: currentSerializedFile,
-                    verifiedExternalTargetPathIDs: verifiedExternalTargetPathIDs
+                verifiedExternalTargetPathIDs: verifiedExternalTargetPathIDs,
+                importedLocalPathIDMap: importedLocalPathIDMap,
+                availableImportedLocalPathIDs: availableImportedLocalPathIDs
             )
             if remappedAsset.wasExternal {
                 externalRemaps += 1
@@ -254,7 +260,9 @@ enum AoVAssetBundleCatalogMerger {
         field: String,
         from source: AoVSerializedFileSummary,
         to destination: AoVSerializedFileSummary,
-        verifiedExternalTargetPathIDs: [String: Set<Int64>]
+        verifiedExternalTargetPathIDs: [String: Set<Int64>],
+        importedLocalPathIDMap: [Int64: Int64],
+        availableImportedLocalPathIDs: Set<Int64>
     ) throws -> (pointer: AoVSerializedAssetPointer, wasExternal: Bool, targetAudited: Bool) {
         guard pointer.fileID >= 0 else {
             throw AoVAssetBundleCatalogMergeError.unresolvedExternalReference(field)
@@ -263,10 +271,27 @@ enum AoVAssetBundleCatalogMerger {
             if pointer.pathID == 0 {
                 return (pointer, false, false)
             }
-            guard destination.serializedObjectPathIDs.contains(pointer.pathID) else {
+            guard source.serializedObjectPathIDs.contains(pointer.pathID) else {
                 throw AoVAssetBundleCatalogMergeError.unresolvedLocalPointer(field)
             }
-            return (pointer, false, false)
+            let mappedPathID: Int64
+            if importedLocalPathIDMap.isEmpty {
+                mappedPathID = pointer.pathID
+            } else {
+                guard let mapped = importedLocalPathIDMap[pointer.pathID] else {
+                    throw AoVAssetBundleCatalogMergeError.unresolvedLocalPointer(field)
+                }
+                mappedPathID = mapped
+            }
+            guard destination.serializedObjectPathIDs.contains(mappedPathID) ||
+                  availableImportedLocalPathIDs.contains(mappedPathID) else {
+                throw AoVAssetBundleCatalogMergeError.unresolvedLocalPointer(field)
+            }
+            return (
+                AoVSerializedAssetPointer(fileID: 0, pathID: mappedPathID),
+                false,
+                false
+            )
         }
 
         guard pointer.pathID != 0,
