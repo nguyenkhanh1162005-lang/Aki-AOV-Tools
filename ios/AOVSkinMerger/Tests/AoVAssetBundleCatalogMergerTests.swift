@@ -267,6 +267,7 @@ final class AoVAssetBundleCatalogMergerTests: XCTestCase {
             fileSizeFieldOffset: 4,
             dataOffsetFieldOffset: 12,
             typeCount: 1,
+            serializedTypes: [],
             objectCount: localPathIDs.count,
             serializedObjects: objects,
             assetBundleObjects: [],
