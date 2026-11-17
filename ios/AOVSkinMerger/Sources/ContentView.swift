@@ -312,6 +312,7 @@ struct ContentView: View {
             Divider().overlay(.white.opacity(0.12))
             catalogComparisonView("Packer Catalog", report.packerCatalogComparison)
             catalogComparisonView("Verification Catalog", report.verificationCatalogComparison)
+            catalogMergePlanView(report.catalogMergePlanFindings)
 
             if !report.legacyVersions.isEmpty {
                 Divider().overlay(.white.opacity(0.12))
@@ -432,6 +433,89 @@ struct ContentView: View {
             }
             Text("Các ánh xạ này là ứng viên phân tích, không phải lệnh ghi pointer cũ sang catalog mới.")
                 .font(.caption2).foregroundColor(.orange)
+        }
+    }
+
+    private func catalogMergePlanView(_ findings: [AoVRemakeCatalogPlanFinding]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Kế hoạch ghép catalog thử")
+                .font(.subheadline.weight(.semibold))
+            metric("Bundle có ứng viên ghép", "\(findings.filter { $0.status == .candidate || $0.status == .requiresExternalTargetAudit }.count)")
+            metric("Bundle bị chặn / không khớp", "\(findings.filter { $0.status == .blocked || $0.status == .missingCurrentBundle || $0.status == .ambiguousCurrentBundle }.count)")
+            metric("Bundle cần audit external CAB", "\(findings.filter { $0.status == .requiresExternalTargetAudit }.count)")
+            metric("Bundle không có thay đổi", "\(findings.filter { $0.status == .noChanges }.count)")
+
+            ForEach(Array(findings.prefix(16)), id: \.id) { finding in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(finding.bundleName)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                        Spacer()
+                        Text(catalogPlanStatusText(finding.status))
+                            .font(.caption2)
+                            .foregroundColor(catalogPlanStatusColor(finding.status))
+                    }
+                    Text("\(finding.kind.displayName) · nguồn: \(finding.sourceArchives.joined(separator: ", "))")
+                        .font(.caption2).foregroundColor(.secondary)
+                    if !finding.addedContainerKeys.isEmpty {
+                        Text("Sẽ thêm: " + finding.addedContainerKeys.prefix(6).joined(separator: ", "))
+                            .font(.caption2.monospaced()).foregroundColor(.green)
+                    }
+                    if !finding.alreadyPresentContainerKeys.isEmpty {
+                        Text("Giữ theo RES: " + finding.alreadyPresentContainerKeys.prefix(6).joined(separator: ", "))
+                            .font(.caption2.monospaced()).foregroundColor(.secondary)
+                    }
+                    if !finding.addedDependencies.isEmpty {
+                        Text("Dependency cần thêm: " + finding.addedDependencies.joined(separator: ", "))
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                    if finding.remappedExternalPointerCount > 0 {
+                        Text("External pointer đã đổi fileID: \(finding.remappedExternalPointerCount), cần kiểm tra object đích trong CAB được tham chiếu.")
+                            .font(.caption2).foregroundColor(.orange)
+                    }
+                    if !finding.externalTargetAuditSamples.isEmpty {
+                        Text("Cần audit: " + finding.externalTargetAuditSamples.prefix(4).joined(separator: ", "))
+                            .font(.caption2.monospaced()).foregroundColor(.orange)
+                    }
+                    if !finding.reasons.isEmpty {
+                        ForEach(Array(finding.reasons.prefix(3).enumerated()), id: \.offset) { _, reason in
+                            Text(reason).font(.caption2).foregroundColor(.orange)
+                        }
+                    }
+                    if let nodePath = finding.currentNodePath {
+                        Text("RES node: \(nodePath) · object pathID \(finding.currentObjectPathID ?? 0)")
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+                Divider().overlay(.white.opacity(0.08))
+            }
+            if findings.count > 16 {
+                Text("Hiển thị 16 / \(findings.count) kế hoạch.")
+                    .font(.caption2).foregroundColor(.secondary)
+            }
+            Text("Đây là kế hoạch merge candidate, chưa ghi vào Packer/Verification và chưa xuất ZIP remake.")
+                .font(.caption2.weight(.semibold)).foregroundColor(.orange)
+        }
+    }
+
+    private func catalogPlanStatusText(_ status: AoVRemakeCatalogPlanStatus) -> String {
+        switch status {
+        case .candidate: return "Ứng viên"
+        case .requiresExternalTargetAudit: return "Cần audit CAB"
+        case .noChanges: return "Không đổi"
+        case .missingCurrentBundle: return "Thiếu trong RES"
+        case .ambiguousCurrentBundle: return "Trùng tên"
+        case .blocked: return "Bị chặn"
+        }
+    }
+
+    private func catalogPlanStatusColor(_ status: AoVRemakeCatalogPlanStatus) -> Color {
+        switch status {
+        case .candidate: return .green
+        case .requiresExternalTargetAudit, .blocked, .missingCurrentBundle, .ambiguousCurrentBundle: return .orange
+        case .noChanges: return .secondary
         }
     }
 
