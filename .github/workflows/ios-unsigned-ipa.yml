@@ -1,10 +1,18 @@
 name: Build iOS unsigned IPA
 
 on:
-  # Build a fresh unsigned IPA whenever the iOS prototype branch changes.
   push:
     branches:
       - feat/ios-offline-app-prototype
+    paths:
+      - 'ios/AOVSkinMerger/**'
+      - '.github/workflows/ios-unsigned-ipa.yml'
+  pull_request:
+    branches:
+      - feat/multi-actor-aov-archive-merge
+    paths:
+      - 'ios/AOVSkinMerger/**'
+      - '.github/workflows/ios-unsigned-ipa.yml'
   workflow_dispatch:
 
 permissions:
@@ -47,7 +55,7 @@ jobs:
           sips -s format png -z 1024 1024 "$ICON_OUTPUT" --out "$ICON_DIR/AppIcon.png"
           test -s "$ICON_DIR/AppIcon.png"
 
-          # Install the user-supplied AKI hero artwork into the asset catalog.
+          # Install the supplied AKI hero artwork into the asset catalog.
           HERO_DIR="ios/AOVSkinMerger/Sources/Assets.xcassets/AkiHero.imageset"
           mkdir -p "$HERO_DIR"
           python3 - <<'PY'

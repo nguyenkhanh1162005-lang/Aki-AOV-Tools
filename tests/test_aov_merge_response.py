@@ -32,7 +32,7 @@ class AOVMergeResponseTests(unittest.IsolatedAsyncioTestCase):
             try:
                 with patch(
                     "app.main.run_in_threadpool",
-                    new=AsyncMock(side_effect=lambda fn, *args: fake_merge(*args)),
+                    new=AsyncMock(side_effect=lambda _guard, fn, *args: fake_merge(*args)),
                 ):
                     response = await main.merge_aov_chunked_upload(upload_id)
 

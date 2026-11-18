@@ -6,6 +6,7 @@ import os
 import zipfile
 import shutil
 import tempfile
+import threading
 import time
 import uuid
 import zlib
@@ -36,6 +37,23 @@ UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 UPLOAD_SESSIONS: dict[str, dict] = {}
 UPLOAD_TTL_SECONDS = 3600
 MAX_ACTIVE_UPLOAD_SESSIONS = 8
+HEAVY_JOB_LOCK = threading.Lock()
+
+
+def _run_guarded_heavy_job(function, *args, **kwargs):
+    """Run one memory-heavy archive task at a time on the 512 MiB free instance."""
+    if not HEAVY_JOB_LOCK.acquire(blocking=False):
+        raise HTTPException(429, "Máy chủ đang xử lý một tác vụ MOD khác. Hãy đợi tác vụ đó kết thúc rồi thử lại.")
+    try:
+        return function(*args, **kwargs)
+    finally:
+        HEAVY_JOB_LOCK.release()
+
+
+def _build_compatibility_report(paths: list[str]):
+    manifest = build_resource_manifest(paths)
+    plan = plan_resource_compatibility(manifest["resources"])
+    return manifest, plan
 
 
 _AOV_DOWNLOAD_FILENAMES = {
@@ -735,7 +753,7 @@ async def preflight_chunked_aov_upload(upload_id: str):
     if any(item["received"] != item["size"] for item in session["files"]):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
     try:
-        report = await run_in_threadpool(analyze_aov_input_set, session["paths"])
+        report = await run_in_threadpool(_run_guarded_heavy_job, analyze_aov_input_set, session["paths"])
         session["created"] = time.time()
         _persist_upload_session(upload_id, session)
         return report
@@ -750,8 +768,7 @@ async def inspect_chunked_compatibility(upload_id: str):
     if any(item["received"] != item["size"] for item in session["files"]):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
     try:
-        manifest = await run_in_threadpool(build_resource_manifest, session["paths"])
-        plan = await run_in_threadpool(plan_resource_compatibility, manifest["resources"])
+        manifest, plan = await run_in_threadpool(_run_guarded_heavy_job, _build_compatibility_report, session["paths"])
         session["created"] = time.time()
         _persist_upload_session(upload_id, session)
         return {
@@ -771,7 +788,8 @@ async def scan_chunked_aov_notices(upload_id: str):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
     try:
         report = await run_in_threadpool(
-            decode_archive_resources, session["paths"], "", scan_only=True
+            _run_guarded_heavy_job, decode_archive_resources,
+            session["paths"], "", scan_only=True
         )
     except AOVBytesArchiveError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -821,13 +839,14 @@ async def scan_chunked_aov_notices(upload_id: str):
         "notice_assetbundles_skipped": report.get("notice_assetbundles_skipped", 0),
         "notice_assetbundle_scan_errors": report.get("notice_assetbundle_scan_errors", []),
         "unsupported_resources": len(report.get("unsupported", [])),
+        "oversized_entries_skipped": report.get("oversized_entries_skipped", 0),
         "nested_packages_expanded": report.get("nested_packages_expanded", 0),
         "scope": report.get("notice_scan_scope", ""),
         "warning": (
             "Đây là quét từ khóa chỉ đọc, không chứng minh chuỗi tìm được là popup "
-            "đang hiển thị. AssetBundle UnityFS được quét metadata có giới hạn; bundle quá lớn, "
-            "payload nhị phân opaque và định dạng chưa giải mã có thể bị bỏ qua. "
-            "Chế độ quét giới hạn 256 MiB dữ liệu .bytes đã giải mã và không ghi ZIP tạm. "
+            "đang hiển thị. AssetBundle UnityFS được quét metadata có giới hạn; bundle quá 16 MiB và entry quá 16 MiB sẽ bị bỏ qua, "
+            "payload nhị phân opaque và định dạng chưa giải mã có thể bị bỏ qua. Số entry quá lớn bị bỏ qua được trả trong báo cáo. "
+            "Chế độ quét giới hạn 48 MiB dữ liệu .bytes đã giải mã, tối đa 100 object mỗi bundle và không ghi ZIP tạm. "
             "Chỉ các script thuộc luồng login/startup mới được gắn nhãn ứng viên; "
             "commercializenotify và các bảng billboard được phân loại bảo vệ riêng. "
             "GameEntryControl/LobbyView/CLobbySystem có thể được nhận diện header Lua tùy biến "
@@ -845,7 +864,8 @@ async def scan_chunked_aov_branding(upload_id: str):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
     try:
         report = await run_in_threadpool(
-            decode_archive_resources, session["paths"], "", scan_only=True
+            _run_guarded_heavy_job, decode_archive_resources,
+            session["paths"], "", scan_only=True
         )
     except AOVBytesArchiveError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -858,13 +878,14 @@ async def scan_chunked_aov_branding(upload_id: str):
         "assetbundles_scanned": report.get("notice_assetbundles_scanned", 0),
         "assetbundles_skipped": report.get("notice_assetbundles_skipped", 0),
         "unsupported_resources": len(report.get("unsupported", [])),
+        "oversized_entries_skipped": report.get("oversized_entries_skipped", 0),
         "nested_packages_expanded": report.get("nested_packages_expanded", 0),
         "terms": report.get("branding_scan_terms", []),
         "candidates": report.get("branding_candidates", []),
         "truncated": report.get("branding_candidates_truncated", False),
         "warning": (
             "Quét chỉ đọc các tệp văn bản, .bytes giải mã được và metadata object "
-            "Unity AssetBundle có giới hạn. Dữ liệu opaque, bundle vượt giới hạn "
+            "Unity AssetBundle có giới hạn 16 MiB. Dữ liệu opaque, entry vượt 16 MiB, bundle vượt giới hạn "
             "hoặc tài nguyên chưa giải mã có thể không được quét. Kết quả xác định "
             "vị trí chuỗi, không chứng minh popup đang hiển thị và không sửa ZIP."
         ),
@@ -885,7 +906,8 @@ async def rewrite_chunked_aov_branding(upload_id: str):
     output_path = Path(session["workdir"]) / "aki-aov-branding-updated.zip"
     try:
         report = await run_in_threadpool(
-            rewrite_archive_branding, session["paths"], str(output_path)
+            _run_guarded_heavy_job, rewrite_archive_branding,
+            session["paths"], str(output_path)
         )
     except NoticeRewriteError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -916,7 +938,8 @@ async def decode_chunked_aov_bytes(upload_id: str):
     output_path = Path(session["workdir"]) / "aki-aov-decoded-resources.zip"
     try:
         report = await run_in_threadpool(
-            decode_archive_resources, session["paths"], str(output_path)
+            _run_guarded_heavy_job, decode_archive_resources,
+            session["paths"], str(output_path)
         )
     except AOVBytesArchiveError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -951,7 +974,7 @@ async def merge_chunked_upload(upload_id: str):
         raise HTTPException(400, "File chưa tải lên đầy đủ.")
     output_path = Path(session["workdir"]) / "aki-mod-merged.zip"
     try:
-        await run_in_threadpool(merge_mod_archives, session["paths"], str(output_path))
+        await run_in_threadpool(_run_guarded_heavy_job, merge_mod_archives, session["paths"], str(output_path))
     except ModPipelineError as exc:
         raise HTTPException(400, str(exc)) from exc
     _remove_upload_session_metadata(session)
@@ -973,7 +996,8 @@ async def merge_aov_chunked_upload(upload_id: str):
     output_path = Path(session["workdir"]) / "aov-merged.zip"
     try:
         report = await run_in_threadpool(
-            merge_mod_archives, session["paths"], str(output_path)
+            _run_guarded_heavy_job, merge_mod_archives,
+            session["paths"], str(output_path)
         )
     except ModPipelineError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -1131,7 +1155,7 @@ async def roundtrip_check_assetbundle(file: UploadFile = File(...)):
                 raise HTTPException(413, "AssetBundle vượt quá giới hạn kiểm tra round-trip 64 MiB.")
             data.extend(chunk)
         try:
-            return await run_in_threadpool(verify_assetbundle_roundtrip, bytes(data))
+            return await run_in_threadpool(_run_guarded_heavy_job, verify_assetbundle_roundtrip, bytes(data))
         except AssetBundleInspectError as exc:
             raise HTTPException(400, str(exc)) from exc
     finally:
@@ -1167,7 +1191,7 @@ async def merge(files: list[UploadFile] = File(...)):
 
         output_path = workdir / "aki-mod-merged.zip"
         try:
-            await run_in_threadpool(merge_mod_archives, input_paths, str(output_path))
+            await run_in_threadpool(_run_guarded_heavy_job, merge_mod_archives, input_paths, str(output_path))
         except ModPipelineError as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -1208,7 +1232,7 @@ async def inspect(files: list[UploadFile] = File(...)):
             await upload.close()
             input_paths.append(str(destination))
         try:
-            report = await run_in_threadpool(inspect_archives, input_paths)
+            report = await run_in_threadpool(_run_guarded_heavy_job, inspect_archives, input_paths)
         except InspectError as exc:
             raise HTTPException(400, str(exc)) from exc
         from fastapi.responses import PlainTextResponse
@@ -1243,9 +1267,8 @@ async def inspect_compatibility(files: list[UploadFile] = File(...)):
             await upload.close()
             input_paths.append(str(destination))
         try:
-            manifest = await run_in_threadpool(build_resource_manifest, input_paths)
-            plan = await run_in_threadpool(
-                plan_resource_compatibility, manifest["resources"]
+            manifest, plan = await run_in_threadpool(
+                _run_guarded_heavy_job, _build_compatibility_report, input_paths
             )
         except (ResourceManifestError, CompatibilityPlanError) as exc:
             raise HTTPException(400, str(exc)) from exc

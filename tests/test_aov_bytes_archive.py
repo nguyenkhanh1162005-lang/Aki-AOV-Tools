@@ -553,5 +553,38 @@ class AOVBytesArchiveTests(unittest.TestCase):
                 decode_archive_resources([source], str(folder / "decoded.zip"))
 
 
+    def test_scan_only_skips_oversized_entries_before_reading_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            source = self._archive(folder / "large-entry.zip", {
+                "large-config.txt": b"x" * 1024,
+                "small.txt": b"ok",
+            })
+            with patch("app.aov_bytes_archive.MAX_SCAN_ENTRY_BYTES", 64):
+                report = decode_archive_resources(
+                    [source], "", scan_only=True
+                )
+        self.assertEqual(report["oversized_entries_skipped"], 1)
+        self.assertGreaterEqual(report["ignored_files"], 1)
+        self.assertFalse(report["game_tested"])
+
+    def test_scan_only_spools_large_nested_resources_zip_instead_of_skipping_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            nested = self._archive(folder / "Resources.zip", {
+                "LoginNotice.lua": b"hi",
+            })
+            wrapper = self._archive(folder / "wrapper.zip", {
+                "Resources.zip": Path(nested).read_bytes(),
+            })
+            with patch("app.aov_bytes_archive.MAX_SCAN_ENTRY_BYTES", 4):
+                report = decode_archive_resources(
+                    [wrapper], "", scan_only=True
+                )
+        self.assertEqual(report["oversized_entries_skipped"], 0)
+        self.assertEqual(report["notice_scan_files"], 1)
+        self.assertTrue(report["scan_only"])
+
+
 if __name__ == "__main__":
     unittest.main()

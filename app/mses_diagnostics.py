@@ -6,8 +6,8 @@ table-specific adapter can be reviewed against actual payloads.
 """
 from __future__ import annotations
 
-import io
 import re
+import tempfile
 import zipfile
 from collections import defaultdict
 from pathlib import Path, PurePosixPath
@@ -55,14 +55,26 @@ def _read_manifest_resource(
                 raise MSESDiagnosticsError(
                     f"Container lồng vượt giới hạn đọc: {container_path}"
                 )
-            nested_bytes = outer.read(container_info)
-            with zipfile.ZipFile(io.BytesIO(nested_bytes), "r") as nested:
-                info = nested.getinfo(resource_path)
-                if info.file_size > _MAX_RESOURCE_BYTES:
-                    raise MSESDiagnosticsError(
-                        f"Resource vượt giới hạn đọc: {resource_path}"
-                    )
-                return nested.read(info)
+            # Resources.zip can be hundreds of MiB. Spool it to disk so
+            # each overlapping MSES lookup does not duplicate the full container
+            # in process memory.
+            with tempfile.SpooledTemporaryFile(
+                max_size=16 * 1024 * 1024, mode="w+b"
+            ) as nested_stream:
+                with outer.open(container_info, "r") as source_stream:
+                    while True:
+                        block = source_stream.read(1024 * 1024)
+                        if not block:
+                            break
+                        nested_stream.write(block)
+                nested_stream.seek(0)
+                with zipfile.ZipFile(nested_stream, "r") as nested:
+                    info = nested.getinfo(resource_path)
+                    if info.file_size > _MAX_RESOURCE_BYTES:
+                        raise MSESDiagnosticsError(
+                            f"Resource vượt giới hạn đọc: {resource_path}"
+                        )
+                    return nested.read(info)
         info = outer.getinfo(resource_path)
         if info.file_size > _MAX_RESOURCE_BYTES:
             raise MSESDiagnosticsError(
