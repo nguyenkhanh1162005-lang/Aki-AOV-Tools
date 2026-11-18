@@ -12,6 +12,7 @@ enum AoVRuntimeCatalogMergeBlock: String, Codable, Hashable, Sendable {
     case conflictingLegacyVerification
     case zipChecksumAlgorithmUnknown
     case databinChecksumAlgorithmUnknown
+    case catalogVersionMismatch
     case emptyPath
 }
 
@@ -69,6 +70,19 @@ enum AoVRuntimeCatalogMergePlanner {
         verifiedFinalEntries: [String: AoVRuntimeResourcePackInfo] = [:]
     ) -> AoVRuntimePackerMergePlan {
         var issues: [AoVRuntimeCatalogMergeIssue] = []
+        let compatibleLegacy = legacy.filter { source in
+            guard source.catalog.version == current.version else {
+                issues.append(
+                    AoVRuntimeCatalogMergeIssue(
+                        path: source.catalog.version,
+                        reason: .catalogVersionMismatch,
+                        sourceArchives: [source.source]
+                    )
+                )
+                return false
+            }
+            return true
+        }
         let currentByPath = Dictionary(grouping: current.allResourcePackInfo, by: \.pathInIFS)
         let currentDuplicatePaths = currentByPath
             .filter { $0.key.isEmpty || $0.value.count > 1 }
@@ -83,7 +97,7 @@ enum AoVRuntimeCatalogMergePlanner {
             })
         }
 
-        let legacyRows = legacy.flatMap { source in
+        let legacyRows = compatibleLegacy.flatMap { source in
             source.catalog.allResourcePackInfo.map {
                 AoVRuntimeMergeSourceValue(source: source.source, value: $0)
             }
@@ -241,7 +255,7 @@ enum AoVRuntimeCatalogMergePlanner {
 
         var mergedLinks = current.allParentIndexToChild
         var linkSet = Set(mergedLinks)
-        for (sourceName, catalog) in legacy.map({ ($0.source, $0.catalog) }) {
+        for (sourceName, catalog) in compatibleLegacy.map({ ($0.source, $0.catalog) }) {
             for link in catalog.allParentIndexToChild {
                 guard let parentIndex = Int(exactly: link.parentIdx),
                       let childIndex = Int(exactly: link.childIdx),
@@ -313,6 +327,19 @@ enum AoVRuntimeCatalogMergePlanner {
         verifiedFinalZIPChecksumValues: [String: Int64] = [:]
     ) -> AoVRuntimeVerificationMergePlan {
         var issues: [AoVRuntimeCatalogMergeIssue] = []
+        let compatibleLegacy = legacy.filter { source in
+            guard source.catalog.version == current.version else {
+                issues.append(
+                    AoVRuntimeCatalogMergeIssue(
+                        path: source.catalog.version,
+                        reason: .catalogVersionMismatch,
+                        sourceArchives: [source.source]
+                    )
+                )
+                return false
+            }
+            return true
+        }
 
         let currentZIP = Dictionary(grouping: current.allZipVerificationInfo, by: \.pathInIFS)
         let currentDatabin = Dictionary(grouping: current.allDatabinVerificationInfo, by: \.pathInIFS)
@@ -335,12 +362,12 @@ enum AoVRuntimeCatalogMergePlanner {
             )
         }
 
-        let legacyZIPRows = legacy.flatMap { source in
+        let legacyZIPRows = compatibleLegacy.flatMap { source in
             source.catalog.allZipVerificationInfo.map {
                 AoVRuntimeMergeSourceValue(source: source.source, value: $0)
             }
         }
-        let legacyDatabinRows = legacy.flatMap { source in
+        let legacyDatabinRows = compatibleLegacy.flatMap { source in
             source.catalog.allDatabinVerificationInfo.map {
                 AoVRuntimeMergeSourceValue(source: source.source, value: $0)
             }
