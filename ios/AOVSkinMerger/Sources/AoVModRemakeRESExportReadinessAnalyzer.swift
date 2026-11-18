@@ -105,7 +105,8 @@ enum AoVModRemakeRESExportReadinessAnalyzer {
         do {
             catalogInputs = try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
                 baseRESURL: baseRESURL,
-                legacyMODURLs: legacyMODURLs
+                legacyMODURLs: legacyMODURLs,
+                allowLegacyBuildMismatch: true
             )
         } catch {
             throw AoVModRemakeRESExportReadinessError.incompatibleRuntimeCatalogs(
