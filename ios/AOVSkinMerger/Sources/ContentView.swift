@@ -560,7 +560,12 @@ struct ContentView: View {
             metric("Không tìm thấy · path trùng · value ngoài 32-bit",
                    "\(finding.missingPaths) · \(finding.ambiguousPaths) · \(finding.unsupportedValues)")
             metric("XOR mask nhất quán", finding.maskDescription)
-            metric("CRC32 khớp trực tiếp", "\(finding.exactCRC32Matches)")
+            metric("CRC32 khớp trực tiếp (byte ZIP)", "\(finding.exactCRC32Matches)")
+            metric("UnityFS block giải nén · bỏ qua do giới hạn/lỗi",
+                   "\(finding.unityFSUncompressedEvaluatedSamples) · \(finding.unityFSUncompressedSkippedCount)")
+            metric("XOR CRC32 UnityFS giải nén", finding.unityFSUncompressedMaskDescription)
+            metric("CRC32 UnityFS giải nén khớp trực tiếp",
+                   "\(finding.exactUnityFSUncompressedCRC32Matches)")
             Text(finding.statusDescription)
                 .font(.caption.weight(.semibold))
                 .foregroundColor(checksumFindingColor(finding.status))
