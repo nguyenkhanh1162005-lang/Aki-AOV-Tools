@@ -45,6 +45,12 @@ jobs:
             -project AOVSkinMerger.xcodeproj \
             -scheme AOVSkinMerger
 
+      - name: Verify iOS 15 minimum deployment target
+        working-directory: ios/AOVSkinMerger
+        run: |
+          xcodebuild -showBuildSettings -project AOVSkinMerger.xcodeproj -scheme AOVSkinMerger \
+            | grep -F "IPHONEOS_DEPLOYMENT_TARGET = 15.0"
+
       - name: Run iOS Simulator unit tests
         working-directory: ios/AOVSkinMerger
         run: |
