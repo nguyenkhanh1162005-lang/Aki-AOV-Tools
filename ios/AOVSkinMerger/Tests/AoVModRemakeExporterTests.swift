@@ -620,6 +620,18 @@ final class AoVModRemakeExporterTests: XCTestCase {
              try makeUnityFS(with: .verification(legacyVerification)))
         ], root: root)
 
+        XCTAssertThrowsError(
+            try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+                baseRESURL: baseURL,
+                legacyMODURLs: [legacyURL]
+            )
+        ) { error in
+            guard let remakeError = error as? AoVModRemakeError,
+                  case .versionMismatch("old-build-mod.zip", "1.64.1.11", "1.64.1.12") = remakeError else {
+                return XCTFail("Expected final-export preflight to reject an older build, got \(error)")
+            }
+        }
+
         let inputs = try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
             baseRESURL: baseURL,
             legacyMODURLs: [legacyURL],
