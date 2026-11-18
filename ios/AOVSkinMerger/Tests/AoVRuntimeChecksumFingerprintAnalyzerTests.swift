@@ -3,6 +3,28 @@ import XCTest
 @testable import AOVSkinMerger
 
 final class AoVRuntimeChecksumFingerprintAnalyzerTests: XCTestCase {
+    func testUnityFSUncompressedFingerprintIsPartialWhenCatalogPathsAreMissing() {
+        let mask: UInt32 = 0xCAFEBABE
+        let samples = (0..<8).map { index in
+            let crc = UInt32(index * 31 + 7)
+            return AoVRuntimeChecksumFingerprintSample(
+                path: "Packer/\\(index)",
+                storedChecksum: Int64(crc ^ mask),
+                computedCRC32: UInt32(index * 19 + 11),
+                computedUnityFSUncompressedCRC32: crc
+            )
+        }
+        let finding = AoVRuntimeChecksumFingerprintAnalyzer.evaluate(
+            title: "Packer",
+            totalCatalogRows: 9,
+            samples: samples,
+            missingPaths: 1
+        )
+
+        XCTAssertEqual(finding.unityFSUncompressedStatus, .partialConsistentSample)
+        XCTAssertEqual(finding.constantUnityFSUncompressedXORMask, mask)
+    }
+
     func testCRC32MatchesIEEEKnownVector() {
         XCTAssertEqual(
             AoVRuntimeChecksumFingerprintAnalyzer.crc32(Data("123456789".utf8)),
