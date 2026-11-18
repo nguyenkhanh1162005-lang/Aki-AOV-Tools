@@ -52,6 +52,116 @@ final class AoVUnityFSAssetBundleMergeExecutorTests: XCTestCase {
         XCTAssertTrue(bundle.catalogExtractionStatus?.contains("CAB") == true)
     }
 
+    func testCABBatchImporterReadsZIPsImportsObjectClosureAndReturnsVerifiedCandidate() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-CAB-Batch-Integration-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("base-res.zip")
+        let legacyURL = root.appendingPathComponent("legacy-mod.zip")
+        try makeCABArchive(
+            baseURL,
+            root: root,
+            record: makeAssetBundleRecord(rootPathID: 5001, assetPathID: 1001),
+            assetPathID: 1001,
+            objectValue: 100
+        )
+        try makeCABArchive(
+            legacyURL,
+            root: root,
+            record: makeAssetBundleRecord(rootPathID: 6001, assetPathID: 2002),
+            assetPathID: 2002,
+            objectValue: 200
+        )
+
+        let report = try AoVModRemakeCABBatchImporter.mergeMatchedCandidates(
+            baseRESURL: baseURL,
+            legacyMODURLs: [legacyURL]
+        )
+
+        XCTAssertEqual(report.candidateCount, 1)
+        XCTAssertEqual(report.completedCandidateCount, 1)
+        XCTAssertEqual(report.unchangedCandidateCount, 0)
+        XCTAssertTrue(report.isComplete)
+        XCTAssertTrue(report.failures.isEmpty)
+        XCTAssertTrue(report.blockedCandidateFindings.isEmpty)
+        XCTAssertEqual(report.mergedResults.count, 1)
+        XCTAssertEqual(report.importedObjectCount, 1)
+
+        let merged = try XCTUnwrap(report.mergedResults.first)
+        XCTAssertTrue(merged.roundTripVerified)
+        XCTAssertEqual(
+            merged.resourcePayload.ifsPath,
+            "assetbundle/actor-test.assetbundle"
+        )
+        let bundleInfo = try AoVUnityFSParser.inspect(merged.resourcePayload.data)
+        let nodes = try AoVUnityFSParser.extractNodes(
+            merged.resourcePayload.data,
+            maximumExpandedBytes: 512 * 1024 * 1024,
+            maximumNodeCount: max(bundleInfo.nodes.count, 1)
+        )
+        let serializedNode = try XCTUnwrap(nodes.first(where: {
+            $0.path == "CAB-actor-test"
+        }))
+        let summary = try AoVSerializedFileParser.inspect(serializedNode.data)
+        let finalRecord = try XCTUnwrap(summary.assetBundleRecords.first(where: {
+            $0.pathID == 5001
+        }))
+        let importedPathID = try XCTUnwrap(merged.importedPathIDs.first)
+        XCTAssertEqual(finalRecord.containerEntries.first?.asset.pathID, importedPathID)
+        XCTAssertTrue(summary.serializedObjectPathIDs.contains(importedPathID))
+        let importedValue = try AoVSerializedFileParser.decodeObjectWithTypeTree(
+            pathID: importedPathID,
+            in: serializedNode.data,
+            summary: summary
+        )
+        XCTAssertEqual(importedValue.objectValue?["m_TestPathID"]?.intValue, 200)
+    }
+
+    func testCABBatchImporterBlocksOverlappingContainerKeysAcrossMODs() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-CAB-Batch-Conflict-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("base-res.zip")
+        let firstMODURL = root.appendingPathComponent("first-mod.zip")
+        let secondMODURL = root.appendingPathComponent("second-mod.zip")
+        try makeCABArchive(
+            baseURL,
+            root: root,
+            record: makeAssetBundleRecord(rootPathID: 5001, assetPathID: 1001),
+            assetPathID: 1001,
+            objectValue: 100
+        )
+        try makeCABArchive(
+            firstMODURL,
+            root: root,
+            record: makeAssetBundleRecord(rootPathID: 6001, assetPathID: 2002),
+            assetPathID: 2002,
+            objectValue: 200
+        )
+        try makeCABArchive(
+            secondMODURL,
+            root: root,
+            record: makeAssetBundleRecord(rootPathID: 7001, assetPathID: 3003),
+            assetPathID: 3003,
+            objectValue: 300
+        )
+
+        let report = try AoVModRemakeCABBatchImporter.mergeMatchedCandidates(
+            baseRESURL: baseURL,
+            legacyMODURLs: [firstMODURL, secondMODURL]
+        )
+
+        XCTAssertEqual(report.candidateCount, 2)
+        XCTAssertEqual(report.completedCandidateCount, 0)
+        XCTAssertFalse(report.isComplete)
+        XCTAssertTrue(report.mergedResults.isEmpty)
+        XCTAssertTrue(report.failures.contains { $0.localizedCaseInsensitiveContains("container key") })
+    }
+
     func testDetectsChangedObjectPayloadBehindAnUnchangedContainerPointer() throws {
         let nodes = objectNodes()
         let currentPayload = try AoVUnityTypeTreeWriter.write(
@@ -189,6 +299,51 @@ final class AoVUnityFSAssetBundleMergeExecutorTests: XCTestCase {
             summary: summary
         )
         XCTAssertEqual(retainedBaseValue.objectValue?["m_TestPathID"]?.intValue, 100)
+    }
+
+    private func makeCABArchive(
+        _ url: URL,
+        root: URL,
+        record: AoVSerializedAssetBundleRecord,
+        assetPathID: Int64,
+        objectValue: Int64
+    ) throws {
+        let nodes = objectNodes()
+        let assetPayload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: .object(["m_TestPathID": .signed(objectValue)]),
+            littleEndian: true
+        )
+        let serializedFile = try makeSerializedFileWithBundleRecord(
+            record: record,
+            assetPathID: assetPathID,
+            assetPayload: assetPayload,
+            assetNodes: nodes
+        )
+        let cabBytes = try makeUnityFS(
+            serializedFile: serializedFile,
+            nodePath: "CAB-actor-test"
+        )
+        let cabURL = root.appendingPathComponent(UUID().uuidString + ".assetbundle")
+        let versionURL = root.appendingPathComponent(UUID().uuidString + ".txt")
+        try cabBytes.write(to: cabURL, options: .atomic)
+        try Data("1.64.1.12\\n".utf8).write(to: versionURL, options: .atomic)
+
+        let archive = try Archive(url: url, accessMode: .create)
+        try archive.addEntry(
+            with: "version.txt",
+            fileURL: versionURL,
+            compressionMethod: .none,
+            bufferSize: 64 * 1024
+        )
+        try archive.addEntry(
+            with: "1.64.1.12/assetbundle/actor-test.assetbundle",
+            fileURL: cabURL,
+            compressionMethod: .none,
+            bufferSize: 64 * 1024
+        )
+        try? FileManager.default.removeItem(at: cabURL)
+        try? FileManager.default.removeItem(at: versionURL)
     }
 
     private func objectNodes() -> [AoVUnityTypeTreeNode] {
