@@ -1,6 +1,6 @@
 # AKI AOV SKIN for iOS — prototype 0.5.3 (build 20)
 
-This is an **unsigned iOS device-build prototype**. It is not a universal or game-certified AoV skin merger. The current project target is iOS 26.5.
+This is an **unsigned iOS device-build prototype**. It is not a universal or game-certified AoV skin merger. The app supports iOS 15.0 and later in one build; CI compiles it with the iOS 26.5 SDK.
 
 ## Implemented on-device
 
@@ -46,6 +46,8 @@ This is an **unsigned iOS device-build prototype**. It is not a universal or gam
 
 ## Build and signing
 
+The deployment target is iOS 15.0. `SWCompression` is pinned to 4.8.7 because 4.9.x raises its minimum iOS deployment target to 17.0; the 4.8.7 LZMA API used by the UnityFS parser is compatible with the current call sites.
+
 Requires macOS, Xcode, Homebrew, and XcodeGen:
 
 ```sh
@@ -69,6 +71,6 @@ CI runs the unit-test suite before packaging an unsigned device IPA. A test fail
 
 - Home-screen name: `AKI AOV SKIN`.
 - Bundle identifier: `com.aki.aovskinmerger`.
-- Target: iOS 26.5+.
+- Target: iOS 15.0+ (one IPA supports all iOS versions from this minimum upward).
 - App icon: generated from the supplied artwork stored in `IconSource`.
 - IPA artifact: `AKI AOV SKIN.ipa`.
