@@ -281,6 +281,7 @@ struct ContentView: View {
                             remakeReport = nil
                             remakeExportReport = nil
                             cabBatchMergeReport = nil
+                            resReadinessReport = nil
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                         }
@@ -1874,6 +1875,7 @@ struct ContentView: View {
         remakeReport = nil
         remakeExportReport = nil
         cabBatchMergeReport = nil
+        resReadinessReport = nil
         let legacyURLs = remakeMODURLs
         Task {
             do {
