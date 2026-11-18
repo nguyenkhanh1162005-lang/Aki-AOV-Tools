@@ -87,6 +87,12 @@ jobs:
           -derivedDataPath "$RUNNER_TEMP/AOVTestDerivedData"
           CODE_SIGNING_ALLOWED=NO
 
+      - name: Verify iOS 15 minimum deployment target
+        working-directory: ios/AOVSkinMerger
+        run: |
+          xcodebuild -showBuildSettings -project AOVSkinMerger.xcodeproj -scheme AOVSkinMerger \
+            | grep -F "IPHONEOS_DEPLOYMENT_TARGET = 15.0"
+
       - name: Build unsigned iOS device app
         working-directory: ios/AOVSkinMerger
         run: >-
@@ -122,7 +128,7 @@ jobs:
           test -x "$APP_PATH/AOVSkinMerger"
           test "$(plutil -extract CFBundleIdentifier raw "$APP_INFO")" = "com.aki.aovskinmerger"
           test "$(plutil -extract CFBundleShortVersionString raw "$APP_INFO")" = "0.5.3"
-          test "$(plutil -extract MinimumOSVersion raw "$APP_INFO")" = "26.5"
+          test "$(plutil -extract MinimumOSVersion raw "$APP_INFO")" = "15.0"
           lipo -archs "$APP_PATH/AOVSkinMerger" | grep -qw arm64
           shasum -a 256 "$IPA_PATH"
 
