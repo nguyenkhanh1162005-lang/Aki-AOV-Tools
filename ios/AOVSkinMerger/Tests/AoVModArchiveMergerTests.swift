@@ -4,6 +4,45 @@ import ZIPFoundation
 @testable import AOVSkinMerger
 
 final class AoVModArchiveMergerTests: XCTestCase {
+    func testMergesZIPCompatible3105ArchiveWithoutRenamingInput() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-3105-Merge-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("legacy-skin.3105")
+        let payload = Data("skin-payload-from-3105".utf8)
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.3.2\n".utf8)),
+            ("Data/base-resource.bin", Data("base".utf8))
+        ], root: root)
+        try makeArchive(legacyURL, entries: [
+            ("version.txt", Data("1.64.3.2\n".utf8)),
+            ("Skins/Actor_731/LegacySkin.bytes", payload)
+        ], root: root)
+
+        let report = try AoVModArchiveMerger.merge(
+            [baseURL, legacyURL],
+            baseURL: baseURL
+        )
+
+        XCTAssertTrue(report.structurallyValidated)
+        XCTAssertFalse(report.gameCompatibilityTested)
+        XCTAssertEqual(report.sourceCount, 2)
+        XCTAssertEqual(report.pipelineEvents.first?.stage, .preflight)
+
+        let output = try Archive(url: report.outputURL, accessMode: .read)
+        let mergedEntry = try XCTUnwrap(output.first(where: {
+            $0.type == .file && $0.path == "Skins/Actor_731/LegacySkin.bytes"
+        }))
+        var actual = Data()
+        _ = try output.extract(mergedEntry, bufferSize: 64 * 1024) {
+            actual.append($0)
+        }
+        XCTAssertEqual(actual, payload)
+    }
+
     func testMergesAnUnknownNonConflictingSkinPayloadAndMeasuresRuntime() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-Merger-Test-\(UUID().uuidString)", isDirectory: true)
