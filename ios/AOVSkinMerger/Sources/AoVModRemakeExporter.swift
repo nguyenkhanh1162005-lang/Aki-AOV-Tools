@@ -497,12 +497,13 @@ enum AoVModRemakeExporter {
         )
     }
 
-    /// Convenience entry point that extracts real runtime catalogs from the
-    /// selected legacy MOD archives and enforces exact build-marker equality.
-    /// Payload bytes and final metadata must still come from verified adapters.
-    /// Produces one merged AssetBundle resource payload for the RES export
-    /// pipeline. These bytes remain a candidate until final Packer/Verification
-    /// metadata is independently verified and passed to exportVerifiedRES.
+    /// Merges a matched class-142 AssetBundle record with its local object closure.
+    /// The caller must preflight archive provenance, SerializedFile format and
+    /// target platform. The importer then validates TypeTree compatibility,
+    /// local/external PPtr targets, object closure and UnityFS round-trip.
+    /// Cross-build analysis is permitted only in this candidate stage; payload
+    /// bytes remain in memory until final Packer/Verification metadata is
+    /// independently verified and passed to the strict RES exporter.
     static func mergeAssetBundleResource(
         resourcePath: String,
         runtimePath: String? = nil,
