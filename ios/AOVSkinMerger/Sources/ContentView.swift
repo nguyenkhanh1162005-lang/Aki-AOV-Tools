@@ -16,6 +16,8 @@ struct ContentView: View {
     @State private var remakeMODURLs: [URL] = []
     @State private var isAnalyzingRemake = false
     @State private var remakeReport: AoVModRemakeReport?
+    @State private var isExportingRemake = false
+    @State private var remakeExportReport: AoVModRemakeExportReport?
     @State private var isAnalyzing = false
     @State private var selectedURLs: [URL] = []
     @State private var selectedBaseURL: URL?
@@ -143,6 +145,7 @@ struct ContentView: View {
                         if let mergeReport { mergeResultView(mergeReport) }
                         remakePanel
                         if let remakeReport { remakeResultView(remakeReport) }
+                        if let remakeExportReport { remakeExportResultView(remakeExportReport) }
     
                         VStack(alignment: .leading, spacing: 9) {
                             Label("Tiến độ phát triển", systemImage: "hammer.fill").font(.headline)
@@ -267,6 +270,7 @@ struct ContentView: View {
                         Button(role: .destructive) {
                             remakeMODURLs.remove(at: index)
                             remakeReport = nil
+                            remakeExportReport = nil
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                         }
@@ -377,7 +381,22 @@ struct ContentView: View {
                 Label(warning, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundColor(.orange)
             }
-            Text("Trạng thái: chưa tạo file remake. Các writer đã qua test cấu trúc tổng hợp; chưa chứng minh tương thích với RES thật hoặc Liên Quân.")
+            Text("Chưa gộp CAB/AssetBundle ở bước tự động này. Chỉ tài nguyên mới độc lập, có Packer/Verification duy nhất và không có liên kết Packer mới được xuất.")
+                .font(.caption).foregroundColor(.orange)
+            Button(action: runRemakeSafeExport) {
+                HStack {
+                    if isExportingRemake { ProgressView().tint(.white) }
+                    Label(
+                        isExportingRemake ? "Đang tạo RES an toàn…" : "Xuất phần tài nguyên độc lập an toàn",
+                        systemImage: "shippingbox.and.arrow.backward"
+                    )
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(AKIPrimaryButtonStyle())
+            .disabled(remakeBaseURL == nil || remakeMODURLs.isEmpty || remakeReport == nil ||
+                      isAnalyzingRemake || isExportingRemake || isCopyingFiles || isMerging)
+            Text("Payload được giữ nguyên byte và dùng metadata từ MOD cùng build. Chưa xác nhận tương thích trong game.")
                 .font(.footnote.weight(.semibold)).foregroundColor(.orange)
         }
         .panel()
@@ -1340,10 +1359,12 @@ struct ContentView: View {
                         if let imported = report.importedURLs.first {
                             remakeBaseURL = imported
                             remakeReport = nil
+                            remakeExportReport = nil
                         }
                     case .legacyMods:
                         remakeMODURLs.append(contentsOf: report.importedURLs)
                         remakeReport = nil
+                        remakeExportReport = nil
                     }
 
                     if !report.errors.isEmpty {
@@ -1495,6 +1516,7 @@ struct ContentView: View {
         }
         isAnalyzingRemake = true
         remakeReport = nil
+        remakeExportReport = nil
         let legacyURLs = remakeMODURLs
         Task {
             do {
@@ -1508,6 +1530,51 @@ struct ContentView: View {
             }
             isAnalyzingRemake = false
         }
+    }
+
+    private func runRemakeSafeExport() {
+        guard let baseURL = remakeBaseURL, !remakeMODURLs.isEmpty, remakeReport != nil else {
+            alertText = "Hãy chọn RES nền, MOD cũ và chạy phân tích trước."
+            showAlert = true
+            return
+        }
+        isExportingRemake = true
+        remakeExportReport = nil
+        let legacyURLs = remakeMODURLs
+        Task {
+            do {
+                let report = try await Task.detached(priority: .userInitiated) {
+                    try AoVModRemakeExporter.exportLegacyOnlyStandaloneResources(
+                        baseRESURL: baseURL,
+                        legacyMODURLs: legacyURLs
+                    )
+                }.value
+                remakeExportReport = report
+            } catch {
+                alertText = error.localizedDescription
+                showAlert = true
+            }
+            isExportingRemake = false
+        }
+    }
+
+    private func remakeExportResultView(_ report: AoVModRemakeExportReport) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Đã tạo RES remake một phần", systemImage: "checkmark.seal.fill")
+                .font(.headline)
+                .foregroundColor(.green)
+            Text(report.outputURL.lastPathComponent)
+                .font(.subheadline.weight(.semibold))
+                .textSelection(.enabled)
+            metric("Tài nguyên mới được thêm", "\(report.addedResources)")
+            metric("Packer entry mới", "\(report.packerAddedPaths.count)")
+            metric("Verification ZIP mới", "\(report.verificationAddedZIPPaths.count)")
+            metric("Verification Databin mới", "\(report.verificationAddedDatabinPaths.count)")
+            metric("Dung lượng RES đầu ra", formatByteCount(report.outputBytes))
+            Text("File nằm trong Tệp → Trên iPhone của tôi → AKI AOV SKIN → AKI AOV SKIN Exports. Chỉ cấu trúc ZIP và catalog đã được kiểm tra; chưa phải bản xác nhận chạy trong Liên Quân.")
+                .font(.caption).foregroundColor(.orange)
+        }
+        .panel()
     }
 
     private func runAESScan() {
