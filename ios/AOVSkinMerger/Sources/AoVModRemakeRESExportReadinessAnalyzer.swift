@@ -192,6 +192,9 @@ enum AoVModRemakeRESExportReadinessAnalyzer {
             } else if staticMetadata.count != 1 {
                 reasons.append("Các MOD không thống nhất pkgType/tag/flags/resourceInfos của Packer entry.")
             }
+            if sourceRows.contains(where: { $0.value.pathInIFS != result.resourcePayload.ifsPath }) {
+                reasons.append("IFS path trong Packer metadata khác chính xác path của CAB candidate.")
+            }
 
             if !packerFingerprintValid {
                 reasons.append("Packer AssetBundle CRC32/XOR fingerprint chưa nhất quán hoặc chưa đủ mẫu.")
