@@ -4,30 +4,55 @@ import ZIPFoundation
 @testable import AOVSkinMerger
 
 final class AoVModRemakeExporterTests: XCTestCase {
-    func testChecksumAnalyzerFindsConsistentRawCRC32XORMaskInRESVerificationCatalog() throws {
+    func testChecksumAnalyzerFingerprintsPackerAndBothVerificationCatalogs() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-Checksum-Fingerprint-RES-Test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
         let baseURL = root.appendingPathComponent("checksum-res.zip")
+        let packerMask: UInt32 = 0x2468ACE0
         let zipMask: UInt32 = 0xA5A5F00D
         let databinMask: UInt32 = 0x13579BDF
+        var packerRows: [AoVRuntimeResourcePackInfo] = []
         var zipRows: [AoVRuntimeVerificationEntry] = []
         var databinRows: [AoVRuntimeVerificationEntry] = []
         var resourceEntries: [(String, Data)] = []
 
         for index in 0..<8 {
-            let zipPath = "Images/UI/icon-\(index).png"
-            let zipPayload = Data("zip-resource-payload-\(index)".utf8)
-            let zipCRC = AoVRuntimeChecksumFingerprintAnalyzer.crc32(zipPayload)
-            zipRows.append(
-                AoVRuntimeVerificationEntry(
-                    pathInIFS: zipPath,
-                    crcXor: Int64(zipCRC ^ zipMask)
+            let bundlePath = "assetbundle/actor-\(index).assetbundle"
+            let bundlePayload = Data("assetbundle-resource-payload-\(index)".utf8)
+            let bundleCRC = AoVRuntimeChecksumFingerprintAnalyzer.crc32(bundlePayload)
+            packerRows.append(
+                AoVRuntimeResourcePackInfo(
+                    pathInIFS: bundlePath,
+                    pkgType: 0,
+                    crcXor: Int64(bundleCRC ^ packerMask),
+                    tag: "Synthetic",
+                    flags: 0,
+                    resourceInfos: [
+                        AoVRuntimeResourceItem(hashCode: Int64(index + 1), extensionName: "assetbundle")
+                    ]
                 )
             )
-            resourceEntries.append(("1.64.1.12/" + zipPath, zipPayload))
+            zipRows.append(
+                AoVRuntimeVerificationEntry(
+                    pathInIFS: bundlePath,
+                    crcXor: Int64(bundleCRC ^ zipMask)
+                )
+            )
+            resourceEntries.append(("1.64.1.12/" + bundlePath, bundlePayload))
+
+            let imagePath = "Images/UI/icon-\(index).png"
+            let imagePayload = Data("zip-resource-payload-\(index)".utf8)
+            let imageCRC = AoVRuntimeChecksumFingerprintAnalyzer.crc32(imagePayload)
+            zipRows.append(
+                AoVRuntimeVerificationEntry(
+                    pathInIFS: imagePath,
+                    crcXor: Int64(imageCRC ^ zipMask)
+                )
+            )
+            resourceEntries.append(("1.64.1.12/" + imagePath, imagePayload))
 
             let databinPath = "Databin/Client/Actor_\(index).bytes"
             let databinPayload = Data("databin-resource-payload-\(index)".utf8)
@@ -41,6 +66,16 @@ final class AoVModRemakeExporterTests: XCTestCase {
             resourceEntries.append(("1.64.1.12/" + databinPath, databinPayload))
         }
 
+        let basePacker = makePackerCatalog()
+        let packer = AoVRuntimeResourcePackerCatalog(
+            name: basePacker.name,
+            version: basePacker.version,
+            svnRevision: basePacker.svnRevision,
+            setName: basePacker.setName,
+            allResourcePackInfo: packerRows,
+            allParentIndexToChild: [],
+            trailingData: basePacker.trailingData
+        )
         let verification = AoVRuntimeResourceVerificationCatalog(
             name: "ResourceVerificationInfoSetXML",
             version: "1.64.1.12",
@@ -49,11 +84,13 @@ final class AoVModRemakeExporterTests: XCTestCase {
             allDatabinVerificationInfo: databinRows,
             trailingData: Data()
         )
+        let packerBundle = try makeUnityFS(with: .packer(packer))
         let verificationBundle = try makeUnityFS(with: .verification(verification))
         try makeArchive(
             baseURL,
             entries: [
                 ("version.txt", Data("1.64.1.12\\n".utf8)),
+                ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle", packerBundle),
                 ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle", verificationBundle)
             ] + resourceEntries,
             root: root
@@ -61,10 +98,17 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
         let report = try AoVRuntimeChecksumFingerprintAnalyzer.analyze(baseRESURL: baseURL)
 
+        XCTAssertEqual(report.packerAssetBundles.status, .consistentSample)
+        XCTAssertEqual(report.packerAssetBundles.evaluatedSamples, 8)
+        XCTAssertEqual(report.packerAssetBundles.constantXORMask, packerMask)
+        XCTAssertEqual(report.packerAssetBundles.unityFSUncompressedEvaluatedSamples, 0)
+        XCTAssertEqual(report.packerAssetBundles.unityFSUncompressedSkippedCount, 8)
+
         XCTAssertEqual(report.zipVerification.status, .consistentSample)
-        XCTAssertEqual(report.zipVerification.evaluatedSamples, 8)
+        XCTAssertEqual(report.zipVerification.evaluatedSamples, 16)
         XCTAssertEqual(report.zipVerification.constantXORMask, zipMask)
         XCTAssertEqual(report.zipVerification.exactCRC32Matches, 0)
+
         XCTAssertEqual(report.databinVerification.status, .consistentSample)
         XCTAssertEqual(report.databinVerification.evaluatedSamples, 8)
         XCTAssertEqual(report.databinVerification.constantXORMask, databinMask)
