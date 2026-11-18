@@ -39,6 +39,14 @@ struct ContentView: View {
     @State private var releaseURL: URL?
     @State private var selectedTab = "Trang chủ"
 
+    private var allowedImportContentTypes: [UTType] {
+        let zipType = UTType(filenameExtension: "zip") ?? .zip
+        guard importPurpose != .remakeBase else { return [zipType] }
+        let modType = UTType("com.aki.aovskinmerger.modarchive") ??
+            UTType(filenameExtension: "3105", conformingTo: .zip) ?? .zip
+        return [zipType, modType]
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -207,11 +215,7 @@ struct ContentView: View {
             }
             .fileImporter(
                 isPresented: $isImporting,
-                allowedContentTypes: [
-                    UTType(filenameExtension: "zip") ?? .zip,
-                    UTType("com.aki.aovskinmerger.modarchive") ??
-                        UTType(filenameExtension: "3105", conformingTo: .zip) ?? .zip
-                ],
+                allowedContentTypes: allowedImportContentTypes,
                 allowsMultipleSelection: true
             ) { result in
                 importFiles(result, purpose: importPurpose)
@@ -1655,10 +1659,17 @@ struct ContentView: View {
         switch result {
         case .success(let urls):
             guard !urls.isEmpty else { return }
-            if purpose == .remakeBase && urls.count != 1 {
-                alertText = "Chế độ RMK chỉ nhận đúng một ZIP làm RES nền."
-                showAlert = true
-                return
+            if purpose == .remakeBase {
+                guard urls.count == 1 else {
+                    alertText = "Chế độ RMK chỉ nhận đúng một ZIP làm RES nền."
+                    showAlert = true
+                    return
+                }
+                guard urls[0].pathExtension.lowercased() == "zip" else {
+                    alertText = "RES nền phải là file .zip. File .3105 chỉ được chọn trong danh sách MOD cũ."
+                    showAlert = true
+                    return
+                }
             }
 
             let existingURLs: [URL]
