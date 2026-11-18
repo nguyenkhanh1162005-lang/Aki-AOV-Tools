@@ -49,6 +49,35 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
         XCTAssertTrue(report.allChecksumsHaveCandidates)
     }
 
+    func testUsesBaseRESPackerMetadataWhenLegacyMODOmitsTheEntry() throws {
+        let packerMask: UInt32 = 0xABCD1234
+        let fingerprint = makeReport(
+            packer: makeFinding(title: "Packer", mask: packerMask),
+            zip: makeFinding(title: "ZIP", mask: 0x10293847)
+        )
+        let baseRow = AoVRuntimeResourcePackInfo(
+            pathInIFS: "assetbundle/actor-731.assetbundle",
+            pkgType: 4,
+            crcXor: 777,
+            tag: "BaseHero",
+            flags: 256,
+            resourceInfos: [AoVRuntimeResourceItem(hashCode: 731, extensionName: "assetbundle")]
+        )
+
+        let report = try AoVModRemakeRESExportReadinessAnalyzer.buildProposals(
+            baseRESName: "base-res.zip",
+            assetBundleMergeResults: [makeMergeResult(payload: Data("merged-cab".utf8))],
+            legacyPackerCatalogs: [(source: "RES nền", catalog: makePackerCatalog(rows: [baseRow]))],
+            checksumFingerprint: fingerprint
+        )
+
+        let proposal = try XCTUnwrap(report.proposals.first)
+        XCTAssertEqual(proposal.status, .requiresExternalValidation)
+        XCTAssertEqual(proposal.sourceArchives, ["RES nền"])
+        XCTAssertEqual(proposal.proposedPackerEntry?.tag, "BaseHero")
+        XCTAssertEqual(proposal.proposedPackerEntry?.pkgType, 4)
+    }
+
     func testAcceptsSameStaticPackerMetadataWhenLegacyChecksumsDiffer() throws {
         let mask: UInt32 = 0x11223344
         let fingerprint = makeReport(
