@@ -302,6 +302,53 @@ struct ContentView: View {
             metric("RES nền", report.base.fileName)
             metric("Version RES", report.baseVersion ?? "Không tìm thấy version.txt")
             metric("MOD cũ", "\(report.legacy.count)")
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Nhận diện họ tài nguyên")
+                    .font(.subheadline.weight(.bold))
+                Text("Phân loại tự động theo path và metadata của từng gói. Nhãn adapter cho biết mức xử lý hiện có, không đồng nghĩa mọi payload đều đã ghép được.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                ForEach(report.packageAudits) { package in
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(package.archiveName)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                        metric("Build · file · giải nén",
+                               "\(package.version ?? "Không rõ") · \(package.fileCount) · \(formatByteCount(package.expandedBytes))")
+                        ForEach(Array(package.families.prefix(8))) { family in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(family.family.title)
+                                        .font(.caption.weight(.semibold))
+                                    Spacer()
+                                    Text("\(family.fileCount) file · \(formatByteCount(family.totalBytes))")
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundColor(.secondary)
+                                }
+                                if family.parsedUnityFSCount > 0 {
+                                    Text("UnityFS đã phân tích: \(family.parsedUnityFSCount)")
+                                        .font(.caption2)
+                                        .foregroundColor(.green)
+                                }
+                                Text(family.family.supportSummary)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                ForEach(family.samples, id: \.self) { sample in
+                                    Text(sample)
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                    .padding(10)
+                    .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+            .padding(.vertical, 6)
+            Divider().overlay(.white.opacity(0.12))
             metric("Path giống payload", "\(report.identicalCount)")
             metric("Path cùng tên, payload khác", "\(report.changedCount)")
             metric("Path chỉ có ở MOD cũ", "\(report.legacyOnlyCount)")
