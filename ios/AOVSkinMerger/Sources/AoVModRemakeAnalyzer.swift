@@ -407,7 +407,7 @@ struct AoVModPackageAudit: Codable, Sendable, Identifiable {
         if normalized.contains("commonactions") { return .commonActions }
         if normalized.contains("mses") { return .mses }
         if normalized.contains("ifix") { return .ifix }
-        if normalized.contains("reskinseniorlabelcfg") ||
+        if normalized.contains("resskinseniorlabelcfg") ||
             normalized.contains("thanos/heroskin") ||
             normalized.contains("heroskinconfig") {
             return .heroSkinConfig
