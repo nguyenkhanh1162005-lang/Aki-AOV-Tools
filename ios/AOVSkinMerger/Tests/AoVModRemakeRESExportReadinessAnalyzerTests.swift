@@ -216,7 +216,7 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
 
     func testFingerprintIdentityRejectsDifferentRESBytesWithSameFilename() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AKI-RES-Fingerprint-Identity-Test-\\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("AKI-RES-Fingerprint-Identity-Test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -248,14 +248,14 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
             )
         ) { error in
             guard case AoVModRemakeRESExportReadinessError.fingerprintContentMismatch = error else {
-                return XCTFail("Expected a content fingerprint mismatch, got \\(error)")
+                return XCTFail("Expected a content fingerprint mismatch, got \(error)")
             }
         }
     }
 
     func testFingerprintIdentityIsRequiredBeforeRESReadinessAnalysis() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AKI-RES-Fingerprint-Missing-Test-\\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("AKI-RES-Fingerprint-Missing-Test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let baseRES = root.appendingPathComponent("base-res.zip")
@@ -272,7 +272,7 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
             )
         ) { error in
             guard case AoVModRemakeRESExportReadinessError.missingRESFingerprintIdentity = error else {
-                return XCTFail("Expected a missing fingerprint identity, got \\(error)")
+                return XCTFail("Expected a missing fingerprint identity, got \(error)")
             }
         }
     }
