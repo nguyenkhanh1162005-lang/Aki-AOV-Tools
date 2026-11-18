@@ -118,6 +118,379 @@ enum AoVModRemakeExporter {
     private static let verificationFileName = "resourceverificationinfosetall.assetbundle"
     private static let outputFolderName = "AKI AOV SKIN Exports"
 
+    /// Automatic first-stage RMK export: copies only legacy-only standalone
+    /// files whose payload is preserved byte-for-byte and whose source Packer
+    /// and Verification records are unique. AssetBundles, Wwise banks, and any
+    /// Packer-linked resource remain outside this path until their semantic
+    /// merge/dependency adapters have been verified.
+    static func exportLegacyOnlyStandaloneResources(
+        baseRESURL: URL,
+        legacyMODURLs: [URL]
+    ) throws -> AoVModRemakeExportReport {
+        guard !legacyMODURLs.isEmpty else {
+            throw AoVModRemakeExporterError.noSafeStandaloneResources("Chưa chọn MOD cũ.")
+        }
+        let catalogInputs = try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+            baseRESURL: baseRESURL,
+            legacyMODURLs: legacyMODURLs
+        )
+        let sourceNames = legacyMODURLs.map { $0.lastPathComponent }
+        guard Set(sourceNames).count == sourceNames.count else {
+            throw AoVModRemakeExporterError.noSafeStandaloneResources(
+                "Có nhiều file MOD trùng tên; hãy đổi tên để phân biệt nguồn metadata."
+            )
+        }
+
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-AOV-STANDALONE-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        func resolveResources(_ inputURL: URL) throws -> URL {
+            let outer: Archive
+            do {
+                outer = try Archive(url: inputURL, accessMode: .read)
+            } catch {
+                throw AoVModRemakeExporterError.invalidBaseArchive(inputURL.lastPathComponent)
+            }
+            let nestedEntries = outer.filter {
+                $0.type == .file &&
+                ($0.path as NSString).lastPathComponent.caseInsensitiveCompare("Resources.zip") == .orderedSame
+            }
+            guard nestedEntries.count <= 1 else {
+                throw AoVModRemakeExporterError.ambiguousCatalog("Resources.zip")
+            }
+            guard let nested = nestedEntries.first else { return inputURL }
+            guard nested.uncompressedSize <= 512 * 1024 * 1024 else {
+                throw AoVModRemakeExporterError.archiveExpandedTooLarge("Resources.zip")
+            }
+            let destination = tempRoot.appendingPathComponent("resources-\(UUID().uuidString).zip")
+            do {
+                _ = try outer.extract(nested, to: destination, bufferSize: 64 * 1024)
+                _ = try Archive(url: destination, accessMode: .read)
+            } catch {
+                try? FileManager.default.removeItem(at: destination)
+                throw AoVModRemakeExporterError.invalidBaseArchive(
+                    "\(inputURL.lastPathComponent)/Resources.zip"
+                )
+            }
+            return destination
+        }
+
+        func readCatalog(_ archive: Archive, fileName: String) throws -> Data {
+            let matches = archive.filter {
+                $0.type == .file &&
+                ($0.path as NSString).lastPathComponent.caseInsensitiveCompare(fileName) == .orderedSame
+            }
+            guard matches.count == 1, let entry = matches.first else {
+                throw matches.isEmpty
+                    ? AoVModRemakeExporterError.missingCatalog(fileName)
+                    : AoVModRemakeExporterError.ambiguousCatalog(fileName)
+            }
+            return try readEntry(archive, entry, maxBytes: maximumSingleEntry)
+        }
+
+        func runtimePath(for archivePath: String, version: String) throws -> String? {
+            let normalized = try normalizeArchivePath(archivePath)
+            let parts = normalized.split(separator: "/").map(String.init)
+            guard !parts.isEmpty else { return nil }
+            if parts.count >= 3,
+               parts[0].lowercased() == "resources",
+               parts[1].caseInsensitiveCompare(version) == .orderedSame {
+                return parts.dropFirst(2).joined(separator: "/")
+            }
+            if parts.count >= 2,
+               parts[0].caseInsensitiveCompare(version) == .orderedSame {
+                return parts.dropFirst().joined(separator: "/")
+            }
+            if parts[0].range(
+                of: #"^\d+(?:\.\d+){1,3}$"#,
+                options: .regularExpression
+            ) != nil {
+                return nil
+            }
+            return normalized
+        }
+
+        func makeRuntimeEntryMap(
+            _ entries: [Entry],
+            version: String
+        ) throws -> [String: [Entry]] {
+            var result: [String: [Entry]] = [:]
+            for entry in entries {
+                guard let path = try runtimePath(for: entry.path, version: version) else { continue }
+                result[path, default: []].append(entry)
+            }
+            return result
+        }
+
+        func isStandalone(_ path: String, _ row: AoVRuntimeResourcePackInfo) -> Bool {
+            let normalized = path.replacingOccurrences(of: "\\", with: "/")
+            let lower = normalized.lowercased()
+            let components = lower.split(separator: "/")
+            let ext = URL(fileURLWithPath: normalized).pathExtension.lowercased()
+            let excludedExtensions: Set<String> = [
+                "assetbundle", "bnk", "wem", "zip", "pck", "obb"
+            ]
+            return !components.contains("assetbundle") &&
+                !excludedExtensions.contains(ext) &&
+                !lower.contains(".pkg.") &&
+                !row.resourceInfos.contains(where: {
+                    $0.extensionName.lowercased() == "assetbundle"
+                })
+        }
+
+        let baseResourcesURL = try resolveResources(baseRESURL)
+        let baseArchive: Archive
+        do {
+            baseArchive = try Archive(url: baseResourcesURL, accessMode: .read)
+        } catch {
+            throw AoVModRemakeExporterError.invalidBaseArchive(baseRESURL.lastPathComponent)
+        }
+        let baseEntries = try validatedEntries(baseArchive, label: "RES nền")
+        let basePackerData = try readCatalog(baseArchive, fileName: packerFileName)
+        let baseVerificationData = try readCatalog(baseArchive, fileName: verificationFileName)
+        let basePackerTarget = try AoVUnityFSRuntimeCatalogMergeExecutor.locatePackerCatalog(
+            in: basePackerData
+        )
+        let baseVerificationTarget = try AoVUnityFSRuntimeCatalogMergeExecutor.locateVerificationCatalog(
+            in: baseVerificationData
+        )
+        guard case .packer(let basePacker) = basePackerTarget.catalog,
+              case .verification(let baseVerification) = baseVerificationTarget.catalog,
+              basePacker.version == baseVerification.version else {
+            throw AoVModRemakeExporterError.catalogMergeFailed(
+                "RES nền thiếu đúng cặp runtime Packer/Verification cùng version."
+            )
+        }
+
+        let version = basePacker.version
+        let basePackerPaths = Set(basePacker.allResourcePackInfo.map(\.pathInIFS))
+        let baseRuntimeEntries = try makeRuntimeEntryMap(baseEntries, version: version)
+        let lowerVersion = version.lowercased()
+        let destinationPrefix: String
+        if baseEntries.contains(where: {
+            $0.path.lowercased().hasPrefix("resources/\(lowerVersion)/")
+        }) {
+            destinationPrefix = "Resources/\(version)/"
+        } else if baseEntries.contains(where: {
+            $0.path.lowercased().hasPrefix("\(lowerVersion)/")
+        }) {
+            destinationPrefix = "\(version)/"
+        } else {
+            destinationPrefix = ""
+        }
+
+        typealias Candidate = (
+            source: String,
+            path: String,
+            packer: AoVRuntimeResourcePackInfo,
+            verification: AoVRuntimeVerificationEntry,
+            isZIP: Bool,
+            data: Data
+        )
+        var candidatesByPath: [String: [Candidate]] = [:]
+        var blockedSamples: [String] = []
+
+        for sourceURL in legacyMODURLs {
+            let sourceName = sourceURL.lastPathComponent
+            let packerSources = catalogInputs.packer.filter { $0.source == sourceName }
+            let verificationSources = catalogInputs.verification.filter { $0.source == sourceName }
+            guard packerSources.count == 1, verificationSources.count == 1,
+                  let sourcePacker = packerSources.first?.catalog,
+                  let sourceVerification = verificationSources.first?.catalog,
+                  sourcePacker.version == version,
+                  sourceVerification.version == version else {
+                throw AoVModRemakeExporterError.catalogMergeFailed(
+                    "\(sourceName): không đọc được đúng một cặp Packer/Verification cùng version."
+                )
+            }
+
+            let sourceResourcesURL = try resolveResources(sourceURL)
+            let sourceArchive: Archive
+            do {
+                sourceArchive = try Archive(url: sourceResourcesURL, accessMode: .read)
+            } catch {
+                throw AoVModRemakeExporterError.invalidBaseArchive(sourceName)
+            }
+            let sourceEntries = try validatedEntries(sourceArchive, label: sourceName)
+            let sourceRuntimeEntries = try makeRuntimeEntryMap(sourceEntries, version: version)
+            let linkedIndices = Set(sourcePacker.allParentIndexToChild.flatMap {
+                [$0.parentIdx, $0.childIdx]
+            })
+            let rowsByPath = Dictionary(
+                grouping: sourcePacker.allResourcePackInfo,
+                by: \.pathInIFS
+            )
+
+            for (index, row) in sourcePacker.allResourcePackInfo.enumerated() {
+                let resourcePath: String
+                do {
+                    resourcePath = try normalizeArchivePath(row.pathInIFS)
+                } catch {
+                    continue
+                }
+                guard resourcePath == row.pathInIFS,
+                      !basePackerPaths.contains(resourcePath),
+                      baseRuntimeEntries[resourcePath] == nil,
+                      rowsByPath[resourcePath]?.count == 1,
+                      let rowIndex = Int32(exactly: index),
+                      !linkedIndices.contains(rowIndex),
+                      isStandalone(resourcePath, row) else {
+                    continue
+                }
+
+                let zipRows = sourceVerification.allZipVerificationInfo.filter {
+                    $0.pathInIFS == resourcePath
+                }
+                let databinRows = sourceVerification.allDatabinVerificationInfo.filter {
+                    $0.pathInIFS == resourcePath
+                }
+                guard zipRows.count + databinRows.count == 1,
+                      let matchingEntries = sourceRuntimeEntries[resourcePath],
+                      matchingEntries.count == 1,
+                      let resourceEntry = matchingEntries.first else {
+                    blockedSamples.append("\(sourceName): \(resourcePath) (thiếu/trùng payload hoặc Verification)")
+                    continue
+                }
+                guard resourceEntry.uncompressedSize <= maximumSingleEntry else {
+                    blockedSamples.append("\(sourceName): \(resourcePath) (quá lớn)")
+                    continue
+                }
+
+                let payload = try readEntry(
+                    sourceArchive,
+                    resourceEntry,
+                    maxBytes: maximumSingleEntry
+                )
+                let isZIP = !zipRows.isEmpty
+                let verificationRow = isZIP ? zipRows[0] : databinRows[0]
+                candidatesByPath[resourcePath, default: []].append(
+                    (
+                        source: sourceName,
+                        path: resourcePath,
+                        packer: row,
+                        verification: verificationRow,
+                        isZIP: isZIP,
+                        data: payload
+                    )
+                )
+            }
+        }
+
+        var selected: [Candidate] = []
+        for path in candidatesByPath.keys.sorted() {
+            guard let candidates = candidatesByPath[path], let first = candidates.first else { continue }
+            let identical = candidates.dropFirst().allSatisfy {
+                $0.data == first.data &&
+                $0.packer == first.packer &&
+                $0.verification == first.verification &&
+                $0.isZIP == first.isZIP
+            }
+            if identical {
+                selected.append(first)
+            } else {
+                blockedSamples.append("\(path) (nhiều MOD có payload hoặc checksum xung đột)")
+            }
+        }
+        guard !selected.isEmpty else {
+            let samples = blockedSamples.prefix(5).joined(separator: "; ")
+            let suffix = samples.isEmpty ? "" : " Mẫu bị loại: \(samples)."
+            throw AoVModRemakeExporterError.noSafeStandaloneResources(
+                "Không có file mới độc lập, đủ metadata và không có Packer dependency.\(suffix)"
+            )
+        }
+
+        var totalBytes: UInt64 = 0
+        var payloads: [AoVModRemakeResourcePayload] = []
+        var finalPackerEntries: [String: AoVRuntimeResourcePackInfo] = [:]
+        var finalZIPChecksums: [String: Int64] = [:]
+        var finalDatabinChecksums: [String: Int64] = [:]
+        var selectedBySource: [String: Set<String>] = [:]
+        var selectedZIPBySource: [String: Set<String>] = [:]
+        var selectedDatabinBySource: [String: Set<String>] = [:]
+
+        for candidate in selected {
+            let next = totalBytes.addingReportingOverflow(UInt64(candidate.data.count))
+            guard !next.overflow, next.partialValue <= 256 * 1024 * 1024 else {
+                throw AoVModRemakeExporterError.noSafeStandaloneResources(
+                    "Giới hạn tự động hiện là 256 MiB mỗi lượt để tránh dùng quá nhiều RAM trên iPhone."
+                )
+            }
+            totalBytes = next.partialValue
+            payloads.append(
+                AoVModRemakeResourcePayload(
+                    archivePath: destinationPrefix + candidate.path,
+                    ifsPath: candidate.path,
+                    data: candidate.data
+                )
+            )
+            finalPackerEntries[candidate.path] = candidate.packer
+            selectedBySource[candidate.source, default: []].insert(candidate.path)
+            if candidate.isZIP {
+                finalZIPChecksums[candidate.path] = candidate.verification.crcXor
+                selectedZIPBySource[candidate.source, default: []].insert(candidate.path)
+            } else {
+                finalDatabinChecksums[candidate.path] = candidate.verification.crcXor
+                selectedDatabinBySource[candidate.source, default: []].insert(candidate.path)
+            }
+        }
+
+        let filteredPacker: [(source: String, catalog: AoVRuntimeResourcePackerCatalog)] =
+            catalogInputs.packer.compactMap { item in
+                let paths = selectedBySource[item.source] ?? []
+                let rows = item.catalog.allResourcePackInfo.filter {
+                    paths.contains($0.pathInIFS)
+                }
+                guard !rows.isEmpty else { return nil }
+                return (
+                    source: item.source,
+                    catalog: AoVRuntimeResourcePackerCatalog(
+                        name: item.catalog.name,
+                        version: item.catalog.version,
+                        svnRevision: item.catalog.svnRevision,
+                        setName: item.catalog.setName,
+                        allResourcePackInfo: rows,
+                        allParentIndexToChild: [],
+                        trailingData: item.catalog.trailingData
+                    )
+                )
+            }
+        let filteredVerification: [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)] =
+            catalogInputs.verification.compactMap { item in
+                let zipPaths = selectedZIPBySource[item.source] ?? []
+                let databinPaths = selectedDatabinBySource[item.source] ?? []
+                let zipRows = item.catalog.allZipVerificationInfo.filter {
+                    zipPaths.contains($0.pathInIFS)
+                }
+                let databinRows = item.catalog.allDatabinVerificationInfo.filter {
+                    databinPaths.contains($0.pathInIFS)
+                }
+                guard !zipRows.isEmpty || !databinRows.isEmpty else { return nil }
+                return (
+                    source: item.source,
+                    catalog: AoVRuntimeResourceVerificationCatalog(
+                        name: item.catalog.name,
+                        version: item.catalog.version,
+                        svnRevision: item.catalog.svnRevision,
+                        allZipVerificationInfo: zipRows,
+                        allDatabinVerificationInfo: databinRows,
+                        trailingData: item.catalog.trailingData
+                    )
+                )
+            }
+
+        return try exportVerifiedRES(
+            baseRESURL: baseRESURL,
+            resourcePayloads: payloads,
+            legacyPackerCatalogs: filteredPacker,
+            verifiedFinalPackerEntries: finalPackerEntries,
+            legacyVerificationCatalogs: filteredVerification,
+            verifiedFinalDatabinChecksumValues: finalDatabinChecksums,
+            verifiedFinalZIPChecksumValues: finalZIPChecksums
+        )
+    }
+
     /// Convenience entry point that extracts real runtime catalogs from the
     /// selected legacy MOD archives and enforces exact build-marker equality.
     /// Payload bytes and final metadata must still come from verified adapters.
