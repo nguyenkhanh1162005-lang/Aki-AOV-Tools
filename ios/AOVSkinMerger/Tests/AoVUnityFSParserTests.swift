@@ -56,15 +56,18 @@ final class AoVUnityFSParserTests: XCTestCase {
         XCTAssertEqual(info.nodes.first?.path, "CAB-test")
     }
 
-    func testRejectsLegacyEncryptionFlagInsteadOfTreatingItAsPadding() {
+    func testRejectsUnencryptedPayloadMarkedWithLegacyEncryptionFlag() {
+        // This synthetic fixture has a plain header but sets the legacy
+        // UnityCN encryption bit. The parser must try the encrypted layout,
+        // not silently treat 0x200 as a block-padding flag.
         let bundle = makeBundle(
             engineVersion: "2019.4.20f1",
             flags: 0x240
         )
         XCTAssertThrowsError(try AoVUnityFSParser.inspect(bundle)) { error in
             guard let parserError = error as? AoVUnityFSError,
-                  case .unsupportedEncryption(_) = parserError else {
-                return XCTFail("Expected unsupported encryption, got \(error)")
+                  case .fileSizeMismatch(_, _) = parserError else {
+                return XCTFail("Expected malformed encrypted header rejection, got \(error)")
             }
         }
     }
