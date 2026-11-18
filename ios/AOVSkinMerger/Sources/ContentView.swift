@@ -561,15 +561,9 @@ struct ContentView: View {
                    "\(finding.missingPaths) · \(finding.ambiguousPaths) · \(finding.unsupportedValues)")
             metric("XOR mask nhất quán", finding.maskDescription)
             metric("CRC32 khớp trực tiếp", "\(finding.exactCRC32Matches)")
-            let color: Color
-            switch finding.status {
-            case .consistentSample: color = .green
-            case .partialConsistentSample: color = .orange
-            case .insufficientSamples, .inconsistent: color = .secondary
-            }
             Text(finding.statusDescription)
                 .font(.caption.weight(.semibold))
-                .foregroundColor(color)
+                .foregroundColor(checksumFindingColor(finding.status))
             if finding.sampleLimitHit {
                 Text("Đã giới hạn số mẫu để tránh quét toàn bộ hàng chục nghìn file.")
                     .font(.caption2)
@@ -581,6 +575,14 @@ struct ContentView: View {
                     .foregroundColor(.secondary)
                     .textSelection(.enabled)
             }
+        }
+    }
+
+    private func checksumFindingColor(_ status: AoVRuntimeChecksumFingerprintStatus) -> Color {
+        switch status {
+        case .consistentSample: return .green
+        case .partialConsistentSample: return .orange
+        case .insufficientSamples, .inconsistent: return .secondary
         }
     }
 
