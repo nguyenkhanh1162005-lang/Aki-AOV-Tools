@@ -180,6 +180,15 @@ enum AoVModRemakeCABBatchImporter {
             for references: [AoVSerializedFileExternalReference]
         ) throws -> [String: Data] {
             var result = verifiedExternalTargetFiles
+            var auditBytes = result.values.reduce(UInt64(0)) { partial, data in
+                let next = partial.addingReportingOverflow(UInt64(data.count))
+                return next.overflow ? UInt64.max : next.partialValue
+            }
+            guard auditBytes <= maximumExternalAuditBytes else {
+                throw AoVModRemakeExporterError.archiveExpandedTooLarge(
+                    "external CAB audit vượt giới hạn bộ nhớ tạm 128 MiB."
+                )
+            }
             for reference in references {
                 let targetKey = AoVAssetBundleCatalogMerger.externalTargetKey(
                     guidHex: reference.guidHex,
@@ -229,15 +238,13 @@ enum AoVModRemakeCABBatchImporter {
                     resourcePath: match.resourcePath,
                     nodePath: match.nodePath
                 )
-                let nextAuditBytes = result.values.reduce(UInt64(0)) { partial, data in
-                    let next = partial.addingReportingOverflow(UInt64(data.count))
-                    return next.overflow ? UInt64.max : next.partialValue
-                }.addingReportingOverflow(UInt64(target.data.count))
+                let nextAuditBytes = auditBytes.addingReportingOverflow(UInt64(target.data.count))
                 guard !nextAuditBytes.overflow,
                       nextAuditBytes.partialValue <= maximumExternalAuditBytes else {
                     continue
                 }
                 result[targetKey] = target.data
+                auditBytes = nextAuditBytes.partialValue
             }
             return result
         }
@@ -253,19 +260,22 @@ enum AoVModRemakeCABBatchImporter {
                 continue
             }
             do {
-                let sourceNode = try readNode(
-                    archiveName: finding.sourceArchive,
-                    resourcePath: finding.sourceResourcePath,
-                    nodePath: finding.sourceNodePath
-                )
-                let sourceRecords = sourceNode.summary.assetBundleRecords.filter {
-                    $0.pathID == finding.sourceObjectPathID
-                }
-                guard sourceRecords.count == 1, let sourceRecord = sourceRecords.first else {
-                    throw AoVUnityFSAssetBundleMergeExecutorError.objectNotFound(
-                        finding.sourceObjectPathID
+                let sourceRecord = try {
+                    let sourceNode = try readNode(
+                        archiveName: finding.sourceArchive,
+                        resourcePath: finding.sourceResourcePath,
+                        nodePath: finding.sourceNodePath
                     )
-                }
+                    let sourceRecords = sourceNode.summary.assetBundleRecords.filter {
+                        $0.pathID == finding.sourceObjectPathID
+                    }
+                    guard sourceRecords.count == 1, let sourceRecord = sourceRecords.first else {
+                        throw AoVUnityFSAssetBundleMergeExecutorError.objectNotFound(
+                            finding.sourceObjectPathID
+                        )
+                    }
+                    return sourceRecord
+                }()
                 let sourceIdentity = identity(for: sourceRecord)
                 guard sourceIdentity == finding.bundleName else {
                     throw AoVModRemakeExporterError.integrityFailure(
