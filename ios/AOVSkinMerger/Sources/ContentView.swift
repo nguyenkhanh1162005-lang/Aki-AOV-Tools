@@ -20,6 +20,8 @@ struct ContentView: View {
     @State private var remakeExportReport: AoVModRemakeExportReport?
     @State private var isMergingCABs = false
     @State private var cabBatchMergeReport: AoVModRemakeCABBatchedMergeReport?
+    @State private var isAnalyzingChecksumFingerprint = false
+    @State private var checksumFingerprintReport: AoVRuntimeChecksumFingerprintReport?
     @State private var isAnalyzing = false
     @State private var selectedURLs: [URL] = []
     @State private var selectedBaseURL: URL?
@@ -148,6 +150,7 @@ struct ContentView: View {
                         remakePanel
                         if let remakeReport { remakeResultView(remakeReport) }
                         if let cabBatchMergeReport { cabBatchMergeResultView(cabBatchMergeReport) }
+                        if let checksumFingerprintReport { checksumFingerprintView(checksumFingerprintReport) }
                         if let remakeExportReport { remakeExportResultView(remakeExportReport) }
     
                         VStack(alignment: .leading, spacing: 9) {
@@ -308,7 +311,24 @@ struct ContentView: View {
                       remakeReport?.cabMergeCandidates.contains(where: { $0.status == .candidate }) != true ||
                       isAnalyzingRemake || isMergingCABs || isCopyingFiles || isMerging || isExportingRemake)
 
-            Text("Nút này chạy nhập object closure thật trên CAB có ứng viên khớp, kiểm tra TypeTree/PPtr và round-trip. Nó chỉ tạo candidate trong bộ nhớ, không xuất RES nếu checksum cuối chưa được xác minh.")
+            Button(action: runChecksumFingerprintAnalysis) {
+                HStack {
+                    if isAnalyzingChecksumFingerprint { ProgressView().tint(.white) }
+                    Label(
+                        isAnalyzingChecksumFingerprint ? "Đang khảo sát checksum RES…" : "Khảo sát checksum trên RES nền",
+                        systemImage: "number"
+                    )
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(AKISecondaryButtonStyle())
+            .disabled(remakeBaseURL == nil || isAnalyzingChecksumFingerprint ||
+                      isMergingCABs || isAnalyzingRemake || isCopyingFiles || isExportingRemake || isMerging)
+
+            Text("Khảo sát này đối chiếu CRC32 IEEE của byte thô với các giá trị Verification có sẵn. Nó chỉ tìm dấu hiệu XOR nhất quán trên mẫu RES, không tự cấp checksum cho dữ liệu đã sửa.")
+                .font(.caption2).foregroundColor(.orange)
+
+            Text("Nút nhập CAB chạy object closure thật, kiểm tra TypeTree/PPtr và round-trip. Nó chỉ tạo candidate trong bộ nhớ, không xuất RES nếu checksum cuối chưa được xác minh.")
                 .font(.caption2).foregroundColor(.orange)
         }
         .panel()
@@ -514,6 +534,54 @@ struct ContentView: View {
                 .foregroundColor(.orange)
         }
         .panel()
+    }
+
+    private func checksumFingerprintView(_ report: AoVRuntimeChecksumFingerprintReport) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Khảo sát checksum / Verification", systemImage: "number")
+                .font(.headline)
+            metric("RES nền", report.baseRESName)
+            checksumFindingView(report.zipVerification)
+            Divider().overlay(.white.opacity(0.08))
+            checksumFindingView(report.databinVerification)
+            Text(report.warning)
+                .font(.caption2)
+                .foregroundColor(.orange)
+        }
+        .panel()
+    }
+
+    private func checksumFindingView(_ finding: AoVRuntimeChecksumFingerprintFinding) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(finding.title)
+                .font(.subheadline.weight(.semibold))
+            metric("Dòng catalog · mẫu tính được",
+                   "\(finding.totalCatalogRows) · \(finding.evaluatedSamples)")
+            metric("Không tìm thấy · path trùng · value ngoài 32-bit",
+                   "\(finding.missingPaths) · \(finding.ambiguousPaths) · \(finding.unsupportedValues)")
+            metric("XOR mask nhất quán", finding.maskDescription)
+            metric("CRC32 khớp trực tiếp", "\(finding.exactCRC32Matches)")
+            let color: Color
+            switch finding.status {
+            case .consistentSample: color = .green
+            case .partialConsistentSample: color = .orange
+            case .insufficientSamples, .inconsistent: color = .secondary
+            }
+            Text(finding.statusDescription)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(color)
+            if finding.sampleLimitHit {
+                Text("Đã giới hạn số mẫu để tránh quét toàn bộ hàng chục nghìn file.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            ForEach(finding.examples, id: \.self) { example in
+                Text(example)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
     }
 
     private func runtimeCatalogSectionView(_ report: AoVRuntimeCatalogSectionReport) -> some View {
@@ -1546,6 +1614,7 @@ struct ContentView: View {
                             remakeReport = nil
                             remakeExportReport = nil
                             cabBatchMergeReport = nil
+                            checksumFingerprintReport = nil
                         }
                     case .legacyMods:
                         remakeMODURLs.append(contentsOf: report.importedURLs)
@@ -1746,6 +1815,28 @@ struct ContentView: View {
                 showAlert = true
             }
             isMergingCABs = false
+        }
+    }
+
+    private func runChecksumFingerprintAnalysis() {
+        guard let baseURL = remakeBaseURL else {
+            alertText = "Hãy chọn RES nền trước khi khảo sát checksum."
+            showAlert = true
+            return
+        }
+        isAnalyzingChecksumFingerprint = true
+        checksumFingerprintReport = nil
+        Task {
+            do {
+                let report = try await Task.detached(priority: .userInitiated) {
+                    try AoVRuntimeChecksumFingerprintAnalyzer.analyze(baseRESURL: baseURL)
+                }.value
+                checksumFingerprintReport = report
+            } catch {
+                alertText = error.localizedDescription
+                showAlert = true
+            }
+            isAnalyzingChecksumFingerprint = false
         }
     }
 
