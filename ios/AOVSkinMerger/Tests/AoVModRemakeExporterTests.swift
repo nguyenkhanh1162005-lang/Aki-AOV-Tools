@@ -592,6 +592,46 @@ final class AoVModRemakeExporterTests: XCTestCase {
         XCTAssertEqual(inputs.verification[0].catalog.name, "ResourceVerificationInfoSetXML")
     }
 
+    func testLegacyCatalogLoaderAllowsReadOnlyBuildMigrationAnalysis() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Catalog-ReadOnly-Migration-Test-\\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("old-build-mod.zip")
+        let basePacker = makePackerCatalog(version: "1.64.1.12")
+        let baseVerification = makeVerificationCatalog(version: "1.64.1.12")
+        let legacyPacker = makePackerCatalog(version: "1.64.1.11")
+        let legacyVerification = makeVerificationCatalog(version: "1.64.1.11")
+
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.1.12\\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(basePacker))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(baseVerification)))
+        ], root: root)
+        try makeArchive(legacyURL, entries: [
+            ("version.txt", Data("1.64.1.11\\n".utf8)),
+            ("1.64.1.11/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(legacyPacker))),
+            ("1.64.1.11/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(legacyVerification)))
+        ], root: root)
+
+        let inputs = try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+            baseRESURL: baseURL,
+            legacyMODURLs: [legacyURL],
+            allowLegacyBuildMismatch: true
+        )
+
+        XCTAssertEqual(inputs.basePacker.first?.catalog.version, "1.64.1.12")
+        XCTAssertEqual(inputs.baseVerification.first?.catalog.version, "1.64.1.12")
+        XCTAssertEqual(inputs.packer.first?.catalog.version, "1.64.1.11")
+        XCTAssertEqual(inputs.verification.first?.catalog.version, "1.64.1.11")
+    }
+
     func testLegacyCatalogLoaderRejectsDifferentBuildVersion() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-Catalog-Version-Guard-Test-\(UUID().uuidString)", isDirectory: true)
@@ -782,10 +822,12 @@ final class AoVModRemakeExporterTests: XCTestCase {
         )
     }
 
-    private func makeVerificationCatalog() -> AoVRuntimeResourceVerificationCatalog {
+    private func makeVerificationCatalog(
+        version: String = "1.64.1.12"
+    ) -> AoVRuntimeResourceVerificationCatalog {
         AoVRuntimeResourceVerificationCatalog(
             name: "ResourceVerificationInfoSetXML",
-            version: "1.64.1.12",
+            version: version,
             svnRevision: "1793129",
             allZipVerificationInfo: [],
             allDatabinVerificationInfo: [],
