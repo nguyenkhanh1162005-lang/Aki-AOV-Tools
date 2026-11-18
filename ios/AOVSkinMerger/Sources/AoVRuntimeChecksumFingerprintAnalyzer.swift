@@ -87,6 +87,7 @@ struct AoVRuntimeChecksumFingerprintFinding: Sendable {
 
 struct AoVRuntimeChecksumFingerprintReport: Sendable {
     let baseRESName: String
+    let packerAssetBundles: AoVRuntimeChecksumFingerprintFinding
     let zipVerification: AoVRuntimeChecksumFingerprintFinding
     let databinVerification: AoVRuntimeChecksumFingerprintFinding
     let warning: String
@@ -100,6 +101,9 @@ enum AoVRuntimeChecksumFingerprintError: LocalizedError {
     case missingVerificationCatalog
     case ambiguousVerificationCatalog
     case invalidVerificationCatalog(String)
+    case missingPackerCatalog
+    case ambiguousPackerCatalog
+    case invalidPackerCatalog(String)
     case unsafePath(String)
     case duplicatePath(String)
     case tooManyEntries
@@ -116,6 +120,12 @@ enum AoVRuntimeChecksumFingerprintError: LocalizedError {
             return "RES có nhiều Verification catalog cùng tên."
         case .invalidVerificationCatalog(let reason):
             return "Không đọc được Verification catalog: \(reason)"
+        case .missingPackerCatalog:
+            return "Không tìm thấy ResourcePackerInfoSetAll.assetbundle."
+        case .ambiguousPackerCatalog:
+            return "RES có nhiều Packer catalog cùng tên."
+        case .invalidPackerCatalog(let reason):
+            return "Không đọc được Packer catalog: \(reason)"
         case .unsafePath(let path):
             return "RES có đường dẫn không an toàn: \(path)."
         case .duplicatePath(let path):
@@ -160,6 +170,7 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
     private static let maximumUnityFSFingerprintEntryBytes: UInt64 = 64 * 1024 * 1024
     private static let minimumSamplesForCandidate = 8
     private static let verificationFileName = "resourceverificationinfosetall.assetbundle"
+    private static let packerFileName = "resourcepackerinfosetall.assetbundle"
 
     static func analyze(baseRESURL: URL) throws -> AoVRuntimeChecksumFingerprintReport {
         let tempRoot = FileManager.default.temporaryDirectory
@@ -207,16 +218,38 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
         guard catalogMatches.count == 1, let catalogEntry = catalogMatches.first else {
             throw AoVRuntimeChecksumFingerprintError.ambiguousVerificationCatalog
         }
-        let catalogData = try readEntry(resourceArchive, catalogEntry)
-        let target: AoVUnityFSRuntimeCatalogTarget
+        let verificationData = try readEntry(resourceArchive, catalogEntry)
+        let verificationTarget: AoVUnityFSRuntimeCatalogTarget
         do {
-            target = try AoVUnityFSRuntimeCatalogMergeExecutor.locateVerificationCatalog(in: catalogData)
+            verificationTarget = try AoVUnityFSRuntimeCatalogMergeExecutor.locateVerificationCatalog(in: verificationData)
         } catch {
             throw AoVRuntimeChecksumFingerprintError.invalidVerificationCatalog(error.localizedDescription)
         }
-        guard case .verification(let catalog) = target.catalog else {
+        guard case .verification(let verificationCatalog) = verificationTarget.catalog else {
             throw AoVRuntimeChecksumFingerprintError.invalidVerificationCatalog(
                 "File được nhận diện không phải Verification catalog."
+            )
+        }
+
+        let packerMatches = entries.filter {
+            ($0.path as NSString).lastPathComponent.caseInsensitiveCompare(packerFileName) == .orderedSame
+        }
+        guard !packerMatches.isEmpty else {
+            throw AoVRuntimeChecksumFingerprintError.missingPackerCatalog
+        }
+        guard packerMatches.count == 1, let packerEntry = packerMatches.first else {
+            throw AoVRuntimeChecksumFingerprintError.ambiguousPackerCatalog
+        }
+        let packerData = try readEntry(resourceArchive, packerEntry)
+        let packerTarget: AoVUnityFSRuntimeCatalogTarget
+        do {
+            packerTarget = try AoVUnityFSRuntimeCatalogMergeExecutor.locatePackerCatalog(in: packerData)
+        } catch {
+            throw AoVRuntimeChecksumFingerprintError.invalidPackerCatalog(error.localizedDescription)
+        }
+        guard case .packer(let packerCatalog) = packerTarget.catalog else {
+            throw AoVRuntimeChecksumFingerprintError.invalidPackerCatalog(
+                "File được nhận diện không phải Packer catalog."
             )
         }
 
@@ -227,21 +260,31 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
             entriesByRuntimePath[runtimePath, default: []].append(entry)
         }
 
+        let packerFinding = try fingerprint(
+            title: "Packer AssetBundle",
+            rows: packerCatalog.allResourcePackInfo.map {
+                AoVRuntimeVerificationEntry(pathInIFS: $0.pathInIFS, crcXor: $0.crcXor)
+            },
+            archive: resourceArchive,
+            entriesByRuntimePath: entriesByRuntimePath,
+            assetBundleRowsOnly: true
+        )
         let zipFinding = try fingerprint(
             title: "Verification ZIP",
-            rows: catalog.allZipVerificationInfo,
+            rows: verificationCatalog.allZipVerificationInfo,
             archive: resourceArchive,
             entriesByRuntimePath: entriesByRuntimePath
         )
         let databinFinding = try fingerprint(
             title: "Verification Databin",
-            rows: catalog.allDatabinVerificationInfo,
+            rows: verificationCatalog.allDatabinVerificationInfo,
             archive: resourceArchive,
             entriesByRuntimePath: entriesByRuntimePath
         )
 
         return AoVRuntimeChecksumFingerprintReport(
             baseRESName: baseRESURL.lastPathComponent,
+            packerAssetBundles: packerFinding,
             zipVerification: zipFinding,
             databinVerification: databinFinding,
             warning: "Có hai phép đo tách biệt: CRC32 IEEE trên byte ZIP thô và, với AssetBundle UnityFS nhỏ hơn 64 MiB, CRC32 trên luồng block đã giải nén. XOR mask chỉ là giả thuyết từ mẫu RES; không tự động dùng cho payload đã sửa và chưa chứng minh tương thích trong game."
@@ -335,7 +378,8 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
         title: String,
         rows: [AoVRuntimeVerificationEntry],
         archive: Archive,
-        entriesByRuntimePath: [String: [Entry]]
+        entriesByRuntimePath: [String: [Entry]],
+        assetBundleRowsOnly: Bool = false
     ) throws -> AoVRuntimeChecksumFingerprintFinding {
         let distinctRows = Dictionary(grouping: rows, by: \.pathInIFS)
         let orderedPaths = distinctRows.keys.sorted()
@@ -348,6 +392,11 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
         var unityFSUncompressedSkipped = 0
 
         for path in sampledPaths {
+            if assetBundleRowsOnly &&
+                URL(fileURLWithPath: path).pathExtension.lowercased() != "assetbundle" {
+                unsupportedValues += 1
+                continue
+            }
             guard let catalogRows = distinctRows[path], catalogRows.count == 1,
                   let row = catalogRows.first else {
                 ambiguousPaths += 1
