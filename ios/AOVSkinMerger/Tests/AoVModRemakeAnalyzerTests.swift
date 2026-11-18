@@ -64,6 +64,137 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
         XCTAssertEqual(audit.families.reduce(0) { $0 + $1.fileCount }, paths.count)
     }
 
+    func testCABCandidatePlannerMapsUniqueBundleAndReportsLegacyOnlyKeys() {
+        let source = cabSnapshot(
+            archive: "generic-old-mod.zip",
+            resource: "Resources/1.9/assetbundle/actor.assetbundle",
+            node: "CAB-source",
+            format: 22,
+            platform: 13,
+            pathID: 200,
+            bundle: "actor/731",
+            entries: [
+                cabEntry("assets/hero.prefab", pathID: 2001),
+                cabEntry("assets/old-effect.prefab", pathID: 2002)
+            ],
+            dependencies: ["common", "common/fx"]
+        )
+        let destination = cabSnapshot(
+            archive: "new-res.zip",
+            resource: "Resources/2.0/assetbundle/actor.assetbundle",
+            node: "CAB-current",
+            format: 22,
+            platform: 13,
+            pathID: 900,
+            bundle: "actor/731",
+            entries: [cabEntry("assets/hero.prefab", pathID: 9001)],
+            dependencies: ["common"]
+        )
+
+        let findings = AoVModRemakeAnalyzer.planCABCandidates(
+            current: [destination],
+            legacy: [source]
+        )
+
+        XCTAssertEqual(findings.count, 1)
+        XCTAssertEqual(findings.first?.status, .candidate)
+        XCTAssertEqual(findings.first?.destinationObjectPathID, 900)
+        XCTAssertEqual(findings.first?.legacyOnlyContainerKeyCount, 1)
+        XCTAssertEqual(findings.first?.changedAssetPointerCount, 1)
+        XCTAssertEqual(findings.first?.dependenciesMissingFromDestination, ["common/fx"])
+        XCTAssertTrue(findings.first?.reason.contains("object closure") == true)
+    }
+
+    func testCABCandidatePlannerReportsMissingAndAmbiguousTargets() {
+        let source = cabSnapshot(
+            archive: "old.zip",
+            resource: "old/actor.assetbundle",
+            node: "CAB-old",
+            format: 22,
+            platform: 13,
+            pathID: 100,
+            bundle: "actor/missing",
+            entries: [],
+            dependencies: []
+        )
+        let missing = AoVModRemakeAnalyzer.planCABCandidates(current: [], legacy: [source])
+        XCTAssertEqual(missing.first?.status, .missingDestination)
+
+        let ambiguousA = cabSnapshot(
+            archive: "new-res.zip", resource: "new/a.assetbundle", node: "CAB-A",
+            format: 22, platform: 13, pathID: 500, bundle: "actor/missing",
+            entries: [], dependencies: []
+        )
+        let ambiguousB = cabSnapshot(
+            archive: "new-res.zip", resource: "new/b.assetbundle", node: "CAB-B",
+            format: 22, platform: 13, pathID: 600, bundle: "actor/missing",
+            entries: [], dependencies: []
+        )
+        let ambiguous = AoVModRemakeAnalyzer.planCABCandidates(
+            current: [ambiguousA, ambiguousB],
+            legacy: [source]
+        )
+        XCTAssertEqual(ambiguous.first?.status, .ambiguousDestination)
+        XCTAssertNil(ambiguous.first?.destinationObjectPathID)
+    }
+
+    func testCABCandidatePlannerBlocksFormatPlatformAndDuplicateKeyMismatches() {
+        let source = cabSnapshot(
+            archive: "old.zip", resource: "old/a.assetbundle", node: "CAB-old",
+            format: 22, platform: 13, pathID: 100, bundle: "actor/731",
+            entries: [cabEntry("assets/hero.prefab", pathID: 101)],
+            dependencies: []
+        )
+        let incompatible = cabSnapshot(
+            archive: "new-res.zip", resource: "new/a.assetbundle", node: "CAB-new",
+            format: 23, platform: 13, pathID: 500, bundle: "actor/731",
+            entries: [cabEntry("assets/hero.prefab", pathID: 501)],
+            dependencies: []
+        )
+        let incompatibleFinding = AoVModRemakeAnalyzer.planCABCandidates(
+            current: [incompatible], legacy: [source]
+        )
+        XCTAssertEqual(incompatibleFinding.first?.status, .incompatibleSerializedFile)
+
+        let duplicateSource = cabSnapshot(
+            archive: "old.zip", resource: "old/a.assetbundle", node: "CAB-old",
+            format: 22, platform: 13, pathID: 100, bundle: "actor/731",
+            entries: [
+                cabEntry("assets/hero.prefab", pathID: 101),
+                cabEntry("assets/hero.prefab", pathID: 102)
+            ],
+            dependencies: []
+        )
+        let duplicateFinding = AoVModRemakeAnalyzer.planCABCandidates(
+            current: [cabSnapshot(
+                archive: "new-res.zip", resource: "new/a.assetbundle", node: "CAB-new",
+                format: 22, platform: 13, pathID: 500, bundle: "actor/731",
+                entries: [cabEntry("assets/hero.prefab", pathID: 501)],
+                dependencies: []
+            )],
+            legacy: [duplicateSource]
+        )
+        XCTAssertEqual(duplicateFinding.first?.status, .duplicateContainerKeys)
+        XCTAssertEqual(duplicateFinding.first?.duplicateContainerKeyCount, 1)
+    }
+
+    func testCABCandidatePlannerRejectsEmptyBundleIdentity() {
+        let source = cabSnapshot(
+            archive: "old.zip", resource: "old/unknown.assetbundle", node: "CAB-old",
+            format: 22, platform: 13, pathID: 100, bundle: "",
+            entries: [], dependencies: []
+        )
+        let destination = cabSnapshot(
+            archive: "new-res.zip", resource: "new/unknown.assetbundle", node: "CAB-new",
+            format: 22, platform: 13, pathID: 500, bundle: "",
+            entries: [], dependencies: []
+        )
+        let findings = AoVModRemakeAnalyzer.planCABCandidates(
+            current: [destination], legacy: [source]
+        )
+        XCTAssertEqual(findings.first?.status, .missingDestination)
+    }
+
     func testPathFindingKindsRemainSeparate() {
         XCTAssertEqual(AoVRemakePathKind.identical.rawValue, "identical")
         XCTAssertEqual(AoVRemakePathKind.changed.rawValue, "changed")
@@ -248,6 +379,54 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
         XCTAssertEqual(report.mappedContainerKeyCount, 0)
     }
 
+
+    private func cabSnapshot(
+        archive: String,
+        resource: String,
+        node: String,
+        format: UInt32,
+        platform: Int32,
+        pathID: Int64,
+        bundle: String,
+        entries: [AoVSerializedAssetBundleEntry],
+        dependencies: [String]
+    ) -> AoVRemakeCABRecordSnapshot {
+        let record = AoVSerializedAssetBundleRecord(
+            pathID: pathID,
+            name: bundle,
+            preloadReferences: [],
+            containerEntries: entries,
+            mainAsset: AoVSerializedAssetPointer(fileID: 0, pathID: 0),
+            mainAssetPreloadIndex: 0,
+            mainAssetPreloadSize: 0,
+            scriptCompatibilityEntries: [],
+            classCompatibilityIDs: [],
+            classCompatibilityEntries: [],
+            runtimeCompatibility: 0,
+            assetBundleName: bundle,
+            dependencies: dependencies,
+            isStreamedSceneAssetBundle: false,
+            trailingBytes: 0,
+            trailingData: Data()
+        )
+        return AoVRemakeCABRecordSnapshot(
+            sourceArchive: archive,
+            resourcePath: resource,
+            nodePath: node,
+            serializedFileFormatVersion: format,
+            targetPlatform: platform,
+            record: record
+        )
+    }
+
+    private func cabEntry(_ key: String, pathID: Int64) -> AoVSerializedAssetBundleEntry {
+        AoVSerializedAssetBundleEntry(
+            key: key,
+            preloadIndex: 0,
+            preloadSize: 0,
+            asset: AoVSerializedAssetPointer(fileID: 0, pathID: pathID)
+        )
+    }
 
     private func emptyRuntimeCatalogReport() -> AoVRuntimeCatalogComparisonReport {
         func section(_ title: String) -> AoVRuntimeCatalogSectionReport {
