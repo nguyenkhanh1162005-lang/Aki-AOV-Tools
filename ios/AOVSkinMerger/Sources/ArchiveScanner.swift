@@ -498,20 +498,19 @@ enum ArchiveScanner {
                     bundlePayload.prefix(unitySignature.count) == unitySignature {
                     do {
                         let info = try AoVUnityFSParser.inspect(bundlePayload)
-                        let fileName = (path as NSString).lastPathComponent.lowercased()
-                        let isCatalogBundle = fileName == "resourcepackerinfosetall.assetbundle" ||
-                            fileName == "resourceverificationinfosetall.assetbundle"
                         var catalogStatus: String?
                         var catalogSamples: [AoVUnityFSCatalogNodeSample] = []
 
-                        if isCatalogBundle {
-                            do {
-                                let extracted = try AoVUnityFSParser.extractNodes(
-                                    bundlePayload,
-                                    maximumExpandedBytes: maximumCatalogExpandedBytes,
-                                    maximumNodeCount: 256
-                                )
-                                catalogSamples = extracted.map { node in
+                        // Inspect bounded SerializedFile nodes in every UnityFS
+                        // AssetBundle, not just the two runtime catalog bundles.
+                        // This provides generic CAB discovery without writing data.
+                        do {
+                            let extracted = try AoVUnityFSParser.extractNodes(
+                                bundlePayload,
+                                maximumExpandedBytes: maximumCatalogExpandedBytes,
+                                maximumNodeCount: 256
+                            )
+                            catalogSamples = extracted.map { node in
                                     let serializedSummary: String?
                                     let serializedFile: AoVSerializedFileSummary?
                                     do {
@@ -556,10 +555,9 @@ enum ArchiveScanner {
                                         serializedFile: serializedFile
                                     )
                                 }
-                                catalogStatus = "Đã trích xuất read-only \(extracted.count) node."
-                            } catch {
-                                catalogStatus = "Không trích xuất được: \(error.localizedDescription)"
-                            }
+                            catalogStatus = "Đã trích xuất read-only \(extracted.count) node để audit SerializedFile/CAB."
+                        } catch {
+                            catalogStatus = "Không trích xuất được SerializedFile/CAB node: \(error.localizedDescription)"
                         }
 
                         unityFSBundles.append(
