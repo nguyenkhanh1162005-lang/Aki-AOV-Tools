@@ -3,6 +3,67 @@ import Foundation
 @testable import AOVSkinMerger
 
 final class AoVModRemakeAnalyzerTests: XCTestCase {
+    func testPackageAuditClassifiesDifferentModResourceFamilies() {
+        let paths = [
+            "Resources/2.0.0/assetbundle/resourcepackerinfosetall.assetbundle",
+            "Resources/2.0.0/Databin/Actor/100_AssetRef.bytes",
+            "Resources/2.0.0/Ages/CommonActions.pkg.bytes",
+            "Resources/2.0.0/MSES/ActorTable.bytes",
+            "Resources/2.0.0/IFix/Patch.bytes",
+            "Resources/2.0.0/Databin/ResSkinSeniorLabelCfg.bytes",
+            "Resources/2.0.0/Sound/Bank.bnk",
+            "Resources/2.0.0/Sound/1001.wem",
+            "Resources/2.0.0/Actor/Actions.pkg.bytes",
+            "Resources/2.0.0/Databin/Actor/Effect.bytes",
+            "Resources/2.0.0/Assets/globalgamemanagers.assets",
+            "Resources/2.0.0/version.txt",
+            "Resources/2.0.0/custom/unknown.bin"
+        ]
+        let digests = paths.map {
+            ArchivePathDigest(
+                archiveName: "generic-mod.zip",
+                path: $0,
+                sha256: String(repeating: "a", count: 64),
+                uncompressedBytes: 128
+            )
+        }
+        let inventory = ArchiveInventory(
+            id: UUID(),
+            fileName: "generic-mod.zip",
+            fileSize: 1024,
+            fileCount: paths.count,
+            uncompressedBytes: UInt64(paths.count * 128),
+            paths: paths,
+            pathDigests: digests,
+            unityFSBundles: [],
+            unityFSUnrecognizedCount: 0,
+            unityFSTooLargeCount: 0,
+            unityFSInspectionFailures: []
+        )
+
+        let audit = AoVModPackageAudit.make(from: inventory, version: "2.0.0")
+        let counts = Dictionary(uniqueKeysWithValues: audit.families.map {
+            ($0.family, $0.fileCount)
+        })
+
+        XCTAssertEqual(audit.archiveName, "generic-mod.zip")
+        XCTAssertEqual(audit.version, "2.0.0")
+        XCTAssertEqual(counts[.runtimeCatalog], 1)
+        XCTAssertEqual(counts[.assetReference], 1)
+        XCTAssertEqual(counts[.commonActions], 1)
+        XCTAssertEqual(counts[.mses], 1)
+        XCTAssertEqual(counts[.ifix], 1)
+        XCTAssertEqual(counts[.heroSkinConfig], 1)
+        XCTAssertEqual(counts[.wwiseBank], 1)
+        XCTAssertEqual(counts[.wwiseMedia], 1)
+        XCTAssertEqual(counts[.actionPackage], 1)
+        XCTAssertEqual(counts[.databin], 1)
+        XCTAssertEqual(counts[.unitySerializedAsset], 1)
+        XCTAssertEqual(counts[.metadata], 1)
+        XCTAssertEqual(counts[.other], 1)
+        XCTAssertEqual(audit.families.reduce(0) { $0 + $1.fileCount }, paths.count)
+    }
+
     func testPathFindingKindsRemainSeparate() {
         XCTAssertEqual(AoVRemakePathKind.identical.rawValue, "identical")
         XCTAssertEqual(AoVRemakePathKind.changed.rawValue, "changed")
