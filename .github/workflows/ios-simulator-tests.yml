@@ -1,18 +1,19 @@
 name: iOS Simulator tests
 
 on:
-  push:
-    branches:
-      - feat/ios-offline-app-prototype
   pull_request:
     branches:
       - feat/multi-actor-aov-archive-merge
+    paths:
+      - 'ios/AOVSkinMerger/**'
+      - '.github/workflows/ios-simulator-tests.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: aki-aov-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: aki-aov-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
