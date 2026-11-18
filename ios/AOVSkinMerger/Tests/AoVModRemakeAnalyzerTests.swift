@@ -178,6 +178,39 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
         XCTAssertEqual(duplicateFinding.first?.duplicateContainerKeyCount, 1)
     }
 
+    func testCABCandidatePlannerBlocksMatchingButUnsupportedLegacyObjectFormat() {
+        let source = cabSnapshot(
+            archive: "old-build.zip",
+            resource: "old/actor.assetbundle",
+            node: "CAB-old",
+            format: 17,
+            platform: 13,
+            pathID: 100,
+            bundle: "actor/731",
+            entries: [cabEntry("assets/hero.prefab", pathID: 101)],
+            dependencies: []
+        )
+        let destination = cabSnapshot(
+            archive: "new-res.zip",
+            resource: "new/actor.assetbundle",
+            node: "CAB-new",
+            format: 17,
+            platform: 13,
+            pathID: 500,
+            bundle: "actor/731",
+            entries: [cabEntry("assets/hero.prefab", pathID: 501)],
+            dependencies: []
+        )
+
+        let finding = AoVModRemakeAnalyzer.planCABCandidates(
+            current: [destination],
+            legacy: [source]
+        ).first
+
+        XCTAssertEqual(finding?.status, .incompatibleSerializedFile)
+        XCTAssertTrue(finding?.reason.contains("object writer") == true)
+    }
+
     func testCABCandidatePlannerRejectsEmptyBundleIdentity() {
         let source = cabSnapshot(
             archive: "old.zip", resource: "old/unknown.assetbundle", node: "CAB-old",
