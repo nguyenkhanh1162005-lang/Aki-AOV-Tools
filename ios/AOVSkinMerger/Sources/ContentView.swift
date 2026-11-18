@@ -1684,7 +1684,7 @@ struct ContentView: View {
             guard existingCount + urls.count <= limit else {
                 alertText = purpose == .remakeBase
                     ? "Chỉ chọn một ZIP RES nền."
-                    : "App nhận tối đa 10 ZIP trong danh sách này. Hãy xóa bớt file rồi chọn lại."
+                    : "App nhận tối đa 10 gói ZIP/.3105 trong danh sách này. Hãy xóa bớt gói rồi chọn lại."
                 showAlert = true
                 return
             }
@@ -1733,11 +1733,11 @@ struct ContentView: View {
                             report.errors.joined(separator: "\n")
                         showAlert = true
                     } else if report.importedURLs.isEmpty {
-                        alertText = "Chưa có ZIP nào được thêm vào danh sách."
+                        alertText = "Chưa có gói nào được thêm vào danh sách."
                         showAlert = true
                     } else {
                         let destination = subfolder.map { "SourceArchives/\($0)" } ?? "SourceArchives"
-                        alertText = "Đã nhập thành công \(report.importedURLs.count) ZIP. Bản sao nằm trong Tệp → Trên iPhone → AKI AOV SKIN → \(destination)."
+                        alertText = "Đã nhập thành công \(report.importedURLs.count) gói. Bản sao nằm trong Tệp → Trên iPhone → AKI AOV SKIN → \(destination)."
                         showAlert = true
                     }
                 } catch {
