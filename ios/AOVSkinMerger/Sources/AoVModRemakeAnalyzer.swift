@@ -976,7 +976,8 @@ enum AoVModRemakeAnalyzer {
     /// filenames or payload bytes as hard-coded merge fixtures.
     static func loadRuntimeCatalogInputs(
         baseRESURL: URL,
-        legacyMODURLs: [URL]
+        legacyMODURLs: [URL],
+        allowLegacyBuildMismatch: Bool = false
     ) throws -> AoVModRemakeCatalogInputs {
         guard !legacyMODURLs.isEmpty else { throw AoVModRemakeError.noLegacyMods }
         guard legacyMODURLs.count <= maximumLegacyMods else { throw AoVModRemakeError.tooManyLegacyMods }
@@ -1017,7 +1018,7 @@ enum AoVModRemakeAnalyzer {
                 readVersionMarker(from: scanURL) else {
                 throw AoVModRemakeError.missingVersionMarker(url.lastPathComponent)
             }
-            guard version == baseVersion else {
+            guard allowLegacyBuildMismatch || version == baseVersion else {
                 throw AoVModRemakeError.versionMismatch(url.lastPathComponent, version, baseVersion)
             }
             guard let inventory = try ArchiveScanner.analyze([scanURL]).archives.first else {
@@ -1026,14 +1027,18 @@ enum AoVModRemakeAnalyzer {
             let namedInventory = relabel(inventory, as: url.lastPathComponent)
             let sourcePacker = runtimePackerCatalogs(in: namedInventory)
             let sourceVerification = runtimeVerificationCatalogs(in: namedInventory)
-            for source in sourcePacker where source.catalog.version != baseVersion {
+            // The legacy catalog must agree with its own archive marker.
+            // When read-only migration analysis is enabled, its game build may
+            // differ from the destination RES, but the final exporter remains
+            // strict and continues to require a build match.
+            for source in sourcePacker where source.catalog.version != version {
                 throw AoVModRemakeError.versionMismatch(
-                    url.lastPathComponent, source.catalog.version, baseVersion
+                    url.lastPathComponent, source.catalog.version, version
                 )
             }
-            for source in sourceVerification where source.catalog.version != baseVersion {
+            for source in sourceVerification where source.catalog.version != version {
                 throw AoVModRemakeError.versionMismatch(
-                    url.lastPathComponent, source.catalog.version, baseVersion
+                    url.lastPathComponent, source.catalog.version, version
                 )
             }
             packer.append(contentsOf: sourcePacker)
