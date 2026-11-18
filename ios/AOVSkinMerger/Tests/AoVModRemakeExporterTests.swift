@@ -646,7 +646,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
     func testReadOnlyMigrationAnalysisCanInspectLegacyWithoutVersionMarker() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AKI-Catalog-Missing-Marker-Test-\\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("AKI-Catalog-Missing-Marker-Test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -658,7 +658,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
         let legacyVerification = makeVerificationCatalog(version: "1.64.1.11")
 
         try makeArchive(baseURL, entries: [
-            ("version.txt", Data("1.64.1.12\\n".utf8)),
+            ("version.txt", Data("1.64.1.12\n".utf8)),
             ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
              try makeUnityFS(with: .packer(basePacker))),
             ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
