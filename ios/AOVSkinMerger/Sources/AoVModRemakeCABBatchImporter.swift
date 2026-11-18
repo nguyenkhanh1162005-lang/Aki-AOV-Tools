@@ -39,6 +39,12 @@ private struct AoVRemakeCABPreparedInput {
     let record: AoVSerializedAssetBundleRecord
 }
 
+struct AoVRemakeCABExternalTargetLocation: Hashable, Sendable {
+    let archiveName: String
+    let resourcePath: String
+    let nodePath: String
+}
+
 enum AoVModRemakeCABBatchImporter {
     private static let maximumArchiveBytes: UInt64 = 512 * 1024 * 1024
     private static let maximumGroupWorkingBytes: UInt64 = 768 * 1024 * 1024
@@ -224,12 +230,14 @@ enum AoVModRemakeCABBatchImporter {
                     }
                 }
 
-                let uniqueMatches = Dictionary(
-                    matches.map { ("\\($0.archiveName)|\\($0.resourcePath)|\\($0.nodePath)", $0) },
-                    uniquingKeysWith: { first, _ in first }
-                )
-                guard uniqueMatches.count == 1,
-                      let match = uniqueMatches.values.first else {
+                let locations = matches.map {
+                    AoVRemakeCABExternalTargetLocation(
+                        archiveName: $0.archiveName,
+                        resourcePath: $0.resourcePath,
+                        nodePath: $0.nodePath
+                    )
+                }
+                guard let match = uniqueExternalTargetLocation(locations) else {
                     // Missing or ambiguous target is intentionally not inferred.
                     continue
                 }
@@ -480,6 +488,14 @@ enum AoVModRemakeCABBatchImporter {
             blockedCandidateFindings: blockedFindings,
             failures: failures
         )
+    }
+
+    static func uniqueExternalTargetLocation(
+        _ locations: [AoVRemakeCABExternalTargetLocation]
+    ) -> AoVRemakeCABExternalTargetLocation? {
+        let uniqueLocations = Set(locations)
+        guard uniqueLocations.count == 1 else { return nil }
+        return uniqueLocations.first
     }
 
     private static func resolveResourceArchive(_ inputURL: URL, tempRoot: URL) throws -> URL {
