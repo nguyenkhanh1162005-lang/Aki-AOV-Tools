@@ -2,7 +2,7 @@ name: AOVSkinMerger
 options:
   bundleIdPrefix: com.aki
   deploymentTarget:
-    iOS: "26.5"
+    iOS: "15.0"
 packages:
   ZIPFoundation:
     url: https://github.com/weichsel/ZIPFoundation.git
@@ -12,7 +12,7 @@ packages:
     revision: a599a71c4cf5d142ffce772c0d16a5a7b755d83c
   SWCompression:
     url: https://github.com/tsolomko/SWCompression.git
-    from: 4.9.1
+    exactVersion: "4.8.7"
 targets:
   AOVSkinMerger:
     type: application
@@ -35,7 +35,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_VERSION: "5.0"
-        IPHONEOS_DEPLOYMENT_TARGET: "26.5"
+        IPHONEOS_DEPLOYMENT_TARGET: "15.0"
         TARGETED_DEVICE_FAMILY: "1"
     scheme:
       testTargets:
