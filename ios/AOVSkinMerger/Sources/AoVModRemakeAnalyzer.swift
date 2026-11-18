@@ -247,6 +247,8 @@ private struct AoVRemakeCatalogPlanAccumulator {
 }
 
 struct AoVModRemakeCatalogInputs: Sendable {
+    let basePacker: [(source: String, catalog: AoVRuntimeResourcePackerCatalog)]
+    let baseVerification: [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)]
     let packer: [(source: String, catalog: AoVRuntimeResourcePackerCatalog)]
     let verification: [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)]
 }
@@ -990,6 +992,23 @@ enum AoVModRemakeAnalyzer {
             throw AoVModRemakeError.missingVersionMarker(baseRESURL.lastPathComponent)
         }
 
+        guard let baseInventory = try ArchiveScanner.analyze([baseScanURL]).archives.first else {
+            throw AoVModRemakeError.invalidArchive(baseRESURL.lastPathComponent)
+        }
+        let namedBaseInventory = relabel(baseInventory, as: baseRESURL.lastPathComponent)
+        let basePacker = runtimePackerCatalogs(in: namedBaseInventory)
+        let baseVerification = runtimeVerificationCatalogs(in: namedBaseInventory)
+        for source in basePacker where source.catalog.version != baseVersion {
+            throw AoVModRemakeError.versionMismatch(
+                baseRESURL.lastPathComponent, source.catalog.version, baseVersion
+            )
+        }
+        for source in baseVerification where source.catalog.version != baseVersion {
+            throw AoVModRemakeError.versionMismatch(
+                baseRESURL.lastPathComponent, source.catalog.version, baseVersion
+            )
+        }
+
         var packer: [(source: String, catalog: AoVRuntimeResourcePackerCatalog)] = []
         var verification: [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)] = []
         for url in legacyMODURLs {
@@ -1020,7 +1039,12 @@ enum AoVModRemakeAnalyzer {
             packer.append(contentsOf: sourcePacker)
             verification.append(contentsOf: sourceVerification)
         }
-        return AoVModRemakeCatalogInputs(packer: packer, verification: verification)
+        return AoVModRemakeCatalogInputs(
+            basePacker: basePacker,
+            baseVerification: baseVerification,
+            packer: packer,
+            verification: verification
+        )
     }
 
     private static func runtimePackerCatalogs(
