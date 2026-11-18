@@ -56,7 +56,7 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
             let rawCRC = UInt32(index * 103 + 17)
             let uncompressedCRC = UInt32(index * 47 + 29)
             return AoVRuntimeChecksumFingerprintSample(
-                path: "Packer/\\(index)",
+                path: "Packer/\(index)",
                 storedChecksum: Int64(uncompressedCRC ^ unityFSMask),
                 computedCRC32: rawCRC,
                 computedUnityFSUncompressedCRC32: uncompressedCRC
