@@ -239,6 +239,17 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
         AoVRuntimeCRC32.checksum(data)
     }
 
+    static func unityFSUncompressedCRC32(_ data: Data) throws -> UInt32 {
+        var crc = AoVRuntimeCRC32()
+        try AoVUnityFSParser.forEachUncompressedBlock(
+            data,
+            maximumExpandedBytes: 256 * 1024 * 1024
+        ) { block in
+            crc.update(block)
+        }
+        return crc.value
+    }
+
     static func evaluate(
         title: String,
         totalCatalogRows: Int,
@@ -352,14 +363,7 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
                 if entry.uncompressedSize <= maximumUnityFSFingerprintEntryBytes {
                     do {
                         let bundleData = try readEntry(archive, entry)
-                        var unityFSCRC = AoVRuntimeCRC32()
-                        try AoVUnityFSParser.forEachUncompressedBlock(
-                            bundleData,
-                            maximumExpandedBytes: UInt64(AoVUnityFSParser.maximumFingerprintExpandedBytes)
-                        ) { block in
-                            unityFSCRC.update(block)
-                        }
-                        unityFSUncompressedCRC = unityFSCRC.value
+                        unityFSUncompressedCRC = try unityFSUncompressedCRC32(bundleData)
                     } catch {
                         unityFSUncompressedSkipped += 1
                     }
