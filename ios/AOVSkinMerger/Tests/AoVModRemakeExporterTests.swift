@@ -89,7 +89,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
         try makeArchive(
             baseURL,
             entries: [
-                ("version.txt", Data("1.64.1.12\\n".utf8)),
+                ("version.txt", Data("1.64.1.12\n".utf8)),
                 ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle", packerBundle),
                 ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle", verificationBundle)
             ] + resourceEntries,
@@ -146,14 +146,14 @@ final class AoVModRemakeExporterTests: XCTestCase {
         let legacyVerification = makeVerificationCatalog()
 
         try makeArchive(baseURL, entries: [
-            ("version.txt", Data("1.64.1.12\\n".utf8)),
+            ("version.txt", Data("1.64.1.12\n".utf8)),
             ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
              try makeUnityFS(with: .packer(basePacker))),
             ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
              try makeUnityFS(with: .verification(baseVerification)))
         ], root: root)
         try makeArchive(legacyURL, entries: [
-            ("version.txt", Data("1.64.1.12\\n".utf8)),
+            ("version.txt", Data("1.64.1.12\n".utf8)),
             ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
              try makeUnityFS(with: .packer(legacyPacker))),
             ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
