@@ -397,6 +397,7 @@ struct ContentView: View {
             )
 
             catalogMergePlanView(report.catalogMergePlanFindings)
+            cabMergeCandidateView(report.cabMergeCandidates)
 
             if !report.legacyVersions.isEmpty {
                 Divider().overlay(.white.opacity(0.12))
@@ -428,7 +429,7 @@ struct ContentView: View {
                 Label(warning, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundColor(.orange)
             }
-            Text("Chưa gộp CAB/AssetBundle ở bước tự động này. Chỉ tài nguyên mới độc lập, có Packer/Verification duy nhất và không có liên kết Packer mới được xuất.")
+            Text("CAB đã được quét và đối chiếu class 142 theo bundle identity. Bước tự động nhập object closure và cập nhật checksum xuyên toàn bộ RES vẫn chưa được bật.")
                 .font(.caption).foregroundColor(.orange)
             Button(action: runRemakeSafeExport) {
                 HStack {
@@ -714,6 +715,77 @@ struct ContentView: View {
             Text("Đây là kế hoạch merge candidate, chưa ghi vào Packer/Verification và chưa xuất ZIP remake.")
                 .font(.caption2.weight(.semibold)).foregroundColor(.orange)
         }
+    }
+
+    private func cabMergeCandidateView(_ findings: [AoVRemakeCABCandidateFinding]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Đối chiếu CAB / AssetBundle class 142")
+                .font(.subheadline.weight(.semibold))
+            metric("Bản ghi CAB đọc được", "\(findings.count)")
+            metric("Khớp duy nhất, đủ điều kiện xem tiếp", "\(findings.filter { $0.status == .candidate }.count)")
+            metric("Thiếu / trùng / không tương thích / key trùng",
+                   "\(findings.filter { $0.status != .candidate }.count)")
+            ForEach(Array(findings.prefix(14))) { finding in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(finding.bundleName.isEmpty ? "(bundle không tên)" : finding.bundleName)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                        Spacer()
+                        Text(cabMergeStatusText(finding.status))
+                            .font(.caption2)
+                            .foregroundColor(cabMergeStatusColor(finding.status))
+                    }
+                    Text("\(finding.sourceArchive) · \(finding.sourceResourcePath)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+                    Text("Nguồn node \(finding.sourceNodePath) · class-142 pathID \(finding.sourceObjectPathID) · \(finding.sourceContainerKeyCount) keys · SerializedFile v\(finding.sourceSerializedFileFormatVersion)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    if let destinationPath = finding.destinationResourcePath {
+                        Text("RES đích: \(destinationPath) · node \(finding.destinationNodePath ?? "?") · pathID \(finding.destinationObjectPathID ?? 0) · v\(finding.destinationSerializedFileFormatVersion ?? 0)")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    metric("Key MOD-only · pointer khác · key trùng",
+                           "\(finding.legacyOnlyContainerKeyCount) · \(finding.changedAssetPointerCount) · \(finding.duplicateContainerKeyCount)")
+                    if !finding.dependenciesMissingFromDestination.isEmpty {
+                        Text("Dependency cần xác minh: " + finding.dependenciesMissingFromDestination.prefix(6).joined(separator: ", "))
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                    }
+                    Text(finding.reason)
+                        .font(.caption2)
+                        .foregroundColor(finding.status == .candidate ? .secondary : .orange)
+                }
+                .padding(.vertical, 5)
+                Divider().overlay(.white.opacity(0.08))
+            }
+            if findings.count > 14 {
+                Text("Hiển thị 14 / \(findings.count) bản ghi CAB.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            Text("Khớp bundle identity mới chỉ là bước preflight. Chưa có nghĩa object đã nhập hoặc dependency/checksum đã sẵn sàng để xuất.")
+                .font(.caption2.weight(.semibold))
+                .foregroundColor(.orange)
+        }
+    }
+
+    private func cabMergeStatusText(_ status: AoVRemakeCABMergeStatus) -> String {
+        switch status {
+        case .candidate: return "Khớp ứng viên"
+        case .missingDestination: return "Thiếu CAB đích"
+        case .ambiguousDestination: return "Trùng identity"
+        case .incompatibleSerializedFile: return "Khác format/platform"
+        case .duplicateContainerKeys: return "Key bị trùng"
+        }
+    }
+
+    private func cabMergeStatusColor(_ status: AoVRemakeCABMergeStatus) -> Color {
+        status == .candidate ? .green : .orange
     }
 
     private func catalogPlanStatusText(_ status: AoVRemakeCatalogPlanStatus) -> String {
