@@ -66,7 +66,8 @@ struct AoVRuntimeChecksumFingerprintFinding: Sendable {
         if distinctUnityFSUncompressedXORMaskCount > 1 {
             return .inconsistent
         }
-        if unityFSUncompressedSkippedCount > 0 || sampleLimitHit {
+        if missingPaths > 0 || ambiguousPaths > 0 || unsupportedValues > 0 ||
+            unityFSUncompressedSkippedCount > 0 || sampleLimitHit {
             return .partialConsistentSample
         }
         return .consistentSample
