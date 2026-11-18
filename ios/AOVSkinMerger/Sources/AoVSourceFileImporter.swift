@@ -33,11 +33,11 @@ enum AoVSourceFileImporterError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noFiles:
-            return "Không có file ZIP nào được chọn."
+            return "Không có gói MOD nào được chọn."
         case .tooManyFiles(let limit):
-            return "App nhận tối đa \(limit) ZIP trong một lần ghép. Hãy xóa bớt file rồi chọn lại."
+            return "App nhận tối đa \(limit) gói MOD trong một lần ghép. Hãy xóa bớt file rồi chọn lại."
         case .invalidFileType(let name):
-            return "\(name): chỉ nhận file có đuôi .zip."
+            return "\(name): chỉ nhận file .zip hoặc .3105."
         case .emptyFile(let name):
             return "\(name): file rỗng hoặc chưa tải hoàn tất từ Files/iCloud."
         case .notRegularFile(let name):
@@ -102,7 +102,7 @@ enum AoVSourceFileImporter {
         into folder: URL,
         currentTotalBytes: UInt64
     ) throws -> (url: URL, totalBytes: UInt64) {
-        guard source.pathExtension.lowercased() == "zip" else {
+        guard ["zip", "3105"].contains(source.pathExtension.lowercased()) else {
             throw AoVSourceFileImporterError.invalidFileType(source.lastPathComponent)
         }
 
