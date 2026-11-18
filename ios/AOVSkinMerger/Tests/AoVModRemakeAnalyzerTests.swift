@@ -538,3 +538,29 @@ final class AoVModRemakeAnalyzerTests: XCTestCase {
         )
     }
 }
+
+final class AoVModRemakeCABBatchImporterTests: XCTestCase {
+    func testExternalTargetAuditDeduplicatesSameLocationAndRejectsAmbiguity() {
+        let first = AoVRemakeCABExternalTargetLocation(
+            archiveName: "base-res.zip",
+            resourcePath: "assetbundle/shared.assetbundle",
+            nodePath: "CAB-0"
+        )
+        let second = AoVRemakeCABExternalTargetLocation(
+            archiveName: "base-res.zip",
+            resourcePath: "assetbundle/other.assetbundle",
+            nodePath: "CAB-0"
+        )
+
+        XCTAssertEqual(
+            AoVModRemakeCABBatchImporter.uniqueExternalTargetLocation([first, first]),
+            first
+        )
+        XCTAssertNil(
+            AoVModRemakeCABBatchImporter.uniqueExternalTargetLocation([first, second])
+        )
+        XCTAssertNil(
+            AoVModRemakeCABBatchImporter.uniqueExternalTargetLocation([])
+        )
+    }
+}
