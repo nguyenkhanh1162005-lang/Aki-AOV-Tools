@@ -36,6 +36,48 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
         XCTAssertEqual(plan.candidateCatalog?.svnRevision, current.svnRevision)
     }
 
+    func testPackerPlannerBlocksLegacyCatalogFromDifferentBuild() {
+        let current = packer(entries: [], links: [], version: "2.0.0")
+        let legacyEntry = pack("assetbundle/old-build.assetbundle", crc: 101)
+        let legacy = packer(entries: [legacyEntry], links: [], version: "1.9.9")
+
+        let plan = AoVRuntimeCatalogMergePlanner.planPacker(
+            current: current,
+            legacy: [("old-build.zip", legacy)],
+            verifiedFinalEntries: [legacyEntry.pathInIFS: legacyEntry]
+        )
+
+        XCTAssertFalse(plan.safeToWrite)
+        XCTAssertNil(plan.candidateCatalog)
+        XCTAssertTrue(plan.issues.contains {
+            $0.reason == .catalogVersionMismatch &&
+            $0.sourceArchives == ["old-build.zip"]
+        })
+    }
+
+    func testVerificationPlannerBlocksLegacyCatalogFromDifferentBuild() {
+        let path = "Databin/Client/Actor/OldSkin.bytes"
+        let current = verification(zip: [], databin: [], version: "2.0.0")
+        let legacy = verification(
+            zip: [],
+            databin: [verify(path, crc: 321)],
+            version: "1.9.9"
+        )
+
+        let plan = AoVRuntimeCatalogMergePlanner.planVerification(
+            current: current,
+            legacy: [("old-build.zip", legacy)],
+            verifiedFinalDatabinChecksumValues: [path: 321]
+        )
+
+        XCTAssertFalse(plan.safeToWrite)
+        XCTAssertNil(plan.candidateCatalog)
+        XCTAssertTrue(plan.issues.contains {
+            $0.reason == .catalogVersionMismatch &&
+            $0.sourceArchives == ["old-build.zip"]
+        })
+    }
+
     func testPackerPlannerBlocksDuplicatePathInsideOneLegacyCatalog() {
         let duplicated = pack("assetbundle/repeated.assetbundle", crc: 10)
         let current = packer(entries: [], links: [])
@@ -340,11 +382,12 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
 
     private func packer(
         entries: [AoVRuntimeResourcePackInfo],
-        links: [AoVPackInfoMapItem]
+        links: [AoVPackInfoMapItem],
+        version: String = "1.64.2.1"
     ) -> AoVRuntimeResourcePackerCatalog {
         AoVRuntimeResourcePackerCatalog(
             name: "ResourcePackerInfoSetXML",
-            version: "1.64.2.1",
+            version: version,
             svnRevision: "1800000",
             setName: "ResourcePackerInfoSetXML",
             allResourcePackInfo: entries,
@@ -359,11 +402,12 @@ final class AoVRuntimeCatalogMergePlannerTests: XCTestCase {
 
     private func verification(
         zip: [AoVRuntimeVerificationEntry],
-        databin: [AoVRuntimeVerificationEntry]
+        databin: [AoVRuntimeVerificationEntry],
+        version: String = "1.64.2.1"
     ) -> AoVRuntimeResourceVerificationCatalog {
         AoVRuntimeResourceVerificationCatalog(
             name: "ResourceVerificationInfoSetXML",
-            version: "1.64.2.1",
+            version: version,
             svnRevision: "1800000",
             allZipVerificationInfo: zip,
             allDatabinVerificationInfo: databin,
