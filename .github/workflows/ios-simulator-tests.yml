@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: aki-aov-ios-tests-${{ github.event.pull_request.head.ref || github.ref_name }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   ios-simulator-tests:
