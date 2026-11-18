@@ -79,8 +79,8 @@ final class AoVSerializedFileParserTests: XCTestCase {
         let data = makeSerializedFile(
             formatVersion: 22,
             objectPayload: payload,
-            objectClassID: 28,
-            typeTreeNodes: nodes
+            typeTreeNodes: nodes,
+            objectClassID: 28
         )
         let summary = try AoVSerializedFileParser.inspect(data)
         let object = try XCTUnwrap(summary.serializedObjects.first)
@@ -101,8 +101,8 @@ final class AoVSerializedFileParserTests: XCTestCase {
         let source = makeSerializedFile(
             formatVersion: 22,
             objectPayload: Data([0xE9, 0x03, 0, 0, 0, 0, 0, 0]),
-            objectClassID: 28,
-            typeTreeNodes: nodes
+            typeTreeNodes: nodes,
+            objectClassID: 28
         )
         let summary = try AoVSerializedFileParser.inspect(source)
         let object = try XCTUnwrap(summary.serializedObjects.first)
@@ -156,8 +156,8 @@ final class AoVSerializedFileParserTests: XCTestCase {
         let source = makeSerializedFile(
             formatVersion: 22,
             objectPayload: originalPayload,
-            objectClassID: 28,
-            typeTreeNodes: nodes
+            typeTreeNodes: nodes,
+            objectClassID: 28
         )
         let before = try AoVSerializedFileParser.inspect(source)
         let oldObject = try XCTUnwrap(before.serializedObjects.first)
