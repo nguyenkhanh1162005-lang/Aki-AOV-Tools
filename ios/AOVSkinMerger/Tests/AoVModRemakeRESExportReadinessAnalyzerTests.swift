@@ -49,6 +49,70 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
         XCTAssertTrue(report.allChecksumsHaveCandidates)
     }
 
+    func testPackerCandidatePrefersConsistentUnityFSUncompressedCRC32() throws {
+        let unityFSMask: UInt32 = 0xA1B2C3D4
+        let verificationMask: UInt32 = 0x1234ABCD
+        let packerSamples = (0..<8).map { index -> AoVRuntimeChecksumFingerprintSample in
+            let rawCRC = UInt32(index * 103 + 17)
+            let uncompressedCRC = UInt32(index * 47 + 29)
+            return AoVRuntimeChecksumFingerprintSample(
+                path: "Packer/\\(index)",
+                storedChecksum: Int64(uncompressedCRC ^ unityFSMask),
+                computedCRC32: rawCRC,
+                computedUnityFSUncompressedCRC32: uncompressedCRC
+            )
+        }
+        let packerFinding = AoVRuntimeChecksumFingerprintAnalyzer.evaluate(
+            title: "Packer",
+            totalCatalogRows: packerSamples.count,
+            samples: packerSamples
+        )
+        XCTAssertEqual(packerFinding.status, .inconsistent)
+        XCTAssertEqual(packerFinding.unityFSUncompressedStatus, .consistentSample)
+
+        let verificationFinding = makeFinding(title: "Verification ZIP", mask: verificationMask)
+        let fingerprint = makeReport(packer: packerFinding, zip: verificationFinding)
+        let unityFS = try AoVUnityFSRepacker.repack(
+            [AoVUnityFSRepackNode(path: "CAB-main", data: Data("synthetic serialized file".utf8), flags: 7)],
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2022.3.5f1",
+            blockInfoLayout: .arenaOfValor,
+            aovEncryption: true
+        ).data
+        let metadata = AoVRuntimeResourcePackInfo(
+            pathInIFS: "assetbundle/actor-731.assetbundle",
+            pkgType: 3,
+            crcXor: 99,
+            tag: "Hero",
+            flags: 512,
+            resourceInfos: [AoVRuntimeResourceItem(hashCode: 731, extensionName: "assetbundle")]
+        )
+        let report = try AoVModRemakeRESExportReadinessAnalyzer.buildProposals(
+            baseRESName: "base-res.zip",
+            assetBundleMergeResults: [makeMergeResult(payload: unityFS)],
+            legacyPackerCatalogs: [
+                (source: "legacy-mod.zip", catalog: makePackerCatalog(rows: [metadata]))
+            ],
+            checksumFingerprint: fingerprint
+        )
+
+        let proposal = try XCTUnwrap(report.proposals.first)
+        let expectedUncompressedCRC = try AoVRuntimeChecksumFingerprintAnalyzer.unityFSUncompressedCRC32(unityFS)
+        XCTAssertEqual(proposal.status, .requiresExternalValidation)
+        XCTAssertEqual(proposal.packerChecksumBasis, .unityFSUncompressedCRC32)
+        XCTAssertEqual(proposal.unityFSUncompressedCRC32, expectedUncompressedCRC)
+        XCTAssertEqual(
+            proposal.proposedPackerEntry?.crcXor,
+            Int64(expectedUncompressedCRC ^ unityFSMask)
+        )
+        XCTAssertEqual(
+            proposal.proposedVerificationZIPChecksum,
+            Int64(AoVRuntimeChecksumFingerprintAnalyzer.crc32(unityFS) ^ verificationMask)
+        )
+        XCTAssertFalse(report.safeToExport)
+    }
+
     func testUsesBaseRESPackerMetadataWhenLegacyMODOmitsTheEntry() throws {
         let packerMask: UInt32 = 0xABCD1234
         let fingerprint = makeReport(
