@@ -648,6 +648,9 @@ enum AoVModRemakeAnalyzer {
             let formatCompatible =
                 source.serializedFileFormatVersion == destination.serializedFileFormatVersion &&
                 source.targetPlatform == destination.targetPlatform
+            let objectImportFormatSupported =
+                (22...30).contains(source.serializedFileFormatVersion) &&
+                (22...30).contains(destination.serializedFileFormatVersion)
             let status: AoVRemakeCABMergeStatus
             let reason: String
             if duplicateCount > 0 {
@@ -656,6 +659,9 @@ enum AoVModRemakeAnalyzer {
             } else if !formatCompatible {
                 status = .incompatibleSerializedFile
                 reason = "SerializedFile format hoặc target platform khác nhau; chưa có adapter chuyển đổi đã xác minh."
+            } else if !objectImportFormatSupported {
+                status = .incompatibleSerializedFile
+                reason = "Cùng SerializedFile format nhưng object writer hiện chỉ hỗ trợ format 22–30; CAB này chỉ được phân tích, chưa được nhập."
             } else {
                 status = .candidate
                 reason = "Đã khớp duy nhất theo bundle identity. Vẫn cần nhập object closure, audit PPtr/dependency và checksum cuối."
