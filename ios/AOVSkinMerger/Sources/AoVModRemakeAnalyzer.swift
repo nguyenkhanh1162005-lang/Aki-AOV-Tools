@@ -1014,11 +1014,12 @@ enum AoVModRemakeAnalyzer {
         var verification: [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)] = []
         for url in legacyMODURLs {
             let scanURL = try resolveResourceArchive(url, tempRoot: tempRoot)
-            guard let version = try readVersionMarker(from: url) ??
-                readVersionMarker(from: scanURL) else {
+            let version = try readVersionMarker(from: url) ??
+                readVersionMarker(from: scanURL)
+            guard allowLegacyBuildMismatch || version != nil else {
                 throw AoVModRemakeError.missingVersionMarker(url.lastPathComponent)
             }
-            guard allowLegacyBuildMismatch || version == baseVersion else {
+            if let version, !allowLegacyBuildMismatch, version != baseVersion {
                 throw AoVModRemakeError.versionMismatch(url.lastPathComponent, version, baseVersion)
             }
             guard let inventory = try ArchiveScanner.analyze([scanURL]).archives.first else {
@@ -1027,19 +1028,32 @@ enum AoVModRemakeAnalyzer {
             let namedInventory = relabel(inventory, as: url.lastPathComponent)
             let sourcePacker = runtimePackerCatalogs(in: namedInventory)
             let sourceVerification = runtimeVerificationCatalogs(in: namedInventory)
-            // The legacy catalog must agree with its own archive marker.
-            // When read-only migration analysis is enabled, its game build may
-            // differ from the destination RES, but the final exporter remains
-            // strict and continues to require a build match.
-            for source in sourcePacker where source.catalog.version != version {
-                throw AoVModRemakeError.versionMismatch(
-                    url.lastPathComponent, source.catalog.version, version
+            // A marker, when present, must agree with every legacy runtime
+            // catalog. In read-only migration mode a missing marker is allowed
+            // only when the catalog payloads agree with one another.
+            if let version {
+                for source in sourcePacker where source.catalog.version != version {
+                    throw AoVModRemakeError.versionMismatch(
+                        url.lastPathComponent, source.catalog.version, version
+                    )
+                }
+                for source in sourceVerification where source.catalog.version != version {
+                    throw AoVModRemakeError.versionMismatch(
+                        url.lastPathComponent, source.catalog.version, version
+                    )
+                }
+            } else {
+                let catalogVersions = Set(
+                    sourcePacker.map { $0.catalog.version } +
+                    sourceVerification.map { $0.catalog.version }
                 )
-            }
-            for source in sourceVerification where source.catalog.version != version {
-                throw AoVModRemakeError.versionMismatch(
-                    url.lastPathComponent, source.catalog.version, version
-                )
+                guard catalogVersions.count <= 1 else {
+                    throw AoVModRemakeError.versionMismatch(
+                        url.lastPathComponent,
+                        catalogVersions.sorted().joined(separator: ", "),
+                        "version.txt thiếu và catalog không đồng nhất"
+                    )
+                }
             }
             packer.append(contentsOf: sourcePacker)
             verification.append(contentsOf: sourceVerification)
