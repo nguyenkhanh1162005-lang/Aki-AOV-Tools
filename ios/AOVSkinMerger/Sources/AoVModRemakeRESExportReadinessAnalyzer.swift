@@ -115,7 +115,7 @@ enum AoVModRemakeRESExportReadinessAnalyzer {
         return try buildProposals(
             baseRESName: baseRESURL.lastPathComponent,
             assetBundleMergeResults: assetBundleMergeResults,
-            legacyPackerCatalogs: catalogInputs.packer,
+            legacyPackerCatalogs: catalogInputs.basePacker + catalogInputs.packer,
             checksumFingerprint: checksumFingerprint
         )
     }
