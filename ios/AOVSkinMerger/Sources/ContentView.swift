@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 private enum ZIPImportPurpose: Equatable {
     case merger
@@ -48,7 +49,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationView {
             ZStack {
                 ZStack {
                     LinearGradient(
@@ -207,7 +208,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { bottomNavigation }
-            .toolbar(.hidden, for: .navigationBar)
+            .navigationBarHidden(true)
             .tint(.white)
             .preferredColorScheme(.dark)
             .onOpenURL { url in
@@ -240,6 +241,7 @@ struct ContentView: View {
                 Text("Gói được chọn sẽ làm nền; các ZIP còn lại được ghép vào gói này.")
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 
 
@@ -1817,10 +1819,11 @@ struct ContentView: View {
                 }
             }
             .padding(.top, 5)
-            ShareLink(item: report.outputURL) {
-                Label("Chia sẻ / lưu ZIP kết quả", systemImage: "square.and.arrow.up")
+            AKIShareButton(
+                item: report.outputURL,
+                label: Label("Chia sẻ / lưu ZIP kết quả", systemImage: "square.and.arrow.up")
                     .frame(maxWidth: .infinity)
-            }
+            )
             .buttonStyle(AKIPrimaryButtonStyle())
             Text("ZIP đã qua kiểm CRC và kiểm tra cấu trúc. Chưa thử trong Liên Quân; đây không phải xác nhận tương thích game. Nếu một loại xung đột chưa có adapter, app sẽ dừng và không xuất ZIP.")
                 .font(.footnote)
@@ -2125,4 +2128,38 @@ private extension View {
                                        startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
             .shadow(color: .black.opacity(0.24), radius: 16, y: 8)
     }
+}
+
+
+private struct AKIShareButton<Content: View>: View {
+    let item: URL
+    let label: Content
+    @State private var isPresented = false
+
+    var body: some View {
+        Button {
+            isPresented = true
+        } label: {
+            label
+        }
+        .sheet(isPresented: $isPresented) {
+            AKIActivityViewController(activityItems: [item])
+        }
+    }
+}
+
+private struct AKIActivityViewController: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(
+            activityItems: activityItems,
+            applicationActivities: nil
+        )
+    }
+
+    func updateUIViewController(
+        _ uiViewController: UIActivityViewController,
+        context: Context
+    ) { }
 }
