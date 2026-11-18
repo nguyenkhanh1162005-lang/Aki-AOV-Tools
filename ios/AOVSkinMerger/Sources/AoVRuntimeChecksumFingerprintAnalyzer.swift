@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import ZIPFoundation
 
 enum AoVRuntimeChecksumFingerprintStatus: String, Sendable {
@@ -87,6 +88,7 @@ struct AoVRuntimeChecksumFingerprintFinding: Sendable {
 
 struct AoVRuntimeChecksumFingerprintReport: Sendable {
     let baseRESName: String
+    var baseRESFingerprint: String? = nil
     let packerAssetBundles: AoVRuntimeChecksumFingerprintFinding
     let zipVerification: AoVRuntimeChecksumFingerprintFinding
     let databinVerification: AoVRuntimeChecksumFingerprintFinding
@@ -173,6 +175,7 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
     private static let packerFileName = "resourcepackerinfosetall.assetbundle"
 
     static func analyze(baseRESURL: URL) throws -> AoVRuntimeChecksumFingerprintReport {
+        let baseRESFingerprint = try sha256File(at: baseRESURL)
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-AOV-CHECKSUM-FINGERPRINT-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
@@ -286,11 +289,24 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
 
         return AoVRuntimeChecksumFingerprintReport(
             baseRESName: baseRESURL.lastPathComponent,
+            baseRESFingerprint: baseRESFingerprint,
             packerAssetBundles: packerFinding,
             zipVerification: zipFinding,
             databinVerification: databinFinding,
             warning: "Có hai phép đo tách biệt: CRC32 IEEE trên byte ZIP thô và, với AssetBundle UnityFS nhỏ hơn 64 MiB, CRC32 trên luồng block đã giải nén. XOR mask chỉ là giả thuyết từ mẫu RES; không tự động dùng cho payload đã sửa và chưa chứng minh tương thích trong game."
         )
+    }
+
+    /// Hashes an archive incrementally so reusing a fingerprint never depends
+    /// on the filename alone and large RES files are not loaded into memory.
+    static func sha256File(at url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     static func crc32(_ data: Data) -> UInt32 {
