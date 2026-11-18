@@ -12,6 +12,19 @@ struct AoVRuntimeChecksumFingerprintSample: Sendable {
     let path: String
     let storedChecksum: Int64
     let computedCRC32: UInt32
+    let computedUnityFSUncompressedCRC32: UInt32?
+
+    init(
+        path: String,
+        storedChecksum: Int64,
+        computedCRC32: UInt32,
+        computedUnityFSUncompressedCRC32: UInt32? = nil
+    ) {
+        self.path = path
+        self.storedChecksum = storedChecksum
+        self.computedCRC32 = computedCRC32
+        self.computedUnityFSUncompressedCRC32 = computedUnityFSUncompressedCRC32
+    }
 }
 
 struct AoVRuntimeChecksumFingerprintFinding: Sendable {
@@ -25,12 +38,24 @@ struct AoVRuntimeChecksumFingerprintFinding: Sendable {
     let distinctXORMaskCount: Int
     let constantXORMask: UInt32?
     let exactCRC32Matches: Int
+    let unityFSUncompressedEvaluatedSamples: Int
+    let distinctUnityFSUncompressedXORMaskCount: Int
+    let constantUnityFSUncompressedXORMask: UInt32?
+    let exactUnityFSUncompressedCRC32Matches: Int
+    let unityFSUncompressedSkippedCount: Int
     let status: AoVRuntimeChecksumFingerprintStatus
     let examples: [String]
 
     var maskDescription: String {
         guard let constantXORMask else { return "Không có mask nhất quán" }
         return String(format: "0x%08X", constantXORMask)
+    }
+
+    var unityFSUncompressedMaskDescription: String {
+        guard let constantUnityFSUncompressedXORMask else {
+            return "Chưa có mask UnityFS giải nén nhất quán"
+        }
+        return String(format: "0x%08X", constantUnityFSUncompressedXORMask)
     }
 
     var statusDescription: String {
@@ -119,6 +144,7 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
     private static let maximumEntries = 20_000
     private static let maximumSingleEntryBytes: UInt64 = 512 * 1024 * 1024
     private static let maximumSamplesPerCatalog = 256
+    private static let maximumUnityFSFingerprintEntryBytes: UInt64 = 64 * 1024 * 1024
     private static let minimumSamplesForCandidate = 8
     private static let verificationFileName = "resourceverificationinfosetall.assetbundle"
 
@@ -205,7 +231,7 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
             baseRESName: baseRESURL.lastPathComponent,
             zipVerification: zipFinding,
             databinVerification: databinFinding,
-            warning: "Chỉ khảo sát CRC32 IEEE trên byte thô của từng ZIP entry. XOR mask nhất quán là giả thuyết từ mẫu RES, không tự động được dùng làm checksum cho payload đã sửa và chưa chứng minh tương thích trong game."
+            warning: "Có hai phép đo tách biệt: CRC32 IEEE trên byte ZIP thô và, với AssetBundle UnityFS nhỏ hơn 64 MiB, CRC32 trên luồng block đã giải nén. XOR mask chỉ là giả thuyết từ mẫu RES; không tự động dùng cho payload đã sửa và chưa chứng minh tương thích trong game."
         )
     }
 
@@ -220,7 +246,8 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
         missingPaths: Int = 0,
         ambiguousPaths: Int = 0,
         unsupportedValues: Int = 0,
-        sampleLimitHit: Bool = false
+        sampleLimitHit: Bool = false,
+        unityFSUncompressedSkippedCount: Int = 0
     ) -> AoVRuntimeChecksumFingerprintFinding {
         let masks = samples.map {
             UInt32(truncatingIfNeeded: $0.storedChecksum) ^ $0.computedCRC32
@@ -231,6 +258,16 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
         let exactMatches = samples.filter {
             UInt32(truncatingIfNeeded: $0.storedChecksum) == $0.computedCRC32
         }.count
+
+        let unityFSSamples = samples.compactMap { sample -> (stored: UInt32, computed: UInt32)? in
+            guard let computed = sample.computedUnityFSUncompressedCRC32 else { return nil }
+            return (UInt32(truncatingIfNeeded: sample.storedChecksum), computed)
+        }
+        let unityFSMasks = unityFSSamples.map { $0.stored ^ $0.computed }
+        let distinctUnityFSMasks = Set(unityFSMasks)
+        let constantUnityFSMask = unityFSSamples.count >= minimumSamplesForCandidate &&
+            distinctUnityFSMasks.count == 1 ? distinctUnityFSMasks.first : nil
+        let exactUnityFSMatches = unityFSSamples.filter { $0.stored == $0.computed }.count
 
         let status: AoVRuntimeChecksumFingerprintStatus
         if samples.count < minimumSamplesForCandidate {
@@ -260,6 +297,11 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
             distinctXORMaskCount: distinctMasks.count,
             constantXORMask: constantMask,
             exactCRC32Matches: exactMatches,
+            unityFSUncompressedEvaluatedSamples: unityFSSamples.count,
+            distinctUnityFSUncompressedXORMaskCount: distinctUnityFSMasks.count,
+            constantUnityFSUncompressedXORMask: constantUnityFSMask,
+            exactUnityFSUncompressedCRC32Matches: exactUnityFSMatches,
+            unityFSUncompressedSkippedCount: unityFSUncompressedSkippedCount,
             status: status,
             examples: examples
         )
@@ -279,6 +321,7 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
         var missingPaths = 0
         var ambiguousPaths = 0
         var unsupportedValues = 0
+        var unityFSUncompressedSkipped = 0
 
         for path in sampledPaths {
             guard let catalogRows = distinctRows[path], catalogRows.count == 1,
@@ -304,11 +347,32 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
                 continue
             }
             let computed = try crc32(of: entry, in: archive)
+            var unityFSUncompressedCRC: UInt32?
+            if URL(fileURLWithPath: entry.path).pathExtension.lowercased() == "assetbundle" {
+                if entry.uncompressedSize <= maximumUnityFSFingerprintEntryBytes {
+                    do {
+                        let bundleData = try readEntry(archive, entry)
+                        var unityFSCRC = AoVRuntimeCRC32()
+                        try AoVUnityFSParser.forEachUncompressedBlock(
+                            bundleData,
+                            maximumExpandedBytes: UInt64(AoVUnityFSParser.maximumFingerprintExpandedBytes)
+                        ) { block in
+                            unityFSCRC.update(block)
+                        }
+                        unityFSUncompressedCRC = unityFSCRC.value
+                    } catch {
+                        unityFSUncompressedSkipped += 1
+                    }
+                } else {
+                    unityFSUncompressedSkipped += 1
+                }
+            }
             samples.append(
                 AoVRuntimeChecksumFingerprintSample(
                     path: path,
                     storedChecksum: row.crcXor,
-                    computedCRC32: computed
+                    computedCRC32: computed,
+                    computedUnityFSUncompressedCRC32: unityFSUncompressedCRC
                 )
             )
         }
@@ -320,7 +384,8 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
             missingPaths: missingPaths,
             ambiguousPaths: ambiguousPaths,
             unsupportedValues: unsupportedValues,
-            sampleLimitHit: sampleLimitHit
+            sampleLimitHit: sampleLimitHit,
+            unityFSUncompressedSkippedCount: unityFSUncompressedSkipped
         )
     }
 
