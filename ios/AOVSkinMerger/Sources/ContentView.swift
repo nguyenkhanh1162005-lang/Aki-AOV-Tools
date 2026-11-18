@@ -566,6 +566,9 @@ struct ContentView: View {
             metric("XOR CRC32 UnityFS giải nén", finding.unityFSUncompressedMaskDescription)
             metric("CRC32 UnityFS giải nén khớp trực tiếp",
                    "\(finding.exactUnityFSUncompressedCRC32Matches)")
+            Text("Trạng thái UnityFS giải nén: " + checksumStatusText(finding.unityFSUncompressedStatus))
+                .font(.caption.weight(.semibold))
+                .foregroundColor(checksumFindingColor(finding.unityFSUncompressedStatus))
             Text(finding.statusDescription)
                 .font(.caption.weight(.semibold))
                 .foregroundColor(checksumFindingColor(finding.status))
@@ -580,6 +583,15 @@ struct ContentView: View {
                     .foregroundColor(.secondary)
                     .textSelection(.enabled)
             }
+        }
+    }
+
+    private func checksumStatusText(_ status: AoVRuntimeChecksumFingerprintStatus) -> String {
+        switch status {
+        case .consistentSample: return "Mẫu nhất quán"
+        case .partialConsistentSample: return "Nhất quán một phần"
+        case .insufficientSamples: return "Chưa đủ mẫu"
+        case .inconsistent: return "Mẫu không nhất quán"
         }
     }
 
