@@ -1545,11 +1545,13 @@ struct ContentView: View {
                             remakeBaseURL = imported
                             remakeReport = nil
                             remakeExportReport = nil
+                            cabBatchMergeReport = nil
                         }
                     case .legacyMods:
                         remakeMODURLs.append(contentsOf: report.importedURLs)
                         remakeReport = nil
                         remakeExportReport = nil
+                        cabBatchMergeReport = nil
                     }
 
                     if !report.errors.isEmpty {
