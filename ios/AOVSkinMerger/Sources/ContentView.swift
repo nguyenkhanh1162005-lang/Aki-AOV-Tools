@@ -22,6 +22,8 @@ struct ContentView: View {
     @State private var cabBatchMergeReport: AoVModRemakeCABBatchedMergeReport?
     @State private var isAnalyzingChecksumFingerprint = false
     @State private var checksumFingerprintReport: AoVRuntimeChecksumFingerprintReport?
+    @State private var isPreparingRESMetadata = false
+    @State private var resReadinessReport: AoVModRemakeRESExportReadinessReport?
     @State private var isAnalyzing = false
     @State private var selectedURLs: [URL] = []
     @State private var selectedBaseURL: URL?
@@ -151,6 +153,7 @@ struct ContentView: View {
                         if let remakeReport { remakeResultView(remakeReport) }
                         if let cabBatchMergeReport { cabBatchMergeResultView(cabBatchMergeReport) }
                         if let checksumFingerprintReport { checksumFingerprintView(checksumFingerprintReport) }
+                        if let resReadinessReport { resReadinessView(resReadinessReport) }
                         if let remakeExportReport { remakeExportResultView(remakeExportReport) }
     
                         VStack(alignment: .leading, spacing: 9) {
@@ -329,6 +332,25 @@ struct ContentView: View {
                 .font(.caption2).foregroundColor(.orange)
 
             Text("Nút nhập CAB chạy object closure thật, kiểm tra TypeTree/PPtr và round-trip. Nó chỉ tạo candidate trong bộ nhớ, không xuất RES nếu checksum cuối chưa được xác minh.")
+                .font(.caption2).foregroundColor(.orange)
+
+            Button(action: runRemakeRESReadiness) {
+                HStack {
+                    if isPreparingRESMetadata { ProgressView().tint(.white) }
+                    Label(
+                        isPreparingRESMetadata ? "Đang lập metadata candidate…" : "Lập đề xuất metadata RES (chưa xuất)",
+                        systemImage: "list.clipboard"
+                    )
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(AKISecondaryButtonStyle())
+            .disabled(remakeBaseURL == nil || remakeMODURLs.isEmpty ||
+                      cabBatchMergeReport?.mergedResults.isEmpty != false ||
+                      checksumFingerprintReport == nil || isPreparingRESMetadata ||
+                      isMergingCABs || isAnalyzingRemake || isCopyingFiles || isExportingRemake || isMerging)
+
+            Text("Bước này đối chiếu metadata nguồn và lập checksum candidate riêng cho Packer/Verification. Nó không xác nhận thuật toán gốc và không mở khóa xuất RES.")
                 .font(.caption2).foregroundColor(.orange)
         }
         .panel()
@@ -548,6 +570,61 @@ struct ContentView: View {
             checksumFindingView(report.databinVerification)
             Text(report.warning)
                 .font(.caption2)
+                .foregroundColor(.orange)
+        }
+        .panel()
+    }
+
+    private func resReadinessView(_ report: AoVModRemakeRESExportReadinessReport) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Đề xuất metadata RES", systemImage: "list.clipboard")
+                .font(.headline)
+            metric("RES nền", report.baseRESName)
+            metric("CAB candidate", "\(report.proposalCount)")
+            metric("Có đủ candidate để kiểm chứng", "\(report.candidateCount)")
+            metric("Bị chặn do thiếu hoặc mâu thuẫn", "\(report.blockedCount)")
+            metric("Packer XOR mask", report.packerXORMask.map { String(format: "0x%08X", $0) } ?? "Chưa xác định")
+            metric("Verification ZIP XOR mask", report.verificationZIPXORMask.map { String(format: "0x%08X", $0) } ?? "Chưa xác định")
+
+            ForEach(Array(report.proposals.enumerated()), id: \.offset) { _, proposal in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top) {
+                        Text(proposal.runtimePath)
+                            .font(.system(size: 10, design: .monospaced))
+                            .textSelection(.enabled)
+                        Spacer(minLength: 4)
+                        Text(proposal.status == .requiresExternalValidation ? "Cần xác minh" : "Bị chặn")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundColor(proposal.status == .requiresExternalValidation ? .orange : .red)
+                    }
+                    metric("Object nhập", "\(proposal.importedObjectCount)")
+                    metric("Nguồn Packer", proposal.sourceArchives.isEmpty ? "Không có" : proposal.sourceArchives.joined(separator: ", "))
+                    if let rawCRC = proposal.rawPayloadCRC32 {
+                        metric("CRC32 byte CAB cuối", String(format: "0x%08X", rawCRC))
+                    }
+                    if let packer = proposal.proposedPackerEntry {
+                        metric("Packer crcXor candidate", String(format: "0x%08X", UInt32(truncatingIfNeeded: packer.crcXor)))
+                        metric("Packer tag · pkgType · flags",
+                               "\(packer.tag) · \(packer.pkgType) · \(packer.flags)")
+                    }
+                    if let verification = proposal.proposedVerificationZIPChecksum {
+                        metric("Verification ZIP candidate",
+                               String(format: "0x%08X", UInt32(truncatingIfNeeded: verification)))
+                    }
+                    ForEach(proposal.reasons, id: \.self) { reason in
+                        Text(reason)
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                    }
+                }
+                .padding(9)
+                .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+            }
+            Text(report.warning)
+                .font(.caption2)
+                .foregroundColor(.orange)
+            Label("Chưa cho phép xuất RES cuối", systemImage: "lock.fill")
+                .font(.caption.weight(.semibold))
                 .foregroundColor(.orange)
         }
         .panel()
@@ -1636,12 +1713,14 @@ struct ContentView: View {
                             remakeExportReport = nil
                             cabBatchMergeReport = nil
                             checksumFingerprintReport = nil
+                            resReadinessReport = nil
                         }
                     case .legacyMods:
                         remakeMODURLs.append(contentsOf: report.importedURLs)
                         remakeReport = nil
                         remakeExportReport = nil
                         cabBatchMergeReport = nil
+                        resReadinessReport = nil
                     }
 
                     if !report.errors.isEmpty {
@@ -1821,6 +1900,7 @@ struct ContentView: View {
         isMergingCABs = true
         cabBatchMergeReport = nil
         remakeExportReport = nil
+        resReadinessReport = nil
         let legacyURLs = remakeMODURLs
         Task {
             do {
@@ -1847,6 +1927,7 @@ struct ContentView: View {
         }
         isAnalyzingChecksumFingerprint = true
         checksumFingerprintReport = nil
+        resReadinessReport = nil
         Task {
             do {
                 let report = try await Task.detached(priority: .userInitiated) {
@@ -1858,6 +1939,39 @@ struct ContentView: View {
                 showAlert = true
             }
             isAnalyzingChecksumFingerprint = false
+        }
+    }
+
+    private func runRemakeRESReadiness() {
+        guard let baseURL = remakeBaseURL,
+              !remakeMODURLs.isEmpty,
+              let cabReport = cabBatchMergeReport,
+              !cabReport.mergedResults.isEmpty,
+              let checksumReport = checksumFingerprintReport else {
+            alertText = "Cần RES nền, MOD cũ, CAB candidate và checksum fingerprint trước khi lập metadata."
+            showAlert = true
+            return
+        }
+        isPreparingRESMetadata = true
+        resReadinessReport = nil
+        let legacyURLs = remakeMODURLs
+        let mergedResults = cabReport.mergedResults
+        Task {
+            do {
+                let report = try await Task.detached(priority: .userInitiated) {
+                    try AoVModRemakeRESExportReadinessAnalyzer.analyze(
+                        baseRESURL: baseURL,
+                        legacyMODURLs: legacyURLs,
+                        assetBundleMergeResults: mergedResults,
+                        checksumFingerprint: checksumReport
+                    )
+                }.value
+                resReadinessReport = report
+            } catch {
+                alertText = error.localizedDescription
+                showAlert = true
+            }
+            isPreparingRESMetadata = false
         }
     }
 
