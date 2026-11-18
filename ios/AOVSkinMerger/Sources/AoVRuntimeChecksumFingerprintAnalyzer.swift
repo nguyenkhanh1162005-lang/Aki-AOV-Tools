@@ -260,14 +260,16 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
             entriesByRuntimePath[runtimePath, default: []].append(entry)
         }
 
+        let packerAssetBundleRows = packerCatalog.allResourcePackInfo.filter {
+            URL(fileURLWithPath: $0.pathInIFS).pathExtension.lowercased() == "assetbundle"
+        }
         let packerFinding = try fingerprint(
             title: "Packer AssetBundle",
-            rows: packerCatalog.allResourcePackInfo.map {
+            rows: packerAssetBundleRows.map {
                 AoVRuntimeVerificationEntry(pathInIFS: $0.pathInIFS, crcXor: $0.crcXor)
             },
             archive: resourceArchive,
-            entriesByRuntimePath: entriesByRuntimePath,
-            assetBundleRowsOnly: true
+            entriesByRuntimePath: entriesByRuntimePath
         )
         let zipFinding = try fingerprint(
             title: "Verification ZIP",
@@ -378,8 +380,7 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
         title: String,
         rows: [AoVRuntimeVerificationEntry],
         archive: Archive,
-        entriesByRuntimePath: [String: [Entry]],
-        assetBundleRowsOnly: Bool = false
+        entriesByRuntimePath: [String: [Entry]]
     ) throws -> AoVRuntimeChecksumFingerprintFinding {
         let distinctRows = Dictionary(grouping: rows, by: \.pathInIFS)
         let orderedPaths = distinctRows.keys.sorted()
@@ -392,11 +393,6 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
         var unityFSUncompressedSkipped = 0
 
         for path in sampledPaths {
-            if assetBundleRowsOnly &&
-                URL(fileURLWithPath: path).pathExtension.lowercased() != "assetbundle" {
-                unsupportedValues += 1
-                continue
-            }
             guard let catalogRows = distinctRows[path], catalogRows.count == 1,
                   let row = catalogRows.first else {
                 ambiguousPaths += 1
