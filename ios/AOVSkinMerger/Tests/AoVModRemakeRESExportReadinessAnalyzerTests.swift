@@ -1,0 +1,206 @@
+import Foundation
+import XCTest
+@testable import AOVSkinMerger
+
+final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
+    func testBuildsPackerAndVerificationChecksumCandidatesButNeverMarksExportSafe() throws {
+        let packerMask: UInt32 = 0x2468ACE0
+        let verificationMask: UInt32 = 0xA5A5F00D
+        let packerFinding = makeFinding(title: "Packer", mask: packerMask)
+        let verificationFinding = makeFinding(title: "Verification ZIP", mask: verificationMask)
+        let databinFinding = makeFinding(title: "Verification Databin", mask: 0x12345678)
+        let fingerprint = AoVRuntimeChecksumFingerprintReport(
+            baseRESName: "base-res.zip",
+            packerAssetBundles: packerFinding,
+            zipVerification: verificationFinding,
+            databinVerification: databinFinding,
+            warning: "synthetic"
+        )
+        let payload = Data("merged-assetbundle-payload".utf8)
+        let result = makeMergeResult(payload: payload)
+        let packerRow = AoVRuntimeResourcePackInfo(
+            pathInIFS: "assetbundle/actor-731.assetbundle",
+            pkgType: 3,
+            crcXor: 111,
+            tag: "Hero",
+            flags: 512,
+            resourceInfos: [
+                AoVRuntimeResourceItem(hashCode: 731123, extensionName: "assetbundle")
+            ]
+        )
+        let catalog = makePackerCatalog(rows: [packerRow])
+
+        let report = try AoVModRemakeRESExportReadinessAnalyzer.buildProposals(
+            baseRESName: "base-res.zip",
+            assetBundleMergeResults: [result],
+            legacyPackerCatalogs: [(source: "legacy-a.zip", catalog: catalog)],
+            checksumFingerprint: fingerprint
+        )
+
+        let proposal = try XCTUnwrap(report.proposals.first)
+        let rawCRC = AoVRuntimeChecksumFingerprintAnalyzer.crc32(payload)
+        XCTAssertEqual(proposal.status, .requiresExternalValidation)
+        XCTAssertEqual(proposal.rawPayloadCRC32, rawCRC)
+        XCTAssertEqual(proposal.proposedPackerEntry?.crcXor, Int64(rawCRC ^ packerMask))
+        XCTAssertEqual(proposal.proposedVerificationZIPChecksum, Int64(rawCRC ^ verificationMask))
+        XCTAssertEqual(proposal.proposedPackerEntry?.tag, "Hero")
+        XCTAssertEqual(proposal.proposedPackerEntry?.resourceInfos, packerRow.resourceInfos)
+        XCTAssertFalse(report.safeToExport)
+        XCTAssertTrue(report.allChecksumsHaveCandidates)
+    }
+
+    func testBlocksConflictingPackerStaticMetadataAcrossMODs() throws {
+        let mask: UInt32 = 0x55667788
+        let finding = makeFinding(title: "Packer", mask: mask)
+        let fingerprint = makeReport(packer: finding, zip: makeFinding(title: "ZIP", mask: mask))
+        let path = "assetbundle/actor-731.assetbundle"
+        let first = AoVRuntimeResourcePackInfo(
+            pathInIFS: path,
+            pkgType: 0,
+            crcXor: 1,
+            tag: "HeroA",
+            flags: 0,
+            resourceInfos: []
+        )
+        let second = AoVRuntimeResourcePackInfo(
+            pathInIFS: path,
+            pkgType: 0,
+            crcXor: 2,
+            tag: "HeroB",
+            flags: 0,
+            resourceInfos: []
+        )
+
+        let report = try AoVModRemakeRESExportReadinessAnalyzer.buildProposals(
+            baseRESName: "base-res.zip",
+            assetBundleMergeResults: [makeMergeResult(payload: Data("candidate".utf8))],
+            legacyPackerCatalogs: [
+                (source: "legacy-a.zip", catalog: makePackerCatalog(rows: [first])),
+                (source: "legacy-b.zip", catalog: makePackerCatalog(rows: [second]))
+            ],
+            checksumFingerprint: fingerprint
+        )
+
+        let proposal = try XCTUnwrap(report.proposals.first)
+        XCTAssertEqual(proposal.status, .blocked)
+        XCTAssertNil(proposal.proposedPackerEntry)
+        XCTAssertNil(proposal.proposedVerificationZIPChecksum)
+        XCTAssertTrue(proposal.reasons.contains {
+            $0.contains("không thống nhất pkgType/tag/flags/resourceInfos")
+        })
+    }
+
+    func testBlocksWhenEitherChecksumFingerprintIsOnlyPartial() throws {
+        let stableMask: UInt32 = 0x01020304
+        let stable = makeFinding(title: "Packer", mask: stableMask)
+        let samples = (0..<8).map { index in
+            AoVRuntimeChecksumFingerprintSample(
+                path: "bundle/\(index)",
+                storedChecksum: Int64(UInt32(index) ^ stableMask),
+                computedCRC32: UInt32(index)
+            )
+        }
+        let partial = AoVRuntimeChecksumFingerprintAnalyzer.evaluate(
+            title: "Verification ZIP",
+            totalCatalogRows: 10,
+            samples: samples,
+            missingPaths: 2
+        )
+        let fingerprint = makeReport(packer: stable, zip: partial)
+
+        let row = AoVRuntimeResourcePackInfo(
+            pathInIFS: "assetbundle/actor-731.assetbundle",
+            pkgType: 0,
+            crcXor: 99,
+            tag: "Hero",
+            flags: 0,
+            resourceInfos: []
+        )
+        let report = try AoVModRemakeRESExportReadinessAnalyzer.buildProposals(
+            baseRESName: "base-res.zip",
+            assetBundleMergeResults: [makeMergeResult(payload: Data("candidate".utf8))],
+            legacyPackerCatalogs: [(source: "legacy.zip", catalog: makePackerCatalog(rows: [row]))],
+            checksumFingerprint: fingerprint
+        )
+
+        let proposal = try XCTUnwrap(report.proposals.first)
+        XCTAssertEqual(proposal.status, .blocked)
+        XCTAssertTrue(proposal.reasons.contains {
+            $0.contains("Verification ZIP CRC32/XOR fingerprint")
+        })
+    }
+
+    func testRejectsFingerprintFromAnotherRES() {
+        let fingerprint = makeReport(
+            packer: makeFinding(title: "Packer", mask: 1),
+            zip: makeFinding(title: "ZIP", mask: 2),
+            name: "different-res.zip"
+        )
+        XCTAssertThrowsError(
+            try AoVModRemakeRESExportReadinessAnalyzer.buildProposals(
+                baseRESName: "base-res.zip",
+                assetBundleMergeResults: [makeMergeResult(payload: Data([1, 2, 3]))],
+                legacyPackerCatalogs: [],
+                checksumFingerprint: fingerprint
+            )
+        )
+    }
+
+    private func makeFinding(title: String, mask: UInt32) -> AoVRuntimeChecksumFingerprintFinding {
+        let samples = (0..<8).map { index in
+            let crc = UInt32(index * 1_000 + 19)
+            return AoVRuntimeChecksumFingerprintSample(
+                path: "\(title)/\(index)",
+                storedChecksum: Int64(crc ^ mask),
+                computedCRC32: crc
+            )
+        }
+        return AoVRuntimeChecksumFingerprintAnalyzer.evaluate(
+            title: title,
+            totalCatalogRows: samples.count,
+            samples: samples
+        )
+    }
+
+    private func makeReport(
+        packer: AoVRuntimeChecksumFingerprintFinding,
+        zip: AoVRuntimeChecksumFingerprintFinding,
+        name: String = "base-res.zip"
+    ) -> AoVRuntimeChecksumFingerprintReport {
+        AoVRuntimeChecksumFingerprintReport(
+            baseRESName: name,
+            packerAssetBundles: packer,
+            zipVerification: zip,
+            databinVerification: makeFinding(title: "Databin", mask: 3),
+            warning: "synthetic"
+        )
+    }
+
+    private func makeMergeResult(payload: Data) -> AoVModRemakeAssetBundleMergeResult {
+        AoVModRemakeAssetBundleMergeResult(
+            resourcePath: "1.64.1.12/assetbundle/actor-731.assetbundle",
+            resourcePayload: AoVModRemakeResourcePayload(
+                archivePath: "1.64.1.12/assetbundle/actor-731.assetbundle",
+                ifsPath: "assetbundle/actor-731.assetbundle",
+                data: payload
+            ),
+            importedObjectCount: 1,
+            importedPathIDs: [987654],
+            roundTripVerified: true
+        )
+    }
+
+    private func makePackerCatalog(
+        rows: [AoVRuntimeResourcePackInfo]
+    ) -> AoVRuntimeResourcePackerCatalog {
+        AoVRuntimeResourcePackerCatalog(
+            name: "ResourcePackerInfoSetXML",
+            version: "1.64.1.12",
+            svnRevision: "test",
+            setName: "ResourcePackerInfoSetXML",
+            allResourcePackInfo: rows,
+            allParentIndexToChild: [],
+            trailingData: Data()
+        )
+    }
+}
