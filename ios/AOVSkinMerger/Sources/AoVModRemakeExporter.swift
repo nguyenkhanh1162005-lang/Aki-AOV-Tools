@@ -232,9 +232,15 @@ enum AoVModRemakeExporter {
             let excludedExtensions: Set<String> = [
                 "assetbundle", "bnk", "wem", "zip", "pck", "obb"
             ]
+            let dedicatedAdapterMarkers = [
+                "assetref", "commonactions", "thanos/heroskin_",
+                "reskinseniorlabelcfg", "battlebank", "lobbybank",
+                "skillcombine", "ifix", "mses", "/sound/", "/audio/"
+            ]
             return !components.contains("assetbundle") &&
                 !excludedExtensions.contains(ext) &&
                 !lower.contains(".pkg.") &&
+                !dedicatedAdapterMarkers.contains(where: { lower.contains($0) }) &&
                 !row.resourceInfos.contains(where: {
                     $0.extensionName.lowercased() == "assetbundle"
                 })
@@ -757,28 +763,6 @@ enum AoVModRemakeExporter {
         guard case .packer(let currentPackerCatalog) = packerTarget.catalog,
               case .verification(let currentVerificationCatalog) = verificationTarget.catalog else {
             throw AoVModRemakeExporterError.catalogMergeFailed("Catalog RES không đúng loại.")
-        }
-        let currentPackerPaths = Set(currentPackerCatalog.allResourcePackInfo.map(\.pathInIFS))
-        for payload in resourcePayloads {
-            let archivePath = try normalizeArchivePath(payload.archivePath)
-            let existingEntry = resourceEntryByPath[archivePath]
-            let payloadMatchesBase: Bool
-            if let existingEntry {
-                payloadMatchesBase = try readEntry(
-                    resourceArchive,
-                    existingEntry,
-                    maxBytes: maximumSingleEntry
-                ) == payload.data
-            } else {
-                payloadMatchesBase = false
-            }
-            let requiresFinalPackerEntry =
-                assetBundleIFSPaths.contains(payload.ifsPath) ||
-                !currentPackerPaths.contains(payload.ifsPath) ||
-                !payloadMatchesBase
-            if requiresFinalPackerEntry && verifiedFinalPackerEntries[payload.ifsPath] == nil {
-                throw AoVModRemakeExporterError.missingFinalPackerEntry(payload.ifsPath)
-            }
         }
         guard currentPackerCatalog.version == currentVerificationCatalog.version else {
             throw AoVModRemakeExporterError.catalogVersionMismatch(
