@@ -211,13 +211,13 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
     func testLoadsLegacyRuntimeCatalogsFromVersionMatchedArchives() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AKI-Catalog-Loader-Test-\\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("AKI-Catalog-Loader-Test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
         let baseURL = root.appendingPathComponent("clean-res.zip")
         let legacyURL = root.appendingPathComponent("legacy-mod.zip")
-        let version = Data("1.64.1.12\\n".utf8)
+        let version = Data("1.64.1.12\n".utf8)
         let packer = try makeUnityFS(with: .packer(makePackerCatalog()))
         let verification = try makeUnityFS(with: .verification(makeVerificationCatalog()))
         let entries = [
@@ -241,17 +241,17 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
     func testLegacyCatalogLoaderRejectsDifferentBuildVersion() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AKI-Catalog-Version-Guard-Test-\\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("AKI-Catalog-Version-Guard-Test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
         let baseURL = root.appendingPathComponent("clean-res.zip")
         let legacyURL = root.appendingPathComponent("old-build-mod.zip")
         try makeArchive(baseURL, entries: [
-            ("version.txt", Data("1.64.1.12\\n".utf8))
+            ("version.txt", Data("1.64.1.12\n".utf8))
         ], root: root)
         try makeArchive(legacyURL, entries: [
-            ("version.txt", Data("1.64.1.11\\n".utf8))
+            ("version.txt", Data("1.64.1.11\n".utf8))
         ], root: root)
 
         XCTAssertThrowsError(
@@ -262,14 +262,14 @@ final class AoVModRemakeExporterTests: XCTestCase {
         ) { error in
             guard let remakeError = error as? AoVModRemakeError,
                   case .versionMismatch("old-build-mod.zip", "1.64.1.11", "1.64.1.12") = remakeError else {
-                return XCTFail("Expected a strict build-version mismatch, got \\(error)")
+                return XCTFail("Expected a strict build-version mismatch, got \(error)")
             }
         }
     }
 
     func testArchiveBasedExportLoadsCatalogsAndWritesVerifiedZIPPayload() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AKI-RES-Archive-Coordinator-Test-\\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("AKI-RES-Archive-Coordinator-Test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -278,7 +278,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
         let packerBytes = try makeUnityFS(with: .packer(makePackerCatalog()))
         let verificationBytes = try makeUnityFS(with: .verification(makeVerificationCatalog()))
         let sharedEntries = [
-            ("version.txt", Data("1.64.1.12\\n".utf8)),
+            ("version.txt", Data("1.64.1.12\n".utf8)),
             ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle", packerBytes),
             ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle", verificationBytes)
         ]
@@ -331,7 +331,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
     func testExporterRejectsCatalogVersionMismatchBeforeWriting() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AKI-RES-Catalog-Version-Test-\\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("AKI-RES-Catalog-Version-Test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -364,7 +364,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
         ) { error in
             guard let exporterError = error as? AoVModRemakeExporterError,
                   case .catalogVersionMismatch("Packer", "1.64.1.11", "1.64.1.12") = exporterError else {
-                return XCTFail("Expected catalog version mismatch, got \\(error)")
+                return XCTFail("Expected catalog version mismatch, got \(error)")
             }
         }
     }
