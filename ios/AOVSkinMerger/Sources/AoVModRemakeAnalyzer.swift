@@ -556,21 +556,25 @@ enum AoVModRemakeAnalyzer {
         legacy: [ArchiveInventory]
     ) -> [AoVRemakeCABCandidateFinding] {
         func snapshots(_ bundles: [AoVUnityFSScanResult]) -> [AoVRemakeCABRecordSnapshot] {
-            bundles.flatMap { bundle in
-                bundle.catalogNodeSamples.flatMap { node in
-                    guard let serialized = node.serializedFile else { return [] }
-                    return serialized.assetBundleRecords.map { record in
-                        AoVRemakeCABRecordSnapshot(
-                            sourceArchive: bundle.archiveName,
-                            resourcePath: bundle.path,
-                            nodePath: node.path,
-                            serializedFileFormatVersion: serialized.formatVersion,
-                            targetPlatform: serialized.targetPlatform,
-                            record: record
+            var result: [AoVRemakeCABRecordSnapshot] = []
+            for bundle in bundles {
+                for node in bundle.catalogNodeSamples {
+                    guard let serialized = node.serializedFile else { continue }
+                    for record in serialized.assetBundleRecords {
+                        result.append(
+                            AoVRemakeCABRecordSnapshot(
+                                sourceArchive: bundle.archiveName,
+                                resourcePath: bundle.path,
+                                nodePath: node.path,
+                                serializedFileFormatVersion: serialized.formatVersion,
+                                targetPlatform: serialized.targetPlatform,
+                                record: record
+                            )
                         )
                     }
                 }
             }
+            return result
         }
 
         let currentRecords = snapshots(base)
