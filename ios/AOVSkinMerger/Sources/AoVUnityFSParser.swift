@@ -597,6 +597,98 @@ enum AoVUnityFSParser {
         )
     }
 
+    /// Streams the fully decompressed UnityFS block-data region in directory
+    /// order. This is useful for integrity research because it separates a
+    /// compressed/encrypted container's raw bytes from its uncompressed payload.
+    /// The consumer sees one decoded block at a time, so callers can update a
+    /// checksum without holding the entire expanded stream in memory.
+    static func forEachUncompressedBlock(
+        _ data: Data,
+        maximumExpandedBytes: UInt64 = 256 * 1024 * 1024,
+        _ consumer: (Data) throws -> Void
+    ) throws {
+        let info = try inspect(data)
+        guard maximumExpandedBytes > 0,
+              maximumExpandedBytes <= UInt64(maximumBundleBytes) else {
+            throw AoVUnityFSError.resourceLimit("giới hạn giải nén phải nằm trong khoảng 1 byte–512 MiB.")
+        }
+        guard info.totalUncompressedBytes <= maximumExpandedBytes else {
+            throw AoVUnityFSError.resourceLimit(
+                "dữ liệu sau giải nén là \(info.totalUncompressedBytes) byte, vượt giới hạn \(maximumExpandedBytes) byte."
+            )
+        }
+        guard let startOffset = Int(exactly: info.blockDataOffset),
+              startOffset <= data.count else {
+            throw AoVUnityFSError.invalidBlockTable("offset dữ liệu block không biểu diễn được.")
+        }
+
+        var cursor = startOffset
+        var expandedBytes: UInt64 = 0
+        for block in info.blocks {
+            let compressedCount = Int(block.compressedSize)
+            let expectedBlockSize = Int(block.uncompressedSize)
+            guard cursor >= 0, cursor <= data.count,
+                  compressedCount <= data.count - cursor else {
+                throw AoVUnityFSError.truncated("dữ liệu block \(block.index)")
+            }
+
+            let compressed = data.subdata(in: cursor..<(cursor + compressedCount))
+            let method = UInt32(block.flags & 0x3F)
+            let decoded: Data
+            switch method {
+            case 0:
+                guard compressed.count == expectedBlockSize else {
+                    throw AoVUnityFSError.decompressionFailed(
+                        "block \(block.index) không nén có \(compressed.count) byte, cần \(expectedBlockSize)."
+                    )
+                }
+                decoded = compressed
+            case 1:
+                decoded = try decompressLZMA(
+                    compressed,
+                    expectedSize: expectedBlockSize,
+                    maximumOutputSize: Int(maximumExpandedBytes),
+                    context: "block \(block.index)"
+                )
+            case 2, 3:
+                do {
+                    decoded = try AoVLZ4Block.decompress(
+                        compressed,
+                        expectedSize: expectedBlockSize,
+                        maximumSize: Int(maximumExpandedBytes)
+                    )
+                } catch {
+                    throw AoVUnityFSError.decompressionFailed(
+                        "block \(block.index): \(error.localizedDescription)"
+                    )
+                }
+            case 4:
+                throw AoVUnityFSError.unsupportedBlockCompression(method)
+            default:
+                throw AoVUnityFSError.invalidCompression(method)
+            }
+
+            guard decoded.count == expectedBlockSize else {
+                throw AoVUnityFSError.decompressionFailed(
+                    "block \(block.index) giải nén ra \(decoded.count) byte, cần \(expectedBlockSize)."
+                )
+            }
+            let nextBytes = expandedBytes.addingReportingOverflow(UInt64(decoded.count))
+            guard !nextBytes.overflow, nextBytes.partialValue <= maximumExpandedBytes else {
+                throw AoVUnityFSError.resourceLimit("dữ liệu block giải nén vượt giới hạn.")
+            }
+            try consumer(decoded)
+            expandedBytes = nextBytes.partialValue
+            cursor += compressedCount
+        }
+
+        guard expandedBytes == info.totalUncompressedBytes else {
+            throw AoVUnityFSError.invalidBlockTable(
+                "tổng block giải nén là \(expandedBytes) byte, directory khai báo \(info.totalUncompressedBytes) byte."
+            )
+        }
+    }
+
     /// Extract UnityFS directory nodes for read-only inspection. This never rebuilds
     /// or modifies a bundle and enforces a caller-supplied expanded-size ceiling.
     static func extractNodes(
