@@ -8,7 +8,7 @@ final class AoVRuntimeChecksumFingerprintAnalyzerTests: XCTestCase {
         let samples = (0..<8).map { index in
             let crc = UInt32(index * 31 + 7)
             return AoVRuntimeChecksumFingerprintSample(
-                path: "Packer/\\(index)",
+                path: "Packer/\(index)",
                 storedChecksum: Int64(crc ^ mask),
                 computedCRC32: UInt32(index * 19 + 11),
                 computedUnityFSUncompressedCRC32: crc
