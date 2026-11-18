@@ -37,6 +37,24 @@ final class AoVSourceFileImporterTests: XCTestCase {
         XCTAssertEqual(report.totalBytes, UInt64(payload.count))
     }
 
+    func testCopies3105ArchiveIntoAppFolderAndPreservesOriginalName() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let source = root.appendingPathComponent("legacy-skin.3105")
+        let appFolder = root.appendingPathComponent("Documents/SourceArchives", isDirectory: true)
+        let payload = Data([0x50, 0x4B, 0x03, 0x04, 9, 8, 7, 6])
+        try payload.write(to: source)
+
+        let report = try AoVSourceFileImporter.copy([source], into: appFolder)
+
+        XCTAssertEqual(report.importedURLs.count, 1)
+        XCTAssertTrue(report.errors.isEmpty)
+        XCTAssertTrue(report.importedURLs[0].lastPathComponent.hasSuffix("-legacy-skin.3105"))
+        XCTAssertEqual(try Data(contentsOf: report.importedURLs[0]), payload)
+        XCTAssertEqual(report.totalBytes, UInt64(payload.count))
+    }
+
     func testRejectsMoreThanTenFilesBeforeCopying() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -66,7 +84,7 @@ final class AoVSourceFileImporterTests: XCTestCase {
 
         XCTAssertTrue(report.importedURLs.isEmpty)
         XCTAssertEqual(report.errors.count, 1)
-        XCTAssertTrue(report.errors[0].contains("chỉ nhận file"))
+        XCTAssertTrue(report.errors[0].contains("chỉ nhận file .zip hoặc .3105"))
     }
 
     func testDoesNotRejectZipWhenExistingImportedBytesAreLarge() throws {
