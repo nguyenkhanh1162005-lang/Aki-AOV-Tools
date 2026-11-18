@@ -49,6 +49,45 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
         XCTAssertTrue(report.allChecksumsHaveCandidates)
     }
 
+    func testAcceptsSameStaticPackerMetadataWhenLegacyChecksumsDiffer() throws {
+        let mask: UInt32 = 0x11223344
+        let fingerprint = makeReport(
+            packer: makeFinding(title: "Packer", mask: mask),
+            zip: makeFinding(title: "ZIP", mask: 0x55667788)
+        )
+        let first = AoVRuntimeResourcePackInfo(
+            pathInIFS: "assetbundle/actor-731.assetbundle",
+            pkgType: 2,
+            crcXor: 0x01010101,
+            tag: "Hero",
+            flags: 512,
+            resourceInfos: [AoVRuntimeResourceItem(hashCode: 731, extensionName: "assetbundle")]
+        )
+        let second = AoVRuntimeResourcePackInfo(
+            pathInIFS: first.pathInIFS,
+            pkgType: first.pkgType,
+            crcXor: 0xFEFEFEFE,
+            tag: first.tag,
+            flags: first.flags,
+            resourceInfos: first.resourceInfos
+        )
+
+        let report = try AoVModRemakeRESExportReadinessAnalyzer.buildProposals(
+            baseRESName: "base-res.zip",
+            assetBundleMergeResults: [makeMergeResult(payload: Data("candidate".utf8))],
+            legacyPackerCatalogs: [
+                (source: "legacy-a.zip", catalog: makePackerCatalog(rows: [first])),
+                (source: "legacy-b.zip", catalog: makePackerCatalog(rows: [second]))
+            ],
+            checksumFingerprint: fingerprint
+        )
+
+        let proposal = try XCTUnwrap(report.proposals.first)
+        XCTAssertEqual(proposal.status, .requiresExternalValidation)
+        XCTAssertEqual(proposal.proposedPackerEntry?.tag, "Hero")
+        XCTAssertEqual(proposal.sourceArchives, ["legacy-a.zip", "legacy-b.zip"])
+    }
+
     func testBlocksConflictingPackerStaticMetadataAcrossMODs() throws {
         let mask: UInt32 = 0x55667788
         let finding = makeFinding(title: "Packer", mask: mask)
