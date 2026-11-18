@@ -43,6 +43,7 @@ enum AoVModRemakeExporterError: LocalizedError {
     case archiveExpandedTooLarge(String)
     case resourceTooLarge(String)
     case noResourcePayloads
+    case noSafeStandaloneResources(String)
     case duplicateArchivePayload(String)
     case duplicateRuntimePath(String)
     case invalidRuntimePath(String)
@@ -73,6 +74,8 @@ enum AoVModRemakeExporterError: LocalizedError {
             return "\(path) vượt giới hạn 512 MiB."
         case .noResourcePayloads:
             return "Chưa có payload tài nguyên cuối đã ghép để xuất vào RES."
+        case .noSafeStandaloneResources(let reason):
+            return "Không có tài nguyên độc lập đủ điều kiện xuất an toàn: \(reason)"
         case .duplicateArchivePayload(let path):
             return "Có nhiều payload đầu ra cùng đường dẫn ZIP: \(path)"
         case .duplicateRuntimePath(let path):
@@ -307,11 +310,18 @@ enum AoVModRemakeExporter {
         let assetBundleIFSPaths = Set(payloadByIFSPath.keys.filter {
             $0.lowercased().hasSuffix(".assetbundle")
         })
+        for (path, entry) in verifiedFinalPackerEntries {
+            guard payloadIFSPathContains(path, in: payloadByIFSPath) else {
+                throw AoVModRemakeExporterError.unusedFinalPackerEntry(path)
+            }
+            guard entry.pathInIFS == path else {
+                throw AoVModRemakeExporterError.catalogMergeFailed(
+                    "Packer final map dùng key \(path) nhưng entry trỏ tới \(entry.pathInIFS)."
+                )
+            }
+        }
         for path in assetBundleIFSPaths where verifiedFinalPackerEntries[path] == nil {
             throw AoVModRemakeExporterError.missingFinalPackerEntry(path)
-        }
-        for path in verifiedFinalPackerEntries.keys where !assetBundleIFSPaths.contains(path) {
-            throw AoVModRemakeExporterError.unusedFinalPackerEntry(path)
         }
 
         // The caller's verified checksum maps are the authoritative
@@ -374,6 +384,28 @@ enum AoVModRemakeExporter {
         guard case .packer(let currentPackerCatalog) = packerTarget.catalog,
               case .verification(let currentVerificationCatalog) = verificationTarget.catalog else {
             throw AoVModRemakeExporterError.catalogMergeFailed("Catalog RES không đúng loại.")
+        }
+        let currentPackerPaths = Set(currentPackerCatalog.allResourcePackInfo.map(\.pathInIFS))
+        for payload in resourcePayloads {
+            let archivePath = try normalizeArchivePath(payload.archivePath)
+            let existingEntry = resourceEntryByPath[archivePath]
+            let payloadMatchesBase: Bool
+            if let existingEntry {
+                payloadMatchesBase = try readEntry(
+                    resourceArchive,
+                    existingEntry,
+                    maxBytes: maximumSingleEntry
+                ) == payload.data
+            } else {
+                payloadMatchesBase = false
+            }
+            let requiresFinalPackerEntry =
+                assetBundleIFSPaths.contains(payload.ifsPath) ||
+                !currentPackerPaths.contains(payload.ifsPath) ||
+                !payloadMatchesBase
+            if requiresFinalPackerEntry && verifiedFinalPackerEntries[payload.ifsPath] == nil {
+                throw AoVModRemakeExporterError.missingFinalPackerEntry(payload.ifsPath)
+            }
         }
         guard currentPackerCatalog.version == currentVerificationCatalog.version else {
             throw AoVModRemakeExporterError.catalogVersionMismatch(
@@ -514,6 +546,13 @@ enum AoVModRemakeExporter {
             structurallyValidated: true,
             gameCompatibilityTested: false
         )
+    }
+
+    private static func payloadIFSPathContains(
+        _ path: String,
+        in payloads: [String: AoVModRemakeResourcePayload]
+    ) -> Bool {
+        payloads.values.contains { $0.ifsPath == path }
     }
 
     private static func validatedEntries(_ archive: Archive, label: String) throws -> [Entry] {
