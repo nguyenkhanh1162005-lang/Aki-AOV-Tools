@@ -64,13 +64,13 @@ struct ContentView: View {
                         quickStatus
                         VStack(alignment: .leading, spacing: 12) {
                             Label("Nguồn MOD", systemImage: "doc.zipper").font(.headline)
-                            Text("Chọn nhiều ZIP. File được giữ trên iPhone, không tải lên máy chủ.")
+                            Text("Chọn nhiều gói ZIP hoặc .3105. Gói .3105 phải là ZIP-compatible để bộ phân tích đọc được; file gốc được giữ trên iPhone, không tải lên máy chủ.")
                                 .font(.footnote).foregroundColor(.secondary)
                             Button { importPurpose = .merger; isImporting = true } label: {
                                 HStack {
                                     if isCopyingFiles { ProgressView() }
                                     Label(
-                                        isCopyingFiles ? "Đang nhập ZIP vào iPhone…" : "Chọn file ZIP",
+                                        isCopyingFiles ? "Đang nhập gói vào iPhone…" : "Chọn ZIP / .3105",
                                         systemImage: isCopyingFiles ? "arrow.down.doc" : "plus.circle.fill"
                                     )
                                 }
@@ -116,7 +116,7 @@ struct ContentView: View {
                                 HStack {
                                     Text("File đã chọn").font(.headline)
                                     Spacer()
-                                    Text("\(selectedURLs.count) ZIP").font(.caption).foregroundColor(.secondary)
+                                    Text("\(selectedURLs.count) gói").font(.caption).foregroundColor(.secondary)
                                 }
                                 ForEach(Array(selectedURLs.enumerated()), id: \.offset) { index, url in
                                     HStack {
@@ -207,7 +207,11 @@ struct ContentView: View {
             }
             .fileImporter(
                 isPresented: $isImporting,
-                allowedContentTypes: [UTType(filenameExtension: "zip") ?? .zip],
+                allowedContentTypes: [
+                    UTType(filenameExtension: "zip") ?? .zip,
+                    UTType("com.aki.aovskinmerger.modarchive") ??
+                        UTType(filenameExtension: "3105", conformingTo: .zip) ?? .zip
+                ],
                 allowsMultipleSelection: true
             ) { result in
                 importFiles(result, purpose: importPurpose)
@@ -256,7 +260,7 @@ struct ContentView: View {
                 importPurpose = .legacyMods
                 isImporting = true
             } label: {
-                Label("Thêm MOD cũ (tối đa 10 ZIP)", systemImage: "doc.zipper")
+                Label("Thêm MOD cũ (tối đa 10 gói ZIP/.3105)", systemImage: "doc.zipper")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(AKISecondaryButtonStyle())
