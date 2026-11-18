@@ -251,6 +251,187 @@ struct AoVModRemakeCatalogInputs: Sendable {
     let verification: [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)]
 }
 
+enum AoVModResourceFamily: String, Codable, CaseIterable, Sendable, Identifiable {
+    case runtimeCatalog
+    case unityFSAssetBundle
+    case assetReference
+    case commonActions
+    case mses
+    case ifix
+    case heroSkinConfig
+    case wwiseBank
+    case wwiseMedia
+    case actionPackage
+    case databin
+    case unitySerializedAsset
+    case metadata
+    case other
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .runtimeCatalog: return "Packer / Verification"
+        case .unityFSAssetBundle: return "UnityFS / AssetBundle"
+        case .assetReference: return "AssetRef"
+        case .commonActions: return "CommonActions"
+        case .mses: return "MSES"
+        case .ifix: return "IFix"
+        case .heroSkinConfig: return "Cấu hình skin / hero"
+        case .wwiseBank: return "Wwise BNK"
+        case .wwiseMedia: return "Wwise WEM"
+        case .actionPackage: return "Action / PKG"
+        case .databin: return "Databin .bytes"
+        case .unitySerializedAsset: return "Unity Serialized Asset"
+        case .metadata: return "Metadata"
+        case .other: return "Khác / chưa nhận diện"
+        }
+    }
+
+    var supportSummary: String {
+        switch self {
+        case .runtimeCatalog:
+            return "Có parser và planner. Chỉ được ghi khi payload cuối, dependency và checksum đã xác minh đúng build."
+        case .unityFSAssetBundle:
+            return "Có parser UnityFS và importer SerializedFile ở mức thành phần. Ghép CAB hoàn chỉnh vẫn cần remap PPtr, dependency closure và checksum."
+        case .assetReference:
+            return "Có nhận diện và adapter AssetRef. Các subset trùng path nhưng khác nội dung cần xử lý xung đột riêng."
+        case .commonActions:
+            return "Có adapter cho direct list và điều kiện skinId đã nhận diện. Schema lạ không được tự ghi."
+        case .mses:
+            return "Có adapter cho bảng/schema MSES đã nhận diện. Trường hoặc phiên bản chưa biết phải dừng."
+        case .ifix:
+            return "Có parser/merger cho cấu trúc IFix đã nhận diện. Không suy diễn opcode hay record chưa hỗ trợ."
+        case .heroSkinConfig:
+            return "Đã nhận diện nhóm cấu hình theo đường dẫn. Cần adapter schema cụ thể trước khi sửa nội dung."
+        case .wwiseBank:
+            return "Có hướng ghép append-only khi ID không xung đột; không tự đổi ID hoặc ghi đè bank."
+        case .wwiseMedia:
+            return "Nhận diện và giữ payload media. Chưa có ghép ngữ nghĩa cho WEM."
+        case .actionPackage:
+            return "Nhận diện gói hành động nhị phân. Chưa có bộ giải mã tổng quát để ghép nội dung PKG."
+        case .databin:
+            return "Có decoder AES/Zstandard cho wrapper đã nhận diện. Ý nghĩa từng Databin và checksum vẫn cần adapter riêng."
+        case .unitySerializedAsset:
+            return "Có parser SerializedFile/importer theo type tree. Chỉ nhập object khi mọi pointer và dependency được xác minh."
+        case .metadata:
+            return "Dùng để nhận diện build và cấu trúc. Không tự sửa metadata không rõ schema."
+        case .other:
+            return "Chưa có adapter nhận diện. Chỉ giữ nguyên hoặc xử lý theo quy tắc độc lập đã xác minh."
+        }
+    }
+}
+
+struct AoVModFamilyAudit: Codable, Sendable, Identifiable {
+    let family: AoVModResourceFamily
+    let fileCount: Int
+    let totalBytes: UInt64
+    let samples: [String]
+    let parsedUnityFSCount: Int
+
+    var id: String { family.rawValue }
+}
+
+struct AoVModPackageAudit: Codable, Sendable, Identifiable {
+    let archiveName: String
+    let version: String?
+    let fileCount: Int
+    let expandedBytes: UInt64
+    let families: [AoVModFamilyAudit]
+
+    var id: String { archiveName }
+
+    private struct Aggregate {
+        var fileCount = 0
+        var totalBytes: UInt64 = 0
+        var samples: [String] = []
+        var parsedUnityFSCount = 0
+    }
+
+    static func make(from inventory: ArchiveInventory, version: String?) -> AoVModPackageAudit {
+        let parsedUnityFSPaths = Set(inventory.unityFSBundles.map {
+            $0.path.replacingOccurrences(of: "\\", with: "/").lowercased()
+        })
+        var aggregates: [AoVModResourceFamily: Aggregate] = [:]
+
+        for record in inventory.pathDigests {
+            let family = classify(record.path, parsedUnityFSPaths: parsedUnityFSPaths)
+            var aggregate = aggregates[family] ?? Aggregate()
+            aggregate.fileCount += 1
+            let total = aggregate.totalBytes.addingReportingOverflow(record.uncompressedBytes)
+            aggregate.totalBytes = total.overflow ? UInt64.max : total.partialValue
+            if aggregate.samples.count < 3 {
+                aggregate.samples.append(record.path)
+            }
+            if parsedUnityFSPaths.contains(record.path.replacingOccurrences(of: "\\", with: "/").lowercased()) {
+                aggregate.parsedUnityFSCount += 1
+            }
+            aggregates[family] = aggregate
+        }
+
+        let families = aggregates.map { family, aggregate in
+            AoVModFamilyAudit(
+                family: family,
+                fileCount: aggregate.fileCount,
+                totalBytes: aggregate.totalBytes,
+                samples: aggregate.samples,
+                parsedUnityFSCount: aggregate.parsedUnityFSCount
+            )
+        }.sorted {
+            if $0.fileCount != $1.fileCount { return $0.fileCount > $1.fileCount }
+            return $0.family.rawValue < $1.family.rawValue
+        }
+
+        return AoVModPackageAudit(
+            archiveName: inventory.fileName,
+            version: version,
+            fileCount: inventory.fileCount,
+            expandedBytes: inventory.uncompressedBytes,
+            families: families
+        )
+    }
+
+    private static func classify(
+        _ path: String,
+        parsedUnityFSPaths: Set<String>
+    ) -> AoVModResourceFamily {
+        let normalized = path.replacingOccurrences(of: "\\", with: "/").lowercased()
+        let fileName = (normalized as NSString).lastPathComponent
+        let ext = (fileName as NSString).pathExtension
+
+        if fileName == "resourcepackerinfosetall.assetbundle" ||
+            fileName == "resourceverificationinfosetall.assetbundle" {
+            return .runtimeCatalog
+        }
+        if normalized.contains("assetref") { return .assetReference }
+        if normalized.contains("commonactions") { return .commonActions }
+        if normalized.contains("mses") { return .mses }
+        if normalized.contains("ifix") { return .ifix }
+        if normalized.contains("reskinseniorlabelcfg") ||
+            normalized.contains("thanos/heroskin") ||
+            normalized.contains("heroskinconfig") {
+            return .heroSkinConfig
+        }
+        if ext == "bnk" { return .wwiseBank }
+        if ext == "wem" { return .wwiseMedia }
+        if fileName.hasSuffix(".pkg.bytes") || normalized.contains(".pkg.") {
+            return .actionPackage
+        }
+        if parsedUnityFSPaths.contains(normalized) || ext == "assetbundle" {
+            return .unityFSAssetBundle
+        }
+        if ext == "bytes" { return .databin }
+        if ext == "asset" || ext == "assets" || ext == "ress" {
+            return .unitySerializedAsset
+        }
+        if ext == "xml" || ext == "json" || ext == "txt" ||
+            ext == "manifest" || ext == "yaml" || ext == "yml" || ext == "csv" {
+            return .metadata
+        }
+        return .other
+    }
+}
+
 struct AoVModRemakeReport: Codable, Sendable {
     let base: ArchiveInventory
     let legacy: [ArchiveInventory]
@@ -271,6 +452,11 @@ struct AoVModRemakeReport: Codable, Sendable {
     let runtimeVerificationMergePlan: AoVRuntimeVerificationMergePlan?
     let catalogMergePlanFindings: [AoVRemakeCatalogPlanFinding]
     let warnings: [String]
+
+    var packageAudits: [AoVModPackageAudit] {
+        [AoVModPackageAudit.make(from: base, version: baseVersion)] +
+            legacy.map { AoVModPackageAudit.make(from: $0, version: legacyVersions[$0.fileName]) }
+    }
 
     var totalLegacyFiles: Int { legacy.reduce(0) { $0 + $1.fileCount } }
     var totalLegacyBytes: UInt64 { legacy.reduce(0) { $0 &+ $1.uncompressedBytes } }
