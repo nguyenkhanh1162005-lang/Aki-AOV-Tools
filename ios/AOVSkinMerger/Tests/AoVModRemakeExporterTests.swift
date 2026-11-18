@@ -4,6 +4,73 @@ import ZIPFoundation
 @testable import AOVSkinMerger
 
 final class AoVModRemakeExporterTests: XCTestCase {
+    func testChecksumAnalyzerFindsConsistentRawCRC32XORMaskInRESVerificationCatalog() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Checksum-Fingerprint-RES-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("checksum-res.zip")
+        let zipMask: UInt32 = 0xA5A5F00D
+        let databinMask: UInt32 = 0x13579BDF
+        var zipRows: [AoVRuntimeVerificationEntry] = []
+        var databinRows: [AoVRuntimeVerificationEntry] = []
+        var resourceEntries: [(String, Data)] = []
+
+        for index in 0..<8 {
+            let zipPath = "Images/UI/icon-\(index).png"
+            let zipPayload = Data("zip-resource-payload-\(index)".utf8)
+            let zipCRC = AoVRuntimeChecksumFingerprintAnalyzer.crc32(zipPayload)
+            zipRows.append(
+                AoVRuntimeVerificationEntry(
+                    pathInIFS: zipPath,
+                    crcXor: Int64(zipCRC ^ zipMask)
+                )
+            )
+            resourceEntries.append(("1.64.1.12/" + zipPath, zipPayload))
+
+            let databinPath = "Databin/Client/Actor_\(index).bytes"
+            let databinPayload = Data("databin-resource-payload-\(index)".utf8)
+            let databinCRC = AoVRuntimeChecksumFingerprintAnalyzer.crc32(databinPayload)
+            databinRows.append(
+                AoVRuntimeVerificationEntry(
+                    pathInIFS: databinPath,
+                    crcXor: Int64(databinCRC ^ databinMask)
+                )
+            )
+            resourceEntries.append(("1.64.1.12/" + databinPath, databinPayload))
+        }
+
+        let verification = AoVRuntimeResourceVerificationCatalog(
+            name: "ResourceVerificationInfoSetXML",
+            version: "1.64.1.12",
+            svnRevision: "synthetic",
+            allZipVerificationInfo: zipRows,
+            allDatabinVerificationInfo: databinRows,
+            trailingData: Data()
+        )
+        let verificationBundle = try makeUnityFS(with: .verification(verification))
+        try makeArchive(
+            baseURL,
+            entries: [
+                ("version.txt", Data("1.64.1.12\\n".utf8)),
+                ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle", verificationBundle)
+            ] + resourceEntries,
+            root: root
+        )
+
+        let report = try AoVRuntimeChecksumFingerprintAnalyzer.analyze(baseRESURL: baseURL)
+
+        XCTAssertEqual(report.zipVerification.status, .consistentSample)
+        XCTAssertEqual(report.zipVerification.evaluatedSamples, 8)
+        XCTAssertEqual(report.zipVerification.constantXORMask, zipMask)
+        XCTAssertEqual(report.zipVerification.exactCRC32Matches, 0)
+        XCTAssertEqual(report.databinVerification.status, .consistentSample)
+        XCTAssertEqual(report.databinVerification.evaluatedSamples, 8)
+        XCTAssertEqual(report.databinVerification.constantXORMask, databinMask)
+        XCTAssertTrue(report.requiresExternalValidation)
+    }
+
     func testExportsVerifiedAssetBundleAndDatabinIntoCleanRESAndUpdatesBothCatalogs() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-RES-Exporter-Test-\(UUID().uuidString)", isDirectory: true)
