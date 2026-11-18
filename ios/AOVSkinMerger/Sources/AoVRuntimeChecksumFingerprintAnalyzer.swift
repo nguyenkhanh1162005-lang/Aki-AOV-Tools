@@ -58,6 +58,19 @@ struct AoVRuntimeChecksumFingerprintFinding: Sendable {
         return String(format: "0x%08X", constantUnityFSUncompressedXORMask)
     }
 
+    var unityFSUncompressedStatus: AoVRuntimeChecksumFingerprintStatus {
+        if unityFSUncompressedEvaluatedSamples < 8 {
+            return .insufficientSamples
+        }
+        if distinctUnityFSUncompressedXORMaskCount > 1 {
+            return .inconsistent
+        }
+        if unityFSUncompressedSkippedCount > 0 || sampleLimitHit {
+            return .partialConsistentSample
+        }
+        return .consistentSample
+    }
+
     var statusDescription: String {
         switch status {
         case .insufficientSamples:
