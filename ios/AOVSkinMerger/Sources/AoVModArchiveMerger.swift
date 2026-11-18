@@ -171,7 +171,7 @@ enum AoVModArchiveMerger {
         var pipelineEvents: [AoVModMergePipelineEvent] = [
             AoVModMergePipelineEvent(
                 stage: .preflight,
-                detail: "Đã kiểm tra \(archiveURLs.count) ZIP; tổng dung lượng đầu vào nằm trong giới hạn 500 MiB."
+                detail: "Đã kiểm tra \(archiveURLs.count) gói MOD; tổng dung lượng đầu vào nằm trong giới hạn 500 MiB."
             )
         ]
 
