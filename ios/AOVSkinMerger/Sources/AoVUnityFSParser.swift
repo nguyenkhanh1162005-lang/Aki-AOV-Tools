@@ -689,6 +689,125 @@ enum AoVUnityFSParser {
         }
     }
 
+    /// Extracts one directory node without expanding the entire UnityFS payload.
+    /// Only blocks intersecting the requested node are decompressed and retained.
+    /// This lowers peak memory for large CABs when the caller needs one
+    /// SerializedFile from a multi-node bundle.
+    static func extractNode(
+        _ data: Data,
+        path: String,
+        maximumExpandedBytes: UInt64 = 256 * 1024 * 1024
+    ) throws -> AoVUnityFSExtractedNode {
+        let info = try inspect(data)
+        guard maximumExpandedBytes > 0,
+              maximumExpandedBytes <= UInt64(maximumBundleBytes) else {
+            throw AoVUnityFSError.resourceLimit("giới hạn giải nén phải nằm trong khoảng 1 byte–512 MiB.")
+        }
+        guard let node = info.nodes.first(where: { $0.path == path }) else {
+            throw AoVUnityFSError.invalidDirectory("Không tìm thấy node \(path).")
+        }
+        guard info.nodes.filter({ $0.path == path }).count == 1 else {
+            throw AoVUnityFSError.invalidDirectory("Node \(path) bị trùng.")
+        }
+        guard node.size <= maximumExpandedBytes else {
+            throw AoVUnityFSError.resourceLimit(
+                "node \(path) có \(node.size) byte, vượt giới hạn \(maximumExpandedBytes) byte."
+            )
+        }
+        guard let startOffset = Int(exactly: info.blockDataOffset),
+              startOffset <= data.count else {
+            throw AoVUnityFSError.invalidBlockTable("offset dữ liệu block không biểu diễn được.")
+        }
+        let nodeEnd = node.offset.addingReportingOverflow(node.size)
+        guard !nodeEnd.overflow, nodeEnd.partialValue <= info.totalUncompressedBytes else {
+            throw AoVUnityFSError.invalidDirectory("node \(path) nằm ngoài vùng dữ liệu giải nén.")
+        }
+
+        var result = Data()
+        result.reserveCapacity(Int(node.size))
+        if node.size == 0 {
+            return AoVUnityFSExtractedNode(path: node.path, data: result, flags: node.flags)
+        }
+
+        var cursor = startOffset
+        var expandedBlockOffset: UInt64 = 0
+        for block in info.blocks {
+            let compressedCount = Int(block.compressedSize)
+            let expectedBlockSize = Int(block.uncompressedSize)
+            guard cursor >= 0, cursor <= data.count,
+                  compressedCount <= data.count - cursor else {
+                throw AoVUnityFSError.truncated("dữ liệu block \(block.index)")
+            }
+            let blockEnd = expandedBlockOffset.addingReportingOverflow(UInt64(expectedBlockSize))
+            guard !blockEnd.overflow, blockEnd.partialValue <= info.totalUncompressedBytes else {
+                throw AoVUnityFSError.invalidBlockTable("offset giải nén block bị tràn.")
+            }
+
+            if blockEnd.partialValue > node.offset && expandedBlockOffset < nodeEnd.partialValue {
+                let compressed = data.subdata(in: cursor..<(cursor + compressedCount))
+                let method = UInt32(block.flags & 0x3F)
+                let decoded: Data
+                switch method {
+                case 0:
+                    guard compressed.count == expectedBlockSize else {
+                        throw AoVUnityFSError.decompressionFailed(
+                            "block \(block.index) không nén có \(compressed.count) byte, cần \(expectedBlockSize)."
+                        )
+                    }
+                    decoded = compressed
+                case 1:
+                    decoded = try decompressLZMA(
+                        compressed,
+                        expectedSize: expectedBlockSize,
+                        maximumOutputSize: Int(maximumExpandedBytes),
+                        context: "block \(block.index)"
+                    )
+                case 2, 3:
+                    do {
+                        decoded = try AoVLZ4Block.decompress(
+                            compressed,
+                            expectedSize: expectedBlockSize,
+                            maximumSize: Int(maximumExpandedBytes)
+                        )
+                    } catch {
+                        throw AoVUnityFSError.decompressionFailed(
+                            "block \(block.index): \(error.localizedDescription)"
+                        )
+                    }
+                case 4:
+                    throw AoVUnityFSError.unsupportedBlockCompression(method)
+                default:
+                    throw AoVUnityFSError.invalidCompression(method)
+                }
+                guard decoded.count == expectedBlockSize else {
+                    throw AoVUnityFSError.decompressionFailed(
+                        "block \(block.index) giải nén ra \(decoded.count) byte, cần \(expectedBlockSize)."
+                    )
+                }
+
+                let intersectionStart = max(node.offset, expandedBlockOffset)
+                let intersectionEnd = min(nodeEnd.partialValue, blockEnd.partialValue)
+                let localStart = Int(intersectionStart - expandedBlockOffset)
+                let localEnd = Int(intersectionEnd - expandedBlockOffset)
+                guard localStart >= 0, localEnd >= localStart, localEnd <= decoded.count else {
+                    throw AoVUnityFSError.invalidDirectory("Khoảng node \(path) không khớp block \(block.index).")
+                }
+                result.append(decoded.subdata(in: localStart..<localEnd))
+            }
+
+            expandedBlockOffset = blockEnd.partialValue
+            cursor += compressedCount
+            if expandedBlockOffset >= nodeEnd.partialValue { break }
+        }
+
+        guard UInt64(result.count) == node.size else {
+            throw AoVUnityFSError.invalidDirectory(
+                "Node \(path) trích được \(result.count) byte, cần \(node.size)."
+            )
+        }
+        return AoVUnityFSExtractedNode(path: node.path, data: result, flags: node.flags)
+    }
+
     /// Extract UnityFS directory nodes for read-only inspection. This never rebuilds
     /// or modifies a bundle and enforces a caller-supplied expanded-size ceiling.
     static func extractNodes(
