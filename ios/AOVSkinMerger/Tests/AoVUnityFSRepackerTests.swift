@@ -92,6 +92,34 @@ final class AoVUnityFSRepackerTests: XCTestCase {
         )
     }
 
+    func testExtractsOneNodeWithoutReturningAllUnityFSNodes() throws {
+        let targetBytes = Data((0..<32_768).map { UInt8($0 % 251) })
+        let nodes = [
+            AoVUnityFSRepackNode(path: "CAB-unrelated", data: Data(repeating: 0xAA, count: 16_384)),
+            AoVUnityFSRepackNode(path: "CAB-target", data: targetBytes),
+            AoVUnityFSRepackNode(path: "CAB-tail", data: Data(repeating: 0xBB, count: 8_192))
+        ]
+        let report = try AoVUnityFSRepacker.repack(
+            nodes,
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2022.3.1f1",
+            blockInfoLayout: .arenaOfValor,
+            aovEncryption: true
+        )
+
+        let extracted = try AoVUnityFSParser.extractNode(
+            report.data,
+            path: "CAB-target",
+            maximumExpandedBytes: 64 * 1024
+        )
+        XCTAssertEqual(extracted.path, "CAB-target")
+        XCTAssertEqual(extracted.data, targetBytes)
+        XCTAssertThrowsError(
+            try AoVUnityFSParser.extractNode(report.data, path: "CAB-missing")
+        )
+    }
+
     func testRepackRoundTripsUnity2019AlignedFormatSixHeader() throws {
         let node = AoVUnityFSRepackNode(path: "CAB-catalog", data: Data(repeating: 0xA5, count: 33))
         let report = try AoVUnityFSRepacker.repack(
