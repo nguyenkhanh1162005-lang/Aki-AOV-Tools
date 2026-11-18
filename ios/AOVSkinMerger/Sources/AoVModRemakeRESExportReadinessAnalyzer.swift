@@ -43,6 +43,8 @@ struct AoVModRemakeRESExportReadinessReport: Sendable {
 
 enum AoVModRemakeRESExportReadinessError: LocalizedError {
     case fingerprintBelongsToDifferentRES(expected: String, actual: String)
+    case missingRESFingerprintIdentity
+    case fingerprintContentMismatch(expected: String, actual: String)
     case noMergedAssetBundles
     case duplicateMergedRuntimePath(String)
     case incompatibleRuntimeCatalogs(String)
@@ -51,6 +53,10 @@ enum AoVModRemakeRESExportReadinessError: LocalizedError {
         switch self {
         case .fingerprintBelongsToDifferentRES(let expected, let actual):
             return "Checksum fingerprint thuộc RES \(actual), không phải RES đang ghép \(expected)."
+        case .missingRESFingerprintIdentity:
+            return "Checksum fingerprint cũ không có SHA-256 của file RES; cần khảo sát lại đúng file nền."
+        case .fingerprintContentMismatch(let expected, let actual):
+            return "RES đã thay đổi sau khi khảo sát checksum (SHA-256 cũ \(expected), hiện tại \(actual)); cần chạy lại khảo sát."
         case .noMergedAssetBundles:
             return "Chưa có AssetBundle candidate đã round-trip để lập metadata RES."
         case .duplicateMergedRuntimePath(let path):
@@ -89,6 +95,22 @@ private struct AoVModRemakePackerStaticMetadata: Hashable {
 }
 
 enum AoVModRemakeRESExportReadinessAnalyzer {
+    static func validateFingerprintIdentity(
+        _ fingerprint: AoVRuntimeChecksumFingerprintReport,
+        baseRESURL: URL
+    ) throws {
+        guard let expected = fingerprint.baseRESFingerprint, !expected.isEmpty else {
+            throw AoVModRemakeRESExportReadinessError.missingRESFingerprintIdentity
+        }
+        let actual = try AoVRuntimeChecksumFingerprintAnalyzer.sha256File(at: baseRESURL)
+        guard expected.caseInsensitiveCompare(actual) == .orderedSame else {
+            throw AoVModRemakeRESExportReadinessError.fingerprintContentMismatch(
+                expected: expected,
+                actual: actual
+            )
+        }
+    }
+
     static func analyze(
         baseRESURL: URL,
         legacyMODURLs: [URL],
@@ -101,6 +123,7 @@ enum AoVModRemakeRESExportReadinessAnalyzer {
                 actual: checksumFingerprint.baseRESName
             )
         }
+        try validateFingerprintIdentity(checksumFingerprint, baseRESURL: baseRESURL)
         let catalogInputs: AoVModRemakeCatalogInputs
         do {
             catalogInputs = try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
