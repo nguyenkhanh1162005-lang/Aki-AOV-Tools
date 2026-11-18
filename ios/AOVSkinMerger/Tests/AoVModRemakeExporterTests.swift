@@ -131,7 +131,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-Nested-RES-Exporter-Test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root, includingPropertiesForKeys: nil) }
+        defer { try? FileManager.default.removeItem(at: root) }
 
         let innerURL = root.appendingPathComponent("Resources.zip")
         let outerURL = root.appendingPathComponent("clean-res-wrapper.zip")
@@ -271,7 +271,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-RES-Archive-Coordinator-Test-\\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root, includingPropertiesForKeys: nil) }
+        defer { try? FileManager.default.removeItem(at: root) }
 
         let baseURL = root.appendingPathComponent("clean-res.zip")
         let legacyURL = root.appendingPathComponent("legacy-source.zip")
