@@ -1704,6 +1704,7 @@ struct ContentView: View {
         isAnalyzingRemake = true
         remakeReport = nil
         remakeExportReport = nil
+        cabBatchMergeReport = nil
         let legacyURLs = remakeMODURLs
         Task {
             do {
