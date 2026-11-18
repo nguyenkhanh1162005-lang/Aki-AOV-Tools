@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: aki-aov-ios-tests-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: aki-aov-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
