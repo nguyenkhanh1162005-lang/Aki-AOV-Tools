@@ -46,12 +46,21 @@ targets:
       properties:
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.aki.aovskinmerger.modarchive
+            UTTypeDescription: AoV MOD Archive
+            UTTypeConformsTo:
+              - public.zip-archive
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - 3105
         CFBundleDocumentTypes:
-          - CFBundleTypeName: ZIP Archive
+          - CFBundleTypeName: ZIP / AoV MOD Archive
             CFBundleTypeRole: Editor
             LSHandlerRank: Alternate
             LSItemContentTypes:
               - public.zip-archive
+              - com.aki.aovskinmerger.modarchive
   AOVSkinMergerTests:
     type: bundle.unit-test
     platform: iOS
