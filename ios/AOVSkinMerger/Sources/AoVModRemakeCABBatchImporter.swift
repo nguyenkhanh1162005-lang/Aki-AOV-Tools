@@ -36,12 +36,13 @@ private struct AoVRemakeCABNodePayload {
 
 private struct AoVRemakeCABPreparedInput {
     let finding: AoVRemakeCABCandidateFinding
-    let serializedFile: Data
     let record: AoVSerializedAssetBundleRecord
 }
 
 enum AoVModRemakeCABBatchImporter {
     private static let maximumArchiveBytes: UInt64 = 512 * 1024 * 1024
+    private static let maximumGroupWorkingBytes: UInt64 = 768 * 1024 * 1024
+    private static let maximumExternalAuditBytes: UInt64 = 128 * 1024 * 1024
     private static let maximumInputCount = 10
 
     /// Finds class-142 matches from the selected archives and runs the existing
@@ -123,16 +124,7 @@ enum AoVModRemakeCABBatchImporter {
             )
         }
 
-        var nodeCache: [String: AoVRemakeCABNodePayload] = [:]
-        var bundleCache: [String: Data] = [:]
-
-        func cacheKey(_ archiveName: String, _ resourcePath: String, _ nodePath: String) -> String {
-            "\(archiveName)\u{1F}\(resourcePath)\u{1F}\(nodePath)"
-        }
-
         func readBundle(_ archiveName: String, resourcePath: String) throws -> Data {
-            let key = "\(archiveName)\u{1F}\(resourcePath)"
-            if let cached = bundleCache[key] { return cached }
             guard let archive = archiveByName[archiveName] else {
                 throw AoVModRemakeExporterError.invalidBaseArchive(archiveName)
             }
@@ -157,8 +149,22 @@ enum AoVModRemakeCABBatchImporter {
                     "Kích thước AssetBundle \(resourcePath) không khớp ZIP entry."
                 )
             }
-            bundleCache[key] = data
             return data
+        }
+
+        func decodeNode(_ bundle: Data, nodePath: String) throws -> AoVRemakeCABNodePayload {
+            let node = try AoVUnityFSParser.extractNode(
+                bundle,
+                path: nodePath,
+                maximumExpandedBytes: maximumArchiveBytes
+            )
+            let summary = try AoVSerializedFileParser.inspect(node.data)
+            guard summary.fileSize == UInt64(node.data.count) else {
+                throw AoVModRemakeExporterError.integrityFailure(
+                    "SerializedFile node \(nodePath) có fileSize không khớp."
+                )
+            }
+            return AoVRemakeCABNodePayload(data: node.data, summary: summary)
         }
 
         func readNode(
@@ -166,31 +172,8 @@ enum AoVModRemakeCABBatchImporter {
             resourcePath: String,
             nodePath: String
         ) throws -> AoVRemakeCABNodePayload {
-            let key = cacheKey(archiveName, resourcePath, nodePath)
-            if let cached = nodeCache[key] { return cached }
             let bundle = try readBundle(archiveName, resourcePath: resourcePath)
-            let info = try AoVUnityFSParser.inspect(bundle)
-            guard info.totalUncompressedBytes <= maximumArchiveBytes else {
-                throw AoVUnityFSAssetBundleMergeExecutorError.expandedArchiveTooLarge
-            }
-            let nodes = try AoVUnityFSParser.extractNodes(
-                bundle,
-                maximumExpandedBytes: maximumArchiveBytes,
-                maximumNodeCount: max(info.nodes.count, 1)
-            )
-            let matches = nodes.filter { $0.path == nodePath }
-            guard matches.count == 1, let node = matches.first else {
-                throw AoVUnityFSAssetBundleMergeExecutorError.nodeNotFound(nodePath)
-            }
-            let summary = try AoVSerializedFileParser.inspect(node.data)
-            guard summary.fileSize == UInt64(node.data.count) else {
-                throw AoVModRemakeExporterError.integrityFailure(
-                    "SerializedFile node \(nodePath) có fileSize không khớp."
-                )
-            }
-            let payload = AoVRemakeCABNodePayload(data: node.data, summary: summary)
-            nodeCache[key] = payload
-            return payload
+            return try decodeNode(bundle, nodePath: nodePath)
         }
 
         func auditedExternalTargets(
@@ -246,6 +229,14 @@ enum AoVModRemakeCABBatchImporter {
                     resourcePath: match.resourcePath,
                     nodePath: match.nodePath
                 )
+                let nextAuditBytes = result.values.reduce(UInt64(0)) { partial, data in
+                    let next = partial.addingReportingOverflow(UInt64(data.count))
+                    return next.overflow ? UInt64.max : next.partialValue
+                }.addingReportingOverflow(UInt64(target.data.count))
+                guard !nextAuditBytes.overflow,
+                      nextAuditBytes.partialValue <= maximumExternalAuditBytes else {
+                    continue
+                }
                 result[targetKey] = target.data
             }
             return result
@@ -304,7 +295,6 @@ enum AoVModRemakeCABBatchImporter {
                 preparedByGroup[key, default: []].append(
                     AoVRemakeCABPreparedInput(
                         finding: finding,
-                        serializedFile: sourceNode.data,
                         record: sourceRecord
                     )
                 )
@@ -368,13 +358,47 @@ enum AoVModRemakeCABBatchImporter {
                     baseScanURL.lastPathComponent,
                     resourcePath: key.resourcePath
                 )
-                let destinationNode = try readNode(
-                    archiveName: baseScanURL.lastPathComponent,
-                    resourcePath: key.resourcePath,
-                    nodePath: key.nodePath
-                )
+                let destinationNode = try decodeNode(destinationBundle, nodePath: key.nodePath)
+                var groupWorkingBytes = UInt64(destinationBundle.count)
+                let destinationNodeBytes = UInt64(destinationNode.data.count)
+                let nodeTotal = groupWorkingBytes.addingReportingOverflow(destinationNodeBytes)
+                guard !nodeTotal.overflow,
+                      nodeTotal.partialValue <= maximumGroupWorkingBytes else {
+                    throw AoVModRemakeExporterError.archiveExpandedTooLarge(
+                        "CAB group \(key.resourcePath) vượt giới hạn bộ nhớ tạm 768 MiB."
+                    )
+                }
+                groupWorkingBytes = nodeTotal.partialValue
+
                 var needsMutation = false
+                var legacyInputs: [AoVAssetBundleLegacyObjectImportInput] = []
+                legacyInputs.reserveCapacity(prepared.count)
                 for item in prepared {
+                    let sourceNode = try readNode(
+                        archiveName: item.finding.sourceArchive,
+                        resourcePath: item.finding.sourceResourcePath,
+                        nodePath: item.finding.sourceNodePath
+                    )
+                    let sourceRecords = sourceNode.summary.assetBundleRecords.filter {
+                        $0.pathID == item.finding.sourceObjectPathID
+                    }
+                    guard sourceRecords.count == 1,
+                          let sourceRecord = sourceRecords.first,
+                          sourceRecord == item.record else {
+                        throw AoVModRemakeExporterError.integrityFailure(
+                            "CAB nguồn \(item.finding.bundleName) thay đổi giữa hai lượt đọc."
+                        )
+                    }
+                    let sourceSize = UInt64(sourceNode.data.count)
+                    let nextGroupBytes = groupWorkingBytes.addingReportingOverflow(sourceSize)
+                    guard !nextGroupBytes.overflow,
+                          nextGroupBytes.partialValue <= maximumGroupWorkingBytes else {
+                        throw AoVModRemakeExporterError.archiveExpandedTooLarge(
+                            "Các SerializedFile nguồn cho \(key.resourcePath) vượt giới hạn bộ nhớ tạm 768 MiB."
+                        )
+                    }
+                    groupWorkingBytes = nextGroupBytes.partialValue
+
                     guard let destinationPathID = item.finding.destinationObjectPathID,
                           let currentRecord = destinationNode.summary.assetBundleRecords.first(where: {
                               $0.pathID == destinationPathID
@@ -388,9 +412,9 @@ enum AoVModRemakeCABBatchImporter {
                     let replacements = try AoVUnityFSAssetBundleMergeExecutor.changedContainerKeys(
                         legacyRecord: item.record,
                         currentRecord: currentRecord,
-                        sourceData: item.serializedFile,
+                        sourceData: sourceNode.data,
                         destinationData: destinationNode.data,
-                        sourceSummary: try AoVSerializedFileParser.inspect(item.serializedFile),
+                        sourceSummary: sourceNode.summary,
                         destinationSummary: destinationNode.summary
                     )
                     let newDependencies = Set(item.record.dependencies)
@@ -398,21 +422,20 @@ enum AoVModRemakeCABBatchImporter {
                     if !additions.isEmpty || !replacements.isEmpty || !newDependencies.isEmpty {
                         needsMutation = true
                     }
+                    legacyInputs.append(
+                        AoVAssetBundleLegacyObjectImportInput(
+                            source: item.finding.sourceArchive,
+                            serializedFile: sourceNode.data,
+                            legacyObjectPathID: item.finding.sourceObjectPathID,
+                            destinationObjectPathID: destinationPathID
+                        )
+                    )
                 }
 
                 guard needsMutation else {
                     unchangedCandidateCount += prepared.count
                     completedCandidateIDs.formUnion(prepared.map { $0.finding.id })
                     continue
-                }
-
-                let legacyInputs = prepared.map { item in
-                    AoVAssetBundleLegacyObjectImportInput(
-                        source: item.finding.sourceArchive,
-                        serializedFile: item.serializedFile,
-                        legacyObjectPathID: item.finding.sourceObjectPathID,
-                        destinationObjectPathID: item.finding.destinationObjectPathID ?? 0
-                    )
                 }
                 let externalTargets = try auditedExternalTargets(
                     for: destinationNode.summary.externalReferences
