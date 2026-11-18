@@ -814,11 +814,18 @@ enum AoVModArchiveMerger {
         try readEntry(reference.archive, reference.entry, maxBytes: maxBytes)
     }
 
-    /// Preserve each source ZIP member's compression mode. Some game loaders
-    /// are stricter than desktop ZIP tools, so the merger must not silently
-    /// switch stored entries to DEFLATE or vice versa.
+    /// Keep opaque game resources uncompressed. These binary payloads are
+    /// already packed by the game toolchain and DEFLATE can add overhead or
+    /// alter how strict loaders inspect the entry. For ordinary files, retain
+    /// the source archive's compressed-versus-stored choice.
     private static func storageMethod(for sourceEntry: Entry) -> CompressionMethod {
-        sourceEntry.isCompressed ? .deflate : .none
+        let ext = URL(fileURLWithPath: sourceEntry.path).pathExtension.lowercased()
+        let opaque: Set<String> = [
+            "assetbundle", "bytes", "bnk", "wem", "zip", "png", "jpg",
+            "jpeg", "webp", "mp3", "ogg", "mp4", "zst", "zstd", "lz4", "lzma"
+        ]
+        if opaque.contains(ext) { return .none }
+        return sourceEntry.isCompressed ? .deflate : .none
     }
 
     private static func copyEntry(
