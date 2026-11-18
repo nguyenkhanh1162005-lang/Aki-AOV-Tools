@@ -5,12 +5,19 @@ enum AoVModRemakeRESProposalStatus: String, Sendable {
     case blocked
 }
 
+enum AoVModRemakeChecksumBasis: String, Sendable {
+    case rawPayloadCRC32
+    case unityFSUncompressedCRC32
+}
+
 struct AoVModRemakeCABExportProposal: Sendable {
     let resourcePath: String
     let runtimePath: String
     let importedObjectCount: Int
     let sourceArchives: [String]
     let rawPayloadCRC32: UInt32?
+    let unityFSUncompressedCRC32: UInt32?
+    let packerChecksumBasis: AoVModRemakeChecksumBasis?
     let proposedPackerEntry: AoVRuntimeResourcePackInfo?
     let proposedVerificationZIPChecksum: Int64?
     let status: AoVModRemakeRESProposalStatus
@@ -175,10 +182,23 @@ enum AoVModRemakeRESExportReadinessAnalyzer {
             }
         }
 
-        let packerFingerprintValid =
-            checksumFingerprint.packerAssetBundles.status == .consistentSample &&
-            checksumFingerprint.packerAssetBundles.constantXORMask != nil &&
-            checksumFingerprint.packerAssetBundles.evaluatedSamples >= 8
+        let packerChecksumBasis: AoVModRemakeChecksumBasis?
+        let packerXORMask: UInt32?
+        if checksumFingerprint.packerAssetBundles.unityFSUncompressedStatus == .consistentSample,
+           checksumFingerprint.packerAssetBundles.unityFSUncompressedEvaluatedSamples >= 8,
+           let mask = checksumFingerprint.packerAssetBundles.constantUnityFSUncompressedXORMask {
+            packerChecksumBasis = .unityFSUncompressedCRC32
+            packerXORMask = mask
+        } else if checksumFingerprint.packerAssetBundles.status == .consistentSample,
+                  checksumFingerprint.packerAssetBundles.evaluatedSamples >= 8,
+                  let mask = checksumFingerprint.packerAssetBundles.constantXORMask {
+            packerChecksumBasis = .rawPayloadCRC32
+            packerXORMask = mask
+        } else {
+            packerChecksumBasis = nil
+            packerXORMask = nil
+        }
+        let packerFingerprintValid = packerChecksumBasis != nil && packerXORMask != nil
         let verificationFingerprintValid =
             checksumFingerprint.zipVerification.status == .consistentSample &&
             checksumFingerprint.zipVerification.constantXORMask != nil &&
@@ -228,11 +248,27 @@ enum AoVModRemakeRESExportReadinessAnalyzer {
             }
 
             let rawCRC32 = AoVRuntimeChecksumFingerprintAnalyzer.crc32(result.resourcePayload.data)
+            let unityFSUncompressedCRC32 = try? AoVRuntimeChecksumFingerprintAnalyzer.unityFSUncompressedCRC32(
+                result.resourcePayload.data
+            )
+            if packerChecksumBasis == .unityFSUncompressedCRC32 && unityFSUncompressedCRC32 == nil {
+                reasons.append("CAB candidate không đọc được các block UnityFS để tính CRC32 trên nội dung giải nén.")
+            }
+            let packerInputCRC32: UInt32?
+            switch packerChecksumBasis {
+            case .rawPayloadCRC32:
+                packerInputCRC32 = rawCRC32
+            case .unityFSUncompressedCRC32:
+                packerInputCRC32 = unityFSUncompressedCRC32
+            case nil:
+                packerInputCRC32 = nil
+            }
             let proposedPacker: AoVRuntimeResourcePackInfo?
             if reasons.isEmpty,
                let metadata = staticMetadata.first,
-               let mask = checksumFingerprint.packerAssetBundles.constantXORMask {
-                proposedPacker = metadata.applying(checksum: rawCRC32 ^ mask)
+               let mask = packerXORMask,
+               let checksum = packerInputCRC32 {
+                proposedPacker = metadata.applying(checksum: checksum ^ mask)
             } else {
                 proposedPacker = nil
             }
@@ -256,6 +292,8 @@ enum AoVModRemakeRESExportReadinessAnalyzer {
                     importedObjectCount: result.importedObjectCount,
                     sourceArchives: sourceArchives,
                     rawPayloadCRC32: rawCRC32,
+                    unityFSUncompressedCRC32: unityFSUncompressedCRC32,
+                    packerChecksumBasis: packerChecksumBasis,
                     proposedPackerEntry: proposedPacker,
                     proposedVerificationZIPChecksum: proposedVerification,
                     status: status,
@@ -267,9 +305,9 @@ enum AoVModRemakeRESExportReadinessAnalyzer {
         return AoVModRemakeRESExportReadinessReport(
             baseRESName: baseRESName,
             proposals: proposals,
-            packerXORMask: checksumFingerprint.packerAssetBundles.constantXORMask,
+            packerXORMask: packerXORMask,
             verificationZIPXORMask: checksumFingerprint.zipVerification.constantXORMask,
-            warning: "Giá trị Packer và Verification bên dưới chỉ là checksum candidate được suy ra từ mask quan sát trên RES nền. Chưa được xác nhận bằng thuật toán gốc hoặc kiểm thử trong game; tuyệt đối chưa dùng để ghi RES cuối."
+            warning: "Packer ưu tiên CRC32 trên block UnityFS đã giải nén nếu mask đủ mẫu nhất quán; nếu không mới dùng CRC32 byte thô. Đây chỉ là candidate quan sát, chưa xác minh mask riêng của AOV. Verification ZIP cũng chưa xác minh trong game; tuyệt đối chưa dùng để ghi RES cuối."
         )
     }
 
@@ -285,6 +323,8 @@ enum AoVModRemakeRESExportReadinessAnalyzer {
             importedObjectCount: result.importedObjectCount,
             sourceArchives: sourceArchives,
             rawPayloadCRC32: nil,
+            unityFSUncompressedCRC32: nil,
+            packerChecksumBasis: nil,
             proposedPackerEntry: nil,
             proposedVerificationZIPChecksum: nil,
             status: .blocked,
