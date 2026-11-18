@@ -348,8 +348,16 @@ enum AoVUnityFSParser {
             throw AoVUnityFSError.unsupportedEncryption(flags)
         }
         let usesAoVEncryption: Bool
-        if let usesLegacyFlags {
-            usesAoVEncryption = flags & (usesLegacyFlags ? 0x200 : 0x400) != 0
+        if usesLegacyFlags == true {
+            // On pre-gate Unity versions 0x200 is the legacy UnityCN
+            // encryption flag, not the newer AoV header/block-info scheme.
+            // Its payload format is not implemented here, so fail closed.
+            guard flags & 0x200 == 0 else {
+                throw AoVUnityFSError.unsupportedEncryption(flags)
+            }
+            usesAoVEncryption = false
+        } else if usesLegacyFlags == false {
+            usesAoVEncryption = flags & 0x400 != 0
         } else if flags & 0x600 != 0 {
             throw AoVUnityFSError.ambiguousLegacyFlag
         } else {
@@ -514,6 +522,11 @@ enum AoVUnityFSParser {
             case .arenaOfValor:
                 blockFlags = try reader.readUInt16BE("AOV block \(index) flags")
                 reserved = try reader.readUInt16BE("AOV block \(index) reserved field")
+                guard reserved == 0 else {
+                    throw AoVUnityFSError.invalidBlockTable(
+                        "AOV block \(index) có reserved field khác 0."
+                    )
+                }
                 compressed = try reader.readUInt32BE("AOV block \(index) compressed size")
                 uncompressed = try reader.readUInt32BE("AOV block \(index) uncompressed size")
             }
@@ -800,7 +813,10 @@ enum AoVUnityFSParser {
                 "Không xác định được Unity version để chọn cờ mã hóa AOV."
             )
         }
-        return engine.usesLegacyEncryptionFlag ? 0x200 : 0x400
+        guard !engine.usesLegacyEncryptionFlag else {
+            throw AoVUnityFSError.unsupportedEncryption(0x200)
+        }
+        return 0x400
     }
 
     private static func decryptAoVHeader(_ encrypted: Data) throws -> Data {
