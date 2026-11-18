@@ -322,9 +322,9 @@ enum AoVModRemakeExporter {
         let zipIFSPaths = Set(verifiedFinalZIPChecksumValues.keys)
         let checksumTypeCollisions = databinIFSPaths.intersection(zipIFSPaths)
         guard checksumTypeCollisions.isEmpty else {
-            throw AoVModRemakeExporterError.catalogMergeFailed(
-                "Một IFS path có cả Databin và ZIP checksum: \\(checksumTypeCollisions.sorted().prefix(4).joined(separator: ", "))."
-            )
+            let collisionSamples = Array(checksumTypeCollisions.sorted().prefix(4))
+            let collisionMessage = "Một IFS path có cả Databin và ZIP checksum: \(collisionSamples)."
+            throw AoVModRemakeExporterError.catalogMergeFailed(collisionMessage)
         }
         for path in payloadIFSPaths where
             !databinIFSPaths.contains(path) && !zipIFSPaths.contains(path) {
@@ -590,15 +590,11 @@ enum AoVModRemakeExporter {
     }
 
     private static func storageMethod(for entry: Entry) -> CompressionMethod {
-        switch entry.compressionMethod {
-        case .none:
-            return .none
-        default:
-            // ZIPFoundation's writer supports the two storage methods used by
-            // this exporter. Preserve stored entries and use DEFLATE for
-            // compressed source entries instead of copying an unknown codec.
-            return .deflate
-        }
+        // ZIPFoundation 0.9.x exposes the extracted entry path and sizes, but
+        // not the original ZIP compression method. Re-encode by the same
+        // safe path policy used for imported resources instead of guessing
+        // from compressed/uncompressed sizes.
+        storageMethod(forNewPath: entry.path)
     }
 
     private static func storageMethod(forNewPath path: String) -> CompressionMethod {
