@@ -214,6 +214,69 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
         )
     }
 
+    func testFingerprintIdentityRejectsDifferentRESBytesWithSameFilename() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-RES-Fingerprint-Identity-Test-\\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let firstDirectory = root.appendingPathComponent("first", isDirectory: true)
+        let secondDirectory = root.appendingPathComponent("second", isDirectory: true)
+        try FileManager.default.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+        let firstRES = firstDirectory.appendingPathComponent("base-res.zip")
+        let secondRES = secondDirectory.appendingPathComponent("base-res.zip")
+        try Data("first-res-content".utf8).write(to: firstRES)
+        try Data("different-res-content".utf8).write(to: secondRES)
+
+        let fingerprint = makeReport(
+            packer: makeFinding(title: "Packer", mask: 1),
+            zip: makeFinding(title: "ZIP", mask: 2),
+            fingerprint: try AoVRuntimeChecksumFingerprintAnalyzer.sha256File(at: firstRES)
+        )
+
+        XCTAssertNoThrow(
+            try AoVModRemakeRESExportReadinessAnalyzer.validateFingerprintIdentity(
+                fingerprint,
+                baseRESURL: firstRES
+            )
+        )
+        XCTAssertThrowsError(
+            try AoVModRemakeRESExportReadinessAnalyzer.validateFingerprintIdentity(
+                fingerprint,
+                baseRESURL: secondRES
+            )
+        ) { error in
+            guard case AoVModRemakeRESExportReadinessError.fingerprintContentMismatch = error else {
+                return XCTFail("Expected a content fingerprint mismatch, got \\(error)")
+            }
+        }
+    }
+
+    func testFingerprintIdentityIsRequiredBeforeRESReadinessAnalysis() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-RES-Fingerprint-Missing-Test-\\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let baseRES = root.appendingPathComponent("base-res.zip")
+        try Data("base-res".utf8).write(to: baseRES)
+
+        let fingerprint = makeReport(
+            packer: makeFinding(title: "Packer", mask: 1),
+            zip: makeFinding(title: "ZIP", mask: 2)
+        )
+        XCTAssertThrowsError(
+            try AoVModRemakeRESExportReadinessAnalyzer.validateFingerprintIdentity(
+                fingerprint,
+                baseRESURL: baseRES
+            )
+        ) { error in
+            guard case AoVModRemakeRESExportReadinessError.missingRESFingerprintIdentity = error else {
+                return XCTFail("Expected a missing fingerprint identity, got \\(error)")
+            }
+        }
+    }
+
     private func makeFinding(title: String, mask: UInt32) -> AoVRuntimeChecksumFingerprintFinding {
         let samples = (0..<8).map { index in
             let crc = UInt32(index * 1_000 + 19)
@@ -233,10 +296,12 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
     private func makeReport(
         packer: AoVRuntimeChecksumFingerprintFinding,
         zip: AoVRuntimeChecksumFingerprintFinding,
-        name: String = "base-res.zip"
+        name: String = "base-res.zip",
+        fingerprint: String? = nil
     ) -> AoVRuntimeChecksumFingerprintReport {
         AoVRuntimeChecksumFingerprintReport(
             baseRESName: name,
+            baseRESFingerprint: fingerprint,
             packerAssetBundles: packer,
             zipVerification: zip,
             databinVerification: makeFinding(title: "Databin", mask: 3),
