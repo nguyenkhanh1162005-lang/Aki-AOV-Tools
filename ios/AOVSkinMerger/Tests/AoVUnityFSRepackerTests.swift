@@ -61,6 +61,37 @@ final class AoVUnityFSRepackerTests: XCTestCase {
         XCTAssertEqual(extracted.map(\.data), nodes.map(\.data))
     }
 
+    func testStreamsUncompressedUnityFSBlocksWithoutBuildingWholeExpandedBuffer() throws {
+        let nodes = [
+            AoVUnityFSRepackNode(path: "CAB-main", data: Data("serialized-main-content".utf8), flags: 4),
+            AoVUnityFSRepackNode(path: "assets/effect.bytes", data: Data((0..<4096).map { UInt8($0 % 251) }), flags: 0)
+        ]
+        let report = try AoVUnityFSRepacker.repack(
+            nodes,
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2022.3.1f1",
+            blockInfoLayout: .arenaOfValor,
+            aovEncryption: true
+        )
+
+        var streamed = Data()
+        try AoVUnityFSParser.forEachUncompressedBlock(
+            report.data,
+            maximumExpandedBytes: 1024 * 1024
+        ) { block in
+            streamed.append(block)
+        }
+
+        var expected = Data()
+        nodes.forEach { expected.append($0.data) }
+        XCTAssertEqual(streamed, expected)
+        XCTAssertEqual(
+            try AoVRuntimeChecksumFingerprintAnalyzer.unityFSUncompressedCRC32(report.data),
+            AoVRuntimeChecksumFingerprintAnalyzer.crc32(expected)
+        )
+    }
+
     func testRepackRoundTripsUnity2019AlignedFormatSixHeader() throws {
         let node = AoVUnityFSRepackNode(path: "CAB-catalog", data: Data(repeating: 0xA5, count: 33))
         let report = try AoVUnityFSRepacker.repack(
