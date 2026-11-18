@@ -77,7 +77,8 @@ enum AoVModRemakeCABBatchImporter {
         // before any CAB import is attempted.
         _ = try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
             baseRESURL: baseRESURL,
-            legacyMODURLs: legacyMODURLs
+            legacyMODURLs: legacyMODURLs,
+            allowLegacyBuildMismatch: true
         )
 
         let tempRoot = FileManager.default.temporaryDirectory
