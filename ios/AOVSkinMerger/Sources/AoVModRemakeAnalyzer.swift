@@ -582,14 +582,14 @@ enum AoVModRemakeAnalyzer {
         current: [AoVRemakeCABRecordSnapshot],
         legacy: [AoVRemakeCABRecordSnapshot]
     ) -> [AoVRemakeCABCandidateFinding] {
-        let currentByName = Dictionary(grouping: current, by: \.bundleName)
+        let currentByName = Dictionary(grouping: current.filter { !$0.bundleName.isEmpty }, by: \.bundleName)
         return legacy.sorted {
             if $0.sourceArchive != $1.sourceArchive { return $0.sourceArchive < $1.sourceArchive }
             if $0.resourcePath != $1.resourcePath { return $0.resourcePath < $1.resourcePath }
             if $0.nodePath != $1.nodePath { return $0.nodePath < $1.nodePath }
             return $0.record.pathID < $1.record.pathID
         }.map { source in
-            let matches = currentByName[source.bundleName] ?? []
+            let matches = source.bundleName.isEmpty ? [] : (currentByName[source.bundleName] ?? [])
             guard matches.count == 1, let destination = matches.first else {
                 let status: AoVRemakeCABMergeStatus = matches.isEmpty
                     ? .missingDestination : .ambiguousDestination
@@ -611,9 +611,11 @@ enum AoVModRemakeAnalyzer {
                     changedAssetPointerCount: 0,
                     duplicateContainerKeyCount: duplicateKeyCount(source.record.containerEntries.map(\.key)),
                     dependenciesMissingFromDestination: [],
-                    reason: matches.isEmpty
-                        ? "RES mới chưa có CAB class-142 cùng bundle identity."
-                        : "RES mới có nhiều CAB class-142 trùng bundle identity; không tự chọn."
+                    reason: source.bundleName.isEmpty
+                        ? "CAB nguồn không có bundle identity; không thể ghép với RES."
+                        : (matches.isEmpty
+                            ? "RES mới chưa có CAB class-142 cùng bundle identity."
+                            : "RES mới có nhiều CAB class-142 trùng bundle identity; không tự chọn.")
                 )
             }
 
