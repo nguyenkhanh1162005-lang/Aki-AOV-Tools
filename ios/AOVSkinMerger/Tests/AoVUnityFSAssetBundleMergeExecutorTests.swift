@@ -183,7 +183,7 @@ final class AoVUnityFSAssetBundleMergeExecutorTests: XCTestCase {
 
     private func makeSerializedFile(payload: Data, nodes: [AoVUnityTypeTreeNode]) -> Data {
         var metadata = Data()
-        metadata.append(Data("2022.3.5f1\\0".utf8))
+        metadata.append(Data("2022.3.5f1\0".utf8))
         appendInt32(13, to: &metadata)
         metadata.append(1)
         appendInt32(1, to: &metadata)
@@ -302,7 +302,7 @@ final class AoVUnityFSAssetBundleMergeExecutorTests: XCTestCase {
         dataSection.append(bundlePayload)
 
         var metadata = Data()
-        metadata.append(Data("2022.3.5f1\\0".utf8))
+        metadata.append(Data("2022.3.5f1\0".utf8))
         appendInt32(13, to: &metadata)
         metadata.append(1)
         appendInt32(2, to: &metadata)
