@@ -1172,9 +1172,9 @@ struct ContentView: View {
                 report.unityFSTooLargeCount > 0 ||
                 !report.unityFSInspectionFailures.isEmpty {
                 Divider().overlay(.white.opacity(0.12))
-                Label("UnityFS AssetBundle đã đọc metadata", systemImage: "shippingbox.fill")
+                Label("UnityFS / CAB đã quét metadata", systemImage: "shippingbox.fill")
                     .font(.subheadline.weight(.semibold))
-                metric("UnityFS đọc được", "\(report.unityFSBundles.count)")
+                metric("UnityFS / CAB nhận diện", "\(report.unityFSBundles.count)")
                 metric("AssetBundle không phải UnityFS", "\(report.unityFSUnrecognizedCount)")
                 metric("Quá giới hạn kiểm tra", "\(report.unityFSTooLargeCount)")
                 ForEach(report.unityFSBundles.prefix(40)) { bundle in
@@ -1195,7 +1195,7 @@ struct ContentView: View {
                                 .textSelection(.enabled)
                         }
                         if let status = bundle.catalogExtractionStatus {
-                            Text("Catalog: \(status)")
+                            Text("Node audit: \(status)")
                                 .font(.caption2)
                                 .foregroundColor(status.hasPrefix("Đã trích xuất") ? .green : .orange)
                                 .textSelection(.enabled)
