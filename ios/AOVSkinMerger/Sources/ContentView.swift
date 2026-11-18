@@ -541,6 +541,8 @@ struct ContentView: View {
             Label("Khảo sát checksum / Verification", systemImage: "number")
                 .font(.headline)
             metric("RES nền", report.baseRESName)
+            checksumFindingView(report.packerAssetBundles)
+            Divider().overlay(.white.opacity(0.08))
             checksumFindingView(report.zipVerification)
             Divider().overlay(.white.opacity(0.08))
             checksumFindingView(report.databinVerification)
