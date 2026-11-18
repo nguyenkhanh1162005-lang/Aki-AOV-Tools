@@ -115,6 +115,70 @@ final class AoVModRemakeExporterTests: XCTestCase {
         XCTAssertTrue(report.requiresExternalValidation)
     }
 
+    func testLoadsBaseAndLegacyRuntimeCatalogsSeparatelyForPreflight() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Runtime-Catalog-Inputs-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("base-res.zip")
+        let legacyURL = root.appendingPathComponent("legacy-mod.zip")
+        let basePacker = makePackerCatalog()
+        let baseVerification = makeVerificationCatalog()
+        let legacyPath = "assetbundle/legacy-actor.assetbundle"
+        let legacyPackerRow = AoVRuntimeResourcePackInfo(
+            pathInIFS: legacyPath,
+            pkgType: 1,
+            crcXor: 98765,
+            tag: "LegacyHero",
+            flags: 7,
+            resourceInfos: [AoVRuntimeResourceItem(hashCode: 731, extensionName: "assetbundle")]
+        )
+        let legacyPacker = AoVRuntimeResourcePackerCatalog(
+            name: basePacker.name,
+            version: basePacker.version,
+            svnRevision: basePacker.svnRevision,
+            setName: basePacker.setName,
+            allResourcePackInfo: basePacker.allResourcePackInfo + [legacyPackerRow],
+            allParentIndexToChild: basePacker.allParentIndexToChild,
+            trailingData: basePacker.trailingData
+        )
+        let legacyVerification = makeVerificationCatalog()
+
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.1.12\\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(basePacker))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(baseVerification)))
+        ], root: root)
+        try makeArchive(legacyURL, entries: [
+            ("version.txt", Data("1.64.1.12\\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(legacyPacker))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(legacyVerification)))
+        ], root: root)
+
+        let inputs = try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+            baseRESURL: baseURL,
+            legacyMODURLs: [legacyURL]
+        )
+
+        XCTAssertEqual(inputs.basePacker.count, 1)
+        XCTAssertEqual(inputs.baseVerification.count, 1)
+        XCTAssertEqual(inputs.packer.count, 1)
+        XCTAssertEqual(inputs.verification.count, 1)
+        XCTAssertEqual(inputs.basePacker.first?.source, "base-res.zip")
+        XCTAssertEqual(inputs.packer.first?.source, "legacy-mod.zip")
+        XCTAssertTrue(inputs.basePacker.first?.catalog.allResourcePackInfo.contains {
+            $0.pathInIFS == "assetbundle/current.assetbundle"
+        } == true)
+        XCTAssertTrue(inputs.packer.first?.catalog.allResourcePackInfo.contains {
+            $0.pathInIFS == legacyPath
+        } == true)
+    }
+
     func testExportsVerifiedAssetBundleAndDatabinIntoCleanRESAndUpdatesBothCatalogs() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-RES-Exporter-Test-\(UUID().uuidString)", isDirectory: true)
