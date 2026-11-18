@@ -18,6 +18,8 @@ struct ContentView: View {
     @State private var remakeReport: AoVModRemakeReport?
     @State private var isExportingRemake = false
     @State private var remakeExportReport: AoVModRemakeExportReport?
+    @State private var isMergingCABs = false
+    @State private var cabBatchMergeReport: AoVModRemakeCABBatchedMergeReport?
     @State private var isAnalyzing = false
     @State private var selectedURLs: [URL] = []
     @State private var selectedBaseURL: URL?
@@ -145,6 +147,7 @@ struct ContentView: View {
                         if let mergeReport { mergeResultView(mergeReport) }
                         remakePanel
                         if let remakeReport { remakeResultView(remakeReport) }
+                        if let cabBatchMergeReport { cabBatchMergeResultView(cabBatchMergeReport) }
                         if let remakeExportReport { remakeExportResultView(remakeExportReport) }
     
                         VStack(alignment: .leading, spacing: 9) {
@@ -241,7 +244,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(AKISecondaryButtonStyle())
-            .disabled(isCopyingFiles || isAnalyzingRemake)
+            .disabled(isCopyingFiles || isAnalyzingRemake || isMergingCABs)
 
             Button {
                 importPurpose = .legacyMods
@@ -251,7 +254,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(AKISecondaryButtonStyle())
-            .disabled(isCopyingFiles || isAnalyzingRemake)
+            .disabled(isCopyingFiles || isAnalyzingRemake || isMergingCABs)
 
             if !remakeMODURLs.isEmpty {
                 HStack {
@@ -271,6 +274,7 @@ struct ContentView: View {
                             remakeMODURLs.remove(at: index)
                             remakeReport = nil
                             remakeExportReport = nil
+                            cabBatchMergeReport = nil
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                         }
@@ -287,9 +291,24 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(AKIPrimaryButtonStyle())
-            .disabled(remakeBaseURL == nil || remakeMODURLs.isEmpty || isAnalyzingRemake || isCopyingFiles || isMerging)
+            .disabled(remakeBaseURL == nil || remakeMODURLs.isEmpty || isAnalyzingRemake || isCopyingFiles || isMergingCABs || isMerging)
 
-            Text("Đã có parser, planner và writer riêng cho catalog Packer/Verification, cùng bộ ghi AssetBundle class 142 trong UnityFS. Chưa xuất ZIP remake cho đến khi payload thật, dependency và checksum của RES được kiểm chứng xuyên suốt.")
+            Button(action: runRemakeCABImport) {
+                HStack {
+                    if isMergingCABs { ProgressView().tint(.white) }
+                    Label(
+                        isMergingCABs ? "Đang nhập object và dependency CAB…" : "Thử nhập object CAB đã khớp",
+                        systemImage: "shippingbox.and.arrow.down"
+                    )
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(AKISecondaryButtonStyle())
+            .disabled(remakeBaseURL == nil || remakeMODURLs.isEmpty || remakeReport == nil ||
+                      remakeReport?.cabMergeCandidates.contains(where: { $0.status == .candidate }) != true ||
+                      isAnalyzingRemake || isMergingCABs || isCopyingFiles || isMerging || isExportingRemake)
+
+            Text("Nút này chạy nhập object closure thật trên CAB có ứng viên khớp, kiểm tra TypeTree/PPtr và round-trip. Nó chỉ tạo candidate trong bộ nhớ, không xuất RES nếu checksum cuối chưa được xác minh.")
                 .font(.caption2).foregroundColor(.orange)
         }
         .panel()
@@ -429,7 +448,7 @@ struct ContentView: View {
                 Label(warning, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundColor(.orange)
             }
-            Text("CAB đã được quét và đối chiếu class 142 theo bundle identity. Bước tự động nhập object closure và cập nhật checksum xuyên toàn bộ RES vẫn chưa được bật.")
+            Text("CAB đã được đối chiếu theo bundle identity. Khi ứng viên đủ điều kiện, dùng nút nhập CAB ở trên để thử nhập object closure và kiểm tra pointer.")
                 .font(.caption).foregroundColor(.orange)
             Button(action: runRemakeSafeExport) {
                 HStack {
@@ -446,6 +465,53 @@ struct ContentView: View {
                       isAnalyzingRemake || isExportingRemake || isCopyingFiles || isMerging)
             Text("Payload được giữ nguyên byte và dùng metadata từ MOD cùng build. Chưa xác nhận tương thích trong game.")
                 .font(.footnote.weight(.semibold)).foregroundColor(.orange)
+        }
+        .panel()
+    }
+
+    private func cabBatchMergeResultView(_ report: AoVModRemakeCABBatchedMergeReport) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Label("Kết quả nhập object CAB", systemImage: "shippingbox.and.arrow.down")
+                .font(.headline)
+            metric("CAB có candidate", "\(report.candidateCount)")
+            metric("Candidate đã xử lý", "\(report.completedCandidateCount)")
+            metric("Candidate không cần thay đổi", "\(report.unchangedCandidateCount)")
+            metric("AssetBundle đã ghép", "\(report.mergedResults.count)")
+            metric("Object đã nhập", "\(report.importedObjectCount)")
+            metric("Candidate bị chặn ở bước đối chiếu", "\(report.blockedCandidateFindings.count)")
+            if report.isComplete {
+                Label("Đã xử lý hết các candidate đủ điều kiện", systemImage: "checkmark.seal.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.green)
+            } else {
+                Label("Chưa hoàn tất toàn bộ CAB", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.orange)
+            }
+            ForEach(report.mergedResults, id: \.resourcePath) { result in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(result.resourcePath)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                    Text("\(result.importedObjectCount) object · \(result.importedPathIDs.count) pathID · round-trip đã qua")
+                        .font(.caption2)
+                        .foregroundColor(.green)
+                }
+            }
+            if !report.failures.isEmpty {
+                Text("Lý do chưa ghép được")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.orange)
+                ForEach(Array(report.failures.prefix(12).enumerated()), id: \.offset) { _, failure in
+                    Text(failure)
+                        .font(.caption2)
+                        .foregroundColor(.orange)
+                        .textSelection(.enabled)
+                }
+            }
+            Text("Các CAB đã ghép hiện mới là payload candidate. Chưa ghi Packer/Verification và chưa xuất RES vì cần checksum cuối có nguồn xác thực.")
+                .font(.caption2)
+                .foregroundColor(.orange)
         }
         .panel()
     }
@@ -1648,6 +1714,35 @@ struct ContentView: View {
                 showAlert = true
             }
             isAnalyzingRemake = false
+        }
+    }
+
+    private func runRemakeCABImport() {
+        guard let baseURL = remakeBaseURL,
+              !remakeMODURLs.isEmpty,
+              remakeReport != nil else {
+            alertText = "Hãy chọn RES nền, MOD cũ và chạy phân tích trước."
+            showAlert = true
+            return
+        }
+        isMergingCABs = true
+        cabBatchMergeReport = nil
+        remakeExportReport = nil
+        let legacyURLs = remakeMODURLs
+        Task {
+            do {
+                let report = try await Task.detached(priority: .userInitiated) {
+                    try AoVModRemakeCABBatchImporter.mergeMatchedCandidates(
+                        baseRESURL: baseURL,
+                        legacyMODURLs: legacyURLs
+                    )
+                }.value
+                cabBatchMergeReport = report
+            } catch {
+                alertText = error.localizedDescription
+                showAlert = true
+            }
+            isMergingCABs = false
         }
     }
 
