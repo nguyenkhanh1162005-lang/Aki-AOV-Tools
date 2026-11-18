@@ -230,6 +230,81 @@ final class AoVModRemakeExporterTests: XCTestCase {
         )
     }
 
+    func testStandaloneExportRejectsPackerLinkedLegacyResource() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-RES-Linked-Export-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("legacy-mod.zip")
+        let basePacker = makePackerCatalog()
+        let baseVerification = makeVerificationCatalog()
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.1.12\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(basePacker))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(baseVerification)))
+        ], root: root)
+
+        let runtimePath = "Databin/Client/Legacy/Actor_731/Effect.bytes"
+        let row = AoVRuntimeResourcePackInfo(
+            pathInIFS: runtimePath,
+            pkgType: 1,
+            crcXor: 123456789,
+            tag: "LegacyLinked",
+            flags: 0,
+            resourceInfos: [
+                AoVRuntimeResourceItem(hashCode: 731123, extensionName: "bytes")
+            ]
+        )
+        let linkedPacker = AoVRuntimeResourcePackerCatalog(
+            name: basePacker.name,
+            version: basePacker.version,
+            svnRevision: basePacker.svnRevision,
+            setName: basePacker.setName,
+            allResourcePackInfo: basePacker.allResourcePackInfo + [row],
+            allParentIndexToChild: [
+                AoVPackInfoMapItem(
+                    parentIdx: 0,
+                    childIdx: Int32(basePacker.allResourcePackInfo.count)
+                )
+            ],
+            trailingData: basePacker.trailingData
+        )
+        let verification = AoVRuntimeResourceVerificationCatalog(
+            name: baseVerification.name,
+            version: baseVerification.version,
+            svnRevision: baseVerification.svnRevision,
+            allZipVerificationInfo: [],
+            allDatabinVerificationInfo: [
+                AoVRuntimeVerificationEntry(pathInIFS: runtimePath, crcXor: 987654321)
+            ],
+            trailingData: baseVerification.trailingData
+        )
+        try makeArchive(legacyURL, entries: [
+            ("version.txt", Data("1.64.1.12\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(linkedPacker))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(verification))),
+            ("1.64.1.12/" + runtimePath, Data("must-not-export-alone".utf8))
+        ], root: root)
+
+        XCTAssertThrowsError(
+            try AoVModRemakeExporter.exportLegacyOnlyStandaloneResources(
+                baseRESURL: baseURL,
+                legacyMODURLs: [legacyURL]
+            )
+        ) { error in
+            XCTAssertTrue(
+                error.localizedDescription.contains("Không có file mới độc lập"),
+                error.localizedDescription
+            )
+        }
+    }
+
     func testExportsNestedResourcesZIPWhilePreservingOuterWrapperFiles() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-Nested-RES-Exporter-Test-\(UUID().uuidString)", isDirectory: true)
