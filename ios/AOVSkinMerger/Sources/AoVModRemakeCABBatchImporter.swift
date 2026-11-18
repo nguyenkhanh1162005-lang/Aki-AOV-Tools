@@ -193,6 +193,64 @@ enum AoVModRemakeCABBatchImporter {
             return payload
         }
 
+        func auditedExternalTargets(
+            for references: [AoVSerializedFileExternalReference]
+        ) throws -> [String: Data] {
+            var result = verifiedExternalTargetFiles
+            for reference in references {
+                let targetKey = AoVAssetBundleCatalogMerger.externalTargetKey(
+                    guidHex: reference.guidHex,
+                    path: reference.path
+                )
+                if result[targetKey] != nil { continue }
+
+                let normalizedReference = normalizedPath(reference.path)
+                guard !normalizedReference.isEmpty else { continue }
+
+                var matches: [(archiveName: String, resourcePath: String, nodePath: String)] = []
+                for bundle in baseInventory.unityFSBundles {
+                    let exactNodeMatches = bundle.catalogNodeSamples.filter {
+                        $0.serializedFile != nil &&
+                            normalizedPath($0.path) == normalizedReference
+                    }
+                    if !exactNodeMatches.isEmpty {
+                        matches.append(contentsOf: exactNodeMatches.map {
+                            (bundle.archiveName, bundle.path, $0.path)
+                        })
+                        continue
+                    }
+
+                    // A resource-path reference is accepted only when that
+                    // AssetBundle contains exactly one parsed SerializedFile.
+                    if normalizedPath(bundle.path) == normalizedReference {
+                        let serializedNodes = bundle.catalogNodeSamples.filter {
+                            $0.serializedFile != nil
+                        }
+                        if serializedNodes.count == 1, let onlyNode = serializedNodes.first {
+                            matches.append((bundle.archiveName, bundle.path, onlyNode.path))
+                        }
+                    }
+                }
+
+                let uniqueMatches = Dictionary(
+                    matches.map { ("\\($0.archiveName)|\\($0.resourcePath)|\\($0.nodePath)", $0) },
+                    uniquingKeysWith: { first, _ in first }
+                )
+                guard uniqueMatches.count == 1,
+                      let match = uniqueMatches.values.first else {
+                    // Missing or ambiguous target is intentionally not inferred.
+                    continue
+                }
+                let target = try readNode(
+                    archiveName: match.archiveName,
+                    resourcePath: match.resourcePath,
+                    nodePath: match.nodePath
+                )
+                result[targetKey] = target.data
+            }
+            return result
+        }
+
         var preparedByGroup: [AoVRemakeCABGroupKey: [AoVRemakeCABPreparedInput]] = [:]
         var failures: [String] = []
 
@@ -356,6 +414,9 @@ enum AoVModRemakeCABBatchImporter {
                         destinationObjectPathID: item.finding.destinationObjectPathID ?? 0
                     )
                 }
+                let externalTargets = try auditedExternalTargets(
+                    for: destinationNode.summary.externalReferences
+                )
                 let merged = try AoVModRemakeExporter.mergeAssetBundleResource(
                     resourcePath: key.resourcePath,
                     runtimePath: runtimePath(for: key.resourcePath),
@@ -363,7 +424,7 @@ enum AoVModRemakeCABBatchImporter {
                     serializedFileNodePath: key.nodePath,
                     legacyInputs: legacyInputs,
                     availableCurrentBundleNames: availableCurrentBundleNames,
-                    verifiedExternalTargetFiles: verifiedExternalTargetFiles
+                    verifiedExternalTargetFiles: externalTargets
                 )
                 guard merged.roundTripVerified else {
                     throw AoVModRemakeExporterError.integrityFailure(
