@@ -34,6 +34,30 @@ final class AoVRuntimeChecksumFingerprintAnalyzerTests: XCTestCase {
         XCTAssertEqual(finding.exactCRC32Matches, 0)
     }
 
+    func testFingerprintFindsSeparateDecompressedUnityFSXORMask() {
+        let mask: UInt32 = 0xD00DFEED
+        let samples = (0..<8).map { index in
+            let computedUnityFS = UInt32(index) &* 0x1F123BB5 &+ 0x1020304
+            return AoVRuntimeChecksumFingerprintSample(
+                path: "assetbundle/actor-\(index).assetbundle",
+                storedChecksum: Int64(computedUnityFS ^ mask),
+                computedCRC32: UInt32(index * 17),
+                computedUnityFSUncompressedCRC32: computedUnityFS
+            )
+        }
+
+        let finding = AoVRuntimeChecksumFingerprintAnalyzer.evaluate(
+            title: "Verification ZIP",
+            totalCatalogRows: samples.count,
+            samples: samples
+        )
+
+        XCTAssertEqual(finding.unityFSUncompressedEvaluatedSamples, 8)
+        XCTAssertEqual(finding.distinctUnityFSUncompressedXORMaskCount, 1)
+        XCTAssertEqual(finding.constantUnityFSUncompressedXORMask, mask)
+        XCTAssertEqual(finding.exactUnityFSUncompressedCRC32Matches, 0)
+    }
+
     func testFingerprintRejectsAChangingXORMask() {
         let samples = (0..<10).map { index in
             let computed = UInt32(index) &* 0x98765 &+ 0x1234
