@@ -348,16 +348,10 @@ enum AoVUnityFSParser {
             throw AoVUnityFSError.unsupportedEncryption(flags)
         }
         let usesAoVEncryption: Bool
-        if usesLegacyFlags == true {
-            // On pre-gate Unity versions 0x200 is the legacy UnityCN
-            // encryption flag, not the newer AoV header/block-info scheme.
-            // Its payload format is not implemented here, so fail closed.
-            guard flags & 0x200 == 0 else {
-                throw AoVUnityFSError.unsupportedEncryption(flags)
-            }
-            usesAoVEncryption = false
-        } else if usesLegacyFlags == false {
-            usesAoVEncryption = flags & 0x400 != 0
+        if let usesLegacyFlags {
+            // AoV builds before the Unity version gate use 0x200 for the
+            // encrypted header/block-info variant; later builds use 0x400.
+            usesAoVEncryption = flags & (usesLegacyFlags ? 0x200 : 0x400) != 0
         } else if flags & 0x600 != 0 {
             throw AoVUnityFSError.ambiguousLegacyFlag
         } else {
@@ -813,10 +807,7 @@ enum AoVUnityFSParser {
                 "Không xác định được Unity version để chọn cờ mã hóa AOV."
             )
         }
-        guard !engine.usesLegacyEncryptionFlag else {
-            throw AoVUnityFSError.unsupportedEncryption(0x200)
-        }
-        return 0x400
+        return engine.usesLegacyEncryptionFlag ? 0x200 : 0x400
     }
 
     private static func decryptAoVHeader(_ encrypted: Data) throws -> Data {
