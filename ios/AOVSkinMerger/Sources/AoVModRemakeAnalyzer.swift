@@ -432,6 +432,56 @@ struct AoVModPackageAudit: Codable, Sendable, Identifiable {
     }
 }
 
+enum AoVRemakeCABMergeStatus: String, Sendable {
+    case candidate
+    case missingDestination
+    case ambiguousDestination
+    case incompatibleSerializedFile
+    case duplicateContainerKeys
+}
+
+struct AoVRemakeCABRecordSnapshot: Sendable {
+    let sourceArchive: String
+    let resourcePath: String
+    let nodePath: String
+    let serializedFileFormatVersion: UInt32
+    let targetPlatform: Int32
+    let record: AoVSerializedAssetBundleRecord
+
+    var bundleName: String {
+        let assetBundleName = record.assetBundleName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = assetBundleName.isEmpty ? record.name : assetBundleName
+        return name.replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+}
+
+struct AoVRemakeCABCandidateFinding: Sendable, Identifiable {
+    let sourceArchive: String
+    let sourceResourcePath: String
+    let sourceNodePath: String
+    let sourceObjectPathID: Int64
+    let bundleName: String
+    let status: AoVRemakeCABMergeStatus
+    let destinationResourcePath: String?
+    let destinationNodePath: String?
+    let destinationObjectPathID: Int64?
+    let sourceSerializedFileFormatVersion: UInt32
+    let destinationSerializedFileFormatVersion: UInt32?
+    let sourceContainerKeyCount: Int
+    let destinationContainerKeyCount: Int
+    let legacyOnlyContainerKeyCount: Int
+    let changedAssetPointerCount: Int
+    let duplicateContainerKeyCount: Int
+    let dependenciesMissingFromDestination: [String]
+    let reason: String
+
+    var id: String {
+        "\(sourceArchive)|\(sourceResourcePath)|\(sourceNodePath)|\(sourceObjectPathID)"
+    }
+}
+
 struct AoVModRemakeReport: Codable, Sendable {
     let base: ArchiveInventory
     let legacy: [ArchiveInventory]
@@ -452,6 +502,10 @@ struct AoVModRemakeReport: Codable, Sendable {
     let runtimeVerificationMergePlan: AoVRuntimeVerificationMergePlan?
     let catalogMergePlanFindings: [AoVRemakeCatalogPlanFinding]
     let warnings: [String]
+
+    var cabMergeCandidates: [AoVRemakeCABCandidateFinding] {
+        AoVModRemakeAnalyzer.buildCABCandidates(base: base.unityFSBundles, legacy: legacy)
+    }
 
     var packageAudits: [AoVModPackageAudit] {
         [AoVModPackageAudit.make(from: base, version: baseVersion)] +
@@ -496,6 +550,135 @@ enum AoVModRemakeAnalyzer {
     private static let packerFileName = "resourcepackerinfosetall.assetbundle"
     private static let verificationFileName = "resourceverificationinfosetall.assetbundle"
     private static let maximumCatalogFindings = 500
+
+    static func buildCABCandidates(
+        base: [AoVUnityFSScanResult],
+        legacy: [ArchiveInventory]
+    ) -> [AoVRemakeCABCandidateFinding] {
+        func snapshots(_ bundles: [AoVUnityFSScanResult]) -> [AoVRemakeCABRecordSnapshot] {
+            bundles.flatMap { bundle in
+                bundle.catalogNodeSamples.flatMap { node in
+                    guard let serialized = node.serializedFile else { return [] }
+                    return serialized.assetBundleRecords.map { record in
+                        AoVRemakeCABRecordSnapshot(
+                            sourceArchive: bundle.archiveName,
+                            resourcePath: bundle.path,
+                            nodePath: node.path,
+                            serializedFileFormatVersion: serialized.formatVersion,
+                            targetPlatform: serialized.targetPlatform,
+                            record: record
+                        )
+                    }
+                }
+            }
+        }
+
+        let currentRecords = snapshots(base)
+        let legacyRecords = legacy.flatMap { snapshots($0.unityFSBundles) }
+        return planCABCandidates(current: currentRecords, legacy: legacyRecords)
+    }
+
+    static func planCABCandidates(
+        current: [AoVRemakeCABRecordSnapshot],
+        legacy: [AoVRemakeCABRecordSnapshot]
+    ) -> [AoVRemakeCABCandidateFinding] {
+        let currentByName = Dictionary(grouping: current, by: \.bundleName)
+        return legacy.sorted {
+            if $0.sourceArchive != $1.sourceArchive { return $0.sourceArchive < $1.sourceArchive }
+            if $0.resourcePath != $1.resourcePath { return $0.resourcePath < $1.resourcePath }
+            if $0.nodePath != $1.nodePath { return $0.nodePath < $1.nodePath }
+            return $0.record.pathID < $1.record.pathID
+        }.map { source in
+            let matches = currentByName[source.bundleName] ?? []
+            guard matches.count == 1, let destination = matches.first else {
+                let status: AoVRemakeCABMergeStatus = matches.isEmpty
+                    ? .missingDestination : .ambiguousDestination
+                return AoVRemakeCABCandidateFinding(
+                    sourceArchive: source.sourceArchive,
+                    sourceResourcePath: source.resourcePath,
+                    sourceNodePath: source.nodePath,
+                    sourceObjectPathID: source.record.pathID,
+                    bundleName: source.bundleName,
+                    status: status,
+                    destinationResourcePath: nil,
+                    destinationNodePath: nil,
+                    destinationObjectPathID: nil,
+                    sourceSerializedFileFormatVersion: source.serializedFileFormatVersion,
+                    destinationSerializedFileFormatVersion: nil,
+                    sourceContainerKeyCount: source.record.containerEntries.count,
+                    destinationContainerKeyCount: 0,
+                    legacyOnlyContainerKeyCount: source.record.containerEntries.count,
+                    changedAssetPointerCount: 0,
+                    duplicateContainerKeyCount: duplicateKeyCount(source.record.containerEntries.map(\.key)),
+                    dependenciesMissingFromDestination: [],
+                    reason: matches.isEmpty
+                        ? "RES mới chưa có CAB class-142 cùng bundle identity."
+                        : "RES mới có nhiều CAB class-142 trùng bundle identity; không tự chọn."
+                )
+            }
+
+            let sourceKeys = source.record.containerEntries.map(\.key)
+            let destinationKeys = destination.record.containerEntries.map(\.key)
+            let sourceByKey = Dictionary(grouping: source.record.containerEntries, by: \.key)
+            let destinationByKey = Dictionary(grouping: destination.record.containerEntries, by: \.key)
+            let duplicateCount = duplicateKeyCount(sourceKeys) + duplicateKeyCount(destinationKeys)
+            let destinationKeySet = Set(destinationKeys)
+            let legacyOnlyCount = sourceKeys.filter { !destinationKeySet.contains($0) }.count
+            let changedPointerCount = sourceByKey.keys.reduce(into: 0) { count, key in
+                guard let sourceRows = sourceByKey[key],
+                      let destinationRows = destinationByKey[key],
+                      sourceRows.count == 1,
+                      destinationRows.count == 1 else { return }
+                if sourceRows[0].asset != destinationRows[0].asset {
+                    count += 1
+                }
+            }
+            let missingDependencies = Set(source.record.dependencies)
+                .subtracting(destination.record.dependencies)
+                .sorted()
+
+            let formatCompatible =
+                source.serializedFileFormatVersion == destination.serializedFileFormatVersion &&
+                source.targetPlatform == destination.targetPlatform
+            let status: AoVRemakeCABMergeStatus
+            let reason: String
+            if duplicateCount > 0 {
+                status = .duplicateContainerKeys
+                reason = "Container key bị trùng trong CAB nguồn hoặc CAB đích; cần xử lý ambiguity trước."
+            } else if !formatCompatible {
+                status = .incompatibleSerializedFile
+                reason = "SerializedFile format hoặc target platform khác nhau; chưa có adapter chuyển đổi đã xác minh."
+            } else {
+                status = .candidate
+                reason = "Đã khớp duy nhất theo bundle identity. Vẫn cần nhập object closure, audit PPtr/dependency và checksum cuối."
+            }
+
+            return AoVRemakeCABCandidateFinding(
+                sourceArchive: source.sourceArchive,
+                sourceResourcePath: source.resourcePath,
+                sourceNodePath: source.nodePath,
+                sourceObjectPathID: source.record.pathID,
+                bundleName: source.bundleName,
+                status: status,
+                destinationResourcePath: destination.resourcePath,
+                destinationNodePath: destination.nodePath,
+                destinationObjectPathID: destination.record.pathID,
+                sourceSerializedFileFormatVersion: source.serializedFileFormatVersion,
+                destinationSerializedFileFormatVersion: destination.serializedFileFormatVersion,
+                sourceContainerKeyCount: sourceKeys.count,
+                destinationContainerKeyCount: destinationKeys.count,
+                legacyOnlyContainerKeyCount: legacyOnlyCount,
+                changedAssetPointerCount: changedPointerCount,
+                duplicateContainerKeyCount: duplicateCount,
+                dependenciesMissingFromDestination: missingDependencies,
+                reason: reason
+            )
+        }
+    }
+
+    private static func duplicateKeyCount(_ keys: [String]) -> Int {
+        keys.count - Set(keys).count
+    }
 
     static func analyze(baseRESURL: URL, legacyMODURLs: [URL]) throws -> AoVModRemakeReport {
         guard !legacyMODURLs.isEmpty else { throw AoVModRemakeError.noLegacyMods }
