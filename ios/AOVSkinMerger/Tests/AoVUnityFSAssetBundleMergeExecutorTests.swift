@@ -1,8 +1,57 @@
 import Foundation
 import XCTest
+import ZIPFoundation
 @testable import AOVSkinMerger
 
 final class AoVUnityFSAssetBundleMergeExecutorTests: XCTestCase {
+    func testArchiveScannerInspectsSerializedFileNodesInOrdinaryCABBundles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-CAB-Scanner-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let nodes = objectNodes()
+        let payload = try AoVUnityTypeTreeWriter.write(
+            nodes: nodes,
+            value: .object(["m_TestPathID": .signed(200)]),
+            littleEndian: true
+        )
+        let record = makeAssetBundleRecord(rootPathID: 5001, assetPathID: 1001)
+        let serializedFile = try makeSerializedFileWithBundleRecord(
+            record: record,
+            assetPathID: 1001,
+            assetPayload: payload,
+            assetNodes: nodes
+        )
+        let cabBytes = try makeUnityFS(
+            serializedFile: serializedFile,
+            nodePath: "CAB-actor-test"
+        )
+
+        let cabFileURL = root.appendingPathComponent("actor-test.assetbundle")
+        try cabBytes.write(to: cabFileURL, options: .atomic)
+        let archiveURL = root.appendingPathComponent("generic-mod.zip")
+        let archive = try Archive(url: archiveURL, accessMode: .create)
+        try archive.addEntry(
+            with: "Resources/2.0.0/assetbundle/actor-test.assetbundle",
+            fileURL: cabFileURL,
+            compressionMethod: .none,
+            bufferSize: 64 * 1024
+        )
+
+        let analysis = try ArchiveScanner.analyze([archiveURL])
+        let bundle = try XCTUnwrap(analysis.unityFSBundles.first)
+        let sample = try XCTUnwrap(bundle.catalogNodeSamples.first)
+        let serializedSummary = try XCTUnwrap(sample.serializedFile)
+
+        XCTAssertEqual(bundle.path, "Resources/2.0.0/assetbundle/actor-test.assetbundle")
+        XCTAssertEqual(sample.path, "CAB-actor-test")
+        XCTAssertEqual(serializedSummary.assetBundleRecords.count, 1)
+        XCTAssertEqual(serializedSummary.assetBundleRecords.first?.assetBundleName, "actor/test")
+        XCTAssertEqual(serializedSummary.assetBundleRecords.first?.pathID, 5001)
+        XCTAssertTrue(bundle.catalogExtractionStatus?.contains("CAB") == true)
+    }
+
     func testDetectsChangedObjectPayloadBehindAnUnchangedContainerPointer() throws {
         let nodes = objectNodes()
         let currentPayload = try AoVUnityTypeTreeWriter.write(
