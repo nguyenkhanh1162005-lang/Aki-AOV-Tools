@@ -35,10 +35,10 @@ final class AoVRuntimeChecksumFingerprintAnalyzerTests: XCTestCase {
     func testCRC64WEFingerprintRequiresEightConsistentSamplesAndFindsExactMatches() {
         let samples = (0..<8).map { index -> AoVRuntimeChecksumCRC64FingerprintSample in
             let computed = AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(
-                Data("AoV-ZIP-entry-\\(index)".utf8)
+                Data("AoV-ZIP-entry-\(index)".utf8)
             )
             return AoVRuntimeChecksumCRC64FingerprintSample(
-                path: "Packages/\\(index).pkg.bytes",
+                path: "Packages/\(index).pkg.bytes",
                 storedChecksum: computed,
                 computedCRC64WE: computed
             )
@@ -67,6 +67,24 @@ final class AoVRuntimeChecksumFingerprintAnalyzerTests: XCTestCase {
             AoVRuntimeChecksumFingerprintAnalyzer.crc32(Data("123456789".utf8)),
             0xCBF43926
         )
+    }
+
+    func testDatabinCRC32UsesLow32BitsOfSignedCatalogValue() {
+        let crc = AoVRuntimeChecksumFingerprintAnalyzer.crc32(Data("databin-checksum".utf8))
+        let signExtended = Int64(bitPattern: UInt64(crc) | 0xFFFF_FFFF_0000_0000)
+        let sample = AoVRuntimeChecksumFingerprintSample(
+            path: "Databin/Res.bytes",
+            storedChecksum: signExtended,
+            computedCRC32: crc
+        )
+        let finding = AoVRuntimeChecksumFingerprintAnalyzer.evaluate(
+            title: "Verification Databin",
+            totalCatalogRows: 1,
+            samples: [sample]
+        )
+        XCTAssertEqual(finding.exactCRC32Matches, 1)
+        XCTAssertEqual(finding.constantXORMask, nil)
+        XCTAssertEqual(finding.status, .insufficientSamples)
     }
 
     func testFingerprintFindsConsistentXORMaskAcrossMinimumSamples() {
