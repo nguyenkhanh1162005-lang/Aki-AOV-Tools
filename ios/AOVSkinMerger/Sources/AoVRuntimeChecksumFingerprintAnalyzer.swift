@@ -660,10 +660,8 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
                 ambiguousPaths += 1
                 continue
             }
-            guard row.crcXor >= 0, row.crcXor <= Int64(UInt32.max) else {
-                unsupportedValues += 1
-                continue
-            }
+            // Databin CRC32 values are stored in a signed Int64 field;
+            // compare the low 32 bits instead of rejecting sign-extended values.
             let normalizedIFSPath = normalizedPath(path)
             guard let matches = entriesByRuntimePath[normalizedIFSPath], !matches.isEmpty else {
                 missingPaths += 1
