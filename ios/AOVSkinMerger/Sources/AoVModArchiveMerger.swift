@@ -828,6 +828,77 @@ enum AoVModArchiveMerger {
         return sourceEntry.isCompressed ? .deflate : .none
     }
 
+    /// AOV `.pkg.bytes` resources may contain a second ZIP archive.
+    /// Some game-side package readers expect that inner archive to use STORE
+    /// (method 0), even when the outer RES ZIP is already stored. Normalize only
+    /// recognized ZIP packages; ordinary opaque .pkg.bytes payloads stay byte-exact.
+    private static func normalizedNestedPackageArchive(
+        at packageURL: URL,
+        tempRoot: URL
+    ) throws -> URL? {
+        let handle = try FileHandle(forReadingFrom: packageURL)
+        let magic = (try? handle.read(upToCount: 4)) ?? Data()
+        try? handle.close()
+
+        let zipMagic = magic == Data([0x50, 0x4B, 0x03, 0x04]) ||
+            magic == Data([0x50, 0x4B, 0x05, 0x06]) ||
+            magic == Data([0x50, 0x4B, 0x07, 0x08])
+        guard zipMagic else { return nil }
+
+        let innerArchive: Archive
+        do {
+            innerArchive = try Archive(url: packageURL, accessMode: .read)
+        } catch {
+            throw AoVModArchiveMergeError.invalidArchive(
+                "\(packageURL.lastPathComponent): ZIP nội bộ của .pkg.bytes bị lỗi."
+            )
+        }
+
+        let entries = try validatedEntries(
+            innerArchive,
+            label: "ZIP nội bộ \(packageURL.lastPathComponent)"
+        )
+        guard !entries.isEmpty, entries.contains(where: { $0.isCompressed }) else {
+            return nil
+        }
+
+        let normalizedURL = tempRoot.appendingPathComponent(
+            "pkg-store-\(UUID().uuidString).zip",
+            isDirectory: false
+        )
+        do {
+            do {
+                let normalizedArchive = try Archive(url: normalizedURL, accessMode: .create)
+                for entry in entries {
+                    let extractedURL = tempRoot.appendingPathComponent(
+                        "pkg-entry-\(UUID().uuidString)",
+                        isDirectory: false
+                    )
+                    do {
+                        _ = try innerArchive.extract(entry, to: extractedURL, bufferSize: 64 * 1024)
+                        try normalizedArchive.addEntry(
+                            with: entry.path,
+                            fileURL: extractedURL,
+                            compressionMethod: .none,
+                            bufferSize: 64 * 1024
+                        )
+                    } catch {
+                        try? FileManager.default.removeItem(at: extractedURL)
+                        throw error
+                    }
+                    try? FileManager.default.removeItem(at: extractedURL)
+                }
+            }
+            try verifyArchive(normalizedURL, label: "ZIP nội bộ .pkg.bytes")
+            return normalizedURL
+        } catch {
+            try? FileManager.default.removeItem(at: normalizedURL)
+            throw AoVModArchiveMergeError.invalidArchive(
+                "\(packageURL.lastPathComponent): không thể chuẩn hóa ZIP nội bộ .pkg.bytes: \(error.localizedDescription)"
+            )
+        }
+    }
+
     private static func copyEntry(
         _ entry: Entry,
         from source: Archive,
@@ -837,12 +908,29 @@ enum AoVModArchiveMerger {
         compressionMethod: CompressionMethod = .deflate
     ) throws {
         let scratch = tempRoot.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: scratch) }
+        var normalizedPackageURL: URL?
+        defer {
+            try? FileManager.default.removeItem(at: scratch)
+            if let normalizedPackageURL {
+                try? FileManager.default.removeItem(at: normalizedPackageURL)
+            }
+        }
         _ = try source.extract(entry, to: scratch, bufferSize: 64 * 1024)
+
+        var payloadURL = scratch
+        var outputMethod = compressionMethod
+        if path.lowercased().hasSuffix(".pkg.bytes") {
+            normalizedPackageURL = try normalizedNestedPackageArchive(at: scratch, tempRoot: tempRoot)
+            if let normalizedPackageURL {
+                payloadURL = normalizedPackageURL
+            }
+            outputMethod = .none
+        }
+
         try destination.addEntry(
             with: path,
-            fileURL: scratch,
-            compressionMethod: compressionMethod,
+            fileURL: payloadURL,
+            compressionMethod: outputMethod,
             bufferSize: 64 * 1024
         )
     }
@@ -855,12 +943,29 @@ enum AoVModArchiveMerger {
         compressionMethod: CompressionMethod = .deflate
     ) throws {
         let scratch = tempRoot.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: scratch) }
+        var normalizedPackageURL: URL?
+        defer {
+            try? FileManager.default.removeItem(at: scratch)
+            if let normalizedPackageURL {
+                try? FileManager.default.removeItem(at: normalizedPackageURL)
+            }
+        }
         try data.write(to: scratch, options: .atomic)
+
+        var payloadURL = scratch
+        var outputMethod = compressionMethod
+        if path.lowercased().hasSuffix(".pkg.bytes") {
+            normalizedPackageURL = try normalizedNestedPackageArchive(at: scratch, tempRoot: tempRoot)
+            if let normalizedPackageURL {
+                payloadURL = normalizedPackageURL
+            }
+            outputMethod = .none
+        }
+
         try destination.addEntry(
             with: path,
-            fileURL: scratch,
-            compressionMethod: compressionMethod,
+            fileURL: payloadURL,
+            compressionMethod: outputMethod,
             bufferSize: 64 * 1024
         )
     }
