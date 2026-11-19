@@ -15,7 +15,7 @@ struct AoVNoticeBrandingRewriteReport: Sendable {
     let gameTested: Bool
 }
 
-enum AoVNoticeBrandingRewriteError: LocalizedError {
+enum AoVNoticeBrandingRewriteError: LocalizedError, Equatable {
     case invalidInput
     case inputTooLarge
     case invalidArchive(String)
