@@ -331,6 +331,202 @@ final class AoVModRemakeExporterTests: XCTestCase {
         )
     }
 
+    func testCandidateRESExportFiltersUnrelatedCatalogRowsAndKeepsPackerDependencyLinks() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Candidate-RES-Export-Test-\\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("legacy-mod.zip")
+        let currentPacker = makePackerCatalog()
+        let currentPackerEntry = try XCTUnwrap(currentPacker.allResourcePackInfo.first)
+        let newPath = "assetbundle/new-hero.assetbundle"
+        let unrelatedPath = "assetbundle/unrelated-mod-entry.assetbundle"
+        let newPackerEntry = AoVRuntimeResourcePackInfo(
+            pathInIFS: newPath,
+            pkgType: 0,
+            crcXor: 0,
+            tag: "NewHero",
+            flags: 512,
+            resourceInfos: [AoVRuntimeResourceItem(hashCode: 731900, extensionName: "assetbundle")]
+        )
+        let unrelatedPackerEntry = AoVRuntimeResourcePackInfo(
+            pathInIFS: unrelatedPath,
+            pkgType: 0,
+            crcXor: 0,
+            tag: "Unrelated",
+            flags: 512,
+            resourceInfos: [AoVRuntimeResourceItem(hashCode: 731901, extensionName: "assetbundle")]
+        )
+
+        var seedZIPRows: [AoVRuntimeVerificationEntry] = []
+        var baseEntries: [(String, Data)] = [
+            ("version.txt", Data("1.64.1.12\\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(currentPacker)))
+        ]
+        for index in 0..<8 {
+            let path = "assetbundle/seed-\\(index).assetbundle"
+            let data = Data("seed-assetbundle-\\(index)".utf8)
+            seedZIPRows.append(
+                AoVRuntimeVerificationEntry(
+                    pathInIFS: path,
+                    crcXor: Int64(bitPattern: AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(data))
+                )
+            )
+            baseEntries.append(("1.64.1.12/" + path, data))
+        }
+        let currentVerification = AoVRuntimeResourceVerificationCatalog(
+            name: "ResourceVerificationInfoSetXML",
+            version: "1.64.1.12",
+            svnRevision: "1793129",
+            allZipVerificationInfo: seedZIPRows,
+            allDatabinVerificationInfo: [],
+            trailingData: Data([0xCC, 0xDD])
+        )
+        baseEntries.append((
+            "1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+            try makeUnityFS(with: .verification(currentVerification))
+        ))
+        baseEntries.append(("1.64.1.12/assetbundle/current.assetbundle", Data("current-bundle".utf8)))
+        try makeArchive(baseURL, entries: baseEntries, root: root)
+
+        let legacyPacker = AoVRuntimeResourcePackerCatalog(
+            name: currentPacker.name,
+            version: currentPacker.version,
+            svnRevision: currentPacker.svnRevision,
+            setName: currentPacker.setName,
+            allResourcePackInfo: [currentPackerEntry, newPackerEntry, unrelatedPackerEntry],
+            allParentIndexToChild: [AoVPackInfoMapItem(parentIdx: 0, childIdx: 1)],
+            trailingData: currentPacker.trailingData
+        )
+        let legacyVerification = AoVRuntimeResourceVerificationCatalog(
+            name: currentVerification.name,
+            version: currentVerification.version,
+            svnRevision: currentVerification.svnRevision,
+            allZipVerificationInfo: [
+                AoVRuntimeVerificationEntry(pathInIFS: newPath, crcXor: 123),
+                AoVRuntimeVerificationEntry(pathInIFS: unrelatedPath, crcXor: 456)
+            ],
+            allDatabinVerificationInfo: [],
+            trailingData: currentVerification.trailingData
+        )
+        try makeArchive(legacyURL, entries: [
+            ("version.txt", Data("1.64.1.12\\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(legacyPacker))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(legacyVerification)))
+        ], root: root)
+
+        let finalBundle = Data("new-hero-final-assetbundle".utf8)
+        let mergeResult = AoVModRemakeAssetBundleMergeResult(
+            resourcePath: "1.64.1.12/" + newPath,
+            resourcePayload: AoVModRemakeResourcePayload(
+                archivePath: "1.64.1.12/" + newPath,
+                ifsPath: newPath,
+                data: finalBundle
+            ),
+            importedObjectCount: 1,
+            importedPathIDs: [9001],
+            roundTripVerified: true
+        )
+        let fingerprint = try AoVRuntimeChecksumFingerprintAnalyzer.analyze(baseRESURL: baseURL)
+
+        let report = try AoVModRemakeExporter.exportCandidateRESIncludingAssetBundleMerges(
+            baseRESURL: baseURL,
+            legacyMODURLs: [legacyURL],
+            assetBundleMergeResults: [mergeResult],
+            checksumFingerprint: fingerprint
+        )
+        defer { try? FileManager.default.removeItem(at: report.outputURL) }
+
+        XCTAssertTrue(report.structurallyValidated)
+        XCTAssertFalse(report.gameCompatibilityTested)
+        XCTAssertEqual(report.packerAddedPaths, [newPath])
+        XCTAssertEqual(report.verificationAddedZIPPaths, [newPath])
+
+        let output = try Archive(url: report.outputURL, accessMode: .read)
+        XCTAssertEqual(try readEntry(output, path: "1.64.1.12/" + newPath), finalBundle)
+
+        let packerData = try readEntry(
+            output,
+            path: "1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle"
+        )
+        let packerTarget = try AoVUnityFSRuntimeCatalogMergeExecutor.locatePackerCatalog(in: packerData)
+        guard case .packer(let actualPacker) = packerTarget.catalog else {
+            return XCTFail("Expected Packer catalog in candidate RES.")
+        }
+        XCTAssertTrue(actualPacker.allResourcePackInfo.contains(where: { $0 == newPackerEntry }))
+        XCTAssertFalse(actualPacker.allResourcePackInfo.contains(where: { $0.pathInIFS == unrelatedPath }))
+        XCTAssertTrue(actualPacker.allParentIndexToChild.contains {
+            $0.parentIdx == 0 && $0.childIdx == 1
+        })
+
+        let verificationData = try readEntry(
+            output,
+            path: "1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle"
+        )
+        let verificationTarget = try AoVUnityFSRuntimeCatalogMergeExecutor.locateVerificationCatalog(
+            in: verificationData
+        )
+        guard case .verification(let actualVerification) = verificationTarget.catalog else {
+            return XCTFail("Expected Verification catalog in candidate RES.")
+        }
+        XCTAssertEqual(
+            actualVerification.allZipVerificationInfo.first(where: { $0.pathInIFS == newPath })?.crcXor,
+            Int64(bitPattern: AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(finalBundle))
+        )
+        XCTAssertFalse(actualVerification.allZipVerificationInfo.contains(where: {
+            $0.pathInIFS == unrelatedPath
+        }))
+    }
+
+    func testCandidatePackerFilterBlocksDependencyMissingFromBaseAndFinalPayloads() {
+        let selectedPath = "assetbundle/selected.assetbundle"
+        let missingPath = "assetbundle/missing-dependency.assetbundle"
+        let selected = AoVRuntimeResourcePackInfo(
+            pathInIFS: selectedPath,
+            pkgType: 0,
+            crcXor: 0,
+            tag: "Selected",
+            flags: 0,
+            resourceInfos: []
+        )
+        let missing = AoVRuntimeResourcePackInfo(
+            pathInIFS: missingPath,
+            pkgType: 0,
+            crcXor: 0,
+            tag: "Missing",
+            flags: 0,
+            resourceInfos: []
+        )
+        let catalog = AoVRuntimeResourcePackerCatalog(
+            name: "ResourcePackerInfoSetXML",
+            version: "1.64.1.12",
+            svnRevision: "test",
+            setName: "ResourcePackerInfoSetXML",
+            allResourcePackInfo: [selected, missing],
+            allParentIndexToChild: [AoVPackInfoMapItem(parentIdx: 0, childIdx: 1)],
+            trailingData: Data()
+        )
+
+        XCTAssertThrowsError(
+            try AoVModRemakeExporter.filterPackerCatalogsForCandidateExport(
+                [("legacy.zip", catalog)],
+                currentPackerPaths: [],
+                selectedPackerPaths: [selectedPath]
+            )
+        ) { error in
+            guard let exporterError = error as? AoVModRemakeExporterError,
+                  case .catalogMergeFailed(let reason) = exporterError else {
+                return XCTFail("Expected unresolved Packer dependency failure, got \\(error)")
+            }
+            XCTAssertTrue(reason.contains(missingPath))
+        }
+    }
+
     func testExportsStandaloneLegacyOnlyDatabinWithSourceMetadataAndNoPackerLinks() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-RES-Standalone-Export-Test-\(UUID().uuidString)", isDirectory: true)
