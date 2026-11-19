@@ -333,7 +333,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
     func testCandidateRESExportFiltersUnrelatedCatalogRowsAndKeepsPackerDependencyLinks() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AKI-Candidate-RES-Export-Test-\\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("AKI-Candidate-RES-Export-Test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -362,13 +362,13 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
         var seedZIPRows: [AoVRuntimeVerificationEntry] = []
         var baseEntries: [(String, Data)] = [
-            ("version.txt", Data("1.64.1.12\\n".utf8)),
+            ("version.txt", Data("1.64.1.12\n".utf8)),
             ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
              try makeUnityFS(with: .packer(currentPacker)))
         ]
         for index in 0..<8 {
-            let path = "assetbundle/seed-\\(index).assetbundle"
-            let data = Data("seed-assetbundle-\\(index)".utf8)
+            let path = "assetbundle/seed-\(index).assetbundle"
+            let data = Data("seed-assetbundle-\(index)".utf8)
             seedZIPRows.append(
                 AoVRuntimeVerificationEntry(
                     pathInIFS: path,
@@ -413,7 +413,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
             trailingData: currentVerification.trailingData
         )
         try makeArchive(legacyURL, entries: [
-            ("version.txt", Data("1.64.1.12\\n".utf8)),
+            ("version.txt", Data("1.64.1.12\n".utf8)),
             ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
              try makeUnityFS(with: .packer(legacyPacker))),
             ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
@@ -521,7 +521,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
         ) { error in
             guard let exporterError = error as? AoVModRemakeExporterError,
                   case .catalogMergeFailed(let reason) = exporterError else {
-                return XCTFail("Expected unresolved Packer dependency failure, got \\(error)")
+                return XCTFail("Expected unresolved Packer dependency failure, got \(error)")
             }
             XCTAssertTrue(reason.contains(missingPath))
         }
