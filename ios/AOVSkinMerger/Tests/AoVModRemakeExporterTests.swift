@@ -4,6 +4,52 @@ import ZIPFoundation
 @testable import AOVSkinMerger
 
 final class AoVModRemakeExporterTests: XCTestCase {
+    func testNormalizesVersionRootAndKeepsNewResourcesUnderBasePrefix() throws {
+        XCTAssertEqual(
+            try AoVModRemakeExporter.normalizeArchivePath("1.64.1/assetbundle/hero.assetbundle"),
+            "assetbundle/hero.assetbundle"
+        )
+        XCTAssertEqual(
+            try AoVModRemakeExporter.normalizeArchivePath("Resources/1.64.1/assetbundle/hero.assetbundle"),
+            "assetbundle/hero.assetbundle"
+        )
+        XCTAssertEqual(
+            try AoVModRemakeExporter.archiveRootPrefix(for: [
+                "1.64.1/assetbundle/hero.assetbundle",
+                "1.64.1/Databin/Client/Global/ResNotifyConfig.bytes"
+            ]),
+            "1.64.1/"
+        )
+        XCTAssertEqual(
+            try AoVModRemakeExporter.archiveRootPrefix(for: [
+                "Resources/1.64.1/assetbundle/hero.assetbundle",
+                "Resources/1.64.1/Databin/Client/Global/ResNotifyConfig.bytes"
+            ]),
+            "Resources/1.64.1/"
+        )
+        XCTAssertEqual(
+            try AoVModRemakeExporter.archiveRootPrefix(for: [
+                "assetbundle/hero.assetbundle",
+                "Databin/Client/Global/ResNotifyConfig.bytes"
+            ]),
+            ""
+        )
+        XCTAssertEqual(
+            AoVModRemakeExporter.preferredArchivePath(
+                normalizedPath: "assetbundle/new-skin.assetbundle",
+                originalPath: "assetbundle/new-skin.assetbundle",
+                prefix: "1.64.1/"
+            ),
+            "1.64.1/assetbundle/new-skin.assetbundle"
+        )
+        XCTAssertThrowsError(
+            try AoVModRemakeExporter.archiveRootPrefix(for: [
+                "1.64.1/assetbundle/a.assetbundle",
+                "1.65.1/assetbundle/b.assetbundle"
+            ])
+        )
+    }
+
     func testChecksumAnalyzerUsesCRC64WEForZIPAndPKGAndCRC32ForDatabin() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-Checksum-Fingerprint-RES-Test-\(UUID().uuidString)", isDirectory: true)
