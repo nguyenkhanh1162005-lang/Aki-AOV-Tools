@@ -341,7 +341,7 @@ struct ContentView: View {
             .disabled(remakeBaseURL == nil || isAnalyzingChecksumFingerprint ||
                       isMergingCABs || isAnalyzingRemake || isCopyingFiles || isExportingRemake || isMerging)
 
-            Text("Khảo sát này đối chiếu CRC32 IEEE của byte thô với các giá trị Verification có sẵn. Nó chỉ tìm dấu hiệu XOR nhất quán trên mẫu RES, không tự cấp checksum cho dữ liệu đã sửa.")
+            Text("Khảo sát dùng CRC64/WE cho Verification ZIP và Packer PKG, CRC32 IEEE cho Databin; chỉ dùng fingerprint khớp trên RES nền hiện tại. Packer AssetBundle crcXor = 0 được giữ nguyên, không tự suy diễn.")
                 .font(.caption2).foregroundColor(.orange)
 
             Text("Nút nhập CAB chạy object closure thật, kiểm tra TypeTree/PPtr và round-trip. Nó chỉ tạo candidate trong bộ nhớ, không xuất RES nếu checksum cuối chưa được xác minh.")
@@ -364,6 +364,28 @@ struct ContentView: View {
                       isMergingCABs || isAnalyzingRemake || isCopyingFiles || isExportingRemake || isMerging)
 
             Text("Bước này đối chiếu metadata nguồn và lập checksum candidate riêng cho Packer/Verification. Nó không xác nhận thuật toán gốc và không mở khóa xuất RES.")
+                .font(.caption2).foregroundColor(.orange)
+
+            Button(action: runRemakeCandidateRESExport) {
+                HStack {
+                    if isExportingRemake { ProgressView().tint(.white) }
+                    Label(
+                        isExportingRemake ? "Đang tạo RES candidate…" : "Tạo RES candidate từ CAB đã ghép",
+                        systemImage: "shippingbox.and.arrow.up"
+                    )
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(AKIPrimaryButtonStyle())
+            .disabled(remakeBaseURL == nil || remakeMODURLs.isEmpty ||
+                      cabBatchMergeReport?.mergedResults.isEmpty != false ||
+                      resReadinessReport?.proposalCount == 0 ||
+                      resReadinessReport?.blockedCount != 0 ||
+                      resReadinessReport?.candidateCount != resReadinessReport?.proposalCount ||
+                      isExportingRemake || isPreparingRESMetadata || isMergingCABs ||
+                      isAnalyzingRemake || isCopyingFiles || isMerging)
+
+            Text("Nút này chỉ tạo ZIP RES candidate sau khi đối chiếu Packer/Verification và kiểm tra cấu trúc. File vẫn cần thử trong game; không có cam kết tương thích trước khi kiểm thử thực tế.")
                 .font(.caption2).foregroundColor(.orange)
         }
         .panel()
@@ -2171,6 +2193,58 @@ struct ContentView: View {
         }
     }
 
+    private func runRemakeCandidateRESExport() {
+        guard let baseURL = remakeBaseURL,
+              !remakeMODURLs.isEmpty,
+              let cabReport = cabBatchMergeReport,
+              !cabReport.mergedResults.isEmpty,
+              let checksumReport = checksumFingerprintReport,
+              let readiness = resReadinessReport else {
+            alertText = "Cần RES nền, MOD cũ, CAB candidate, checksum và metadata candidate trước khi xuất."
+            showAlert = true
+            return
+        }
+        guard readiness.proposalCount == cabReport.mergedResults.count,
+              readiness.candidateCount == readiness.proposalCount,
+              readiness.blockedCount == 0 else {
+            alertText = "Còn CAB candidate bị chặn hoặc thiếu checksum. Chưa thể tạo RES candidate."
+            showAlert = true
+            return
+        }
+
+        isExportingRemake = true
+        remakeExportReport = nil
+        let legacyURLs = remakeMODURLs
+        let mergedResults = cabReport.mergedResults
+        Task {
+            do {
+                let report = try await Task.detached(priority: .userInitiated) {
+                    try AoVModRemakeExporter.exportCandidateRESIncludingAssetBundleMerges(
+                        baseRESURL: baseURL,
+                        legacyMODURLs: legacyURLs,
+                        assetBundleMergeResults: mergedResults,
+                        checksumFingerprint: checksumReport
+                    )
+                }.value
+                remakeExportReport = report
+                recordOperation(
+                    "Tạo RES candidate từ CAB",
+                    summary: "\(report.outputURL.lastPathComponent) · \(report.addedResources) tài nguyên mới · ZIP/catalog đã kiểm tra; chưa thử trong game.",
+                    outcome: report.structurallyValidated ? .success : .partial
+                )
+            } catch {
+                recordOperation(
+                    "Tạo RES candidate từ CAB",
+                    summary: error.localizedDescription,
+                    outcome: .failed
+                )
+                alertText = error.localizedDescription
+                showAlert = true
+            }
+            isExportingRemake = false
+        }
+    }
+
     private func runRemakeSafeExport() {
         guard let baseURL = remakeBaseURL, !remakeMODURLs.isEmpty, remakeReport != nil else {
             alertText = "Hãy chọn RES nền, MOD cũ và chạy phân tích trước."
@@ -2205,9 +2279,12 @@ struct ContentView: View {
 
     private func remakeExportResultView(_ report: AoVModRemakeExportReport) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Đã tạo RES remake một phần", systemImage: "checkmark.seal.fill")
-                .font(.headline)
-                .foregroundColor(.green)
+            Label(
+                report.structurallyValidated ? "Đã tạo RES ZIP candidate" : "RES candidate chưa được xác minh cấu trúc",
+                systemImage: report.structurallyValidated ? "checkmark.seal.fill" : "exclamationmark.triangle"
+            )
+            .font(.headline)
+            .foregroundColor(report.structurallyValidated ? .green : .orange)
             Text(report.outputURL.lastPathComponent)
                 .font(.subheadline.weight(.semibold))
                 .textSelection(.enabled)
@@ -2216,7 +2293,9 @@ struct ContentView: View {
             metric("Verification ZIP mới", "\(report.verificationAddedZIPPaths.count)")
             metric("Verification Databin mới", "\(report.verificationAddedDatabinPaths.count)")
             metric("Dung lượng RES đầu ra", formatByteCount(report.outputBytes))
-            Text("File nằm trong Tệp → Trên iPhone của tôi → AKI AOV SKIN → AKI AOV SKIN Exports. Chỉ cấu trúc ZIP và catalog đã được kiểm tra; chưa phải bản xác nhận chạy trong Liên Quân.")
+            metric("Kiểm tra cấu trúc", report.structurallyValidated ? "Đạt" : "Chưa đạt")
+            metric("Đã thử trong game", report.gameCompatibilityTested ? "Có" : "Chưa")
+            Text("File nằm trong Tệp → Trên iPhone của tôi → AKI AOV SKIN → AKI AOV SKIN Exports. Chỉ cấu trúc ZIP, payload và catalog đã được kiểm tra; chưa phải bản xác nhận chạy trong Liên Quân.")
                 .font(.caption).foregroundColor(.orange)
         }
         .panel()
