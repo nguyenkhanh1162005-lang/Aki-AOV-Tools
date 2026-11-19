@@ -28,6 +28,7 @@ final class AoVNoticeBrandingRewriterTests: XCTestCase {
             ("Aki-AOV-21Skin-Merged/Resources.zip", try Data(contentsOf: innerURL))
         ], root: root)
 
+        let sourceBytes = try Data(contentsOf: outerURL)
         let outputURL = root.appendingPathComponent("aki-branding.zip")
         let report = try AoVNoticeBrandingRewriter.rewriteArchive(
             inputURL: outerURL,
@@ -40,7 +41,7 @@ final class AoVNoticeBrandingRewriterTests: XCTestCase {
         XCTAssertEqual(report.replacementCounts["Web Mod"], 1)
         XCTAssertEqual(report.replacementCounts["Youtube"], 1)
         XCTAssertEqual(report.rewrittenAoVWrappers, 1)
-        XCTAssertEqual(try Data(contentsOf: outerURL), try Data(contentsOf: outerURL))
+        XCTAssertEqual(try Data(contentsOf: outerURL), sourceBytes)
 
         let output = try Archive(url: outputURL, accessMode: .read)
         let nestedEntry = try XCTUnwrap(output.first(where: { $0.type == .file }))
