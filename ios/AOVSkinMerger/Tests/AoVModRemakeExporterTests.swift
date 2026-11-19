@@ -67,8 +67,8 @@ final class AoVModRemakeExporterTests: XCTestCase {
             )
             resourceEntries.append(("1.64.1.12/" + databinPath, databinPayload))
 
-            let pkgPath = "Ages/Prefab_Characters/Prefab_Hero/Actor_\\(index)/CommonActions.pkg.bytes"
-            let pkgPayload = Data("common-actions-pkg-payload-\\(index)".utf8)
+            let pkgPath = "Ages/Prefab_Characters/Prefab_Hero/Actor_\(index)/CommonActions.pkg.bytes"
+            let pkgPayload = Data("common-actions-pkg-payload-\(index)".utf8)
             let pkgCRC64 = AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(pkgPayload)
             packerRows.append(
                 AoVRuntimeResourcePackInfo(
