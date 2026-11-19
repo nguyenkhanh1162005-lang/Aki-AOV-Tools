@@ -477,7 +477,7 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
 
         let examples = samples.prefix(6).map { sample in
             let mask = sample.storedChecksum ^ sample.computedCRC64WE
-            return "\\(sample.path) · stored 0x\\(String(sample.storedChecksum, radix: 16, uppercase: true)) · CRC64/WE 0x\\(String(sample.computedCRC64WE, radix: 16, uppercase: true)) · XOR 0x\\(String(mask, radix: 16, uppercase: true))"
+            return "\(sample.path) · stored 0x\(String(sample.storedChecksum, radix: 16, uppercase: true)) · CRC64/WE 0x\(String(sample.computedCRC64WE, radix: 16, uppercase: true)) · XOR 0x\(String(mask, radix: 16, uppercase: true))"
         }
 
         return AoVRuntimeChecksumCRC64FingerprintFinding(
