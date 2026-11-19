@@ -139,6 +139,7 @@ struct AoVRuntimeChecksumFingerprintReport: Sendable {
     let zipVerification: AoVRuntimeChecksumFingerprintFinding
     let databinVerification: AoVRuntimeChecksumFingerprintFinding
     let packerAssetBundlesCRC64WE: AoVRuntimeChecksumCRC64FingerprintFinding
+    let packerPkgBytesCRC64WE: AoVRuntimeChecksumCRC64FingerprintFinding
     let zipVerificationCRC64WE: AoVRuntimeChecksumCRC64FingerprintFinding
     let warning: String
 
@@ -149,6 +150,7 @@ struct AoVRuntimeChecksumFingerprintReport: Sendable {
         zipVerification: AoVRuntimeChecksumFingerprintFinding,
         databinVerification: AoVRuntimeChecksumFingerprintFinding,
         packerAssetBundlesCRC64WE: AoVRuntimeChecksumCRC64FingerprintFinding = .empty(title: "Packer AssetBundle CRC64/WE"),
+        packerPkgBytesCRC64WE: AoVRuntimeChecksumCRC64FingerprintFinding = .empty(title: "Packer PKG CRC64/WE"),
         zipVerificationCRC64WE: AoVRuntimeChecksumCRC64FingerprintFinding = .empty(title: "Verification ZIP CRC64/WE"),
         warning: String
     ) {
@@ -158,6 +160,7 @@ struct AoVRuntimeChecksumFingerprintReport: Sendable {
         self.zipVerification = zipVerification
         self.databinVerification = databinVerification
         self.packerAssetBundlesCRC64WE = packerAssetBundlesCRC64WE
+        self.packerPkgBytesCRC64WE = packerPkgBytesCRC64WE
         self.zipVerificationCRC64WE = zipVerificationCRC64WE
         self.warning = warning
     }
@@ -266,7 +269,7 @@ private struct AoVRuntimeCRC32 {
 enum AoVRuntimeChecksumFingerprintAnalyzer {
     private static let maximumEntries = 20_000
     private static let maximumSingleEntryBytes: UInt64 = 512 * 1024 * 1024
-    private static let maximumSamplesPerCatalog = 256
+    private static let maximumSamplesPerCatalog = 1_024
     private static let maximumUnityFSFingerprintEntryBytes: UInt64 = 64 * 1024 * 1024
     private static let minimumSamplesForCandidate = 8
     private static let verificationFileName = "resourceverificationinfosetall.assetbundle"
@@ -361,34 +364,48 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
             entriesByRuntimePath[runtimePath, default: []].append(entry)
         }
 
+        // In the inspected 1.64.1 catalog, AssetBundle Packer rows use
+        // crcXor = 0 as a placeholder. They are metadata-only, not a checksum
+        // fingerprint. PKG rows (pkgType 2) carry CRC64/WE values.
         let packerAssetBundleRows = packerCatalog.allResourcePackInfo.filter {
-            URL(fileURLWithPath: $0.pathInIFS).pathExtension.lowercased() == "assetbundle"
+            URL(fileURLWithPath: $0.pathInIFS).pathExtension.lowercased() == "assetbundle" &&
+                $0.crcXor != 0
         }
         let packerFinding = try fingerprint(
-            title: "Packer AssetBundle",
+            title: "Packer AssetBundle CRC32 (nonzero rows only)",
             rows: packerAssetBundleRows.map {
                 AoVRuntimeVerificationEntry(pathInIFS: $0.pathInIFS, crcXor: $0.crcXor)
             },
             archive: resourceArchive,
             entriesByRuntimePath: entriesByRuntimePath
         )
-        let zipFinding = try fingerprint(
-            title: "Verification ZIP",
-            rows: verificationCatalog.allZipVerificationInfo,
-            archive: resourceArchive,
-            entriesByRuntimePath: entriesByRuntimePath
+        let zipFinding = AoVRuntimeChecksumFingerprintAnalyzer.evaluate(
+            title: "Verification ZIP CRC32 (not authoritative)",
+            totalCatalogRows: 0,
+            samples: []
         )
         let databinFinding = try fingerprint(
-            title: "Verification Databin",
+            title: "Verification Databin CRC32",
             rows: verificationCatalog.allDatabinVerificationInfo,
             archive: resourceArchive,
             entriesByRuntimePath: entriesByRuntimePath
         )
         let packerCRC64WEFinding = try fingerprintCRC64WE(
-            title: "Packer AssetBundle CRC64/WE",
+            title: "Packer AssetBundle CRC64/WE (nonzero rows only)",
             rows: packerAssetBundleRows.map {
                 AoVRuntimeVerificationEntry(pathInIFS: $0.pathInIFS, crcXor: $0.crcXor)
             },
+            archive: resourceArchive,
+            entriesByRuntimePath: entriesByRuntimePath
+        )
+        let packerPkgRows = packerCatalog.allResourcePackInfo.filter {
+            $0.pkgType == 2 && $0.pathInIFS.lowercased().hasSuffix(".pkg.bytes")
+        }.map {
+            AoVRuntimeVerificationEntry(pathInIFS: $0.pathInIFS, crcXor: $0.crcXor)
+        }
+        let packerPkgCRC64WEFinding = try fingerprintCRC64WE(
+            title: "Packer PKG CRC64/WE",
+            rows: packerPkgRows,
             archive: resourceArchive,
             entriesByRuntimePath: entriesByRuntimePath
         )
@@ -406,8 +423,9 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
             zipVerification: zipFinding,
             databinVerification: databinFinding,
             packerAssetBundlesCRC64WE: packerCRC64WEFinding,
+            packerPkgBytesCRC64WE: packerPkgCRC64Finding,
             zipVerificationCRC64WE: zipCRC64WEFinding,
-            warning: "Có ba fingerprint tách biệt: CRC32 IEEE cho Databin, CRC64/WE cho catalog ZIP/Packer và CRC32 trên block UnityFS giải nén để đối chiếu phụ. XOR mask chỉ được xem là ứng viên khi tối thiểu 8 mẫu cùng khớp; chưa chứng minh tương thích trong game."
+            warning: "Theo catalog AoV 1.64.1.13: Verification ZIP dùng CRC64/WE trên byte tài nguyên; Verification Databin dùng CRC32 IEEE trên byte .bytes gốc; Packer PKG (pkgType 2) dùng CRC64/WE. Packer AssetBundle có crcXor=0 trong mẫu này và được giữ như metadata, không suy ra checksum từ nó. Cần kiểm chứng trên RES đích và trong game trước khi xuất RES cuối."
         )
     }
 
