@@ -4,24 +4,18 @@ import XCTest
 
 final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
     func testBuildsPackerAndVerificationChecksumCandidatesButNeverMarksExportSafe() throws {
-        let packerMask: UInt32 = 0x2468ACE0
-        let verificationMask: UInt32 = 0xA5A5F00D
-        let packerFinding = makeFinding(title: "Packer", mask: packerMask)
-        let verificationFinding = makeFinding(title: "Verification ZIP", mask: verificationMask)
-        let databinFinding = makeFinding(title: "Verification Databin", mask: 0x12345678)
-        let fingerprint = AoVRuntimeChecksumFingerprintReport(
-            baseRESName: "base-res.zip",
-            packerAssetBundles: packerFinding,
-            zipVerification: verificationFinding,
-            databinVerification: databinFinding,
-            warning: "synthetic"
+        let verificationMask: UInt64 = 0xA5A5F00D11223344
+        let fingerprint = makeReport(
+            packer: makeFinding(title: "Packer", mask: 0x2468ACE0),
+            zip: makeFinding(title: "Verification ZIP CRC32 diagnostic", mask: 0),
+            zipCRC64: makeCRC64Finding(title: "Verification ZIP CRC64/WE", mask: verificationMask)
         )
         let payload = Data("merged-assetbundle-payload".utf8)
         let result = makeMergeResult(payload: payload)
         let packerRow = AoVRuntimeResourcePackInfo(
             pathInIFS: "assetbundle/actor-731.assetbundle",
-            pkgType: 3,
-            crcXor: 111,
+            pkgType: 0,
+            crcXor: 0,
             tag: "Hero",
             flags: 512,
             resourceInfos: [
@@ -33,45 +27,33 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
         let report = try AoVModRemakeRESExportReadinessAnalyzer.buildProposals(
             baseRESName: "base-res.zip",
             assetBundleMergeResults: [result],
-            legacyPackerCatalogs: [(source: "legacy-a.zip", catalog: catalog)],
+            legacyPackerCatalogs: [(source: "base-res.zip", catalog: catalog)],
             checksumFingerprint: fingerprint
         )
 
         let proposal = try XCTUnwrap(report.proposals.first)
-        let rawCRC = AoVRuntimeChecksumFingerprintAnalyzer.crc32(payload)
+        let expectedCRC64 = AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(payload)
         XCTAssertEqual(proposal.status, .requiresExternalValidation)
-        XCTAssertEqual(proposal.rawPayloadCRC32, rawCRC)
-        XCTAssertEqual(proposal.proposedPackerEntry?.crcXor, Int64(rawCRC ^ packerMask))
-        XCTAssertEqual(proposal.proposedVerificationZIPChecksum, Int64(rawCRC ^ verificationMask))
+        XCTAssertEqual(proposal.rawPayloadCRC32, AoVRuntimeChecksumFingerprintAnalyzer.crc32(payload))
+        XCTAssertEqual(proposal.packerChecksumBasis, .preservedPackerMetadata)
+        XCTAssertEqual(proposal.proposedPackerEntry?.crcXor, 0)
+        XCTAssertEqual(
+            proposal.proposedVerificationZIPChecksum,
+            Int64(bitPattern: expectedCRC64 ^ verificationMask)
+        )
         XCTAssertEqual(proposal.proposedPackerEntry?.tag, "Hero")
         XCTAssertEqual(proposal.proposedPackerEntry?.resourceInfos, packerRow.resourceInfos)
         XCTAssertFalse(report.safeToExport)
         XCTAssertTrue(report.allChecksumsHaveCandidates)
     }
 
-    func testPackerCandidatePrefersConsistentUnityFSUncompressedCRC32() throws {
-        let unityFSMask: UInt32 = 0xA1B2C3D4
-        let verificationMask: UInt32 = 0x1234ABCD
-        let packerSamples = (0..<8).map { index -> AoVRuntimeChecksumFingerprintSample in
-            let rawCRC = UInt32(index * 103 + 17)
-            let uncompressedCRC = UInt32(index * 47 + 29)
-            return AoVRuntimeChecksumFingerprintSample(
-                path: "Packer/\(index)",
-                storedChecksum: Int64(uncompressedCRC ^ unityFSMask),
-                computedCRC32: rawCRC,
-                computedUnityFSUncompressedCRC32: uncompressedCRC
-            )
-        }
-        let packerFinding = AoVRuntimeChecksumFingerprintAnalyzer.evaluate(
-            title: "Packer",
-            totalCatalogRows: packerSamples.count,
-            samples: packerSamples
+    func testPackerAssetBundleMetadataIsPreservedAndVerificationUsesCRC64WE() throws {
+        let verificationMask: UInt64 = 0x1234ABCD5678EF90
+        let fingerprint = makeReport(
+            packer: makeFinding(title: "Packer", mask: 0),
+            zip: makeFinding(title: "Verification ZIP CRC32 diagnostic", mask: 0),
+            zipCRC64: makeCRC64Finding(title: "Verification ZIP CRC64/WE", mask: verificationMask)
         )
-        XCTAssertEqual(packerFinding.status, .inconsistent)
-        XCTAssertEqual(packerFinding.unityFSUncompressedStatus, .consistentSample)
-
-        let verificationFinding = makeFinding(title: "Verification ZIP", mask: verificationMask)
-        let fingerprint = makeReport(packer: packerFinding, zip: verificationFinding)
         let unityFS = try AoVUnityFSRepacker.repack(
             [AoVUnityFSRepackNode(path: "CAB-main", data: Data("synthetic serialized file".utf8), flags: 7)],
             formatVersion: 8,
@@ -82,8 +64,8 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
         ).data
         let metadata = AoVRuntimeResourcePackInfo(
             pathInIFS: "assetbundle/actor-731.assetbundle",
-            pkgType: 3,
-            crcXor: 99,
+            pkgType: 0,
+            crcXor: 0,
             tag: "Hero",
             flags: 512,
             resourceInfos: [AoVRuntimeResourceItem(hashCode: 731, extensionName: "assetbundle")]
@@ -92,23 +74,19 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
             baseRESName: "base-res.zip",
             assetBundleMergeResults: [makeMergeResult(payload: unityFS)],
             legacyPackerCatalogs: [
-                (source: "legacy-mod.zip", catalog: makePackerCatalog(rows: [metadata]))
+                (source: "base-res.zip", catalog: makePackerCatalog(rows: [metadata]))
             ],
             checksumFingerprint: fingerprint
         )
 
         let proposal = try XCTUnwrap(report.proposals.first)
-        let expectedUncompressedCRC = try AoVRuntimeChecksumFingerprintAnalyzer.unityFSUncompressedCRC32(unityFS)
+        let expectedCRC64 = AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(unityFS)
         XCTAssertEqual(proposal.status, .requiresExternalValidation)
-        XCTAssertEqual(proposal.packerChecksumBasis, .unityFSUncompressedCRC32)
-        XCTAssertEqual(proposal.unityFSUncompressedCRC32, expectedUncompressedCRC)
-        XCTAssertEqual(
-            proposal.proposedPackerEntry?.crcXor,
-            Int64(expectedUncompressedCRC ^ unityFSMask)
-        )
+        XCTAssertEqual(proposal.packerChecksumBasis, .preservedPackerMetadata)
+        XCTAssertEqual(proposal.proposedPackerEntry?.crcXor, 0)
         XCTAssertEqual(
             proposal.proposedVerificationZIPChecksum,
-            Int64(AoVRuntimeChecksumFingerprintAnalyzer.crc32(unityFS) ^ verificationMask)
+            Int64(bitPattern: expectedCRC64 ^ verificationMask)
         )
         XCTAssertFalse(report.safeToExport)
     }
@@ -232,13 +210,17 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
                 computedCRC32: UInt32(index)
             )
         }
-        let partial = AoVRuntimeChecksumFingerprintAnalyzer.evaluate(
-            title: "Verification ZIP",
-            totalCatalogRows: 10,
-            samples: samples,
+        let partialCRC64 = makeCRC64Finding(
+            title: "Verification ZIP CRC64/WE",
+            mask: 0,
+            totalRows: 10,
             missingPaths: 2
         )
-        let fingerprint = makeReport(packer: stable, zip: partial)
+        let fingerprint = makeReport(
+            packer: stable,
+            zip: makeFinding(title: "Verification ZIP CRC32 diagnostic", mask: 0),
+            zipCRC64: partialCRC64
+        )
 
         let row = AoVRuntimeResourcePackInfo(
             pathInIFS: "assetbundle/actor-731.assetbundle",
@@ -258,7 +240,7 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
         let proposal = try XCTUnwrap(report.proposals.first)
         XCTAssertEqual(proposal.status, .blocked)
         XCTAssertTrue(proposal.reasons.contains {
-            $0.contains("Verification ZIP CRC32/XOR fingerprint")
+            $0.contains("Verification ZIP CRC64/WE fingerprint")
         })
     }
 
@@ -357,11 +339,36 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
         )
     }
 
+    private func makeCRC64Finding(
+        title: String,
+        mask: UInt64,
+        totalRows: Int = 8,
+        missingPaths: Int = 0
+    ) -> AoVRuntimeChecksumCRC64FingerprintFinding {
+        let samples = (0..<8).map { index -> AoVRuntimeChecksumCRC64FingerprintSample in
+            let computed = AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(
+                Data("\(title)-sample-\(index)".utf8)
+            )
+            return AoVRuntimeChecksumCRC64FingerprintSample(
+                path: "\(title)/\(index)",
+                storedChecksum: computed ^ mask,
+                computedCRC64WE: computed
+            )
+        }
+        return AoVRuntimeChecksumFingerprintAnalyzer.evaluateCRC64WE(
+            title: title,
+            totalCatalogRows: totalRows,
+            samples: samples,
+            missingPaths: missingPaths
+        )
+    }
+
     private func makeReport(
         packer: AoVRuntimeChecksumFingerprintFinding,
         zip: AoVRuntimeChecksumFingerprintFinding,
         name: String = "base-res.zip",
-        fingerprint: String? = nil
+        fingerprint: String? = nil,
+        zipCRC64: AoVRuntimeChecksumCRC64FingerprintFinding? = nil
     ) -> AoVRuntimeChecksumFingerprintReport {
         AoVRuntimeChecksumFingerprintReport(
             baseRESName: name,
@@ -369,6 +376,10 @@ final class AoVModRemakeRESExportReadinessAnalyzerTests: XCTestCase {
             packerAssetBundles: packer,
             zipVerification: zip,
             databinVerification: makeFinding(title: "Databin", mask: 3),
+            zipVerificationCRC64WE: zipCRC64 ?? makeCRC64Finding(
+                title: "Verification ZIP CRC64/WE",
+                mask: 0
+            ),
             warning: "synthetic"
         )
     }
