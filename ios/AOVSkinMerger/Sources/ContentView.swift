@@ -2101,6 +2101,7 @@ struct ContentView: View {
         }
         isMerging = true
         mergeReport = nil
+        noticeRewriteReport = nil
         let urls = selectedURLs
         Task {
             do {
