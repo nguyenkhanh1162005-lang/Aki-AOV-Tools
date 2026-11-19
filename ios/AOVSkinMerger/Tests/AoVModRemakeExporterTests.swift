@@ -331,6 +331,54 @@ final class AoVModRemakeExporterTests: XCTestCase {
         )
     }
 
+    func testCandidateExporterRejectsLooseResourceZIPMissingReferencedIFS() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Missing-IFS-Guard-\\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let baseURL = root.appendingPathComponent("loose-res.zip")
+        let manifest = Data(#"{"filelist":[{"filename":"resource.ifs","filesize":120399757}]}"#.utf8)
+        try makeArchive(baseURL, entries: [
+            ("1.64.1/filelist.json", manifest),
+            ("1.64.1/resource.ifs.res", Data(repeating: 0, count: 128))
+        ], root: root)
+
+        XCTAssertThrowsError(
+            try AoVModRemakeExporter.validateBaseRESContainerCanBeRepackedAsCandidate(baseURL)
+        ) { error in
+            guard let exporterError = error as? AoVModRemakeExporterError,
+                  case .catalogMergeFailed(let reason) = exporterError else {
+                return XCTFail("Expected an IFS container guard failure, got \\(error)")
+            }
+            XCTAssertTrue(reason.contains("resource.ifs"))
+            XCTAssertTrue(reason.contains("không chứa file IFS chính"))
+        }
+    }
+
+    func testCandidateExporterRejectsPresentIFSUntilValidatedIFSWriterExists() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-IFS-Writer-Guard-\\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let baseURL = root.appendingPathComponent("ifs-res.zip")
+        let ifsBytes = Data([0x49, 0x46, 0x53, 0x00])
+        let manifest = Data(#"{"filelist":[{"filename":"resource.ifs","filesize":4}]}"#.utf8)
+        try makeArchive(baseURL, entries: [
+            ("1.64.1/filelist.json", manifest),
+            ("1.64.1/resource.ifs", ifsBytes)
+        ], root: root)
+
+        XCTAssertThrowsError(
+            try AoVModRemakeExporter.validateBaseRESContainerCanBeRepackedAsCandidate(baseURL)
+        ) { error in
+            guard let exporterError = error as? AoVModRemakeExporterError,
+                  case .catalogMergeFailed(let reason) = exporterError else {
+                return XCTFail("Expected an unimplemented IFS writer guard failure, got \\(error)")
+            }
+            XCTAssertTrue(reason.contains("chưa có bộ ghi IFS/.ifs.res"))
+        }
+    }
+
     func testCandidateRESExportFiltersUnrelatedCatalogRowsAndKeepsPackerDependencyLinks() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-Candidate-RES-Export-Test-\(UUID().uuidString)", isDirectory: true)
