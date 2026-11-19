@@ -333,7 +333,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
     func testCandidateExporterRejectsLooseResourceZIPMissingReferencedIFS() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AKI-Missing-IFS-Guard-\\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("AKI-Missing-IFS-Guard-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let baseURL = root.appendingPathComponent("loose-res.zip")
@@ -348,7 +348,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
         ) { error in
             guard let exporterError = error as? AoVModRemakeExporterError,
                   case .catalogMergeFailed(let reason) = exporterError else {
-                return XCTFail("Expected an IFS container guard failure, got \\(error)")
+                return XCTFail("Expected an IFS container guard failure, got \(error)")
             }
             XCTAssertTrue(reason.contains("resource.ifs"))
             XCTAssertTrue(reason.contains("không chứa file IFS chính"))
@@ -357,7 +357,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
     func testCandidateExporterRejectsPresentIFSUntilValidatedIFSWriterExists() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AKI-IFS-Writer-Guard-\\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("AKI-IFS-Writer-Guard-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let baseURL = root.appendingPathComponent("ifs-res.zip")
@@ -373,7 +373,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
         ) { error in
             guard let exporterError = error as? AoVModRemakeExporterError,
                   case .catalogMergeFailed(let reason) = exporterError else {
-                return XCTFail("Expected an unimplemented IFS writer guard failure, got \\(error)")
+                return XCTFail("Expected an unimplemented IFS writer guard failure, got \(error)")
             }
             XCTAssertTrue(reason.contains("chưa có bộ ghi IFS/.ifs.res"))
         }
