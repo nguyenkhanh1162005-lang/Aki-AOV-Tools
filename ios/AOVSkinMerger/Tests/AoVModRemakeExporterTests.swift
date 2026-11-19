@@ -129,6 +129,9 @@ final class AoVModRemakeExporterTests: XCTestCase {
         XCTAssertEqual(report.zipVerificationCRC64WE.evaluatedSamples, 16)
         XCTAssertEqual(report.zipVerificationCRC64WE.constantXORMask, zipMask)
         XCTAssertEqual(report.zipVerificationCRC64WE.exactCRC64WEMatches, 0)
+        XCTAssertTrue(report.zipVerificationCRC64WE.examples.contains {
+            $0.contains("Images/UI/icon-0.png") && !$0.contains("\\(")
+        })
 
         XCTAssertEqual(report.packerPkgBytesCRC64WE.status, .consistentSample)
         XCTAssertEqual(report.packerPkgBytesCRC64WE.evaluatedSamples, 8)
