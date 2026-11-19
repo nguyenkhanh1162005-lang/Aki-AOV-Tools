@@ -423,7 +423,7 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
             zipVerification: zipFinding,
             databinVerification: databinFinding,
             packerAssetBundlesCRC64WE: packerCRC64WEFinding,
-            packerPkgBytesCRC64WE: packerPkgCRC64Finding,
+            packerPkgBytesCRC64WE: packerPkgCRC64WEFinding,
             zipVerificationCRC64WE: zipCRC64WEFinding,
             warning: "Theo catalog AoV 1.64.1.13: Verification ZIP dùng CRC64/WE trên byte tài nguyên; Verification Databin dùng CRC32 IEEE trên byte .bytes gốc; Packer PKG (pkgType 2) dùng CRC64/WE. Packer AssetBundle có crcXor=0 trong mẫu này và được giữ như metadata, không suy ra checksum từ nó. Cần kiểm chứng trên RES đích và trong game trước khi xuất RES cuối."
         )
