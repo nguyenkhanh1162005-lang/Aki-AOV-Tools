@@ -25,6 +25,43 @@ final class AoVRuntimeChecksumFingerprintAnalyzerTests: XCTestCase {
         XCTAssertEqual(finding.constantUnityFSUncompressedXORMask, mask)
     }
 
+    func testCRC64WEMatchesKnownVector() {
+        XCTAssertEqual(
+            AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(Data("123456789".utf8)),
+            0x62EC59E3F1A4F00A
+        )
+    }
+
+    func testCRC64WEFingerprintRequiresEightConsistentSamplesAndFindsExactMatches() {
+        let samples = (0..<8).map { index -> AoVRuntimeChecksumCRC64FingerprintSample in
+            let computed = AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(
+                Data("AoV-ZIP-entry-\\(index)".utf8)
+            )
+            return AoVRuntimeChecksumCRC64FingerprintSample(
+                path: "Packages/\\(index).pkg.bytes",
+                storedChecksum: computed,
+                computedCRC64WE: computed
+            )
+        }
+        let finding = AoVRuntimeChecksumFingerprintAnalyzer.evaluateCRC64WE(
+            title: "Verification ZIP CRC64/WE",
+            totalCatalogRows: samples.count,
+            samples: samples
+        )
+        XCTAssertEqual(finding.status, .consistentSample)
+        XCTAssertEqual(finding.evaluatedSamples, 8)
+        XCTAssertEqual(finding.constantXORMask, 0)
+        XCTAssertEqual(finding.exactCRC64WEMatches, 8)
+
+        let insufficient = AoVRuntimeChecksumFingerprintAnalyzer.evaluateCRC64WE(
+            title: "Verification ZIP CRC64/WE",
+            totalCatalogRows: 7,
+            samples: Array(samples.prefix(7))
+        )
+        XCTAssertEqual(insufficient.status, .insufficientSamples)
+        XCTAssertNil(insufficient.constantXORMask)
+    }
+
     func testCRC32MatchesIEEEKnownVector() {
         XCTAssertEqual(
             AoVRuntimeChecksumFingerprintAnalyzer.crc32(Data("123456789".utf8)),
