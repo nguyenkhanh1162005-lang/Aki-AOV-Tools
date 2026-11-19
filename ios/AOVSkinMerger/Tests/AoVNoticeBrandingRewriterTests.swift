@@ -38,8 +38,8 @@ final class AoVNoticeBrandingRewriterTests: XCTestCase {
         XCTAssertFalse(report.gameTested)
         XCTAssertEqual(report.replacementCounts["KIANA MOD AOV"], 1)
         XCTAssertEqual(report.replacementCounts["Mod được tạo bởi youtuber KIANA MOD AOV"], 1)
-        XCTAssertEqual(report.replacementCounts["Web Mod"], 1)
-        XCTAssertEqual(report.replacementCounts["Youtube"], 1)
+        XCTAssertNil(report.replacementCounts["Web Mod"])
+        XCTAssertNil(report.replacementCounts["Youtube"])
         XCTAssertEqual(report.rewrittenAoVWrappers, 1)
         XCTAssertEqual(try Data(contentsOf: outerURL), sourceBytes)
 
@@ -64,8 +64,8 @@ final class AoVNoticeBrandingRewriterTests: XCTestCase {
         XCTAssertTrue(rewrittenText.contains("AKI MOD AOV"))
         XCTAssertTrue(rewrittenText.contains("Mod được gộp bởi AKI MOD AOV"))
         XCTAssertFalse(rewrittenText.contains("KIANA MOD AOV"))
-        XCTAssertFalse(rewrittenText.contains("Web Mod"))
-        XCTAssertFalse(rewrittenText.contains("Youtube"))
+        XCTAssertTrue(rewrittenText.contains("Web Mod"))
+        XCTAssertTrue(rewrittenText.contains("Youtube"))
 
         let opaqueURL = root.appendingPathComponent("opaque.assetbundle")
         _ = try nested.extract(opaqueEntry, to: opaqueURL, bufferSize: 64 * 1024)
@@ -129,6 +129,33 @@ final class AoVNoticeBrandingRewriterTests: XCTestCase {
             _ = try archive.extract(entry, to: extracted, bufferSize: 64 * 1024)
             XCTAssertEqual(try Data(contentsOf: extracted), payload)
         }
+    }
+
+    func testDoesNotRewriteMSESStructuredPayloadEvenWhenItContainsBrandText() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Notice-MSES-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        var mses = Data("MSES".utf8)
+        mses.append(Data(repeating: 0, count: 8))
+        mses.append(Data(repeating: 0x41, count: 128))
+        mses.append(Data("KIANA MOD AOV".utf8))
+        let wrapped = try AoVBytesDecoder.encodeResource(
+            mses,
+            resourceName: "ResNotifyConfig.bytes",
+            wrapperMode: "aes"
+        )
+        let input = root.appendingPathComponent("source.zip")
+        try makeArchive(input, entries: [
+            ("Databin/Client/Global/ResNotifyConfig.bytes", wrapped),
+            ("Resources/LoginNotice.lua", Data("KIANA MOD AOV".utf8))
+        ], root: root)
+        let output = root.appendingPathComponent("output.zip")
+
+        let report = try AoVNoticeBrandingRewriter.rewriteArchive(inputURL: input, outputURL: output)
+        XCTAssertEqual(report.replacementTotal, 1)
+        XCTAssertFalse(report.modifiedResources.contains { $0.contains("ResNotifyConfig.bytes") })
     }
 
     func testNoMatchingTextDoesNotCreateOutput() throws {
