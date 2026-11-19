@@ -80,6 +80,7 @@ enum AoVNoticeBrandingRewriter {
     ]
     private static let protectedPathMarkers = [
         "commercializenotify",
+        "ifix",
         "reskillbillboardcfg",
         "resbillboardcfg",
         "resbillboardskincfg",
@@ -88,9 +89,7 @@ enum AoVNoticeBrandingRewriter {
     ]
     private static let replacements: [(String, String)] = [
         ("Mod được tạo bởi youtuber KIANA MOD AOV", "Mod được gộp bởi AKI MOD AOV"),
-        ("KIANA MOD AOV", "AKI MOD AOV"),
-        ("Web Mod", ""),
-        ("Youtube", "")
+        ("KIANA MOD AOV", "AKI MOD AOV")
     ]
 
     private struct RewriteState {
@@ -278,6 +277,10 @@ enum AoVNoticeBrandingRewriter {
             } catch {
                 throw AoVNoticeBrandingRewriteError.wrappedResourceDecodeFailed(logicalPath)
             }
+
+            // These formats are structured game data, not editable text resources.
+            // Even if a payload contains many printable strings, never rewrite them.
+            if isKnownStructuredBinary(decoded.data) { return nil }
 
             var rewrittenPayload = decoded.data
             var changed = false
@@ -474,6 +477,14 @@ enum AoVNoticeBrandingRewriter {
     private static func isProtectedPath(_ path: String) -> Bool {
         let normalized = path.replacingOccurrences(of: "\\", with: "/").lowercased()
         return protectedPathMarkers.contains(where: normalized.contains)
+    }
+
+    private static func isKnownStructuredBinary(_ data: Data) -> Bool {
+        [
+            Data("MSES".utf8),
+            Data("UnityFS".utf8),
+            Data("BKHD".utf8)
+        ].contains { data.starts(with: $0) }
     }
 
     private static func looksLikeZIP(_ data: Data) -> Bool {
