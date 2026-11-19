@@ -652,7 +652,7 @@ struct ContentView: View {
                 .font(.subheadline.weight(.semibold))
             metric("Dòng catalog · mẫu tính được",
                    "\(finding.totalCatalogRows) · \(finding.evaluatedSamples)")
-            metric("Không tìm thấy · path trùng · value ngoài 32-bit",
+            metric("Không tìm thấy · path trùng · value không hỗ trợ",
                    "\(finding.missingPaths) · \(finding.ambiguousPaths) · \(finding.unsupportedValues)")
             metric("XOR mask nhất quán", finding.maskDescription)
             metric("CRC32 khớp trực tiếp (byte ZIP)", "\(finding.exactCRC32Matches)")
