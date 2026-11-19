@@ -576,9 +576,11 @@ struct ContentView: View {
             Label("Khảo sát checksum / Verification", systemImage: "number")
                 .font(.headline)
             metric("RES nền", report.baseRESName)
-            checksumFindingView(report.packerAssetBundles)
+            metric("Packer AssetBundle", "Giữ crcXor metadata, không suy checksum từ placeholder 0")
             Divider().overlay(.white.opacity(0.08))
-            checksumFindingView(report.zipVerification)
+            checksumCRC64FindingView(report.packerPkgBytesCRC64WE)
+            Divider().overlay(.white.opacity(0.08))
+            checksumCRC64FindingView(report.zipVerificationCRC64WE)
             Divider().overlay(.white.opacity(0.08))
             checksumFindingView(report.databinVerification)
             Text(report.warning)
@@ -596,8 +598,9 @@ struct ContentView: View {
             metric("CAB candidate", "\(report.proposalCount)")
             metric("Có đủ candidate để kiểm chứng", "\(report.candidateCount)")
             metric("Bị chặn do thiếu hoặc mâu thuẫn", "\(report.blockedCount)")
-            metric("Packer XOR mask", report.packerXORMask.map { String(format: "0x%08X", $0) } ?? "Chưa xác định")
-            metric("Verification ZIP XOR mask", report.verificationZIPXORMask.map { String(format: "0x%08X", $0) } ?? "Chưa xác định")
+            metric("Packer AssetBundle checksum", "Giữ nguyên giá trị catalog nguồn")
+            metric("Verification ZIP CRC64/WE XOR mask",
+                   report.verificationZIPCRC64WEXORMask.map { String(format: "0x%016llX", $0) } ?? "Chưa xác định")
 
             ForEach(Array(report.proposals.enumerated()), id: \.offset) { _, proposal in
                 VStack(alignment: .leading, spacing: 6) {
@@ -616,13 +619,13 @@ struct ContentView: View {
                         metric("CRC32 byte CAB cuối", String(format: "0x%08X", rawCRC))
                     }
                     if let packer = proposal.proposedPackerEntry {
-                        metric("Packer crcXor candidate", String(format: "0x%08X", UInt32(truncatingIfNeeded: packer.crcXor)))
+                        metric("Packer crcXor được giữ", String(format: "0x%016llX", UInt64(bitPattern: packer.crcXor)))
                         metric("Packer tag · pkgType · flags",
                                "\(packer.tag) · \(packer.pkgType) · \(packer.flags)")
                     }
                     if let verification = proposal.proposedVerificationZIPChecksum {
-                        metric("Verification ZIP candidate",
-                               String(format: "0x%08X", UInt32(truncatingIfNeeded: verification)))
+                        metric("Verification ZIP CRC64/WE candidate",
+                               String(format: "0x%016llX", UInt64(bitPattern: verification)))
                     }
                     ForEach(proposal.reasons, id: \.self) { reason in
                         Text(reason)
@@ -666,6 +669,33 @@ struct ContentView: View {
                 .foregroundColor(checksumFindingColor(finding.status))
             if finding.sampleLimitHit {
                 Text("Đã giới hạn số mẫu để tránh quét toàn bộ hàng chục nghìn file.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            ForEach(finding.examples, id: \.self) { example in
+                Text(example)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private func checksumCRC64FindingView(_ finding: AoVRuntimeChecksumCRC64FingerprintFinding) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(finding.title)
+                .font(.subheadline.weight(.semibold))
+            metric("Dòng catalog · mẫu tính được",
+                   "\(finding.totalCatalogRows) · \(finding.evaluatedSamples)")
+            metric("Không tìm thấy · path trùng · value vượt giới hạn",
+                   "\(finding.missingPaths) · \(finding.ambiguousPaths) · \(finding.unsupportedValues)")
+            metric("CRC64/WE XOR mask", finding.maskDescription)
+            metric("CRC64/WE khớp trực tiếp", "\(finding.exactCRC64WEMatches)")
+            Text(finding.statusDescription)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(checksumFindingColor(finding.status))
+            if finding.sampleLimitHit {
+                Text("Đã giới hạn số mẫu để tránh quét quá nhiều tài nguyên.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
