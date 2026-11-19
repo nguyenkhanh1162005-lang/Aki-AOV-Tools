@@ -383,7 +383,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let baseURL = root.appendingPathComponent("loose-res.zip")
-        let manifest = Data(#"{"filelist":[{"filename":"resource.ifs","filesize":120399757}]}"#.utf8)
+        let manifest = Data(#"{"filelist":[{"filename":"resource.ifs","filesize":120399757,"cfilesize":448337,"curl":"https://cdn.example/resource.ifs.cures"}]}"#.utf8)
         try makeArchive(baseURL, entries: [
             ("1.64.1/filelist.json", manifest),
             ("1.64.1/resource.ifs.res", Data(repeating: 0, count: 128))
@@ -398,6 +398,9 @@ final class AoVModRemakeExporterTests: XCTestCase {
             }
             XCTAssertTrue(reason.contains("resource.ifs"))
             XCTAssertTrue(reason.contains("không chứa file IFS chính"))
+            XCTAssertTrue(reason.contains("120399757"))
+            XCTAssertTrue(reason.contains("resource.ifs.cures"))
+            XCTAssertTrue(reason.contains("448337"))
         }
     }
 
