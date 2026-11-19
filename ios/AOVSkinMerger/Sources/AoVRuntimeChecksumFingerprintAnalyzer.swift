@@ -87,13 +87,80 @@ struct AoVRuntimeChecksumFingerprintFinding: Sendable {
     }
 }
 
+struct AoVRuntimeChecksumCRC64FingerprintSample: Sendable {
+    let path: String
+    let storedChecksum: UInt64
+    let computedCRC64WE: UInt64
+}
+
+struct AoVRuntimeChecksumCRC64FingerprintFinding: Sendable {
+    let title: String
+    let totalCatalogRows: Int
+    let evaluatedSamples: Int
+    let missingPaths: Int
+    let ambiguousPaths: Int
+    let unsupportedValues: Int
+    let sampleLimitHit: Bool
+    let distinctXORMaskCount: Int
+    let constantXORMask: UInt64?
+    let exactCRC64WEMatches: Int
+    let status: AoVRuntimeChecksumFingerprintStatus
+    let examples: [String]
+
+    var maskDescription: String {
+        guard let constantXORMask else { return "Không có CRC64/WE XOR mask nhất quán" }
+        return String(format: "0x%016llX", constantXORMask)
+    }
+
+    var statusDescription: String {
+        switch status {
+        case .insufficientSamples: return "Chưa đủ mẫu để suy luận CRC64/WE"
+        case .consistentSample: return "Mẫu CRC64/WE đầy đủ có cùng XOR mask"
+        case .partialConsistentSample: return "Mẫu CRC64/WE nhất quán nhưng còn thiếu dữ liệu"
+        case .inconsistent: return "Không có CRC64/WE XOR mask chung"
+        }
+    }
+
+    static func empty(title: String) -> AoVRuntimeChecksumCRC64FingerprintFinding {
+        AoVRuntimeChecksumCRC64FingerprintFinding(
+            title: title, totalCatalogRows: 0, evaluatedSamples: 0,
+            missingPaths: 0, ambiguousPaths: 0, unsupportedValues: 0,
+            sampleLimitHit: false, distinctXORMaskCount: 0,
+            constantXORMask: nil, exactCRC64WEMatches: 0,
+            status: .insufficientSamples, examples: []
+        )
+    }
+}
+
 struct AoVRuntimeChecksumFingerprintReport: Sendable {
     let baseRESName: String
     var baseRESFingerprint: String? = nil
     let packerAssetBundles: AoVRuntimeChecksumFingerprintFinding
     let zipVerification: AoVRuntimeChecksumFingerprintFinding
     let databinVerification: AoVRuntimeChecksumFingerprintFinding
+    let packerAssetBundlesCRC64WE: AoVRuntimeChecksumCRC64FingerprintFinding
+    let zipVerificationCRC64WE: AoVRuntimeChecksumCRC64FingerprintFinding
     let warning: String
+
+    init(
+        baseRESName: String,
+        baseRESFingerprint: String? = nil,
+        packerAssetBundles: AoVRuntimeChecksumFingerprintFinding,
+        zipVerification: AoVRuntimeChecksumFingerprintFinding,
+        databinVerification: AoVRuntimeChecksumFingerprintFinding,
+        packerAssetBundlesCRC64WE: AoVRuntimeChecksumCRC64FingerprintFinding = .empty(title: "Packer AssetBundle CRC64/WE"),
+        zipVerificationCRC64WE: AoVRuntimeChecksumCRC64FingerprintFinding = .empty(title: "Verification ZIP CRC64/WE"),
+        warning: String
+    ) {
+        self.baseRESName = baseRESName
+        self.baseRESFingerprint = baseRESFingerprint
+        self.packerAssetBundles = packerAssetBundles
+        self.zipVerification = zipVerification
+        self.databinVerification = databinVerification
+        self.packerAssetBundlesCRC64WE = packerAssetBundlesCRC64WE
+        self.zipVerificationCRC64WE = zipVerificationCRC64WE
+        self.warning = warning
+    }
 
     var requiresExternalValidation: Bool { true }
 }
@@ -136,6 +203,36 @@ enum AoVRuntimeChecksumFingerprintError: LocalizedError {
         case .tooManyEntries:
             return "RES có quá nhiều file để khảo sát checksum an toàn."
         }
+    }
+}
+
+private struct AoVRuntimeCRC64WE {
+    private static let polynomial: UInt64 = 0x42F0E1EBA9EA3693
+    private static let table: [UInt64] = (0..<256).map { value in
+        var crc = UInt64(value) << 56
+        for _ in 0..<8 {
+            crc = (crc & 0x8000_0000_0000_0000) != 0
+                ? (crc << 1) ^ polynomial
+                : crc << 1
+        }
+        return crc
+    }
+
+    private var state: UInt64 = 0xFFFF_FFFF_FFFF_FFFF
+
+    mutating func update(_ data: Data) {
+        for byte in data {
+            let index = Int(((state >> 56) ^ UInt64(byte)) & 0xFF)
+            state = Self.table[index] ^ (state << 8)
+        }
+    }
+
+    var value: UInt64 { state ^ 0xFFFF_FFFF_FFFF_FFFF }
+
+    static func checksum(_ data: Data) -> UInt64 {
+        var crc = AoVRuntimeCRC64WE()
+        crc.update(data)
+        return crc.value
     }
 }
 
@@ -287,6 +384,20 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
             archive: resourceArchive,
             entriesByRuntimePath: entriesByRuntimePath
         )
+        let packerCRC64WEFinding = try fingerprintCRC64WE(
+            title: "Packer AssetBundle CRC64/WE",
+            rows: packerAssetBundleRows.map {
+                AoVRuntimeVerificationEntry(pathInIFS: $0.pathInIFS, crcXor: $0.crcXor)
+            },
+            archive: resourceArchive,
+            entriesByRuntimePath: entriesByRuntimePath
+        )
+        let zipCRC64WEFinding = try fingerprintCRC64WE(
+            title: "Verification ZIP CRC64/WE",
+            rows: verificationCatalog.allZipVerificationInfo,
+            archive: resourceArchive,
+            entriesByRuntimePath: entriesByRuntimePath
+        )
 
         return AoVRuntimeChecksumFingerprintReport(
             baseRESName: baseRESURL.lastPathComponent,
@@ -294,7 +405,9 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
             packerAssetBundles: packerFinding,
             zipVerification: zipFinding,
             databinVerification: databinFinding,
-            warning: "Có hai phép đo tách biệt: CRC32 IEEE trên byte ZIP thô và, với AssetBundle UnityFS nhỏ hơn 64 MiB, CRC32 trên luồng block đã giải nén. XOR mask chỉ là giả thuyết từ mẫu RES; không tự động dùng cho payload đã sửa và chưa chứng minh tương thích trong game."
+            packerAssetBundlesCRC64WE: packerCRC64WEFinding,
+            zipVerificationCRC64WE: zipCRC64WEFinding,
+            warning: "Có ba fingerprint tách biệt: CRC32 IEEE cho Databin, CRC64/WE cho catalog ZIP/Packer và CRC32 trên block UnityFS giải nén để đối chiếu phụ. XOR mask chỉ được xem là ứng viên khi tối thiểu 8 mẫu cùng khớp; chưa chứng minh tương thích trong game."
         )
     }
 
@@ -312,6 +425,57 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
 
     static func crc32(_ data: Data) -> UInt32 {
         AoVRuntimeCRC32.checksum(data)
+    }
+
+    static func crc64WE(_ data: Data) -> UInt64 {
+        AoVRuntimeCRC64WE.checksum(data)
+    }
+
+    static func evaluateCRC64WE(
+        title: String,
+        totalCatalogRows: Int,
+        samples: [AoVRuntimeChecksumCRC64FingerprintSample],
+        missingPaths: Int = 0,
+        ambiguousPaths: Int = 0,
+        unsupportedValues: Int = 0,
+        sampleLimitHit: Bool = false
+    ) -> AoVRuntimeChecksumCRC64FingerprintFinding {
+        let masks = samples.map { $0.storedChecksum ^ $0.computedCRC64WE }
+        let distinctMasks = Set(masks)
+        let constantMask = samples.count >= minimumSamplesForCandidate && distinctMasks.count == 1
+            ? distinctMasks.first : nil
+        let exactMatches = samples.filter { $0.storedChecksum == $0.computedCRC64WE }.count
+
+        let status: AoVRuntimeChecksumFingerprintStatus
+        if samples.count < minimumSamplesForCandidate {
+            status = .insufficientSamples
+        } else if distinctMasks.count > 1 {
+            status = .inconsistent
+        } else if missingPaths > 0 || ambiguousPaths > 0 || unsupportedValues > 0 || sampleLimitHit {
+            status = .partialConsistentSample
+        } else {
+            status = .consistentSample
+        }
+
+        let examples = samples.prefix(6).map { sample in
+            let mask = sample.storedChecksum ^ sample.computedCRC64WE
+            return "\\(sample.path) · stored 0x\\(String(sample.storedChecksum, radix: 16, uppercase: true)) · CRC64/WE 0x\\(String(sample.computedCRC64WE, radix: 16, uppercase: true)) · XOR 0x\\(String(mask, radix: 16, uppercase: true))"
+        }
+
+        return AoVRuntimeChecksumCRC64FingerprintFinding(
+            title: title,
+            totalCatalogRows: totalCatalogRows,
+            evaluatedSamples: samples.count,
+            missingPaths: missingPaths,
+            ambiguousPaths: ambiguousPaths,
+            unsupportedValues: unsupportedValues,
+            sampleLimitHit: sampleLimitHit,
+            distinctXORMaskCount: distinctMasks.count,
+            constantXORMask: constantMask,
+            exactCRC64WEMatches: exactMatches,
+            status: status,
+            examples: examples
+        )
     }
 
     static func unityFSUncompressedCRC32(_ data: Data) throws -> UInt32 {
@@ -391,6 +555,69 @@ enum AoVRuntimeChecksumFingerprintAnalyzer {
             status: status,
             examples: examples
         )
+    }
+
+    private static func fingerprintCRC64WE(
+        title: String,
+        rows: [AoVRuntimeVerificationEntry],
+        archive: Archive,
+        entriesByRuntimePath: [String: [Entry]]
+    ) throws -> AoVRuntimeChecksumCRC64FingerprintFinding {
+        let distinctRows = Dictionary(grouping: rows, by: \.pathInIFS)
+        let orderedPaths = distinctRows.keys.sorted()
+        let sampledPaths = Array(orderedPaths.prefix(maximumSamplesPerCatalog))
+        let sampleLimitHit = orderedPaths.count > sampledPaths.count
+        var samples: [AoVRuntimeChecksumCRC64FingerprintSample] = []
+        var missingPaths = 0
+        var ambiguousPaths = 0
+        var unsupportedValues = 0
+
+        for path in sampledPaths {
+            guard let catalogRows = distinctRows[path], catalogRows.count == 1,
+                  let row = catalogRows.first else {
+                ambiguousPaths += 1
+                continue
+            }
+            let normalizedIFSPath = normalizedPath(path)
+            guard let matches = entriesByRuntimePath[normalizedIFSPath], !matches.isEmpty else {
+                missingPaths += 1
+                continue
+            }
+            guard matches.count == 1, let entry = matches.first else {
+                ambiguousPaths += 1
+                continue
+            }
+            guard entry.uncompressedSize <= maximumSingleEntryBytes else {
+                unsupportedValues += 1
+                continue
+            }
+            let computed = try crc64WE(of: entry, in: archive)
+            samples.append(
+                AoVRuntimeChecksumCRC64FingerprintSample(
+                    path: path,
+                    storedChecksum: UInt64(bitPattern: row.crcXor),
+                    computedCRC64WE: computed
+                )
+            )
+        }
+
+        return evaluateCRC64WE(
+            title: title,
+            totalCatalogRows: rows.count,
+            samples: samples,
+            missingPaths: missingPaths,
+            ambiguousPaths: ambiguousPaths,
+            unsupportedValues: unsupportedValues,
+            sampleLimitHit: sampleLimitHit
+        )
+    }
+
+    private static func crc64WE(of entry: Entry, in archive: Archive) throws -> UInt64 {
+        var crc = AoVRuntimeCRC64WE()
+        _ = try archive.extract(entry, bufferSize: 64 * 1024) { chunk in
+            crc.update(chunk)
+        }
+        return crc.value
     }
 
     private static func fingerprint(
