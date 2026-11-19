@@ -703,11 +703,20 @@ enum AoVModRemakeExporter {
             )
         }
 
-        let ifsRecords = fileList.compactMap { record -> (name: String, size: UInt64?)? in
+        let ifsRecords = fileList.compactMap { record -> (
+            name: String,
+            size: UInt64?,
+            curesName: String,
+            curesSize: UInt64?
+        )? in
             guard let name = record["filename"] as? String,
                   name.lowercased().hasSuffix(".ifs") else { return nil }
             let rawSize = record["filesize"] as? NSNumber
-            return (name, rawSize?.uint64Value)
+            let rawCuresSize = record["cfilesize"] as? NSNumber
+            let curesURL = record["curl"] as? String
+            let curesName = curesURL.flatMap { URL(string: $0)?.lastPathComponent }
+                ?? (name + ".cures")
+            return (name, rawSize?.uint64Value, curesName, rawCuresSize?.uint64Value)
         }
         guard !ifsRecords.isEmpty else {
             throw AoVModRemakeExporterError.catalogMergeFailed(
@@ -731,9 +740,10 @@ enum AoVModRemakeExporter {
                     $0.path.caseInsensitiveCompare(expectedPath) == .orderedSame
             }
             guard let ifsEntry else {
-                let expectedSize = record.size.map { " (manifest khai báo \($0) byte)" } ?? ""
+                let expectedSize = record.size.map { " (\($0) byte)" } ?? ""
+                let curesSize = record.curesSize.map { " (\($0) byte)" } ?? ""
                 throw AoVModRemakeExporterError.catalogMergeFailed(
-                    "filelist.json tham chiếu IFS \(name)\(expectedSize) nhưng ZIP không chứa file IFS chính. Có .ifs.res/.cures riêng không đủ để tái dựng IFS; từ chối xuất ZIP rời như RES dùng trong game."
+                    "filelist.json tham chiếu IFS \(name)\(expectedSize) và companion \(record.curesName)\(curesSize), nhưng ZIP không chứa file IFS chính. .ifs.res chỉ là sidecar/index, không thay thế được IFS payload; từ chối xuất ZIP rời như RES dùng trong game."
                 )
             }
             let expectedSize = record.size
@@ -742,8 +752,9 @@ enum AoVModRemakeExporter {
                     "IFS \(name) có dung lượng \(ifsEntry.uncompressedSize), khác manifest \(expectedSize) byte."
                 )
             }
+            let curesSize = record.curesSize.map { " (\($0) byte)" } ?? ""
             throw AoVModRemakeExporterError.catalogMergeFailed(
-                "IFS \(name) có trong ZIP nhưng AKI chưa có bộ ghi IFS/.ifs.res đã xác minh để cập nhật đồng bộ. Chưa thể xuất RES dùng trong game."
+                "IFS \(name) có trong ZIP, nhưng companion \(record.curesName)\(curesSize) và metadata IFS/.ifs.res chưa được cập nhật bởi bộ ghi đã xác minh. Chưa thể xuất RES dùng trong game."
             )
         }
     }
