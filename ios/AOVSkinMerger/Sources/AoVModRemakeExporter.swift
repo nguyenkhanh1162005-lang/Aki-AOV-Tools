@@ -953,6 +953,7 @@ enum AoVModRemakeExporter {
         }
 
         let resourceEntries = try validatedEntries(resourceArchive, label: "Resources.zip / RES")
+        let archivePathPrefix = try archiveRootPrefix(for: resourceEntries.map(\.path))
         var resourceEntryByPath: [String: Entry] = [:]
         for entry in resourceEntries {
             let normalized = try normalizeArchivePath(entry.path)
@@ -994,7 +995,11 @@ enum AoVModRemakeExporter {
             totalPayloadBytes = next.partialValue
             payloadByArchivePath[archivePath] = payload
             payloadByIFSPath[ifsPath] = payload
-            payloadArchivePathByNormalizedPath[archivePath] = payload.archivePath
+            payloadArchivePathByNormalizedPath[archivePath] = preferredArchivePath(
+                normalizedPath: archivePath,
+                originalPath: payload.archivePath,
+                prefix: archivePathPrefix
+            )
         }
 
         let assetBundleIFSPaths = Set(payloadByIFSPath.keys.filter {
@@ -1250,7 +1255,7 @@ enum AoVModRemakeExporter {
         return result
     }
 
-    private static func normalizeArchivePath(_ raw: String) throws -> String {
+    static func normalizeArchivePath(_ raw: String) throws -> String {
         let path = raw.replacingOccurrences(of: "\\", with: "/")
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         guard !path.isEmpty, !path.hasPrefix("/"), !path.hasPrefix("~"),
@@ -1266,7 +1271,47 @@ enum AoVModRemakeExporter {
             }
             return parts.dropFirst().joined(separator: "/")
         }
+        if parts.count >= 2,
+           parts[0].range(of: versionPattern, options: .regularExpression) != nil {
+            return parts.dropFirst().joined(separator: "/")
+        }
         return path
+    }
+
+    /// Detects the common resource root used by the source archive so newly
+    /// added files are placed beside existing resources, not beside the ZIP root.
+    static func archiveRootPrefix(for paths: [String]) throws -> String {
+        let versionPattern = #"^\d+(?:\.\d+){1,3}$"#
+        var candidates = Set<String>()
+        for raw in paths {
+            let normalized = raw.replacingOccurrences(of: "\\", with: "/")
+            let components = normalized.split(separator: "/", omittingEmptySubsequences: false)
+            guard components.count >= 2 else { continue }
+            if components[0] == "Resources" {
+                if components.count >= 3,
+                   components[1].range(of: versionPattern, options: .regularExpression) != nil {
+                    candidates.insert("Resources/\(components[1])/")
+                } else {
+                    candidates.insert("Resources/")
+                }
+            } else if components[0].range(of: versionPattern, options: .regularExpression) != nil {
+                candidates.insert("\(components[0])/")
+            }
+        }
+        guard candidates.count <= 1 else {
+            throw AoVModRemakeExporterError.invalidArchivePath(
+                "Archive có nhiều thư mục phiên bản/tài nguyên gốc khác nhau: \(candidates.sorted())."
+            )
+        }
+        return candidates.first ?? ""
+    }
+
+    static func preferredArchivePath(
+        normalizedPath: String,
+        originalPath: String,
+        prefix: String
+    ) -> String {
+        prefix.isEmpty ? originalPath : prefix + normalizedPath
     }
 
     private static func outerLooseResourcePath(_ normalizedResourcePath: String) throws -> String {
