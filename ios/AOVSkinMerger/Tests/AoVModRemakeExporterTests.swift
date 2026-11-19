@@ -4,7 +4,7 @@ import ZIPFoundation
 @testable import AOVSkinMerger
 
 final class AoVModRemakeExporterTests: XCTestCase {
-    func testChecksumAnalyzerFingerprintsPackerAndBothVerificationCatalogs() throws {
+    func testChecksumAnalyzerUsesCRC64WEForZIPAndPKGAndCRC32ForDatabin() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AKI-Checksum-Fingerprint-RES-Test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -12,7 +12,8 @@ final class AoVModRemakeExporterTests: XCTestCase {
 
         let baseURL = root.appendingPathComponent("checksum-res.zip")
         let packerMask: UInt32 = 0x2468ACE0
-        let zipMask: UInt32 = 0xA5A5F00D
+        let zipMask: UInt64 = 0xA5A5F00D11223344
+        let pkgMask: UInt64 = 0x1029384756ABCDEF
         let databinMask: UInt32 = 0x13579BDF
         var packerRows: [AoVRuntimeResourcePackInfo] = []
         var zipRows: [AoVRuntimeVerificationEntry] = []
@@ -35,21 +36,22 @@ final class AoVModRemakeExporterTests: XCTestCase {
                     ]
                 )
             )
+            let bundleZIPCRC64 = AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(bundlePayload)
             zipRows.append(
                 AoVRuntimeVerificationEntry(
                     pathInIFS: bundlePath,
-                    crcXor: Int64(bundleCRC ^ zipMask)
+                    crcXor: Int64(bitPattern: bundleZIPCRC64 ^ zipMask)
                 )
             )
             resourceEntries.append(("1.64.1.12/" + bundlePath, bundlePayload))
 
             let imagePath = "Images/UI/icon-\(index).png"
             let imagePayload = Data("zip-resource-payload-\(index)".utf8)
-            let imageCRC = AoVRuntimeChecksumFingerprintAnalyzer.crc32(imagePayload)
+            let imageCRC64 = AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(imagePayload)
             zipRows.append(
                 AoVRuntimeVerificationEntry(
                     pathInIFS: imagePath,
-                    crcXor: Int64(imageCRC ^ zipMask)
+                    crcXor: Int64(bitPattern: imageCRC64 ^ zipMask)
                 )
             )
             resourceEntries.append(("1.64.1.12/" + imagePath, imagePayload))
@@ -64,6 +66,23 @@ final class AoVModRemakeExporterTests: XCTestCase {
                 )
             )
             resourceEntries.append(("1.64.1.12/" + databinPath, databinPayload))
+
+            let pkgPath = "Ages/Prefab_Characters/Prefab_Hero/Actor_\\(index)/CommonActions.pkg.bytes"
+            let pkgPayload = Data("common-actions-pkg-payload-\\(index)".utf8)
+            let pkgCRC64 = AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(pkgPayload)
+            packerRows.append(
+                AoVRuntimeResourcePackInfo(
+                    pathInIFS: pkgPath,
+                    pkgType: 2,
+                    crcXor: Int64(bitPattern: pkgCRC64 ^ pkgMask),
+                    tag: "PKG",
+                    flags: 0,
+                    resourceInfos: [
+                        AoVRuntimeResourceItem(hashCode: Int64(10_000 + index), extensionName: "pkg.bytes")
+                    ]
+                )
+            )
+            resourceEntries.append(("1.64.1.12/" + pkgPath, pkgPayload))
         }
 
         let basePacker = makePackerCatalog()
@@ -104,10 +123,17 @@ final class AoVModRemakeExporterTests: XCTestCase {
         XCTAssertEqual(report.packerAssetBundles.unityFSUncompressedEvaluatedSamples, 0)
         XCTAssertEqual(report.packerAssetBundles.unityFSUncompressedSkippedCount, 8)
 
-        XCTAssertEqual(report.zipVerification.status, .consistentSample)
-        XCTAssertEqual(report.zipVerification.evaluatedSamples, 16)
-        XCTAssertEqual(report.zipVerification.constantXORMask, zipMask)
-        XCTAssertEqual(report.zipVerification.exactCRC32Matches, 0)
+        XCTAssertEqual(report.zipVerification.status, .insufficientSamples)
+        XCTAssertEqual(report.zipVerification.evaluatedSamples, 0)
+        XCTAssertEqual(report.zipVerificationCRC64WE.status, .consistentSample)
+        XCTAssertEqual(report.zipVerificationCRC64WE.evaluatedSamples, 16)
+        XCTAssertEqual(report.zipVerificationCRC64WE.constantXORMask, zipMask)
+        XCTAssertEqual(report.zipVerificationCRC64WE.exactCRC64WEMatches, 0)
+
+        XCTAssertEqual(report.packerPkgBytesCRC64WE.status, .consistentSample)
+        XCTAssertEqual(report.packerPkgBytesCRC64WE.evaluatedSamples, 8)
+        XCTAssertEqual(report.packerPkgBytesCRC64WE.constantXORMask, pkgMask)
+        XCTAssertEqual(report.packerPkgBytesCRC64WE.exactCRC64WEMatches, 0)
 
         XCTAssertEqual(report.databinVerification.status, .consistentSample)
         XCTAssertEqual(report.databinVerification.evaluatedSamples, 8)
