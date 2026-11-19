@@ -582,6 +582,7 @@ enum AoVModRemakeExporter {
                 "Checksum fingerprint không thuộc RES nền đang xuất."
             )
         }
+        try validateBaseRESContainerCanBeRepackedAsCandidate(baseRESURL)
         try AoVModRemakeRESExportReadinessAnalyzer.validateFingerprintIdentity(
             checksumFingerprint,
             baseRESURL: baseRESURL
@@ -659,6 +660,92 @@ enum AoVModRemakeExporter {
             verifiedFinalDatabinChecksumValues: [:],
             verifiedFinalZIPChecksumValues: verifiedFinalZIPChecksumValues
         )
+    }
+
+    /// Refuses to label a loose resource ZIP as a game RES when its filelist.json
+    /// references a separate IFS container. Updating that package requires a
+    /// matching, validated IFS/.ifs.res writer; copying the extracted files alone
+    /// would leave the game's actual IFS content unchanged.
+    static func validateBaseRESContainerCanBeRepackedAsCandidate(_ baseRESURL: URL) throws {
+        let archive: Archive
+        do {
+            archive = try Archive(url: baseRESURL, accessMode: .read)
+        } catch {
+            throw AoVModRemakeExporterError.invalidBaseArchive(baseRESURL.lastPathComponent)
+        }
+        let manifests = archive.filter {
+            $0.type == .file &&
+                ($0.path as NSString).lastPathComponent.caseInsensitiveCompare("filelist.json") == .orderedSame
+        }
+        guard manifests.count <= 1 else {
+            throw AoVModRemakeExporterError.catalogMergeFailed(
+                "Gói RES có nhiều filelist.json; không thể xác định IFS container tương ứng."
+            )
+        }
+        guard let manifest = manifests.first else {
+            // Standalone ZIP-style RES inputs do not use the external IFS wrapper.
+            return
+        }
+
+        let manifestData = try readEntry(archive, manifest, maxBytes: 4 * 1024 * 1024)
+        let rootObject: Any
+        do {
+            rootObject = try JSONSerialization.jsonObject(with: manifestData)
+        } catch {
+            throw AoVModRemakeExporterError.catalogMergeFailed(
+                "filelist.json không phải JSON hợp lệ; không thể xác minh IFS container."
+            )
+        }
+        guard let root = rootObject as? [String: Any],
+              let fileList = root["filelist"] as? [[String: Any]] else {
+            throw AoVModRemakeExporterError.catalogMergeFailed(
+                "filelist.json thiếu mảng filelist; không thể xác minh IFS container."
+            )
+        }
+
+        let ifsRecords = fileList.compactMap { record -> (name: String, size: UInt64?)? in
+            guard let name = record["filename"] as? String,
+                  name.lowercased().hasSuffix(".ifs") else { return nil }
+            let rawSize = record["filesize"] as? NSNumber
+            return (name, rawSize?.uint64Value)
+        }
+        guard !ifsRecords.isEmpty else {
+            throw AoVModRemakeExporterError.catalogMergeFailed(
+                "filelist.json không có bản ghi IFS mà exporter hiện hỗ trợ."
+            )
+        }
+
+        let manifestDirectory = (manifest.path as NSString).deletingLastPathComponent
+        for record in ifsRecords {
+            let name = record.name
+            guard !name.isEmpty,
+                  (name as NSString).lastPathComponent == name,
+                  !name.contains("..") else {
+                throw AoVModRemakeExporterError.invalidArchivePath(name)
+            }
+            let expectedPath = manifestDirectory.isEmpty
+                ? name
+                : manifestDirectory + "/" + name
+            let ifsEntry = archive.first {
+                $0.type == .file &&
+                    $0.path.caseInsensitiveCompare(expectedPath) == .orderedSame
+            }
+            guard let ifsEntry else {
+                let expectedSize = record.size.map { " (manifest khai báo \($0) byte)" } ?? ""
+                throw AoVModRemakeExporterError.catalogMergeFailed(
+                    "filelist.json tham chiếu IFS \(name)\(expectedSize) nhưng ZIP không chứa file IFS chính. Có .ifs.res/.cures riêng không đủ để tái dựng IFS; từ chối xuất ZIP rời như RES dùng trong game."
+                )
+            }
+            let expectedSize = record.size
+            if let expectedSize, expectedSize != ifsEntry.uncompressedSize {
+                throw AoVModRemakeExporterError.catalogMergeFailed(
+                    "IFS \(name) có dung lượng \(ifsEntry.uncompressedSize), khác manifest \(expectedSize) byte."
+                )
+            }
+            throw AoVModRemakeExporterError.catalogMergeFailed(
+                "IFS \(name) có trong ZIP nhưng AKI chưa có bộ ghi IFS/.ifs.res đã xác minh để cập nhật đồng bộ. Chưa thể xuất RES dùng trong game."
+            )
+        }
     }
 
     /// Retains only the selected Packer rows and parent/child rows needed to keep
