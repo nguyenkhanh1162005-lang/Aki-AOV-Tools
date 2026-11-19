@@ -39,6 +39,7 @@ struct ContentView: View {
     @State private var updateMessage = "Chưa kiểm tra cập nhật"
     @State private var releaseURL: URL?
     @State private var selectedTab = "Trang chủ"
+    @State private var operationHistory: [AKIOperationHistoryEntry] = []
 
     private var allowedImportContentTypes: [UTType] {
         let zipType = UTType(filenameExtension: "zip") ?? .zip
@@ -228,6 +229,7 @@ struct ContentView: View {
                     alertText = "Không thể tạo thư mục lưu ZIP: \(error.localizedDescription)"
                     showAlert = true
                 }
+                refreshOperationHistory()
             }
             .alert("Thông báo", isPresented: $showAlert) {
                 Button("Đóng", role: .cancel) { showAlert = false }
@@ -1293,17 +1295,73 @@ struct ContentView: View {
     }
 
     private var historyDashboard: some View {
-        ScrollView {
+        ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("LỊCH SỬ").font(.system(size: 10, weight: .black, design: .rounded)).tracking(2).foregroundStyle(.white.opacity(0.55))
                 Text("Hoạt động gần đây").font(.system(size: 27, weight: .black, design: .rounded)).foregroundStyle(.white)
-                VStack(spacing: 12) {
-                    Image(systemName: "clock.arrow.circlepath").font(.system(size: 34, weight: .light)).foregroundStyle(.white.opacity(0.65))
-                    Text("Chưa có lịch sử").font(.headline).foregroundStyle(.white)
-                    Text("Các lần ghép chưa được lưu thành nhật ký trong phiên bản này.").font(.footnote).multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.62))
-                }.frame(maxWidth: .infinity).padding(.vertical, 42).panel()
+                Text("Lưu tối đa 100 hoạt động gần nhất ngay trên iPhone. Nhật ký không tải lên máy chủ.")
+                    .font(.footnote).foregroundStyle(.white.opacity(0.62))
+                if operationHistory.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "clock.arrow.circlepath").font(.system(size: 34, weight: .light)).foregroundStyle(.white.opacity(0.65))
+                        Text("Chưa có lịch sử").font(.headline).foregroundStyle(.white)
+                        Text("Các lần nhập, kiểm tra, ghép và xử lý RMK/RES sẽ xuất hiện tại đây.")
+                            .font(.footnote).multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.62))
+                    }.frame(maxWidth: .infinity).padding(.vertical, 42).panel()
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(operationHistory) { entry in
+                            historyRow(entry)
+                        }
+                    }
+                }
             }.padding(16)
         }
+    }
+
+    private func historyRow(_ entry: AKIOperationHistoryEntry) -> some View {
+        let statusColor: Color
+        switch entry.outcome {
+        case .success:
+            statusColor = .green
+        case .partial:
+            statusColor = .orange
+        case .failed:
+            statusColor = .red
+        }
+
+        return HStack(alignment: .top, spacing: 12) {
+            Image(systemName: entry.outcome.systemImage)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(statusColor)
+                .frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(entry.operation)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Spacer(minLength: 6)
+                    Text(entry.outcome.title)
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(statusColor)
+                }
+                Text(entry.summary)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.72))
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Text(entry.date, style: .date)
+                    Text(entry.date, style: .time)
+                }
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.45))
+            }
+        }
+        .padding(13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous)
+            .stroke(.white.opacity(0.14), lineWidth: 1))
     }
 
     private var infoDashboard: some View {
@@ -1313,7 +1371,7 @@ struct ContentView: View {
                 Text("AKI AOV SKIN").font(.system(size: 27, weight: .black, design: .rounded)).foregroundStyle(.white)
                 VStack(alignment: .leading, spacing: 12) {
                     infoRow("Phiên bản", "0.5.3")
-                    infoRow("Nền tảng", "iOS 26.5+")
+                    infoRow("Nền tảng", "iOS 15.0+")
                     infoRow("Xử lý file", "Trực tiếp trên iPhone")
                     infoRow("Máy chủ", "Không tải ZIP lên")
                     infoRow("Trạng thái", "Đang phát triển")
@@ -1741,6 +1799,20 @@ struct ContentView: View {
                         resReadinessReport = nil
                     }
 
+                    if !report.importedURLs.isEmpty {
+                        let operation: String
+                        switch purpose {
+                        case .merger: operation = "Nhập gói ZIP / MOD"
+                        case .remakeBase: operation = "Nhập RES nền"
+                        case .legacyMods: operation = "Nhập MOD cũ"
+                        }
+                        recordOperation(
+                            operation,
+                            summary: "Đã nhập \(report.importedURLs.count)/\(urls.count) file. Chỉ lưu tên thao tác, không lưu đường dẫn riêng tư.",
+                            outcome: report.errors.isEmpty ? .success : .partial
+                        )
+                    }
+
                     if !report.errors.isEmpty {
                         alertText = "Đã nhập \(report.importedURLs.count)/\(urls.count) file. File lỗi:\n" +
                             report.errors.joined(separator: "\n")
@@ -1761,6 +1833,48 @@ struct ContentView: View {
             }
         case .failure(let error):
             alertText = error.localizedDescription
+            showAlert = true
+        }
+    }
+
+    private func operationHistoryStore() throws -> AKIOperationHistoryStore {
+        let support = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = support.appendingPathComponent("AKIAOVSKIN", isDirectory: true)
+        return AKIOperationHistoryStore(
+            fileURL: directory.appendingPathComponent("operation-history.json")
+        )
+    }
+
+    private func refreshOperationHistory() {
+        do {
+            operationHistory = try operationHistoryStore().load()
+        } catch {
+            operationHistory = []
+            alertText = "Không thể đọc lịch sử hoạt động: \(error.localizedDescription)"
+            showAlert = true
+        }
+    }
+
+    private func recordOperation(
+        _ operation: String,
+        summary: String,
+        outcome: AKIOperationHistoryOutcome
+    ) {
+        do {
+            let store = try operationHistoryStore()
+            try store.append(AKIOperationHistoryEntry(
+                operation: operation,
+                summary: summary,
+                outcome: outcome
+            ))
+            operationHistory = try store.load()
+        } catch {
+            alertText = "Không thể lưu lịch sử hoạt động: \(error.localizedDescription)"
             showAlert = true
         }
     }
@@ -1842,7 +1956,9 @@ struct ContentView: View {
                 analysis = try await Task.detached(priority: .userInitiated) {
                     try ArchiveScanner.analyze(urls)
                 }.value
+                recordOperation("Kiểm tra cấu trúc ZIP", summary: "Đã kiểm tra \(urls.count) gói nguồn.", outcome: .success)
             } catch {
+                recordOperation("Kiểm tra cấu trúc ZIP", summary: error.localizedDescription, outcome: .failed)
                 alertText = error.localizedDescription
                 showAlert = true
             }
@@ -1870,7 +1986,13 @@ struct ContentView: View {
                     try AoVModArchiveMerger.merge(urls, baseURL: baseURL)
                 }.value
                 mergeReport = report
+                recordOperation(
+                    "Ghép MOD",
+                    summary: "\(report.outputURL.lastPathComponent) · \(formatByteCount(report.outputBytes))",
+                    outcome: .success
+                )
             } catch {
+                recordOperation("Ghép MOD", summary: error.localizedDescription, outcome: .failed)
                 alertText = error.localizedDescription
                 showAlert = true
             }
@@ -1901,7 +2023,13 @@ struct ContentView: View {
                     try AoVModRemakeAnalyzer.analyze(baseRESURL: baseURL, legacyMODURLs: legacyURLs)
                 }.value
                 remakeReport = report
+                recordOperation(
+                    "Phân tích RMK / RES",
+                    summary: "Đã đối chiếu \(report.legacy.count) gói MOD với RES nền. Đây là báo cáo phân tích, chưa phải RES đầu ra.",
+                    outcome: .success
+                )
             } catch {
+                recordOperation("Phân tích RMK / RES", summary: error.localizedDescription, outcome: .failed)
                 alertText = error.localizedDescription
                 showAlert = true
             }
@@ -1931,7 +2059,13 @@ struct ContentView: View {
                     )
                 }.value
                 cabBatchMergeReport = report
+                recordOperation(
+                    "Thử nhập object CAB",
+                    summary: "\(report.importedObjectCount) object trong \(report.mergedResults.count) AssetBundle candidate; chưa xuất RES.",
+                    outcome: report.failures.isEmpty ? .success : .partial
+                )
             } catch {
+                recordOperation("Thử nhập object CAB", summary: error.localizedDescription, outcome: .failed)
                 alertText = error.localizedDescription
                 showAlert = true
             }
@@ -1954,7 +2088,13 @@ struct ContentView: View {
                     try AoVRuntimeChecksumFingerprintAnalyzer.analyze(baseRESURL: baseURL)
                 }.value
                 checksumFingerprintReport = report
+                recordOperation(
+                    "Khảo sát checksum RES",
+                    summary: "Đã tạo báo cáo fingerprint. Kết quả chưa xác nhận thuật toán checksum gốc.",
+                    outcome: .success
+                )
             } catch {
+                recordOperation("Khảo sát checksum RES", summary: error.localizedDescription, outcome: .failed)
                 alertText = error.localizedDescription
                 showAlert = true
             }
@@ -1987,7 +2127,13 @@ struct ContentView: View {
                     )
                 }.value
                 resReadinessReport = report
+                recordOperation(
+                    "Lập metadata RES candidate",
+                    summary: "Đã lập đề xuất Packer/Verification. Chưa mở khóa xuất RES hoàn chỉnh.",
+                    outcome: .success
+                )
             } catch {
+                recordOperation("Lập metadata RES candidate", summary: error.localizedDescription, outcome: .failed)
                 alertText = error.localizedDescription
                 showAlert = true
             }
@@ -2013,7 +2159,13 @@ struct ContentView: View {
                     )
                 }.value
                 remakeExportReport = report
+                recordOperation(
+                    "Xuất RES một phần",
+                    summary: "\(report.outputURL.lastPathComponent) · \(report.addedResources) tài nguyên độc lập. Chưa xác nhận trong game.",
+                    outcome: .success
+                )
             } catch {
+                recordOperation("Xuất RES một phần", summary: error.localizedDescription, outcome: .failed)
                 alertText = error.localizedDescription
                 showAlert = true
             }
@@ -2050,7 +2202,9 @@ struct ContentView: View {
                 aesReport = try await Task.detached(priority: .userInitiated) {
                     try ArchiveScanner.inspectAESResources(urls)
                 }.value
+                recordOperation("Quét AES / Zstandard", summary: "Đã quét \(urls.count) gói nguồn.", outcome: .success)
             } catch {
+                recordOperation("Quét AES / Zstandard", summary: error.localizedDescription, outcome: .failed)
                 alertText = error.localizedDescription
                 showAlert = true
             }
