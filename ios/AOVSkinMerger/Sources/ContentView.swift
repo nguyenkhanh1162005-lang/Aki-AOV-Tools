@@ -1514,7 +1514,7 @@ struct ContentView: View {
                 Text("GỘP SKIN · TRẢI NGHIỆM ĐỈNH CAO")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .tracking(1.2).foregroundStyle(Color.white.opacity(0.72))
-                Text("Bản iOS 0.5.3 · yêu cầu iOS 26.5+")
+                Text("Bản iOS 0.5.3 · yêu cầu iOS 15.0+")
                     .font(.caption2.weight(.semibold)).foregroundStyle(.white.opacity(0.58))
                 Text("Xử lý file ngay trên iPhone. Bộ ghép sẽ dừng khi gặp xung đột chưa có adapter đã xác minh.")
                     .font(.footnote).foregroundStyle(.white.opacity(0.78))
