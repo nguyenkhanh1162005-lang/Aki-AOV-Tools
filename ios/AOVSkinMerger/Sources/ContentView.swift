@@ -344,7 +344,7 @@ struct ContentView: View {
             Text("Khảo sát dùng CRC64/WE cho Verification ZIP và Packer PKG, CRC32 IEEE cho Databin; chỉ dùng fingerprint khớp trên RES nền hiện tại. Packer AssetBundle crcXor = 0 được giữ nguyên, không tự suy diễn.")
                 .font(.caption2).foregroundColor(.orange)
 
-            Text("Nút nhập CAB chạy object closure thật, kiểm tra TypeTree/PPtr và round-trip. Nó chỉ tạo candidate trong bộ nhớ, không xuất RES nếu checksum cuối chưa được xác minh.")
+            Text("Nút nhập CAB chạy object closure thật, kiểm tra TypeTree/PPtr và round-trip. Nó tạo payload candidate trong bộ nhớ; nút bên dưới mới đóng gói RES và cập nhật Packer/Verification.")
                 .font(.caption2).foregroundColor(.orange)
 
             Button(action: runRemakeRESReadiness) {
@@ -363,7 +363,7 @@ struct ContentView: View {
                       checksumFingerprintReport == nil || isPreparingRESMetadata ||
                       isMergingCABs || isAnalyzingRemake || isCopyingFiles || isExportingRemake || isMerging)
 
-            Text("Bước này đối chiếu metadata nguồn và lập checksum candidate riêng cho Packer/Verification. Nó không xác nhận thuật toán gốc và không mở khóa xuất RES.")
+            Text("Bước này đối chiếu metadata nguồn với fingerprint của đúng RES nền. Chỉ khi tất cả candidate không bị chặn mới cho phép tạo RES ZIP candidate; tương thích trong game vẫn chưa được xác nhận.")
                 .font(.caption2).foregroundColor(.orange)
 
             Button(action: runRemakeCandidateRESExport) {
@@ -661,7 +661,7 @@ struct ContentView: View {
             Text(report.warning)
                 .font(.caption2)
                 .foregroundColor(.orange)
-            Label("Chưa cho phép xuất RES cuối", systemImage: "lock.fill")
+            Label("Chưa xác nhận tương thích trong game", systemImage: "lock.fill")
                 .font(.caption.weight(.semibold))
                 .foregroundColor(.orange)
         }
@@ -2142,7 +2142,7 @@ struct ContentView: View {
                 checksumFingerprintReport = report
                 recordOperation(
                     "Khảo sát checksum RES",
-                    summary: "Đã tạo báo cáo fingerprint. Kết quả chưa xác nhận thuật toán checksum gốc.",
+                    summary: "ZIP được đối chiếu CRC64/WE, Databin CRC32 IEEE và Packer PKG CRC64/WE trên đúng RES nền. AssetBundle Packer crcXor=0 được giữ nguyên.",
                     outcome: .success
                 )
             } catch {
