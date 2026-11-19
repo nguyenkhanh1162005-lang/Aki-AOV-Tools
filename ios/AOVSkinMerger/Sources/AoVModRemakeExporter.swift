@@ -728,7 +728,7 @@ enum AoVModRemakeExporter {
         }
         for path in assetBundleIFSPaths where !zipIFSPaths.contains(path) {
             throw AoVModRemakeExporterError.catalogMergeFailed(
-                "AssetBundle \\(path) phải dùng ZIP Verification checksum."
+                "AssetBundle \(path) phải dùng ZIP Verification checksum."
             )
         }
 
@@ -1128,7 +1128,7 @@ enum AoVModRemakeExporter {
             outerArchive = try Archive(url: outputURL, accessMode: .read)
         } catch {
             throw AoVModRemakeExporterError.integrityFailure(
-                "Không mở lại được ZIP đầu ra: \\(error.localizedDescription)"
+                "Không mở lại được ZIP đầu ra: \(error.localizedDescription)"
             )
         }
         let outerEntries = try validatedEntries(outerArchive, label: "ZIP đầu ra")
@@ -1148,7 +1148,7 @@ enum AoVModRemakeExporter {
                 resourceArchive = try Archive(url: nestedURL, accessMode: .read)
             } catch {
                 throw AoVModRemakeExporterError.integrityFailure(
-                    "Resources.zip đầu ra không mở lại được: \\(error.localizedDescription)"
+                    "Resources.zip đầu ra không mở lại được: \(error.localizedDescription)"
                 )
             }
         } else {
@@ -1162,13 +1162,13 @@ enum AoVModRemakeExporter {
             }
             guard matches.count == 1, let entry = matches.first else {
                 throw AoVModRemakeExporterError.integrityFailure(
-                    "Không tìm thấy duy nhất tài nguyên đầu ra \\(expectedPath)."
+                    "Không tìm thấy duy nhất tài nguyên đầu ra \(expectedPath)."
                 )
             }
             let actual = try readEntry(resourceArchive, entry, maxBytes: maximumSingleEntry)
             guard actual == expectedData else {
                 throw AoVModRemakeExporterError.integrityFailure(
-                    "Payload \\(expectedPath) thay đổi sau khi đóng gói."
+                    "Payload \(expectedPath) thay đổi sau khi đóng gói."
                 )
             }
         }
