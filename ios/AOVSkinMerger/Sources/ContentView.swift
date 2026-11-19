@@ -34,6 +34,8 @@ struct ContentView: View {
     @State private var isDecoding = false
     @State private var isMerging = false
     @State private var mergeReport: AoVModMergeReport?
+    @State private var isRewritingNotices = false
+    @State private var noticeRewriteReport: AoVNoticeBrandingRewriteReport?
     @State private var alertText = ""
     @State private var showAlert = false
     @State private var updateMessage = "Chưa kiểm tra cập nhật"
@@ -1985,7 +1987,37 @@ struct ContentView: View {
                 }
             }
             .padding(.top, 5)
-            AKIShareButton(
+            Button(action: { runNoticeRewrite(report) }) {
+                HStack {
+                    if isRewritingNotices { ProgressView().tint(.white) }
+                    Label(
+                        isRewritingNotices ? "Đang xử lý thông báo…" : "Xử lý thông báo thương hiệu trong ZIP",
+                        systemImage: "text.badge.checkmark"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(AKISecondaryButtonStyle())
+            .disabled(isRewritingNotices)
+            Text("Chỉ thay chuỗi branding trong UTF text và AoV wrapper giải mã được. Không xóa AssetBundle, thông báo hạ, billboard, commercialize notice, MSES, IFix hay Wwise.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+            if let noticeRewriteReport {
+                metric("Chuỗi đã thay", "\(noticeRewriteReport.replacementTotal)")
+                metric("Tài nguyên đã sửa", "\(noticeRewriteReport.modifiedResources.count)")
+                metric("AoV wrapper mã hóa lại", "\(noticeRewriteReport.rewrittenAoVWrappers)")
+                metric("ZIP lồng đã xử lý", "\(noticeRewriteReport.rewrittenNestedZIPs)")
+                AKIShareButton(
+                    item: noticeRewriteReport.outputURL,
+                    label: Label("Chia sẻ ZIP đã xử lý thông báo", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
+                )
+                .buttonStyle(AKIPrimaryButtonStyle())
+                Text("Đã kiểm CRC và cấu trúc ZIP. Chưa thử trong game.")
+                    .font(.caption2)
+                    .foregroundColor(.orange)
+            }
+                        AKIShareButton(
                 item: report.outputURL,
                 label: Label("Chia sẻ / lưu ZIP kết quả", systemImage: "square.and.arrow.up")
                     .frame(maxWidth: .infinity)
@@ -1996,6 +2028,44 @@ struct ContentView: View {
                 .foregroundColor(.orange)
         }
         .panel()
+    }
+
+    private func runNoticeRewrite(_ report: AoVModMergeReport) {
+        guard !isRewritingNotices else { return }
+        isRewritingNotices = true
+        noticeRewriteReport = nil
+        let inputURL = report.outputURL
+        let suffix = String(UUID().uuidString.prefix(8))
+        let outputURL = inputURL.deletingLastPathComponent()
+            .appendingPathComponent(
+                inputURL.deletingPathExtension().lastPathComponent + "-AKI-notice-\(suffix).zip"
+            )
+
+        Task {
+            do {
+                let rewritten = try await Task.detached(priority: .userInitiated) {
+                    try AoVNoticeBrandingRewriter.rewriteArchive(
+                        inputURL: inputURL,
+                        outputURL: outputURL
+                    )
+                }.value
+                noticeRewriteReport = rewritten
+                recordOperation(
+                    "Xử lý thông báo thương hiệu",
+                    summary: "Đã thay \(rewritten.replacementTotal) chuỗi trong \(rewritten.modifiedResources.count) tài nguyên.",
+                    outcome: .success
+                )
+            } catch {
+                recordOperation(
+                    "Xử lý thông báo thương hiệu",
+                    summary: error.localizedDescription,
+                    outcome: .failed
+                )
+                alertText = error.localizedDescription
+                showAlert = true
+            }
+            isRewritingNotices = false
+        }
     }
 
     private func runAnalysis() {
