@@ -228,6 +228,94 @@ final class AoVModArchiveMergerTests: XCTestCase {
         )
     }
 
+    func testNormalizesCompressedInnerZIPInPkgBytesToStoredEntries() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-PkgBytes-STORE-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let nestedZIPURL = root.appendingPathComponent("nested-package.zip")
+        let nestedPayloadURL = root.appendingPathComponent("nested-resource.xml")
+        let nestedPayload = Data(repeating: 0x41, count: 32 * 1024)
+        try nestedPayload.write(to: nestedPayloadURL)
+
+        do {
+            let nested = try Archive(url: nestedZIPURL, accessMode: .create)
+            try nested.addEntry(
+                with: "commonresource/effect.xml",
+                fileURL: nestedPayloadURL,
+                compressionMethod: .deflate,
+                bufferSize: 64 * 1024
+            )
+        }
+        let originalNestedBytes = try Data(contentsOf: nestedZIPURL)
+        let originalNested = try Archive(url: nestedZIPURL, accessMode: .read)
+        let originalEntry = try XCTUnwrap(originalNested.first(where: { $0.type == .file }))
+        XCTAssertTrue(originalEntry.isCompressed, "Test fixture must contain a DEFLATE-compressed inner entry.")
+
+        let baseURL = root.appendingPathComponent("base.zip")
+        let overlayURL = root.appendingPathComponent("overlay.zip")
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.3.2\n".utf8)),
+            ("Packages/CommonActions.pkg.bytes", originalNestedBytes)
+        ], root: root)
+        try makeArchive(overlayURL, entries: [
+            ("version.txt", Data("1.64.3.2\n".utf8)),
+            ("Skins/Actor_731/new-visual.bytes", Data("new-skin-resource".utf8))
+        ], root: root)
+
+        let report = try AoVModArchiveMerger.merge([baseURL, overlayURL], baseURL: baseURL)
+        let output = try Archive(url: report.outputURL, accessMode: .read)
+        let packageEntry = try XCTUnwrap(output.first(where: {
+            $0.type == .file && $0.path == "Packages/CommonActions.pkg.bytes"
+        }))
+        XCTAssertEqual(packageEntry.compressedSize, packageEntry.uncompressedSize,
+                       "The outer .pkg.bytes entry must also be stored.")
+
+        let normalizedNestedURL = root.appendingPathComponent("normalized-package.zip")
+        _ = try output.extract(packageEntry, to: normalizedNestedURL, bufferSize: 64 * 1024)
+        let normalizedNested = try Archive(url: normalizedNestedURL, accessMode: .read)
+        let normalizedEntries = normalizedNested.filter { $0.type == .file }
+        XCTAssertEqual(normalizedEntries.count, 1)
+        let normalizedEntry = try XCTUnwrap(normalizedEntries.first)
+        XCTAssertEqual(normalizedEntry.path, "commonresource/effect.xml")
+        XCTAssertFalse(normalizedEntry.isCompressed,
+                       "The inner ZIP entry must be STORE (compression method 0).")
+
+        let extractedResourceURL = root.appendingPathComponent("roundtrip-resource.xml")
+        _ = try normalizedNested.extract(normalizedEntry, to: extractedResourceURL, bufferSize: 64 * 1024)
+        XCTAssertEqual(try Data(contentsOf: extractedResourceURL), nestedPayload)
+    }
+
+    func testPreservesNonZIPPkgBytesPayloadUnchanged() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-PkgBytes-Opaque-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let opaquePayload = Data([0x42, 0x41, 0x54, 0x4C, 0x00, 0xFF, 0x17, 0x28])
+        let baseURL = root.appendingPathComponent("base.zip")
+        let overlayURL = root.appendingPathComponent("overlay.zip")
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.3.2\n".utf8)),
+            ("Packages/Opaque.pkg.bytes", opaquePayload)
+        ], root: root)
+        try makeArchive(overlayURL, entries: [
+            ("version.txt", Data("1.64.3.2\n".utf8)),
+            ("Skins/Actor_731/new-visual.bytes", Data("new-skin-resource".utf8))
+        ], root: root)
+
+        let report = try AoVModArchiveMerger.merge([baseURL, overlayURL], baseURL: baseURL)
+        let output = try Archive(url: report.outputURL, accessMode: .read)
+        let packageEntry = try XCTUnwrap(output.first(where: {
+            $0.type == .file && $0.path == "Packages/Opaque.pkg.bytes"
+        }))
+        var actual = Data()
+        _ = try output.extract(packageEntry, bufferSize: 64 * 1024) { actual.append($0) }
+        XCTAssertEqual(actual, opaquePayload)
+        XCTAssertEqual(packageEntry.compressedSize, packageEntry.uncompressedSize)
+    }
+
     private func makeArchive(
         _ url: URL,
         entries: [(String, Data)],
