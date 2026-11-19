@@ -564,6 +564,229 @@ enum AoVModRemakeExporter {
         )
     }
 
+    /// Creates a structurally validated RES candidate from CAB object-merge results.
+    /// It derives only the checksum formats already fingerprinted from this exact base RES:
+    /// CRC64/WE for Verification ZIP, while preserving the source Packer AssetBundle metadata.
+    /// The output is still a candidate and is never marked game-compatible.
+    static func exportCandidateRESIncludingAssetBundleMerges(
+        baseRESURL: URL,
+        legacyMODURLs: [URL],
+        assetBundleMergeResults: [AoVModRemakeAssetBundleMergeResult],
+        checksumFingerprint: AoVRuntimeChecksumFingerprintReport
+    ) throws -> AoVModRemakeExportReport {
+        guard !assetBundleMergeResults.isEmpty else {
+            throw AoVModRemakeExporterError.noResourcePayloads
+        }
+        guard checksumFingerprint.baseRESName == baseRESURL.lastPathComponent else {
+            throw AoVModRemakeExporterError.catalogMergeFailed(
+                "Checksum fingerprint không thuộc RES nền đang xuất."
+            )
+        }
+        try AoVModRemakeRESExportReadinessAnalyzer.validateFingerprintIdentity(
+            checksumFingerprint,
+            baseRESURL: baseRESURL
+        )
+
+        // The writer itself requires the current build's runtime schema. Older MOD
+        // catalogs may be analyzed for migration, but cannot be written into this RES.
+        let catalogInputs = try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+            baseRESURL: baseRESURL,
+            legacyMODURLs: legacyMODURLs
+        )
+        let readiness = try AoVModRemakeRESExportReadinessAnalyzer.buildProposals(
+            baseRESName: baseRESURL.lastPathComponent,
+            assetBundleMergeResults: assetBundleMergeResults,
+            legacyPackerCatalogs: catalogInputs.basePacker + catalogInputs.packer,
+            checksumFingerprint: checksumFingerprint
+        )
+        guard readiness.proposalCount == assetBundleMergeResults.count,
+              readiness.candidateCount == readiness.proposalCount,
+              readiness.blockedCount == 0 else {
+            let blocked = readiness.proposals
+                .filter { $0.status == .blocked }
+                .map { "\($0.runtimePath): \($0.reasons.joined(separator: "; "))" }
+                .prefix(4)
+            throw AoVModRemakeExporterError.catalogMergeFailed(
+                "Không đủ bằng chứng để lập RES candidate: \(blocked.joined(separator: " | "))."
+            )
+        }
+
+        var verifiedFinalPackerEntries: [String: AoVRuntimeResourcePackInfo] = [:]
+        var verifiedFinalZIPChecksumValues: [String: Int64] = [:]
+        for proposal in readiness.proposals {
+            guard let packerEntry = proposal.proposedPackerEntry,
+                  let verificationChecksum = proposal.proposedVerificationZIPChecksum,
+                  packerEntry.pathInIFS == proposal.runtimePath else {
+                throw AoVModRemakeExporterError.catalogMergeFailed(
+                    "Thiếu Packer/Verification candidate cho \(proposal.runtimePath)."
+                )
+            }
+            guard verifiedFinalPackerEntries.updateValue(
+                packerEntry,
+                forKey: proposal.runtimePath
+            ) == nil,
+            verifiedFinalZIPChecksumValues.updateValue(
+                verificationChecksum,
+                forKey: proposal.runtimePath
+            ) == nil else {
+                throw AoVModRemakeExporterError.catalogMergeFailed(
+                    "Trùng runtime path trong tập RES candidate: \(proposal.runtimePath)."
+                )
+            }
+        }
+
+        let selectedPaths = Set(verifiedFinalPackerEntries.keys)
+        let currentPackerPaths = Set(
+            catalogInputs.basePacker.flatMap { $0.catalog.allResourcePackInfo.map(\.pathInIFS) }
+        )
+        let filteredPackerCatalogs = try filterPackerCatalogsForCandidateExport(
+            catalogInputs.basePacker + catalogInputs.packer,
+            currentPackerPaths: currentPackerPaths,
+            selectedPackerPaths: selectedPaths
+        )
+        let filteredVerificationCatalogs = filterVerificationCatalogsForCandidateExport(
+            catalogInputs.baseVerification + catalogInputs.verification,
+            selectedZIPPaths: Set(verifiedFinalZIPChecksumValues.keys),
+            selectedDatabinPaths: []
+        )
+
+        return try exportVerifiedRES(
+            baseRESURL: baseRESURL,
+            resourcePayloads: assetBundleMergeResults.map(\.resourcePayload),
+            legacyPackerCatalogs: filteredPackerCatalogs,
+            verifiedFinalPackerEntries: verifiedFinalPackerEntries,
+            legacyVerificationCatalogs: filteredVerificationCatalogs,
+            verifiedFinalDatabinChecksumValues: [:],
+            verifiedFinalZIPChecksumValues: verifiedFinalZIPChecksumValues
+        )
+    }
+
+    /// Retains only the selected Packer rows and parent/child rows needed to keep
+    /// links touching those candidates. Every retained dependency must already
+    /// exist in the current RES or be included as a verified final AssetBundle.
+    /// Rows and link indexes are rebuilt together, so unrelated MOD entries cannot
+    /// pollute the global catalog merge plan.
+    static func filterPackerCatalogsForCandidateExport(
+        _ sourceCatalogs: [(source: String, catalog: AoVRuntimeResourcePackerCatalog)],
+        currentPackerPaths: Set<String>,
+        selectedPackerPaths: Set<String>
+    ) throws -> [(source: String, catalog: AoVRuntimeResourcePackerCatalog)] {
+        let availablePaths = currentPackerPaths.union(selectedPackerPaths)
+        var result: [(source: String, catalog: AoVRuntimeResourcePackerCatalog)] = []
+
+        for source in sourceCatalogs {
+            let originalRows = source.catalog.allResourcePackInfo
+            guard originalRows.contains(where: { selectedPackerPaths.contains($0.pathInIFS) }) else {
+                continue
+            }
+
+            var keptIndices = Set<Int>()
+            for (index, row) in originalRows.enumerated()
+            where selectedPackerPaths.contains(row.pathInIFS) {
+                keptIndices.insert(index)
+            }
+
+            var retainedLinks: [(Int, Int)] = []
+            for link in source.catalog.allParentIndexToChild {
+                guard let parentIndex = Int(exactly: link.parentIdx),
+                      let childIndex = Int(exactly: link.childIdx),
+                      originalRows.indices.contains(parentIndex),
+                      originalRows.indices.contains(childIndex) else {
+                    throw AoVModRemakeExporterError.catalogMergeFailed(
+                        "\(source.source): Packer parent-child index ngoài phạm vi trong catalog có AssetBundle candidate."
+                    )
+                }
+                let parentPath = originalRows[parentIndex].pathInIFS
+                let childPath = originalRows[childIndex].pathInIFS
+                let touchesCandidate = selectedPackerPaths.contains(parentPath) ||
+                    selectedPackerPaths.contains(childPath)
+                guard touchesCandidate else { continue }
+
+                guard availablePaths.contains(parentPath), availablePaths.contains(childPath) else {
+                    let missing = [
+                        availablePaths.contains(parentPath) ? nil : parentPath,
+                        availablePaths.contains(childPath) ? nil : childPath
+                    ].compactMap { $0 }
+                    throw AoVModRemakeExporterError.catalogMergeFailed(
+                        "\(source.source): dependency Packer chưa có trong RES nền hoặc tập CAB đã ghép: \(missing.joined(separator: ", "))."
+                    )
+                }
+                keptIndices.insert(parentIndex)
+                keptIndices.insert(childIndex)
+                retainedLinks.append((parentIndex, childIndex))
+            }
+
+            let orderedIndices = keptIndices.sorted()
+            guard !orderedIndices.isEmpty else { continue }
+            var newIndexByOldIndex: [Int: Int32] = [:]
+            var filteredRows: [AoVRuntimeResourcePackInfo] = []
+            filteredRows.reserveCapacity(orderedIndices.count)
+            for (newIndex, oldIndex) in orderedIndices.enumerated() {
+                guard let encoded = Int32(exactly: newIndex) else {
+                    throw AoVModRemakeExporterError.catalogMergeFailed(
+                        "\(source.source): số Packer entry sau lọc vượt Int32."
+                    )
+                }
+                newIndexByOldIndex[oldIndex] = encoded
+                filteredRows.append(originalRows[oldIndex])
+            }
+
+            var filteredLinks: [AoVPackInfoMapItem] = []
+            var seenLinks = Set<AoVPackInfoMapItem>()
+            for (oldParent, oldChild) in retainedLinks {
+                guard let parent = newIndexByOldIndex[oldParent],
+                      let child = newIndexByOldIndex[oldChild] else {
+                    throw AoVModRemakeExporterError.catalogMergeFailed(
+                        "\(source.source): không thể remap Packer dependency sau khi lọc."
+                    )
+                }
+                let mapped = AoVPackInfoMapItem(parentIdx: parent, childIdx: child)
+                if seenLinks.insert(mapped).inserted { filteredLinks.append(mapped) }
+            }
+
+            result.append((
+                source: source.source,
+                catalog: AoVRuntimeResourcePackerCatalog(
+                    name: source.catalog.name,
+                    version: source.catalog.version,
+                    svnRevision: source.catalog.svnRevision,
+                    setName: source.catalog.setName,
+                    allResourcePackInfo: filteredRows,
+                    allParentIndexToChild: filteredLinks,
+                    trailingData: source.catalog.trailingData
+                )
+            ))
+        }
+        return result
+    }
+
+    static func filterVerificationCatalogsForCandidateExport(
+        _ sourceCatalogs: [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)],
+        selectedZIPPaths: Set<String>,
+        selectedDatabinPaths: Set<String>
+    ) -> [(source: String, catalog: AoVRuntimeResourceVerificationCatalog)] {
+        sourceCatalogs.compactMap { source in
+            let zipRows = source.catalog.allZipVerificationInfo.filter {
+                selectedZIPPaths.contains($0.pathInIFS)
+            }
+            let databinRows = source.catalog.allDatabinVerificationInfo.filter {
+                selectedDatabinPaths.contains($0.pathInIFS)
+            }
+            guard !zipRows.isEmpty || !databinRows.isEmpty else { return nil }
+            return (
+                source: source.source,
+                catalog: AoVRuntimeResourceVerificationCatalog(
+                    name: source.catalog.name,
+                    version: source.catalog.version,
+                    svnRevision: source.catalog.svnRevision,
+                    allZipVerificationInfo: zipRows,
+                    allDatabinVerificationInfo: databinRows,
+                    trailingData: source.catalog.trailingData
+                )
+            )
+        }
+    }
+
     static func exportVerifiedRES(
         baseRESURL: URL,
         legacyMODURLs: [URL],
