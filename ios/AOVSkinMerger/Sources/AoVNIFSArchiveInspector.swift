@@ -181,7 +181,7 @@ enum AoVNIFSArchiveInspector {
     private static func validateTableMD5(_ data: Data, at offset: UInt64, size: UInt64, expected: Data, name: String) throws {
         guard offset <= UInt64(Int.max), size <= UInt64(Int.max),
               Int(offset) <= data.count, Int(size) <= data.count - Int(offset) else {
-            throw AoVNIFSArchiveInspectorError.truncated("\\(name) table checksum range")
+            throw AoVNIFSArchiveInspectorError.truncated("\(name) table checksum range")
         }
         let range = Int(offset)..<(Int(offset) + Int(size))
         let actual = Data(Insecure.MD5.hash(data: data.subdata(in: range)))
