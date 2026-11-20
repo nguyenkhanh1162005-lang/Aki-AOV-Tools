@@ -27,13 +27,17 @@ final class AoVNIFSArchiveInspectorTests: XCTestCase {
     func testRejectsCorruptedHETTableDigest() {
         var ifs = makeIFS()
         ifs[184] ^= 0xFF
-        XCTAssertThrowsError(try AoVNIFSArchiveInspector.inspectIFS(ifs))
+        XCTAssertThrowsError(try AoVNIFSArchiveInspector.inspectIFS(ifs)) { error in
+            XCTAssertEqual(error as? AoVNIFSArchiveInspectorError, .tableChecksumMismatch("HET"))
+        }
     }
 
     func testRejectsCorruptedBETTableDigest() {
         var ifs = makeIFS()
         ifs[200] ^= 0xFF
-        XCTAssertThrowsError(try AoVNIFSArchiveInspector.inspectIFS(ifs))
+        XCTAssertThrowsError(try AoVNIFSArchiveInspector.inspectIFS(ifs)) { error in
+            XCTAssertEqual(error as? AoVNIFSArchiveInspectorError, .tableChecksumMismatch("BET"))
+        }
     }
 
     func testRejectsOverlappingNIFSTables() {
