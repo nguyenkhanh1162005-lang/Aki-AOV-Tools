@@ -40,7 +40,7 @@ struct AoVNIFSArchiveHeader: Equatable, Sendable {
     let hetTableMD5: Data
 
     static let magic: UInt32 = 0x7366_696E
-    static let packedHeaderBytes = 92
+    static let packedHeaderBytes = 172
     static let supportedHeaderBytes: UInt32 = 172
 }
 
