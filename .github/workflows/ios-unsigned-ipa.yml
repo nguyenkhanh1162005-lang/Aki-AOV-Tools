@@ -1,12 +1,6 @@
 name: Build iOS unsigned IPA
 
 on:
-  push:
-    branches:
-      - feat/ios-offline-app-prototype
-    paths:
-      - 'ios/AOVSkinMerger/**'
-      - '.github/workflows/ios-unsigned-ipa.yml'
   pull_request:
     branches:
       - feat/multi-actor-aov-archive-merge
@@ -19,12 +13,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: aki-aov-skin-ios-${{ github.event.pull_request.head.ref || github.ref }}
+  group: aki-aov-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
   build-unsigned-ipa:
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - name: Checkout source
@@ -32,6 +26,12 @@ jobs:
 
       - name: Install XcodeGen
         run: brew install xcodegen
+
+      - name: Select Xcode 26.6 and verify iOS 26.5 SDK
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+          xcodebuild -showsdks | grep -F "iOS 26.5"
 
       - name: Generate 1024px app icon from supplied artwork
         shell: bash
@@ -49,6 +49,19 @@ jobs:
           sips -s format png -z 1024 1024 "$ICON_OUTPUT" --out "$ICON_DIR/AppIcon.png"
           test -s "$ICON_DIR/AppIcon.png"
 
+          # Install the supplied AKI hero artwork into the asset catalog.
+          HERO_DIR="ios/AOVSkinMerger/Sources/Assets.xcassets/AkiHero.imageset"
+          mkdir -p "$HERO_DIR"
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          source = Path("ios/AOVSkinMerger/Artwork/AkiHero.jpg.base64").read_text().strip()
+          output = Path("ios/AOVSkinMerger/Sources/Assets.xcassets/AkiHero.imageset/AkiHero.jpg")
+          output.write_bytes(base64.b64decode(source, validate=True))
+          PY
+          test -s "$HERO_DIR/AkiHero.jpg"
+          file "$HERO_DIR/AkiHero.jpg"
+
       - name: Generate Xcode project
         working-directory: ios/AOVSkinMerger
         run: xcodegen generate
@@ -60,14 +73,25 @@ jobs:
           -project AOVSkinMerger.xcodeproj
           -scheme AOVSkinMerger
 
-      - name: Run iOS unit tests
+      - name: Verify iOS Simulator SDK
+        run: |
+          xcodebuild -showsdks | grep -F "Simulator - iOS 26.5"
+
+      - name: Compile iOS Simulator test bundle
         working-directory: ios/AOVSkinMerger
         run: >-
-          xcodebuild test
+          xcodebuild build-for-testing
           -project AOVSkinMerger.xcodeproj
           -scheme AOVSkinMerger
-          -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+          -destination 'generic/platform=iOS Simulator'
           -derivedDataPath "$RUNNER_TEMP/AOVTestDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Verify iOS 15 minimum deployment target
+        working-directory: ios/AOVSkinMerger
+        run: |
+          xcodebuild -showBuildSettings -project AOVSkinMerger.xcodeproj -scheme AOVSkinMerger \
+            | grep -F "IPHONEOS_DEPLOYMENT_TARGET = 15.0"
 
       - name: Build unsigned iOS device app
         working-directory: ios/AOVSkinMerger
@@ -95,12 +119,23 @@ jobs:
             cd "$PACKAGE_DIR"
             /usr/bin/zip -qry "$GITHUB_WORKSPACE/AKI AOV SKIN.ipa" Payload
           )
-          shasum -a 256 "$GITHUB_WORKSPACE/AKI AOV SKIN.ipa"
+          IPA_PATH="$GITHUB_WORKSPACE/AKI AOV SKIN.ipa"
+          test -s "$IPA_PATH"
+          /usr/bin/unzip -tq "$IPA_PATH"
+          test -d "$PACKAGE_DIR/Payload/AOVSkinMerger.app"
+          APP_INFO="$PACKAGE_DIR/Payload/AOVSkinMerger.app/Info.plist"
+          test -s "$APP_INFO"
+          test -x "$APP_PATH/AOVSkinMerger"
+          test "$(plutil -extract CFBundleIdentifier raw "$APP_INFO")" = "com.aki.aovskinmerger"
+          test "$(plutil -extract CFBundleShortVersionString raw "$APP_INFO")" = "0.5.3"
+          test "$(plutil -extract MinimumOSVersion raw "$APP_INFO")" = "15.0"
+          lipo -archs "$APP_PATH/AOVSkinMerger" | grep -qw arm64
+          shasum -a 256 "$IPA_PATH"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AKI-AOV-SKIN-0.4.1-IPA
+          name: AKI-AOV-SKIN-0.5.3-iOS-26.5-IPA
           path: AKI AOV SKIN.ipa
           if-no-files-found: error
           retention-days: 14

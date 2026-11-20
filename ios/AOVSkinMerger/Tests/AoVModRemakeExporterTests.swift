@@ -1,0 +1,1398 @@
+import Foundation
+import XCTest
+import ZIPFoundation
+@testable import AOVSkinMerger
+
+final class AoVModRemakeExporterTests: XCTestCase {
+    func testNormalizesVersionRootAndKeepsNewResourcesUnderBasePrefix() throws {
+        XCTAssertEqual(
+            try AoVModRemakeExporter.normalizeArchivePath("1.64.1/assetbundle/hero.assetbundle"),
+            "assetbundle/hero.assetbundle"
+        )
+        XCTAssertEqual(
+            try AoVModRemakeExporter.normalizeArchivePath("Resources/1.64.1/assetbundle/hero.assetbundle"),
+            "assetbundle/hero.assetbundle"
+        )
+        XCTAssertEqual(
+            try AoVModRemakeExporter.archiveRootPrefix(for: [
+                "1.64.1/assetbundle/hero.assetbundle",
+                "1.64.1/Databin/Client/Global/ResNotifyConfig.bytes"
+            ]),
+            "1.64.1/"
+        )
+        XCTAssertEqual(
+            try AoVModRemakeExporter.archiveRootPrefix(for: [
+                "Resources/1.64.1/assetbundle/hero.assetbundle",
+                "Resources/1.64.1/Databin/Client/Global/ResNotifyConfig.bytes"
+            ]),
+            "Resources/1.64.1/"
+        )
+        XCTAssertEqual(
+            try AoVModRemakeExporter.archiveRootPrefix(for: [
+                "assetbundle/hero.assetbundle",
+                "Databin/Client/Global/ResNotifyConfig.bytes"
+            ]),
+            ""
+        )
+        XCTAssertEqual(
+            AoVModRemakeExporter.preferredArchivePath(
+                normalizedPath: "assetbundle/new-skin.assetbundle",
+                originalPath: "assetbundle/new-skin.assetbundle",
+                prefix: "1.64.1/"
+            ),
+            "1.64.1/assetbundle/new-skin.assetbundle"
+        )
+        XCTAssertThrowsError(
+            try AoVModRemakeExporter.archiveRootPrefix(for: [
+                "1.64.1/assetbundle/a.assetbundle",
+                "1.65.1/assetbundle/b.assetbundle"
+            ])
+        )
+    }
+
+    func testChecksumAnalyzerUsesCRC64WEForZIPAndPKGAndCRC32ForDatabin() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Checksum-Fingerprint-RES-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("checksum-res.zip")
+        let packerMask: UInt32 = 0x2468ACE0
+        let zipMask: UInt64 = 0xA5A5F00D11223344
+        let pkgMask: UInt64 = 0x1029384756ABCDEF
+        let databinMask: UInt32 = 0x13579BDF
+        var packerRows: [AoVRuntimeResourcePackInfo] = []
+        var zipRows: [AoVRuntimeVerificationEntry] = []
+        var databinRows: [AoVRuntimeVerificationEntry] = []
+        var resourceEntries: [(String, Data)] = []
+
+        for index in 0..<8 {
+            let bundlePath = "assetbundle/actor-\(index).assetbundle"
+            let bundlePayload = Data("assetbundle-resource-payload-\(index)".utf8)
+            let bundleCRC = AoVRuntimeChecksumFingerprintAnalyzer.crc32(bundlePayload)
+            packerRows.append(
+                AoVRuntimeResourcePackInfo(
+                    pathInIFS: bundlePath,
+                    pkgType: 0,
+                    crcXor: Int64(bundleCRC ^ packerMask),
+                    tag: "Synthetic",
+                    flags: 0,
+                    resourceInfos: [
+                        AoVRuntimeResourceItem(hashCode: Int64(index + 1), extensionName: "assetbundle")
+                    ]
+                )
+            )
+            let bundleZIPCRC64 = AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(bundlePayload)
+            zipRows.append(
+                AoVRuntimeVerificationEntry(
+                    pathInIFS: bundlePath,
+                    crcXor: Int64(bitPattern: bundleZIPCRC64 ^ zipMask)
+                )
+            )
+            resourceEntries.append(("1.64.1.12/" + bundlePath, bundlePayload))
+
+            let imagePath = "Images/UI/icon-\(index).png"
+            let imagePayload = Data("zip-resource-payload-\(index)".utf8)
+            let imageCRC64 = AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(imagePayload)
+            zipRows.append(
+                AoVRuntimeVerificationEntry(
+                    pathInIFS: imagePath,
+                    crcXor: Int64(bitPattern: imageCRC64 ^ zipMask)
+                )
+            )
+            resourceEntries.append(("1.64.1.12/" + imagePath, imagePayload))
+
+            let databinPath = "Databin/Client/Actor_\(index).bytes"
+            let databinPayload = Data("databin-resource-payload-\(index)".utf8)
+            let databinCRC = AoVRuntimeChecksumFingerprintAnalyzer.crc32(databinPayload)
+            databinRows.append(
+                AoVRuntimeVerificationEntry(
+                    pathInIFS: databinPath,
+                    crcXor: Int64(databinCRC ^ databinMask)
+                )
+            )
+            resourceEntries.append(("1.64.1.12/" + databinPath, databinPayload))
+
+            let pkgPath = "Ages/Prefab_Characters/Prefab_Hero/Actor_\(index)/CommonActions.pkg.bytes"
+            let pkgPayload = Data("common-actions-pkg-payload-\(index)".utf8)
+            let pkgCRC64 = AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(pkgPayload)
+            packerRows.append(
+                AoVRuntimeResourcePackInfo(
+                    pathInIFS: pkgPath,
+                    pkgType: 2,
+                    crcXor: Int64(bitPattern: pkgCRC64 ^ pkgMask),
+                    tag: "PKG",
+                    flags: 0,
+                    resourceInfos: [
+                        AoVRuntimeResourceItem(hashCode: Int64(10_000 + index), extensionName: "pkg.bytes")
+                    ]
+                )
+            )
+            resourceEntries.append(("1.64.1.12/" + pkgPath, pkgPayload))
+        }
+
+        let basePacker = makePackerCatalog()
+        let packer = AoVRuntimeResourcePackerCatalog(
+            name: basePacker.name,
+            version: basePacker.version,
+            svnRevision: basePacker.svnRevision,
+            setName: basePacker.setName,
+            allResourcePackInfo: packerRows,
+            allParentIndexToChild: [],
+            trailingData: basePacker.trailingData
+        )
+        let verification = AoVRuntimeResourceVerificationCatalog(
+            name: "ResourceVerificationInfoSetXML",
+            version: "1.64.1.12",
+            svnRevision: "synthetic",
+            allZipVerificationInfo: zipRows,
+            allDatabinVerificationInfo: databinRows,
+            trailingData: Data()
+        )
+        let packerBundle = try makeUnityFS(with: .packer(packer))
+        let verificationBundle = try makeUnityFS(with: .verification(verification))
+        try makeArchive(
+            baseURL,
+            entries: [
+                ("version.txt", Data("1.64.1.12\n".utf8)),
+                ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle", packerBundle),
+                ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle", verificationBundle)
+            ] + resourceEntries,
+            root: root
+        )
+
+        let report = try AoVRuntimeChecksumFingerprintAnalyzer.analyze(baseRESURL: baseURL)
+
+        XCTAssertEqual(report.packerAssetBundles.status, .consistentSample)
+        XCTAssertEqual(report.packerAssetBundles.evaluatedSamples, 8)
+        XCTAssertEqual(report.packerAssetBundles.constantXORMask, packerMask)
+        XCTAssertEqual(report.packerAssetBundles.unityFSUncompressedEvaluatedSamples, 0)
+        XCTAssertEqual(report.packerAssetBundles.unityFSUncompressedSkippedCount, 8)
+
+        XCTAssertEqual(report.zipVerification.status, .insufficientSamples)
+        XCTAssertEqual(report.zipVerification.evaluatedSamples, 0)
+        XCTAssertEqual(report.zipVerificationCRC64WE.status, .consistentSample)
+        XCTAssertEqual(report.zipVerificationCRC64WE.evaluatedSamples, 16)
+        XCTAssertEqual(report.zipVerificationCRC64WE.constantXORMask, zipMask)
+        XCTAssertEqual(report.zipVerificationCRC64WE.exactCRC64WEMatches, 0)
+        XCTAssertTrue(report.zipVerificationCRC64WE.examples.contains {
+            $0.contains("Images/UI/icon-0.png") && !$0.contains("\\(")
+        })
+
+        XCTAssertEqual(report.packerPkgBytesCRC64WE.status, .consistentSample)
+        XCTAssertEqual(report.packerPkgBytesCRC64WE.evaluatedSamples, 8)
+        XCTAssertEqual(report.packerPkgBytesCRC64WE.constantXORMask, pkgMask)
+        XCTAssertEqual(report.packerPkgBytesCRC64WE.exactCRC64WEMatches, 0)
+
+        XCTAssertEqual(report.databinVerification.status, .consistentSample)
+        XCTAssertEqual(report.databinVerification.evaluatedSamples, 8)
+        XCTAssertEqual(report.databinVerification.constantXORMask, databinMask)
+        XCTAssertTrue(report.requiresExternalValidation)
+    }
+
+    func testLoadsBaseAndLegacyRuntimeCatalogsSeparatelyForPreflight() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Runtime-Catalog-Inputs-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("base-res.zip")
+        let legacyURL = root.appendingPathComponent("legacy-mod.zip")
+        let basePacker = makePackerCatalog()
+        let baseVerification = makeVerificationCatalog()
+        let legacyPath = "assetbundle/legacy-actor.assetbundle"
+        let legacyPackerRow = AoVRuntimeResourcePackInfo(
+            pathInIFS: legacyPath,
+            pkgType: 1,
+            crcXor: 98765,
+            tag: "LegacyHero",
+            flags: 7,
+            resourceInfos: [AoVRuntimeResourceItem(hashCode: 731, extensionName: "assetbundle")]
+        )
+        let legacyPacker = AoVRuntimeResourcePackerCatalog(
+            name: basePacker.name,
+            version: basePacker.version,
+            svnRevision: basePacker.svnRevision,
+            setName: basePacker.setName,
+            allResourcePackInfo: basePacker.allResourcePackInfo + [legacyPackerRow],
+            allParentIndexToChild: basePacker.allParentIndexToChild,
+            trailingData: basePacker.trailingData
+        )
+        let legacyVerification = makeVerificationCatalog()
+
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.1.12\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(basePacker))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(baseVerification)))
+        ], root: root)
+        try makeArchive(legacyURL, entries: [
+            ("version.txt", Data("1.64.1.12\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(legacyPacker))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(legacyVerification)))
+        ], root: root)
+
+        let inputs = try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+            baseRESURL: baseURL,
+            legacyMODURLs: [legacyURL]
+        )
+
+        XCTAssertEqual(inputs.basePacker.count, 1)
+        XCTAssertEqual(inputs.baseVerification.count, 1)
+        XCTAssertEqual(inputs.packer.count, 1)
+        XCTAssertEqual(inputs.verification.count, 1)
+        XCTAssertEqual(inputs.basePacker.first?.source, "base-res.zip")
+        XCTAssertEqual(inputs.packer.first?.source, "legacy-mod.zip")
+        XCTAssertTrue(inputs.basePacker.first?.catalog.allResourcePackInfo.contains {
+            $0.pathInIFS == "assetbundle/current.assetbundle"
+        } == true)
+        XCTAssertTrue(inputs.packer.first?.catalog.allResourcePackInfo.contains {
+            $0.pathInIFS == legacyPath
+        } == true)
+    }
+
+    func testExportsVerifiedAssetBundleAndDatabinIntoCleanRESAndUpdatesBothCatalogs() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-RES-Exporter-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let currentPacker = makePackerCatalog()
+        let currentVerification = makeVerificationCatalog()
+        let packerBundle = try makeUnityFS(with: .packer(currentPacker))
+        let verificationBundle = try makeUnityFS(with: .verification(currentVerification))
+
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.1.12\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle", packerBundle),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle", verificationBundle),
+            ("1.64.1.12/assetbundle/current.assetbundle", Data("existing-bundle".utf8))
+        ], root: root)
+
+        let finalBundlePath = "assetbundle/creator731.assetbundle"
+        let finalDatabinPath = "Databin/Client/Actor/creator731.bytes"
+        let finalPackerEntry = AoVRuntimeResourcePackInfo(
+            pathInIFS: finalBundlePath,
+            pkgType: 0,
+            crcXor: 987654,
+            tag: "Hero",
+            flags: 512,
+            resourceInfos: [
+                AoVRuntimeResourceItem(hashCode: 123456, extensionName: "assetbundle")
+            ]
+        )
+        let finalBundleBytes = Data("creator-731-final-assetbundle".utf8)
+        let finalDatabinBytes = Data("creator-731-final-databin".utf8)
+        let payloads = [
+            AoVModRemakeResourcePayload(
+                archivePath: "1.64.1.12/assetbundle/creator731.assetbundle",
+                ifsPath: finalBundlePath,
+                data: finalBundleBytes
+            ),
+            AoVModRemakeResourcePayload(
+                archivePath: "1.64.1.12/Databin/Client/Actor/creator731.bytes",
+                ifsPath: finalDatabinPath,
+                data: finalDatabinBytes
+            )
+        ]
+
+        let report = try AoVModRemakeExporter.exportVerifiedRES(
+            baseRESURL: baseURL,
+            resourcePayloads: payloads,
+            legacyPackerCatalogs: [],
+            verifiedFinalPackerEntries: [finalBundlePath: finalPackerEntry],
+            legacyVerificationCatalogs: [],
+            verifiedFinalDatabinChecksumValues: [finalDatabinPath: 222333],
+            verifiedFinalZIPChecksumValues: [finalBundlePath: 444555]
+        )
+        defer { try? FileManager.default.removeItem(at: report.outputURL) }
+
+        XCTAssertTrue(report.structurallyValidated)
+        XCTAssertFalse(report.gameCompatibilityTested)
+        XCTAssertEqual(report.baseRESName, "clean-res.zip")
+        XCTAssertEqual(report.replacedResources, 2)
+        XCTAssertEqual(report.addedResources, 2)
+        XCTAssertEqual(report.packerAddedPaths, [finalBundlePath])
+        XCTAssertEqual(report.verificationAddedZIPPaths, [finalBundlePath])
+        XCTAssertEqual(report.verificationAddedDatabinPaths, [finalDatabinPath])
+        XCTAssertGreaterThan(report.outputBytes, 0)
+        XCTAssertGreaterThanOrEqual(report.elapsedSeconds, 0)
+
+        let output = try Archive(url: report.outputURL, accessMode: .read)
+        let finalBundleEntry = try XCTUnwrap(output.first(where: {
+            $0.type == .file && $0.path == "1.64.1.12/assetbundle/creator731.assetbundle"
+        }))
+        let finalDatabinEntry = try XCTUnwrap(output.first(where: {
+            $0.type == .file && $0.path == "1.64.1.12/Databin/Client/Actor/creator731.bytes"
+        }))
+        var extractedBundle = Data()
+        _ = try output.extract(finalBundleEntry, bufferSize: 64 * 1024) {
+            extractedBundle.append($0)
+        }
+        var extractedDatabin = Data()
+        _ = try output.extract(finalDatabinEntry, bufferSize: 64 * 1024) {
+            extractedDatabin.append($0)
+        }
+        XCTAssertEqual(extractedBundle, finalBundleBytes)
+        XCTAssertEqual(extractedDatabin, finalDatabinBytes)
+
+        let outputPacker = try readEntry(
+            output,
+            path: "1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle"
+        )
+        let outputVerification = try readEntry(
+            output,
+            path: "1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle"
+        )
+        let packerInfo = try AoVUnityFSParser.inspect(outputPacker)
+        let verificationInfo = try AoVUnityFSParser.inspect(outputVerification)
+        XCTAssertTrue(packerInfo.usesAoVEncryption)
+        XCTAssertTrue(verificationInfo.usesAoVEncryption)
+
+        let packerNodes = try AoVUnityFSParser.extractNodes(outputPacker)
+        let verificationNodes = try AoVUnityFSParser.extractNodes(outputVerification)
+        let packerNode = try XCTUnwrap(packerNodes.first)
+        let verificationNode = try XCTUnwrap(verificationNodes.first)
+        let parsedPacker = try AoVSerializedFileParser.inspect(packerNode.data)
+        let parsedVerification = try AoVSerializedFileParser.inspect(verificationNode.data)
+
+        XCTAssertTrue(parsedPacker.resourcePackerCatalog?.allResourcePackInfo.contains {
+            $0.pathInIFS == finalBundlePath && $0 == finalPackerEntry
+        } == true)
+        XCTAssertEqual(
+            parsedVerification.resourceVerificationCatalog?.allZipVerificationInfo.first(where: {
+                $0.pathInIFS == finalBundlePath
+            })?.crcXor,
+            444555
+        )
+        XCTAssertEqual(
+            parsedVerification.resourceVerificationCatalog?.allDatabinVerificationInfo.first(where: {
+                $0.pathInIFS == finalDatabinPath
+            })?.crcXor,
+            222333
+        )
+    }
+
+    func testCandidateExporterRejectsLooseResourceZIPMissingReferencedIFS() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Missing-IFS-Guard-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let baseURL = root.appendingPathComponent("loose-res.zip")
+        let manifest = Data(#"{"filelist":[{"filename":"resource.ifs","filesize":120399757,"cfilesize":448337,"curl":"https://cdn.example/resource.ifs.cures"}]}"#.utf8)
+        try makeArchive(baseURL, entries: [
+            ("1.64.1/filelist.json", manifest),
+            ("1.64.1/resource.ifs.res", Data(repeating: 0, count: 128))
+        ], root: root)
+
+        XCTAssertThrowsError(
+            try AoVModRemakeExporter.validateBaseRESContainerCanBeRepackedAsCandidate(baseURL)
+        ) { error in
+            guard let exporterError = error as? AoVModRemakeExporterError,
+                  case .catalogMergeFailed(let reason) = exporterError else {
+                return XCTFail("Expected an IFS container guard failure, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("resource.ifs"))
+            XCTAssertTrue(reason.contains("không chứa file IFS chính"))
+            XCTAssertTrue(reason.contains("120399757"))
+            XCTAssertTrue(reason.contains("resource.ifs.cures"))
+            XCTAssertTrue(reason.contains("448337"))
+        }
+    }
+
+    func testCandidateExporterRejectsPresentIFSUntilValidatedIFSWriterExists() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-IFS-Writer-Guard-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let baseURL = root.appendingPathComponent("ifs-res.zip")
+        let ifsBytes = Data([0x49, 0x46, 0x53, 0x00])
+        let manifest = Data(#"{"filelist":[{"filename":"resource.ifs","filesize":4}]}"#.utf8)
+        try makeArchive(baseURL, entries: [
+            ("1.64.1/filelist.json", manifest),
+            ("1.64.1/resource.ifs", ifsBytes)
+        ], root: root)
+
+        XCTAssertThrowsError(
+            try AoVModRemakeExporter.validateBaseRESContainerCanBeRepackedAsCandidate(baseURL)
+        ) { error in
+            guard let exporterError = error as? AoVModRemakeExporterError,
+                  case .catalogMergeFailed(let reason) = exporterError else {
+                return XCTFail("Expected an unimplemented IFS writer guard failure, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("metadata IFS/.ifs.res chưa được cập nhật"))
+        }
+    }
+
+    func testCandidateRESExportFiltersUnrelatedCatalogRowsAndKeepsPackerDependencyLinks() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Candidate-RES-Export-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("legacy-mod.zip")
+        let currentPacker = makePackerCatalog()
+        let currentPackerEntry = try XCTUnwrap(currentPacker.allResourcePackInfo.first)
+        let newPath = "assetbundle/new-hero.assetbundle"
+        let unrelatedPath = "assetbundle/unrelated-mod-entry.assetbundle"
+        let newPackerEntry = AoVRuntimeResourcePackInfo(
+            pathInIFS: newPath,
+            pkgType: 0,
+            crcXor: 0,
+            tag: "NewHero",
+            flags: 512,
+            resourceInfos: [AoVRuntimeResourceItem(hashCode: 731900, extensionName: "assetbundle")]
+        )
+        let unrelatedPackerEntry = AoVRuntimeResourcePackInfo(
+            pathInIFS: unrelatedPath,
+            pkgType: 0,
+            crcXor: 0,
+            tag: "Unrelated",
+            flags: 512,
+            resourceInfos: [AoVRuntimeResourceItem(hashCode: 731901, extensionName: "assetbundle")]
+        )
+
+        var seedZIPRows: [AoVRuntimeVerificationEntry] = []
+        var baseEntries: [(String, Data)] = [
+            ("version.txt", Data("1.64.1.12\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(currentPacker)))
+        ]
+        for index in 0..<8 {
+            let path = "assetbundle/seed-\(index).assetbundle"
+            let data = Data("seed-assetbundle-\(index)".utf8)
+            seedZIPRows.append(
+                AoVRuntimeVerificationEntry(
+                    pathInIFS: path,
+                    crcXor: Int64(bitPattern: AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(data))
+                )
+            )
+            baseEntries.append(("1.64.1.12/" + path, data))
+        }
+        let currentVerification = AoVRuntimeResourceVerificationCatalog(
+            name: "ResourceVerificationInfoSetXML",
+            version: "1.64.1.12",
+            svnRevision: "1793129",
+            allZipVerificationInfo: seedZIPRows,
+            allDatabinVerificationInfo: [],
+            trailingData: Data([0xCC, 0xDD])
+        )
+        baseEntries.append((
+            "1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+            try makeUnityFS(with: .verification(currentVerification))
+        ))
+        baseEntries.append(("1.64.1.12/assetbundle/current.assetbundle", Data("current-bundle".utf8)))
+        try makeArchive(baseURL, entries: baseEntries, root: root)
+
+        let legacyPacker = AoVRuntimeResourcePackerCatalog(
+            name: currentPacker.name,
+            version: currentPacker.version,
+            svnRevision: currentPacker.svnRevision,
+            setName: currentPacker.setName,
+            allResourcePackInfo: [currentPackerEntry, newPackerEntry, unrelatedPackerEntry],
+            allParentIndexToChild: [AoVPackInfoMapItem(parentIdx: 0, childIdx: 1)],
+            trailingData: currentPacker.trailingData
+        )
+        let legacyVerification = AoVRuntimeResourceVerificationCatalog(
+            name: currentVerification.name,
+            version: currentVerification.version,
+            svnRevision: currentVerification.svnRevision,
+            allZipVerificationInfo: [
+                AoVRuntimeVerificationEntry(pathInIFS: newPath, crcXor: 123),
+                AoVRuntimeVerificationEntry(pathInIFS: unrelatedPath, crcXor: 456)
+            ],
+            allDatabinVerificationInfo: [],
+            trailingData: currentVerification.trailingData
+        )
+        try makeArchive(legacyURL, entries: [
+            ("version.txt", Data("1.64.1.12\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(legacyPacker))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(legacyVerification)))
+        ], root: root)
+
+        let finalBundle = Data("new-hero-final-assetbundle".utf8)
+        let mergeResult = AoVModRemakeAssetBundleMergeResult(
+            resourcePath: "1.64.1.12/" + newPath,
+            resourcePayload: AoVModRemakeResourcePayload(
+                archivePath: "1.64.1.12/" + newPath,
+                ifsPath: newPath,
+                data: finalBundle
+            ),
+            importedObjectCount: 1,
+            importedPathIDs: [9001],
+            roundTripVerified: true
+        )
+        let fingerprint = try AoVRuntimeChecksumFingerprintAnalyzer.analyze(baseRESURL: baseURL)
+
+        let report = try AoVModRemakeExporter.exportCandidateRESIncludingAssetBundleMerges(
+            baseRESURL: baseURL,
+            legacyMODURLs: [legacyURL],
+            assetBundleMergeResults: [mergeResult],
+            checksumFingerprint: fingerprint
+        )
+        defer { try? FileManager.default.removeItem(at: report.outputURL) }
+
+        XCTAssertTrue(report.structurallyValidated)
+        XCTAssertFalse(report.gameCompatibilityTested)
+        XCTAssertEqual(report.packerAddedPaths, [newPath])
+        XCTAssertEqual(report.verificationAddedZIPPaths, [newPath])
+
+        let output = try Archive(url: report.outputURL, accessMode: .read)
+        XCTAssertEqual(try readEntry(output, path: "1.64.1.12/" + newPath), finalBundle)
+
+        let packerData = try readEntry(
+            output,
+            path: "1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle"
+        )
+        let packerTarget = try AoVUnityFSRuntimeCatalogMergeExecutor.locatePackerCatalog(in: packerData)
+        guard case .packer(let actualPacker) = packerTarget.catalog else {
+            return XCTFail("Expected Packer catalog in candidate RES.")
+        }
+        XCTAssertTrue(actualPacker.allResourcePackInfo.contains(where: { $0 == newPackerEntry }))
+        XCTAssertFalse(actualPacker.allResourcePackInfo.contains(where: { $0.pathInIFS == unrelatedPath }))
+        XCTAssertTrue(actualPacker.allParentIndexToChild.contains {
+            $0.parentIdx == 0 && $0.childIdx == 1
+        })
+
+        let verificationData = try readEntry(
+            output,
+            path: "1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle"
+        )
+        let verificationTarget = try AoVUnityFSRuntimeCatalogMergeExecutor.locateVerificationCatalog(
+            in: verificationData
+        )
+        guard case .verification(let actualVerification) = verificationTarget.catalog else {
+            return XCTFail("Expected Verification catalog in candidate RES.")
+        }
+        XCTAssertEqual(
+            actualVerification.allZipVerificationInfo.first(where: { $0.pathInIFS == newPath })?.crcXor,
+            Int64(bitPattern: AoVRuntimeChecksumFingerprintAnalyzer.crc64WE(finalBundle))
+        )
+        XCTAssertFalse(actualVerification.allZipVerificationInfo.contains(where: {
+            $0.pathInIFS == unrelatedPath
+        }))
+    }
+
+    func testCandidatePackerFilterBlocksDependencyMissingFromBaseAndFinalPayloads() {
+        let selectedPath = "assetbundle/selected.assetbundle"
+        let missingPath = "assetbundle/missing-dependency.assetbundle"
+        let selected = AoVRuntimeResourcePackInfo(
+            pathInIFS: selectedPath,
+            pkgType: 0,
+            crcXor: 0,
+            tag: "Selected",
+            flags: 0,
+            resourceInfos: []
+        )
+        let missing = AoVRuntimeResourcePackInfo(
+            pathInIFS: missingPath,
+            pkgType: 0,
+            crcXor: 0,
+            tag: "Missing",
+            flags: 0,
+            resourceInfos: []
+        )
+        let catalog = AoVRuntimeResourcePackerCatalog(
+            name: "ResourcePackerInfoSetXML",
+            version: "1.64.1.12",
+            svnRevision: "test",
+            setName: "ResourcePackerInfoSetXML",
+            allResourcePackInfo: [selected, missing],
+            allParentIndexToChild: [AoVPackInfoMapItem(parentIdx: 0, childIdx: 1)],
+            trailingData: Data()
+        )
+
+        XCTAssertThrowsError(
+            try AoVModRemakeExporter.filterPackerCatalogsForCandidateExport(
+                [("legacy.zip", catalog)],
+                currentPackerPaths: [],
+                selectedPackerPaths: [selectedPath]
+            )
+        ) { error in
+            guard let exporterError = error as? AoVModRemakeExporterError,
+                  case .catalogMergeFailed(let reason) = exporterError else {
+                return XCTFail("Expected unresolved Packer dependency failure, got \(error)")
+            }
+            XCTAssertTrue(reason.contains(missingPath))
+        }
+    }
+
+    func testExportsStandaloneLegacyOnlyDatabinWithSourceMetadataAndNoPackerLinks() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-RES-Standalone-Export-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("legacy-mod.zip")
+        let basePacker = makePackerCatalog()
+        let baseVerification = makeVerificationCatalog()
+        let packerBytes = try makeUnityFS(with: .packer(basePacker))
+        let verificationBytes = try makeUnityFS(with: .verification(baseVerification))
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.1.12\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle", packerBytes),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle", verificationBytes)
+        ], root: root)
+
+        let runtimePath = "Databin/Client/Legacy/Actor_731/Effect.bytes"
+        let payload = Data("unchanged legacy standalone bytes".utf8)
+        let legacyPackerRow = AoVRuntimeResourcePackInfo(
+            pathInIFS: runtimePath,
+            pkgType: 1,
+            crcXor: 123456789,
+            tag: "LegacyStandalone",
+            flags: 0,
+            resourceInfos: [
+                AoVRuntimeResourceItem(hashCode: 731123, extensionName: "bytes")
+            ]
+        )
+        let legacyPacker = AoVRuntimeResourcePackerCatalog(
+            name: basePacker.name,
+            version: basePacker.version,
+            svnRevision: basePacker.svnRevision,
+            setName: basePacker.setName,
+            allResourcePackInfo: basePacker.allResourcePackInfo + [legacyPackerRow],
+            allParentIndexToChild: basePacker.allParentIndexToChild,
+            trailingData: basePacker.trailingData
+        )
+        let legacyVerification = AoVRuntimeResourceVerificationCatalog(
+            name: baseVerification.name,
+            version: baseVerification.version,
+            svnRevision: baseVerification.svnRevision,
+            allZipVerificationInfo: [],
+            allDatabinVerificationInfo: [
+                AoVRuntimeVerificationEntry(pathInIFS: runtimePath, crcXor: 987654321)
+            ],
+            trailingData: baseVerification.trailingData
+        )
+        try makeArchive(legacyURL, entries: [
+            ("version.txt", Data("1.64.1.12\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(legacyPacker))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(legacyVerification))),
+            ("1.64.1.12/" + runtimePath, payload)
+        ], root: root)
+
+        let report = try AoVModRemakeExporter.exportLegacyOnlyStandaloneResources(
+            baseRESURL: baseURL,
+            legacyMODURLs: [legacyURL]
+        )
+        defer { try? FileManager.default.removeItem(at: report.outputURL) }
+
+        XCTAssertTrue(report.structurallyValidated)
+        XCTAssertFalse(report.gameCompatibilityTested)
+        XCTAssertEqual(report.addedResources, 1)
+        XCTAssertEqual(report.packerAddedPaths, [runtimePath])
+        XCTAssertEqual(report.verificationAddedDatabinPaths, [runtimePath])
+
+        let output = try Archive(url: report.outputURL, accessMode: .read)
+        XCTAssertEqual(
+            try readEntry(output, path: "1.64.1.12/" + runtimePath),
+            payload
+        )
+        let finalPackerData = try readEntry(
+            output,
+            path: "1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle"
+        )
+        let finalVerificationData = try readEntry(
+            output,
+            path: "1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle"
+        )
+        let finalPackerNodes = try AoVUnityFSParser.extractNodes(finalPackerData)
+        let finalVerificationNodes = try AoVUnityFSParser.extractNodes(finalVerificationData)
+        let finalPacker = try AoVSerializedFileParser.inspect(
+            try XCTUnwrap(finalPackerNodes.first).data
+        ).resourcePackerCatalog
+        let finalVerification = try AoVSerializedFileParser.inspect(
+            try XCTUnwrap(finalVerificationNodes.first).data
+        ).resourceVerificationCatalog
+        XCTAssertEqual(
+            finalPacker?.allResourcePackInfo.first(where: { $0.pathInIFS == runtimePath }),
+            legacyPackerRow
+        )
+        XCTAssertEqual(
+            finalVerification?.allDatabinVerificationInfo.first(where: {
+                $0.pathInIFS == runtimePath
+            })?.crcXor,
+            987654321
+        )
+    }
+
+    func testStandaloneExportRejectsPackerLinkedLegacyResource() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-RES-Linked-Export-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("legacy-mod.zip")
+        let basePacker = makePackerCatalog()
+        let baseVerification = makeVerificationCatalog()
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.1.12\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(basePacker))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(baseVerification)))
+        ], root: root)
+
+        let runtimePath = "Databin/Client/Legacy/Actor_731/Effect.bytes"
+        let row = AoVRuntimeResourcePackInfo(
+            pathInIFS: runtimePath,
+            pkgType: 1,
+            crcXor: 123456789,
+            tag: "LegacyLinked",
+            flags: 0,
+            resourceInfos: [
+                AoVRuntimeResourceItem(hashCode: 731123, extensionName: "bytes")
+            ]
+        )
+        let linkedPacker = AoVRuntimeResourcePackerCatalog(
+            name: basePacker.name,
+            version: basePacker.version,
+            svnRevision: basePacker.svnRevision,
+            setName: basePacker.setName,
+            allResourcePackInfo: basePacker.allResourcePackInfo + [row],
+            allParentIndexToChild: [
+                AoVPackInfoMapItem(
+                    parentIdx: 0,
+                    childIdx: Int32(basePacker.allResourcePackInfo.count)
+                )
+            ],
+            trailingData: basePacker.trailingData
+        )
+        let verification = AoVRuntimeResourceVerificationCatalog(
+            name: baseVerification.name,
+            version: baseVerification.version,
+            svnRevision: baseVerification.svnRevision,
+            allZipVerificationInfo: [],
+            allDatabinVerificationInfo: [
+                AoVRuntimeVerificationEntry(pathInIFS: runtimePath, crcXor: 987654321)
+            ],
+            trailingData: baseVerification.trailingData
+        )
+        try makeArchive(legacyURL, entries: [
+            ("version.txt", Data("1.64.1.12\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(linkedPacker))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(verification))),
+            ("1.64.1.12/" + runtimePath, Data("must-not-export-alone".utf8))
+        ], root: root)
+
+        XCTAssertThrowsError(
+            try AoVModRemakeExporter.exportLegacyOnlyStandaloneResources(
+                baseRESURL: baseURL,
+                legacyMODURLs: [legacyURL]
+            )
+        ) { error in
+            XCTAssertTrue(
+                error.localizedDescription.contains("Không có file mới độc lập"),
+                error.localizedDescription
+            )
+        }
+    }
+
+    func testExportsNestedResourcesZIPWhilePreservingOuterWrapperFiles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Nested-RES-Exporter-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let innerURL = root.appendingPathComponent("Resources.zip")
+        let outerURL = root.appendingPathComponent("clean-res-wrapper.zip")
+        try makeArchive(innerURL, entries: [
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(makePackerCatalog()))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(makeVerificationCatalog()))),
+            ("1.64.1.12/assetbundle/current.assetbundle", Data("current".utf8))
+        ], root: root)
+
+        let outer = try Archive(url: outerURL, accessMode: .create)
+        try outer.addEntry(
+            with: "Resources.zip",
+            fileURL: innerURL,
+            compressionMethod: .none,
+            bufferSize: 64 * 1024
+        )
+        let skinListURL = root.appendingPathComponent("DanhSachSkin.txt")
+        let skinList = Data("Danh sách skin nền\n".utf8)
+        try skinList.write(to: skinListURL)
+        try outer.addEntry(
+            with: "DanhSachSkin.txt",
+            fileURL: skinListURL,
+            compressionMethod: .deflate,
+            bufferSize: 64 * 1024
+        )
+
+        let runtimePath = "assetbundle/nested-creator.assetbundle"
+        let finalEntry = AoVRuntimeResourcePackInfo(
+            pathInIFS: runtimePath,
+            pkgType: 0,
+            crcXor: 10101,
+            tag: "Hero",
+            flags: 512,
+            resourceInfos: [
+                AoVRuntimeResourceItem(hashCode: 20202, extensionName: "assetbundle")
+            ]
+        )
+        let payload = AoVModRemakeResourcePayload(
+            archivePath: "1.64.1.12/assetbundle/nested-creator.assetbundle",
+            ifsPath: runtimePath,
+            data: Data("nested-final-bundle".utf8)
+        )
+
+        let report = try AoVModRemakeExporter.exportVerifiedRES(
+            baseRESURL: outerURL,
+            resourcePayloads: [payload],
+            legacyPackerCatalogs: [],
+            verifiedFinalPackerEntries: [runtimePath: finalEntry],
+            legacyVerificationCatalogs: [],
+            verifiedFinalDatabinChecksumValues: [:],
+            verifiedFinalZIPChecksumValues: [runtimePath: 30303]
+        )
+        defer { try? FileManager.default.removeItem(at: report.outputURL) }
+
+        let outputOuter = try Archive(url: report.outputURL, accessMode: .read)
+        let outputSkinList = try readEntry(outputOuter, path: "DanhSachSkin.txt")
+        XCTAssertEqual(outputSkinList, skinList)
+        let outputResourcesEntry = try XCTUnwrap(outputOuter.first(where: {
+            $0.type == .file && $0.path == "Resources.zip"
+        }))
+        let extractedInner = root.appendingPathComponent("output-Resources.zip")
+        _ = try outputOuter.extract(outputResourcesEntry, to: extractedInner, bufferSize: 64 * 1024)
+        let outputInner = try Archive(url: extractedInner, accessMode: .read)
+        XCTAssertEqual(
+            try readEntry(outputInner, path: "1.64.1.12/assetbundle/nested-creator.assetbundle"),
+            Data("nested-final-bundle".utf8)
+        )
+        XCTAssertNotNil(outputInner.first(where: {
+            $0.type == .file && $0.path == "1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle"
+        }))
+        XCTAssertNotNil(outputInner.first(where: {
+            $0.type == .file && $0.path == "1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle"
+        }))
+    }
+
+    func testLoadsLegacyRuntimeCatalogsFromVersionMatchedArchives() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Catalog-Loader-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("legacy-mod.zip")
+        let version = Data("1.64.1.12\n".utf8)
+        let packer = try makeUnityFS(with: .packer(makePackerCatalog()))
+        let verification = try makeUnityFS(with: .verification(makeVerificationCatalog()))
+        let entries = [
+            ("version.txt", version),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle", packer),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle", verification)
+        ]
+        try makeArchive(baseURL, entries: entries, root: root)
+        try makeArchive(legacyURL, entries: entries, root: root)
+
+        let inputs = try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+            baseRESURL: baseURL,
+            legacyMODURLs: [legacyURL]
+        )
+        XCTAssertEqual(inputs.packer.count, 1)
+        XCTAssertEqual(inputs.verification.count, 1)
+        XCTAssertEqual(inputs.packer[0].source, "legacy-mod.zip")
+        XCTAssertEqual(inputs.packer[0].catalog.name, "ResourcePackerInfoSetXML")
+        XCTAssertEqual(inputs.verification[0].catalog.name, "ResourceVerificationInfoSetXML")
+    }
+
+    func testLegacyCatalogLoaderAllowsReadOnlyBuildMigrationAnalysis() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Catalog-ReadOnly-Migration-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("old-build-mod.zip")
+        let basePacker = makePackerCatalog(version: "1.64.1.12")
+        let baseVerification = makeVerificationCatalog(version: "1.64.1.12")
+        let legacyPacker = makePackerCatalog(version: "1.64.1.11")
+        let legacyVerification = makeVerificationCatalog(version: "1.64.1.11")
+
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.1.12\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(basePacker))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(baseVerification)))
+        ], root: root)
+        try makeArchive(legacyURL, entries: [
+            ("version.txt", Data("1.64.1.11\n".utf8)),
+            ("1.64.1.11/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(legacyPacker))),
+            ("1.64.1.11/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(legacyVerification)))
+        ], root: root)
+
+        XCTAssertThrowsError(
+            try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+                baseRESURL: baseURL,
+                legacyMODURLs: [legacyURL]
+            )
+        ) { error in
+            guard let remakeError = error as? AoVModRemakeError,
+                  case .versionMismatch("old-build-mod.zip", "1.64.1.11", "1.64.1.12") = remakeError else {
+                return XCTFail("Expected final-export preflight to reject an older build, got \(error)")
+            }
+        }
+
+        let inputs = try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+            baseRESURL: baseURL,
+            legacyMODURLs: [legacyURL],
+            allowLegacyBuildMismatch: true
+        )
+
+        XCTAssertEqual(inputs.basePacker.first?.catalog.version, "1.64.1.12")
+        XCTAssertEqual(inputs.baseVerification.first?.catalog.version, "1.64.1.12")
+        XCTAssertEqual(inputs.packer.first?.catalog.version, "1.64.1.11")
+        XCTAssertEqual(inputs.verification.first?.catalog.version, "1.64.1.11")
+    }
+
+    func testReadOnlyMigrationAnalysisCanInspectLegacyWithoutVersionMarker() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Catalog-Missing-Marker-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("markerless-mod.zip")
+        let basePacker = makePackerCatalog(version: "1.64.1.12")
+        let baseVerification = makeVerificationCatalog(version: "1.64.1.12")
+        let legacyPacker = makePackerCatalog(version: "1.64.1.11")
+        let legacyVerification = makeVerificationCatalog(version: "1.64.1.11")
+
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.1.12\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(basePacker))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(baseVerification)))
+        ], root: root)
+        try makeArchive(legacyURL, entries: [
+            ("1.64.1.11/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(legacyPacker))),
+            ("1.64.1.11/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(legacyVerification)))
+        ], root: root)
+
+        XCTAssertThrowsError(
+            try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+                baseRESURL: baseURL,
+                legacyMODURLs: [legacyURL]
+            )
+        )
+
+        let inputs = try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+            baseRESURL: baseURL,
+            legacyMODURLs: [legacyURL],
+            allowLegacyBuildMismatch: true
+        )
+        XCTAssertEqual(inputs.packer.first?.catalog.version, "1.64.1.11")
+        XCTAssertEqual(inputs.verification.first?.catalog.version, "1.64.1.11")
+    }
+
+    func testLegacyCatalogLoaderRejectsDifferentBuildVersion() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-Catalog-Version-Guard-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("old-build-mod.zip")
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.1.12\n".utf8))
+        ], root: root)
+        try makeArchive(legacyURL, entries: [
+            ("version.txt", Data("1.64.1.11\n".utf8))
+        ], root: root)
+
+        XCTAssertThrowsError(
+            try AoVModRemakeAnalyzer.loadRuntimeCatalogInputs(
+                baseRESURL: baseURL,
+                legacyMODURLs: [legacyURL]
+            )
+        ) { error in
+            guard let remakeError = error as? AoVModRemakeError,
+                  case .versionMismatch("old-build-mod.zip", "1.64.1.11", "1.64.1.12") = remakeError else {
+                return XCTFail("Expected a strict build-version mismatch, got \(error)")
+            }
+        }
+    }
+
+    func testArchiveBasedExportLoadsCatalogsAndWritesVerifiedZIPPayload() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-RES-Archive-Coordinator-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        let legacyURL = root.appendingPathComponent("legacy-source.zip")
+        let packerBytes = try makeUnityFS(with: .packer(makePackerCatalog()))
+        let verificationBytes = try makeUnityFS(with: .verification(makeVerificationCatalog()))
+        let sharedEntries = [
+            ("version.txt", Data("1.64.1.12\n".utf8)),
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle", packerBytes),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle", verificationBytes)
+        ]
+        try makeArchive(baseURL, entries: sharedEntries, root: root)
+        try makeArchive(legacyURL, entries: sharedEntries, root: root)
+
+        let runtimePath = "Databin/Client/Legacy/Actor_731/CreatorSkin.pkg.bytes"
+        let payloadBytes = Data("verified legacy skin package".utf8)
+        let report = try AoVModRemakeExporter.exportVerifiedRES(
+            baseRESURL: baseURL,
+            legacyMODURLs: [legacyURL],
+            resourcePayloads: [
+                AoVModRemakeResourcePayload(
+                    archivePath: "1.64.1.12/" + runtimePath,
+                    ifsPath: runtimePath,
+                    data: payloadBytes
+                )
+            ],
+            verifiedFinalPackerEntries: [:],
+            verifiedFinalDatabinChecksumValues: [:],
+            verifiedFinalZIPChecksumValues: [runtimePath: 808080]
+        )
+        defer { try? FileManager.default.removeItem(at: report.outputURL) }
+
+        XCTAssertEqual(report.verificationAddedZIPPaths, [runtimePath])
+        XCTAssertEqual(report.packerAddedPaths, [])
+        XCTAssertEqual(report.addedResources, 1)
+        XCTAssertTrue(report.structurallyValidated)
+
+        let output = try Archive(url: report.outputURL, accessMode: .read)
+        XCTAssertEqual(
+            try readEntry(output, path: "1.64.1.12/" + runtimePath),
+            payloadBytes
+        )
+        let verificationData = try readEntry(
+            output,
+            path: "1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle"
+        )
+        let target = try AoVUnityFSRuntimeCatalogMergeExecutor.locateVerificationCatalog(
+            in: verificationData
+        )
+        guard case .verification(let catalog) = target.catalog else {
+            return XCTFail("Expected a Verification catalog in the exported RES.")
+        }
+        XCTAssertEqual(
+            catalog.allZipVerificationInfo.first(where: { $0.pathInIFS == runtimePath })?.crcXor,
+            808080
+        )
+    }
+
+    func testExporterRejectsCatalogVersionMismatchBeforeWriting() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-RES-Catalog-Version-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        try makeArchive(baseURL, entries: [
+            ("1.64.1.12/assetbundle/resourcepackerinfosetall.assetbundle",
+             try makeUnityFS(with: .packer(makePackerCatalog()))),
+            ("1.64.1.12/assetbundle/resourceverificationinfosetall.assetbundle",
+             try makeUnityFS(with: .verification(makeVerificationCatalog())))
+        ], root: root)
+
+        XCTAssertThrowsError(
+            try AoVModRemakeExporter.exportVerifiedRES(
+                baseRESURL: baseURL,
+                resourcePayloads: [
+                    AoVModRemakeResourcePayload(
+                        archivePath: "1.64.1.12/Ages/Legacy.pkg.bytes",
+                        ifsPath: "Ages/Legacy.pkg.bytes",
+                        data: Data("legacy-package".utf8)
+                    )
+                ],
+                legacyPackerCatalogs: [
+                    ("older-build.zip", makePackerCatalog(version: "1.64.1.11"))
+                ],
+                verifiedFinalPackerEntries: [:],
+                legacyVerificationCatalogs: [],
+                verifiedFinalDatabinChecksumValues: [:],
+                verifiedFinalZIPChecksumValues: ["Ages/Legacy.pkg.bytes": 777]
+            )
+        ) { error in
+            guard let exporterError = error as? AoVModRemakeExporterError,
+                  case .catalogVersionMismatch("Packer", "1.64.1.11", "1.64.1.12") = exporterError else {
+                return XCTFail("Expected catalog version mismatch, got \(error)")
+            }
+        }
+    }
+
+    func testExporterRefusesNewDatabinWithoutVerifiedChecksum() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AKI-RES-Exporter-Guard-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let baseURL = root.appendingPathComponent("clean-res.zip")
+        try makeArchive(baseURL, entries: [
+            ("version.txt", Data("1.64.1.12\n".utf8))
+        ], root: root)
+
+        XCTAssertThrowsError(
+            try AoVModRemakeExporter.exportVerifiedRES(
+                baseRESURL: baseURL,
+                resourcePayloads: [
+                    AoVModRemakeResourcePayload(
+                        archivePath: "1.64.1.12/Databin/Client/Actor/unverified.bytes",
+                        ifsPath: "Databin/Client/Actor/unverified.bytes",
+                        data: Data("unverified".utf8)
+                    )
+                ],
+                legacyPackerCatalogs: [],
+                verifiedFinalPackerEntries: [:],
+                legacyVerificationCatalogs: [],
+                verifiedFinalDatabinChecksumValues: [:],
+                verifiedFinalZIPChecksumValues: [:]
+            )
+        ) { error in
+            guard let exporterError = error as? AoVModRemakeExporterError,
+                  case .missingFinalChecksum("Databin/Client/Actor/unverified.bytes") = exporterError else {
+                return XCTFail("Expected missing final Databin checksum, got \(error)")
+            }
+        }
+    }
+
+    private func makePackerCatalog(version: String = "1.64.1.12") -> AoVRuntimeResourcePackerCatalog {
+        AoVRuntimeResourcePackerCatalog(
+            name: "ResourcePackerInfoSetXML",
+            version: version,
+            svnRevision: "1793129",
+            setName: "ResourcePackerInfoSetXML",
+            allResourcePackInfo: [
+                AoVRuntimeResourcePackInfo(
+                    pathInIFS: "assetbundle/current.assetbundle",
+                    pkgType: 0,
+                    crcXor: 100,
+                    tag: "Hero",
+                    flags: 512,
+                    resourceInfos: [
+                        AoVRuntimeResourceItem(hashCode: 111, extensionName: "assetbundle")
+                    ]
+                )
+            ],
+            allParentIndexToChild: [
+                AoVPackInfoMapItem(parentIdx: 0, childIdx: 0)
+            ],
+            trailingData: Data([0xAA, 0xBB])
+        )
+    }
+
+    private func makeVerificationCatalog(
+        version: String = "1.64.1.12"
+    ) -> AoVRuntimeResourceVerificationCatalog {
+        AoVRuntimeResourceVerificationCatalog(
+            name: "ResourceVerificationInfoSetXML",
+            version: version,
+            svnRevision: "1793129",
+            allZipVerificationInfo: [],
+            allDatabinVerificationInfo: [],
+            trailingData: Data([0xCC, 0xDD])
+        )
+    }
+
+    private func makeUnityFS(with catalog: AoVRuntimeResourceCatalog) throws -> Data {
+        let serialized = makeSerializedFile(with: catalog)
+        return try AoVUnityFSRepacker.repack(
+            [AoVUnityFSRepackNode(path: "CAB-runtime-catalog", data: serialized, flags: 7)],
+            formatVersion: 8,
+            playerVersion: "5.0.0",
+            engineVersion: "2022.3.5f1",
+            blockInfoLayout: .arenaOfValor,
+            aovEncryption: true
+        ).data
+    }
+
+    private func makeSerializedFile(with catalog: AoVRuntimeResourceCatalog) -> Data {
+        let name: String
+        switch catalog {
+        case .packer(let value): name = value.name
+        case .verification(let value): name = value.name
+        }
+        let objectPayload = makeMonoBehaviour(name: name, catalog: catalog)
+        var metadata = Data()
+        appendCString("2022.3.5f1", to: &metadata)
+        appendInt32(9, to: &metadata)
+        metadata.append(0)
+        appendInt32(1, to: &metadata)
+        appendInt32(114, to: &metadata)
+        metadata.append(0)
+        appendInt16(-1, to: &metadata)
+        metadata.append(Data(repeating: 0, count: 32))
+        appendInt32(0, to: &metadata)
+        appendInt32(1, to: &metadata)
+        align4(&metadata)
+        appendInt64(4321, to: &metadata)
+        appendInt64(0, to: &metadata)
+        appendUInt32(UInt32(objectPayload.count), to: &metadata)
+        appendInt32(0, to: &metadata)
+        appendInt32(0, to: &metadata)
+        appendInt32(0, to: &metadata)
+        appendInt32(0, to: &metadata)
+        appendCString("", to: &metadata)
+
+        let dataOffset = ((48 + metadata.count + 15) / 16) * 16
+        let fileSize = dataOffset + objectPayload.count
+        var file = Data()
+        appendBE(UInt32(metadata.count), to: &file)
+        appendBE(UInt32(fileSize), to: &file)
+        appendBE(UInt32(22), to: &file)
+        appendBE(UInt32(dataOffset), to: &file)
+        file.append(0)
+        file.append(contentsOf: [0, 0, 0])
+        appendBE(UInt32(metadata.count), to: &file)
+        appendBE(UInt64(fileSize), to: &file)
+        appendBE(UInt64(dataOffset), to: &file)
+        appendBE(UInt64(0), to: &file)
+        file.append(metadata)
+        while file.count < dataOffset { file.append(0) }
+        file.append(objectPayload)
+        return file
+    }
+
+    private func makeMonoBehaviour(name: String, catalog: AoVRuntimeResourceCatalog) -> Data {
+        var data = Data(repeating: 0, count: 12)
+        data.append(1)
+        align4(&data)
+        data.append(Data(repeating: 0, count: 12))
+        appendAlignedString(name, to: &data)
+        switch catalog {
+        case .packer(let value):
+            appendAlignedString(value.version, to: &data)
+            appendAlignedString(value.svnRevision, to: &data)
+            appendAlignedString(value.setName, to: &data)
+            appendInt32(Int32(value.allResourcePackInfo.count), to: &data)
+            for item in value.allResourcePackInfo {
+                appendAlignedString(item.pathInIFS, to: &data)
+                appendInt32(item.pkgType, to: &data)
+                appendInt64(item.crcXor, to: &data)
+                appendAlignedString(item.tag, to: &data)
+                appendUInt16(item.flags, to: &data)
+                align4(&data)
+                appendInt32(Int32(item.resourceInfos.count), to: &data)
+                for resource in item.resourceInfos {
+                    appendInt64(resource.hashCode, to: &data)
+                    appendAlignedString(resource.extensionName, to: &data)
+                }
+            }
+            appendInt32(Int32(value.allParentIndexToChild.count), to: &data)
+            for link in value.allParentIndexToChild {
+                appendInt32(link.parentIdx, to: &data)
+                appendInt32(link.childIdx, to: &data)
+            }
+            data.append(value.trailingData)
+        case .verification(let value):
+            appendAlignedString(value.version, to: &data)
+            appendAlignedString(value.svnRevision, to: &data)
+            appendInt32(Int32(value.allZipVerificationInfo.count), to: &data)
+            for item in value.allZipVerificationInfo {
+                appendAlignedString(item.pathInIFS, to: &data)
+                appendInt64(item.crcXor, to: &data)
+            }
+            appendInt32(Int32(value.allDatabinVerificationInfo.count), to: &data)
+            for item in value.allDatabinVerificationInfo {
+                appendAlignedString(item.pathInIFS, to: &data)
+                appendInt64(item.crcXor, to: &data)
+            }
+            data.append(value.trailingData)
+        }
+        return data
+    }
+
+    private func makeArchive(_ url: URL, entries: [(String, Data)], root: URL) throws {
+        let archive = try Archive(url: url, accessMode: .create)
+        for (path, data) in entries {
+            let scratch = root.appendingPathComponent(UUID().uuidString)
+            try data.write(to: scratch, options: .atomic)
+            try archive.addEntry(
+                with: path,
+                fileURL: scratch,
+                compressionMethod: .none,
+                bufferSize: 64 * 1024
+            )
+            try? FileManager.default.removeItem(at: scratch)
+        }
+    }
+
+    private func readEntry(_ archive: Archive, path: String) throws -> Data {
+        let entry = try XCTUnwrap(archive.first(where: { $0.type == .file && $0.path == path }))
+        var data = Data()
+        _ = try archive.extract(entry, bufferSize: 64 * 1024) { data.append($0) }
+        return data
+    }
+
+    private func appendCString(_ value: String, to data: inout Data) {
+        data.append(Data((value + "\0").utf8))
+    }
+
+    private func appendAlignedString(_ value: String, to data: inout Data) {
+        appendInt32(Int32(value.utf8.count), to: &data)
+        data.append(Data(value.utf8))
+        align4(&data)
+    }
+
+    private func appendInt16(_ value: Int16, to data: inout Data) {
+        let bits = UInt16(bitPattern: value)
+        data.append(UInt8(truncatingIfNeeded: bits))
+        data.append(UInt8(truncatingIfNeeded: bits >> 8))
+    }
+
+    private func appendUInt16(_ value: UInt16, to data: inout Data) {
+        data.append(UInt8(truncatingIfNeeded: value))
+        data.append(UInt8(truncatingIfNeeded: value >> 8))
+    }
+
+    private func appendInt32(_ value: Int32, to data: inout Data) {
+        appendUInt32(UInt32(bitPattern: value), to: &data)
+    }
+
+    private func appendUInt32(_ value: UInt32, to data: inout Data) {
+        for shift in stride(from: 0, through: 24, by: 8) {
+            data.append(UInt8(truncatingIfNeeded: value >> shift))
+        }
+    }
+
+    private func appendInt64(_ value: Int64, to data: inout Data) {
+        let bits = UInt64(bitPattern: value)
+        for shift in stride(from: 0, through: 56, by: 8) {
+            data.append(UInt8(truncatingIfNeeded: bits >> shift))
+        }
+    }
+
+    private func appendBE(_ value: UInt32, to data: inout Data) {
+        for shift in stride(from: 24, through: 0, by: -8) {
+            data.append(UInt8(truncatingIfNeeded: value >> shift))
+        }
+    }
+
+    private func appendBE(_ value: UInt64, to data: inout Data) {
+        for shift in stride(from: 56, through: 0, by: -8) {
+            data.append(UInt8(truncatingIfNeeded: value >> shift))
+        }
+    }
+
+    private func align4(_ data: inout Data) {
+        while data.count % 4 != 0 { data.append(0) }
+    }
+}

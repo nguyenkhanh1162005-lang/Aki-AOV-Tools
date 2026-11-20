@@ -1,0 +1,64 @@
+name: iOS Simulator tests
+
+on:
+  pull_request:
+    branches:
+      - feat/multi-actor-aov-archive-merge
+    paths:
+      - 'ios/AOVSkinMerger/**'
+      - '.github/workflows/ios-simulator-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aki-aov-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  ios-simulator-tests:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Select Xcode 16.4 and verify simulator SDK
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app
+          xcodebuild -version
+          xcodebuild -showsdks | grep -F "iOS "
+          xcodebuild -showsdks | grep -F "Simulator - iOS "
+          xcrun simctl list devices available
+
+      - name: Generate Xcode project
+        working-directory: ios/AOVSkinMerger
+        run: xcodegen generate
+
+      - name: Resolve Swift packages
+        working-directory: ios/AOVSkinMerger
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project AOVSkinMerger.xcodeproj \
+            -scheme AOVSkinMerger
+
+      - name: Verify iOS 15 minimum deployment target
+        working-directory: ios/AOVSkinMerger
+        run: |
+          xcodebuild -showBuildSettings -project AOVSkinMerger.xcodeproj -scheme AOVSkinMerger \
+            | grep -F "IPHONEOS_DEPLOYMENT_TARGET = 15.0"
+
+      - name: Run iOS Simulator unit tests
+        working-directory: ios/AOVSkinMerger
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project AOVSkinMerger.xcodeproj \
+            -scheme AOVSkinMerger \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+            -derivedDataPath "$RUNNER_TEMP/AOVSimulatorTests" \
+            CODE_SIGNING_ALLOWED=NO

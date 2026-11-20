@@ -1,0 +1,75 @@
+name: AOVSkinMerger
+options:
+  bundleIdPrefix: com.aki
+  deploymentTarget:
+    iOS: "15.0"
+packages:
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation.git
+    from: 0.9.20
+  zstd:
+    url: https://github.com/meta/zstd.git
+    revision: a599a71c4cf5d142ffce772c0d16a5a7b755d83c
+  SWCompression:
+    url: https://github.com/tsolomko/SWCompression.git
+    exactVersion: "4.8.7"
+targets:
+  AOVSkinMerger:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    dependencies:
+      - package: ZIPFoundation
+      - package: zstd
+        product: libzstd
+      - package: SWCompression
+        product: SWCompression
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aki.aovskinmerger
+        INFOPLIST_KEY_CFBundleDisplayName: AKI AOV SKIN
+        MARKETING_VERSION: "0.5.3"
+        CURRENT_PROJECT_VERSION: "20"
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+        TARGETED_DEVICE_FAMILY: "1"
+    scheme:
+      testTargets:
+        - AOVSkinMergerTests
+      gatherCoverageData: true
+    info:
+      path: Info.plist
+      properties:
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.aki.aovskinmerger.modarchive
+            UTTypeDescription: AoV MOD Archive
+            UTTypeConformsTo:
+              - public.zip-archive
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - 3105
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: ZIP / AoV MOD Archive
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.zip-archive
+              - com.aki.aovskinmerger.modarchive
+  AOVSkinMergerTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: AOVSkinMerger
+      - package: ZIPFoundation
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aki.aovskinmerger.tests
+        GENERATE_INFOPLIST_FILE: YES
