@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import CryptoKit
 @testable import AOVSkinMerger
 
 final class AoVNIFSArchiveInspectorTests: XCTestCase {
@@ -23,7 +24,7 @@ final class AoVNIFSArchiveInspectorTests: XCTestCase {
         XCTAssertThrowsError(try AoVNIFSArchiveInspector.inspectCompanion(ifsData: ifs, curesData: cures))
     }
 
-    func testRejectsOverlappingNIFSTables() {
+    func testRejectsCorruptedHETTableDigest() {\n        var ifs = makeIFS()\n        ifs[184] ^= 0xFF\n        XCTAssertThrowsError(try AoVNIFSArchiveInspector.inspectIFS(ifs))\n    }\n\n    func testRejectsOverlappingNIFSTables() {
         var ifs = makeIFS()
         ifs.writeUInt64LE(180, at: 28)
         XCTAssertThrowsError(try AoVNIFSArchiveInspector.inspectIFS(ifs))
@@ -63,6 +64,8 @@ final class AoVNIFSArchiveInspectorTests: XCTestCase {
         data.replaceSubrange(188..<192, with: [0x42, 0x45, 0x54, 0x1A])
         data.writeUInt32LE(1, at: 192)
         data.writeUInt32LE(4, at: 196)
+        data.replaceSubrange(124..<140, with: Data(Insecure.MD5.hash(data: data.subdata(in: 188..<204))))
+        data.replaceSubrange(140..<156, with: Data(Insecure.MD5.hash(data: data.subdata(in: 172..<188))))
         return data
     }
 }
