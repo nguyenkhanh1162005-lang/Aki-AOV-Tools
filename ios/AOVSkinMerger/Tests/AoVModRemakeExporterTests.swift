@@ -424,7 +424,7 @@ final class AoVModRemakeExporterTests: XCTestCase {
                   case .catalogMergeFailed(let reason) = exporterError else {
                 return XCTFail("Expected an unimplemented IFS writer guard failure, got \(error)")
             }
-            XCTAssertTrue(reason.contains("chưa có bộ ghi IFS/.ifs.res"))
+            XCTAssertTrue(reason.contains("metadata IFS/.ifs.res chưa được cập nhật"))
         }
     }
 
