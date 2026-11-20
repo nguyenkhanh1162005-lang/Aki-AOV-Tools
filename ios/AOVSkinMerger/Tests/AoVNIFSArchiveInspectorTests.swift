@@ -24,7 +24,13 @@ final class AoVNIFSArchiveInspectorTests: XCTestCase {
         XCTAssertThrowsError(try AoVNIFSArchiveInspector.inspectCompanion(ifsData: ifs, curesData: cures))
     }
 
-    func testRejectsCorruptedHETTableDigest() {\n        var ifs = makeIFS()\n        ifs[184] ^= 0xFF\n        XCTAssertThrowsError(try AoVNIFSArchiveInspector.inspectIFS(ifs))\n    }\n\n    func testRejectsOverlappingNIFSTables() {
+    func testRejectsCorruptedHETTableDigest() {\n        var ifs = makeIFS()\n        ifs[184] ^= 0xFF\n        XCTAssertThrowsError(try AoVNIFSArchiveInspector.inspectIFS(ifs))\n    }\n\n    func testRejectsCorruptedBETTableDigest() {
+        var ifs = makeIFS()
+        ifs[200] ^= 0xFF
+        XCTAssertThrowsError(try AoVNIFSArchiveInspector.inspectIFS(ifs))
+    }
+
+    func testRejectsOverlappingNIFSTables() {
         var ifs = makeIFS()
         ifs.writeUInt64LE(180, at: 28)
         XCTAssertThrowsError(try AoVNIFSArchiveInspector.inspectIFS(ifs))
