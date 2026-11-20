@@ -16,6 +16,7 @@ enum AoVNIFSArchiveInspectorError: Error, LocalizedError, Equatable {
         case .unsupportedHeaderSize(let size): return "NIFS header size không hỗ trợ: \(size)"
         case .invalidLayout(let reason): return "Cấu trúc NIFS không hợp lệ: \(reason)"
         case .companionMismatch(let reason): return "IFS và CURES không khớp: \(reason)"
+        case .tableChecksumMismatch(let name): return "Checksum MD5 của bảng \(name) không khớp header NIFS."
         }
     }
 }
