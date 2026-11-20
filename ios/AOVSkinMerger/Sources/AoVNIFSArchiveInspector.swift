@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 enum AoVNIFSArchiveInspectorError: Error, LocalizedError, Equatable {
     case truncated(String)
@@ -6,6 +7,7 @@ enum AoVNIFSArchiveInspectorError: Error, LocalizedError, Equatable {
     case unsupportedHeaderSize(UInt32)
     case invalidLayout(String)
     case companionMismatch(String)
+    case tableChecksumMismatch(String)
 
     var errorDescription: String? {
         switch self {
@@ -33,6 +35,8 @@ struct AoVNIFSArchiveHeader: Equatable, Sendable {
     let bitmapSize: UInt64
     let md5PieceSize: UInt32
     let rawChunkSize: UInt32
+    let betTableMD5: Data
+    let hetTableMD5: Data
 
     static let magic: UInt32 = 0x7366_696E
     static let packedHeaderBytes = 92
@@ -92,6 +96,8 @@ enum AoVNIFSArchiveInspector {
         }
         try validateTableSignature(data, at: header.hetTablePosition, expected: [0x48, 0x45, 0x54, 0x1A], name: "HET")
         try validateTableSignature(data, at: header.betTablePosition, expected: [0x42, 0x45, 0x54, 0x1A], name: "BET")
+        try validateTableMD5(data, at: header.betTablePosition, size: header.betTableSize, expected: header.betTableMD5, name: "BET")
+        try validateTableMD5(data, at: header.hetTablePosition, size: header.hetTableSize, expected: header.hetTableMD5, name: "HET")
         return header
     }
 
@@ -136,7 +142,7 @@ enum AoVNIFSArchiveInspector {
     }
 
     private static func parseHeaderFields(_ data: Data) throws -> AoVNIFSArchiveHeader {
-        guard data.count >= AoVNIFSArchiveHeader.packedHeaderBytes,
+        guard data.count >= Int(AoVNIFSArchiveHeader.supportedHeaderBytes),
               try readUInt32(data, at: 0) == AoVNIFSArchiveHeader.magic else {
             throw AoVNIFSArchiveInspectorError.invalidMagic("NIFS header")
         }
@@ -154,7 +160,9 @@ enum AoVNIFSArchiveInspector {
             md5TableSize: try readUInt64(data, at: 68),
             bitmapSize: try readUInt64(data, at: 76),
             md5PieceSize: try readUInt32(data, at: 84),
-            rawChunkSize: try readUInt32(data, at: 88)
+            rawChunkSize: try readUInt32(data, at: 88),
+            betTableMD5: data.subdata(in: 124..<140),
+            hetTableMD5: data.subdata(in: 140..<156)
         )
     }
 
@@ -166,6 +174,18 @@ enum AoVNIFSArchiveInspector {
         let actual = expected.indices.map { data[data.index(data.startIndex, offsetBy: Int(offset) + $0)] }
         guard actual == expected else {
             throw AoVNIFSArchiveInspectorError.invalidMagic("\(name) table")
+        }
+    }
+
+    private static func validateTableMD5(_ data: Data, at offset: UInt64, size: UInt64, expected: Data, name: String) throws {
+        guard offset <= UInt64(Int.max), size <= UInt64(Int.max),
+              Int(offset) <= data.count, Int(size) <= data.count - Int(offset) else {
+            throw AoVNIFSArchiveInspectorError.truncated("\\(name) table checksum range")
+        }
+        let range = Int(offset)..<(Int(offset) + Int(size))
+        let actual = Data(Insecure.MD5.hash(data: data.subdata(in: range)))
+        guard actual == expected else {
+            throw AoVNIFSArchiveInspectorError.tableChecksumMismatch(name)
         }
     }
 
